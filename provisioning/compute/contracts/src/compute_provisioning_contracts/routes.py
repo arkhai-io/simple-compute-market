@@ -339,6 +339,7 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/enable"), "provisioning_host_enable", path_resource="host"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/disable"), "provisioning_host_disable", path_resource="host"),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/connectivity"), "provisioning_host_connectivity", path_resource="host"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/hosts/(?P<host>[^/]+)/host-keys/capture"), "provisioning_host_key_capture", path_resource="host"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/fulfillment/validate"), "provisioning_fulfillment_validate", body_resource="capacity_reservation_id"),
     # Relay administration. A pattern matches the whole path and a capture no
     # slash, so the bare relay id never matches a token, enable, disable,
@@ -397,6 +398,7 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         "provisioning_host_enable",
         "provisioning_host_disable",
         "provisioning_host_connectivity",
+        "provisioning_host_key_capture",
         # Relays are operator infrastructure, and no storefront administers them.
         "provisioning_relays_list",
         "provisioning_relay_create",

@@ -12,11 +12,8 @@ Ansible executor's readiness is reported.
 what the host delivers when they reach it on a different route than the
 provisioner does; each, when absent, is the connection's own.
 
-The kind is served at version 2 alone, the version that carries
-``public_port``. A connection at any other version, submitted or stored, is
-refused rather than read under version 2's fields: version 1 has no
-``public_port``, and a host stored at version 1 runs again once it is
-re-registered at version 2, which keeps its protected key.
+The kind is served at version 3 alone. It carries the pinned OpenSSH host
+keys separately from the provisioner's private authentication key.
 
 The codec is SSH's, not Ansible's: an executor consumes the materialized
 connection and holds no cryptography of its own.
@@ -24,17 +21,20 @@ connection and holds no cryptography of its own.
 
 from __future__ import annotations
 
+from base64 import b64decode
 from collections.abc import Mapping
 from typing import Any
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning_contracts import ConnectionSubmission
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.fernet import InvalidToken
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_ssh_public_key
 from market_config import decrypt_secret, encrypt_secret
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 SSH_CONNECTION_KIND = "ssh"
-SSH_CONNECTION_VERSION = 2
+SSH_CONNECTION_VERSION = 3
 FERNET_SCHEME = "fernet-v1"
 PRIVATE_KEY = "private_key"
 
@@ -64,14 +64,37 @@ class SshConnection(BaseModel):
     #: The key file on the service's filesystem; absent, the connection's
     #: protected ``private_key`` names the key instead.
     key_path: str | None = None
+    host_keys: list[str] | None = Field(default=None, min_length=1)
 
     def public_fields(self) -> dict[str, Any]:
-        """The fields an envelope stores; a connection stating no
-        ``public_port`` is stored without the key, never with a null."""
+        """Store optional ports and host pins only when stated."""
         fields = self.model_dump()
-        if fields["public_port"] is None:
-            del fields["public_port"]
+        for field in ("public_port", "host_keys"):
+            if fields[field] is None:
+                del fields[field]
         return fields
+
+    @field_validator("host_keys")
+    @classmethod
+    def _host_public_keys(cls, value: list[str] | None) -> list[str]:
+        if value is None:
+            raise ValueError("omit host_keys to keep the current pin")
+        canonical = []
+        for key in value:
+            parts = key.split()
+            try:
+                if len(parts) < 2:
+                    raise ValueError
+                key_type, encoded = parts[:2]
+                b64decode(encoded, validate=True)
+                public_key = load_ssh_public_key(f"{key_type} {encoded}".encode("ascii"))
+                normalized = public_key.public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH)
+                if normalized.split(b" ", 1)[0] != key_type.encode("ascii"):
+                    raise ValueError
+                canonical.append(normalized.decode("ascii"))
+            except (ValueError, TypeError, UnsupportedAlgorithm):
+                raise ValueError("must contain valid OpenSSH public keys") from None
+        return canonical
 
     @field_validator("ssh_host", "ssh_user")
     @classmethod
@@ -118,7 +141,10 @@ class SshConnectionCodec:
         unknown = sorted(set(secrets) - {PRIVATE_KEY})
         if unknown:
             raise ValueError(f"invalid ssh connection: unknown secrets {unknown}")
-        connection = self._public(public)
+        fields = dict(public)
+        if "host_keys" not in fields and previous is not None and "host_keys" in previous.public:
+            fields["host_keys"] = previous.public["host_keys"]
+        connection = self._public(fields)
         protected: dict[str, ProtectedValue] = {}
         if PRIVATE_KEY in secrets:
             material = secrets[PRIVATE_KEY]
@@ -217,7 +243,7 @@ class SshConnectionCodec:
             ) from exc
 
     @staticmethod
-    def parse(envelope: ConnectionEnvelope) -> SshConnection:
+    def parse(envelope: ConnectionEnvelope, *, include_host_keys: bool = True) -> SshConnection:
         """The typed public fields an executor reads from a stored envelope.
 
         The kind and version are checked before any field, so a host stored at
@@ -230,7 +256,10 @@ class SshConnectionCodec:
                 f"{envelope.kind!r} at {envelope.version}; re-register the host "
                 f"at version {SSH_CONNECTION_VERSION}"
             )
-        return SshConnectionCodec._public(envelope.public)
+        if include_host_keys:
+            return SshConnectionCodec._public(envelope.public)
+        public = {name: envelope.public[name] for name in envelope.public if name != "host_keys"}
+        return SshConnectionCodec._public(public)
 
     @staticmethod
     def _public(public: Mapping[str, Any]) -> SshConnection:
@@ -249,6 +278,7 @@ def ssh_connection(
     public_port: int | None = None,
     key_path: str | None = None,
     private_key: str | None = None,
+    host_keys: list[str] | None = None,
 ) -> ConnectionSubmission:
     """An ``ssh`` connection as an operator submits it, at the version served.
 
@@ -262,6 +292,7 @@ def ssh_connection(
         public_host=public_host,
         public_port=public_port,
         key_path=key_path,
+        **({"host_keys": host_keys} if host_keys is not None else {}),
     ).public_fields()
     secrets = {PRIVATE_KEY: private_key} if private_key is not None else {}
     return ConnectionSubmission(

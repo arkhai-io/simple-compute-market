@@ -90,9 +90,10 @@ transaction = PaymentApproval(config, payer_account).approve(
 ```
 
 Approval retries send the identical mandate and therefore retain the same
-transaction identity. For a local development service, use the explicit
-`development_account` authentication option; it sends `X-Account-ID` and is
-not available outside the service's development authenticator.
+transaction identity. Against a local service that takes the caller's account
+from a header, use the explicit `development_account` authentication option; it
+sends `X-Account-ID` in place of a credential, and only a service that admits
+header identity accepts it.
 
 ## Settlement configuration integration
 
@@ -111,9 +112,9 @@ kit names no concrete dispute interface.
 
 `ArkhaiPaymentsConfig` keeps the service origin, pinned Ed25519 receipt identity,
 fee policy, optional receipt identity history, the API key, an optional CA bundle,
-the local development-auth switch, and the buyer-only `attach_agreement` setting
-(off by default; a seller configuration that sets it fails preflight) in trusted
-role configuration. The key takes one of two forms, which are mutually exclusive
+the `development_auth` switch for loopback header identity, and the buyer-only
+`attach_agreement` setting (off by default; a seller configuration that sets it
+fails preflight) in trusted role configuration. The key takes one of two forms, which are mutually exclusive
 and each exclusive with `development_auth`:
 
 - `api_key`, the key itself, a secret setting a service states in its secret
@@ -131,9 +132,9 @@ unavailable, never the key. `ca_bundle_path` names a PEM bundle the payments
 client verifies the service against instead of the default trust store, for that
 client alone: no other client's trust, and no process setting such as
 `SSL_CERT_FILE`, changes. `payments_client_for_owner(config, owner_account)`
-validates the owner account and uses it for loopback development authentication;
-normal service calls use the resolved key, and the client is given the configured
-bundle as `PaymentsClient(..., ca_bundle=...)`:
+validates the owner account and uses it for loopback header identity when
+`development_auth` is set; normal service calls use the resolved key, and the
+client is given the configured bundle as `PaymentsClient(..., ca_bundle=...)`:
 
 ```python
 from market_arkhai_payments import create_arkhai_payments_registration
@@ -497,40 +498,30 @@ for a fresh verifier.
 
 The committed `examples/local_e2e.py` exercises the `PaymentsClient` primitives
 (approval, buyer and seller polling, Agreement deposit, receipt verification,
-and reverse) against the service's local development authenticator, using a
-minimal deal object rather than a market Agreement. Start the payments repo's checkout-
-owned ledger with `FORMANCE_PORT=3168 bun run ledger:local`, then start its HTTP
-service from that repository in another shell with `bun run service` and
-`PAYMENTS_MODE=development`, `FORMANCE_PORT=3168`, `PAYMENTS_PORT=3180`,
-`ARKHAI_DISPUTE_AUTHORITY`, `RECEIPT_SIGNING_KEY`, and `DEV_OPERATOR_TOKEN`
-set. Both service and client need the same `RECEIPT_SIGNING_KEY`; the operator
-funding request and client need the same `DEV_OPERATOR_TOKEN`.
+and reverse) against a local payments service, using a minimal deal object
+rather than a market Agreement. It needs what any client of that service has:
 
-Before running the example, make the payee a ledger party through the service's
-development-only operator route. `DEV_OPERATOR_TOKEN` must be set in this shell
-to the same value as the service process:
+- `PAYMENTS_URL`, the service's origin, which must be a loopback address;
+- `PAYMENTS_SERVICE_IDENTITY`, the service's public receipt identity, the
+  unpadded base64url Ed25519 key a role states as `service_identity.identifier`;
+- optionally, `PAYMENTS_FEE_BPS`, the service's fee policy, which a role states
+  as `fee_bps` (250 when unset), and `ARKHAI_DISPUTE_AUTHORITY`, the account the
+  mandate names as its dispute authority (the payer when unset);
+- a service that admits `development_account`'s header identity;
+- the payer, `00000000-0000-4000-8000-000000000011`, funded with at least the
+  fixture amount, `1000000` units of `USD/6`, and the payee,
+  `00000000-0000-4000-8000-000000000012`, an existing ledger party.
 
-```sh
-curl --fail-with-body http://127.0.0.1:3180/operator/test-funds \
-  -H "Authorization: Bearer $DEV_OPERATOR_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"account":"00000000-0000-4000-8000-000000000012","asset":"USD/6","amount":"1","requestId":"arkhai-payments-kit-e2e-payee"}'
-```
-
-The request ID makes repeating setup idempotent. In the package directory,
-build and install the internal identity wheel, then run the example against
-that wheel source:
+Starting such a service and preparing its accounts belong to the payments
+service's own documentation. In the package directory, build and install the
+internal identity wheel, then run the example against that wheel source:
 
 ```sh
 make reinit
-PAYMENTS_URL=http://127.0.0.1:3180 \
+PAYMENTS_URL='http://127.0.0.1:<port>' PAYMENTS_SERVICE_IDENTITY='<public receipt identity>' \
 uv run --project . --locked --find-links ../../.dist --python 3.12 -- \
   python examples/local_e2e.py
 ```
 
-The example refuses non-loopback targets. In local development only, it uses
-`RECEIPT_SIGNING_KEY` to derive the service's public receipt identity; ordinary
-clients pin that public identity from trusted configuration and never need the
-service's signing secret. Stop the service, then run
-`FORMANCE_PORT=3168 scripts/ledger-local.sh down` from the payments-service
-checkout when finished.
+The example refuses non-loopback targets, and a receipt that does not verify
+against the pinned identity.

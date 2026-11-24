@@ -25,6 +25,10 @@ pods run beside it.
   the active profiles beside the non-secret ones.
 - A pod sets only the resolver variables — the list of profiles to layer and the
   directory the mounted files live in — as environment variables.
+- A local cluster's Secrets are written from the stack's secret files by the
+  Helm-layer target
+  [Configuration, "A stack's configuration lives in committed files"](configuration.md#a-stacks-configuration-lives-in-committed-files)
+  describes.
 
 ## Service links are off where a loader reads a prefixed override layer
 

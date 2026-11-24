@@ -11,15 +11,20 @@ chart and the service do not read themselves. The schema also refuses every
 definition document's path and the retired VM playbook and inventory settings
 the service refuses at startup, and the smoke hook selects the smoke checks
 that write nothing. The service's migration is the pod's one init container,
-over the application's image, data volume, and profile.
+over the application's image, data volume, and profile. The SSH key mounts,
+from the Secret `sshKey.secretName` names, only when provisioning is real, which
+then refuses a missing name; mock provisioning opens no connection, so it mounts
+no key and needs no name.
 Standard library only: values are written as JSON, which is YAML.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
+import textwrap
 from pathlib import Path
 
 CHART = Path(__file__).resolve().parents[1]
@@ -41,7 +46,7 @@ _HOSTS = {
             "pool_id": "default",
             "connection": {
                 "kind": "ssh",
-                "version": 2,
+                "version": 3,
                 "public": {"ssh_host": "10.0.0.5", "key_path": "/home/appuser/.ssh/id_ed25519"},
             },
         }
@@ -125,7 +130,7 @@ def test_a_host_definitions_document_renders_verbatim_and_read_only() -> None:
     # The ConfigMap ends at the next manifest; the document is its last key here.
     body = document[1].split("\n---", 1)[0]
     assert body.startswith("    hosts:\n")
-    for text in ("host_id: kvm1", "pool_id: default", "kind: ssh", "version: 2",
+    for text in ("host_id: kvm1", "pool_id: default", "kind: ssh", "version: 3",
                  "ssh_host: 10.0.0.5", "key_path: /home/appuser/.ssh/id_ed25519"):
         assert text in body, f"{text} missing from the rendered host document"
     assert (
@@ -133,6 +138,30 @@ def test_a_host_definitions_document_renders_verbatim_and_read_only() -> None:
         "              subPath: host-definitions.yaml\n"
         "              readOnly: true\n"
     ) in rendered.stdout
+
+
+    python = os.environ.get("PROVISIONING_PYTHON")
+    if not python:
+        print("skip: PROVISIONING_PYTHON unset; the host definitions parser did not run")
+        return
+    consume = """
+import sys
+from compute_provisioning.hosts.definitions import parse_host_definitions
+from compute_provisioning_ansible import SSH_CONNECTION_VERSION, SshConnectionCodec
+
+definitions, problems = parse_host_definitions(sys.stdin.read())
+assert not problems, problems
+(host,) = definitions
+assert host.host_id == "kvm1"
+assert host.connection.kind == "ssh" and host.connection.version == SSH_CONNECTION_VERSION
+connection = SshConnectionCodec().build(host.connection.public, {})
+assert connection.public["ssh_host"] == "10.0.0.5"
+"""
+    loaded = subprocess.run(
+        [python, "-c", consume], input=textwrap.dedent(body),
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert loaded.returncode == 0, loaded.stderr
 
 
 def _config_checksum(manifest: str) -> str:
@@ -306,6 +335,66 @@ def test_the_retired_playbook_setting_is_refused() -> None:
     assert "vm_playbook_path" not in rendered.stderr
 
 
+_SSH_KEY_MOUNT = (
+    "- name: ssh-key\n"
+    "              mountPath: /home/appuser/.ssh/id_ed25519\n"
+    "              subPath: id_ed25519\n"
+    "              readOnly: true\n"
+)
+
+
+def _ssh_key_volume(secret_name: str) -> str:
+    return (
+        "- name: ssh-key\n"
+        "          secret:\n"
+        f"            secretName: {secret_name}\n"
+        "            defaultMode: 0400"
+    )
+
+
+def test_mock_provisioning_mounts_no_ssh_key_and_needs_no_secret_name() -> None:
+    """The mock runner opens no connection, so a release running it mounts no
+    key and names no Secret for one, whether its name is the default, empty, or
+    absent."""
+    for ssh_key in ({}, {"secretName": ""}, {"secretName": None}):
+        rendered = _render({"mockMode": True, "sshKey": ssh_key})
+        assert rendered.returncode == 0, (ssh_key, rendered.stderr)
+        deployment = _deployment(rendered.stdout)
+        for text in ("ssh-key", "id_ed25519", "arkhai-provisioning-ssh"):
+            assert text not in deployment, (ssh_key, text)
+
+
+def test_real_provisioning_mounts_the_ssh_key_from_its_secret() -> None:
+    """Without mockMode the application container mounts `id_ed25519` from the
+    Secret `sshKey.secretName` names, read-only and owner-readable; the
+    migration connects to no host and mounts none."""
+    for values, secret_name in (
+        ({}, "arkhai-provisioning-ssh"),
+        ({"mockMode": False, "sshKey": {"secretName": "site-ssh"}}, "site-ssh"),
+    ):
+        rendered = _render(values)
+        assert rendered.returncode == 0, rendered.stderr
+        deployment = _deployment(rendered.stdout)
+        (migration,) = _containers(deployment, "initContainers")
+        (application,) = _containers(deployment, "containers")
+        assert _SSH_KEY_MOUNT in application, values
+        assert "ssh-key" not in migration, values
+        assert _ssh_key_volume(secret_name) in deployment, values
+
+
+def test_real_provisioning_refuses_a_missing_ssh_key_secret_name() -> None:
+    """An empty or absent name is refused by the schema before anything
+    renders, naming the value, rather than rendering a volume no Secret backs."""
+    for ssh_key, refusal in (
+        ({"secretName": ""}, "at '/sshKey/secretName': minLength"),
+        ({"secretName": None}, "at '/sshKey': missing property 'secretName'"),
+    ):
+        for values in ({"sshKey": ssh_key}, {"mockMode": False, "sshKey": ssh_key}):
+            rendered = _render(values)
+            assert rendered.returncode != 0, f"{values} was accepted"
+            assert refusal in rendered.stderr, (values, rendered.stderr)
+
+
 if __name__ == "__main__":
     test_empty_definitions_render_no_document_mount_or_path()
     test_each_definition_renders_its_document_mount_and_path_alone()
@@ -321,4 +410,7 @@ if __name__ == "__main__":
     test_the_smoke_hook_selects_the_read_only_and_security_checks()
     test_the_migration_runs_first_from_the_application_image_over_its_database()
     test_the_retired_playbook_setting_is_refused()
+    test_mock_provisioning_mounts_no_ssh_key_and_needs_no_secret_name()
+    test_real_provisioning_mounts_the_ssh_key_from_its_secret()
+    test_real_provisioning_refuses_a_missing_ssh_key_secret_name()
     print("provisioning chart render checks passed")

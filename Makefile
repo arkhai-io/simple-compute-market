@@ -629,11 +629,14 @@ build-candidate: ## Build the market binary, the chart's package, and the releas
 # wheelhouse once and check its versions, build everything else from it, refuse
 # unless every image built from a wheelhouse was built from that one, then replace
 # the revision's stored wheels, chart package and binary and push every declared
-# image and development image under the revision. The candidate store is
-# $(AR_PREFIX)-candidates, provisioned outside this repository.
+# image and development image under the revision. The candidate store is the
+# generic repository AR_CANDIDATES names, $(AR_PREFIX)-candidates unless set,
+# provisioned outside this repository.
+AR_CANDIDATES ?= $(AR_PREFIX)-candidates
 load-candidate: _require-ar-project ## Load HEAD as a release candidate: store every declared component under its revision
 	python3 scripts/load_candidate.py --project "$(AR_PROJECT)" --location "$(AR_LOCATION)" \
-		--prefix "$(AR_PREFIX)" --docker-registry "$(DOCKER_REGISTRY)" --revision "$(GIT_SUFFIX)"
+		--prefix "$(AR_PREFIX)" --docker-registry "$(DOCKER_REGISTRY)" --revision "$(GIT_SUFFIX)" \
+		--candidates-repository "$(AR_CANDIDATES)"
 
 # Reviw and agent targets
 

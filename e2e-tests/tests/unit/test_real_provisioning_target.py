@@ -200,6 +200,102 @@ def test_admission_log_is_a_relay_access_field_only():
     assert "admission_log" in str(error.value)
 
 
+GUEST_ISOLATION = {
+    "operator": {"host": "127.0.0.1", "port": 16002, "user": "example-observer",
+                 "key_path": "/run/secrets/example-observer-key"},
+    "private_destinations": {"refused": "10.20.0.7", "listed": "172.16.4.8"},
+}
+
+
+def _with_guest_isolation(section: dict) -> dict[str, Any]:
+    return _with(lambda s: s["hosts"][0].update(guest_isolation=section))
+
+
+def test_the_guest_isolation_section_is_accepted_and_absent_by_default():
+    assert load_real_provisioning_target({SECTION: _example()}).host_for("vm").guest_isolation is None
+    isolation = load_real_provisioning_target(
+        _with_guest_isolation(copy.deepcopy(GUEST_ISOLATION))).host_for("vm").guest_isolation
+    assert (isolation.operator.host, isolation.operator.port) == ("127.0.0.1", 16002)
+    assert isolation.operator.key_path == "/run/secrets/example-observer-key"
+    assert (isolation.private_destinations.refused,
+            isolation.private_destinations.listed) == ("10.20.0.7", "172.16.4.8")
+
+
+def test_the_private_destinations_are_optional():
+    section = {"operator": copy.deepcopy(GUEST_ISOLATION["operator"])}
+    isolation = load_real_provisioning_target(_with_guest_isolation(section)).host_for("vm").guest_isolation
+    assert isolation.private_destinations is None
+
+
+@pytest.mark.parametrize(("change", "field"), [
+    (lambda g: g.update(token="invented"), "guest_isolation.token"),
+    (lambda g: g["operator"].update(password="invented"), "guest_isolation.operator.password"),
+    (lambda g: g["private_destinations"].update(other="10.0.0.9"),
+     "guest_isolation.private_destinations.other"),
+    (lambda g: g["operator"].pop("user"), "guest_isolation.operator.user"),
+    (lambda g: g["private_destinations"].pop("listed"), "guest_isolation.private_destinations.listed"),
+    (lambda g: g["operator"].update(key_path="observer-key"), "guest_isolation.operator.key_path"),
+    (lambda g: g["operator"].update(key_path="/run/../etc/key"), "guest_isolation.operator.key_path"),
+])
+def test_an_unknown_missing_or_misplaced_guest_isolation_field_is_named(change, field):
+    section = copy.deepcopy(GUEST_ISOLATION)
+    change(section)
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with_guest_isolation(section))
+    assert field in str(error.value)
+
+
+@pytest.mark.parametrize("which", ["refused", "listed"])
+@pytest.mark.parametrize("address", [
+    "192.0.2.10", "198.51.100.7", "169.254.169.254", "192.168.122.300", "fd00::1", "10.0.0.0/8", "",
+])
+def test_a_destination_outside_the_guest_policys_private_ranges_is_refused_naming_it(which, address):
+    section = copy.deepcopy(GUEST_ISOLATION)
+    section["private_destinations"][which] = address
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with_guest_isolation(section))
+    assert f"guest_isolation.private_destinations.{which}" in str(error.value)
+
+
+@pytest.mark.parametrize("address", ["192.168.122.1", "192.168.122.40"])
+def test_a_destination_on_the_guests_own_network_is_refused_naming_it(address):
+    section = copy.deepcopy(GUEST_ISOLATION)
+    section["private_destinations"]["listed"] = address
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with_guest_isolation(section))
+    text = str(error.value)
+    assert "guest_isolation.private_destinations.listed" in text and "guests' own network" in text
+
+
+def test_equal_destinations_are_refused_naming_both():
+    section = copy.deepcopy(GUEST_ISOLATION)
+    section["private_destinations"]["listed"] = section["private_destinations"]["refused"]
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(_with_guest_isolation(section))
+    text = str(error.value)
+    assert "guest_isolation.private_destinations" in text and "listed must differ from refused" in text
+
+
+def test_guest_isolation_is_a_vm_host_field_only():
+    with pytest.raises(TargetInvalid) as error:
+        load_real_provisioning_target(
+            _with(lambda s: s["hosts"][1].update(guest_isolation=copy.deepcopy(GUEST_ISOLATION))))
+    assert "guest_isolation" in str(error.value)
+
+
+def test_the_examples_commented_guest_isolation_section_is_valid_once_uncommented():
+    lines = EXAMPLE.read_text().splitlines()
+    start = lines.index("      # guest_isolation:")
+    block = [start]
+    while lines[block[-1] + 1].startswith("      #   "):
+        block.append(block[-1] + 1)
+    for index in block:
+        lines[index] = lines[index].replace("# ", "", 1)
+    isolation = load_real_provisioning_target(yaml.safe_load("\n".join(lines))).host_for("vm").guest_isolation
+    assert isolation.operator.key_path.startswith("/run/secrets/example-")
+    assert isolation.private_destinations is not None
+
+
 def test_relay_vm_access_and_direct_bare_metal_access_are_both_valid():
     section = _example()
     section["hosts"][0]["access"] = {"mode": "relay", "relay_id": "example-vm-relay"}

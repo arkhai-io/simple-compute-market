@@ -60,6 +60,19 @@ migration or compatibility path names the tag it read. A form no tagged release
 carried — a kind of deal, a record, a key's use — owes no migration path, compatibility
 shim or recovery machinery.
 
+## Compatibility paths retire on a schedule
+
+This repository retires its compatibility paths as
+[`retiring-compatibility.md`](../engineering/retiring-compatibility.md) says, and
+its list of pending retirements is the release handbook's
+["Compatibility to retire"](../../release-handbook.md#compatibility-to-retire).
+A change adding a path adds its row at closeout, with the rest of its promotion;
+a change retiring one removes the row. A retirement names a marketplace release
+counted from the release that first carries the path, and may name a version
+beside the count, whichever is later, since a planned minor release can become a
+major one. A migration is not a row: the migration floor absorbs migrations when
+a release is cut ([the release handbook, "The migration floor"](../../release-handbook.md#the-migration-floor)).
+
 ## A version changes when its contents change
 
 A contributor bumps a package's version where its contents change, and merges; the

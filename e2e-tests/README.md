@@ -61,8 +61,9 @@ ACTIVE_PROFILES=staging,staging-secrets
 The payment scenarios — `e2e_credits_payment_deal`, `e2e_bare_metal_payment_deal`,
 `e2e_vm_payment_deal`, `e2e_vm_payment_purchase`, `e2e_vm_recurring_purchase`,
 `e2e_bare_metal_recurring_purchase`, `e2e_vm_rate_servicing`,
-`e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog` and
-`e2e_bare_metal_rate_watchdog`, and the qualification modules
+`e2e_bare_metal_rate_servicing`, `e2e_vm_rate_watchdog`,
+`e2e_bare_metal_rate_watchdog`, `e2e_vm_rate_dispute` and the live verification
+modules `e2e_vm_live_rate_servicing` and `e2e_vm_live_dispute`, and the qualification modules
 `e2e_vm_qualification`, `e2e_bare_metal_qualification` and
 `e2e_real_provisioning_reapply` — read the `PAYMENTS` section (environment prefix
 `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`. SERVICE_URL
@@ -81,8 +82,10 @@ The `MEDIATION` section (environment prefix `ARKHAI_MEDIATION__`), read through
 `tests/e2e/roles/helpers/mediation.py`, names the run's dispute authority for the
 buyer: SERVICE_URL its origin, ACCOUNT and RECORD_KEY its identity, API_KEY_ENV
 the variable the buyer's `[[DisputeCredential]]` names its token by, BUYER_API_KEY
-that token, CA_BUNDLE_PATH the bundle it is trusted under, and, for a lane's own
-target, LANE_OWNED and CONTROL_TOKEN. With SERVICE_URL set, the purchase drivers
+that token, CA_BUNDLE_PATH the bundle it is trusted under, PROXY_URL, where its
+origin resolves only inside its topology, the HTTP proxy the run reaches it
+through (see "Live verification"), and, for a lane's own target, LANE_OWNED and
+CONTROL_TOKEN. With SERVICE_URL set, the purchase drivers
 write the buyer's credential and hand the token to each `market` process under
 API_KEY_ENV; a missing required setting fails the scenario by name, an unready
 lane-owned target fails setup by name, and an unready external one reports
@@ -481,6 +484,251 @@ events for the transaction are the storefront's `start` and the payer's `stop`,
 a `deal-servicing` step begins the teardown the shared teardown stages complete.
 Off a Compose lane's injected lane time and doubles the modules are blocked.
 
+### Rate-deal disputes
+
+`e2e_vm_rate_dispute` runs in the VM lane: two modules under
+`tests/e2e/roles/scenarios/vms/rate_dispute/`, each on a rate deal of its own and
+lane-double evidence. Each shares the recurring purchase's stages through its
+accepted money — a default buyer's `market buy` of a recurring on-demand option
+under the lane's `[charged, returned]` declaration, delivered — then sets lane
+time a minute into the second period, so the first period's earnings are held,
+and files a case the authority rules with a stop
+(`tests/e2e/roles/scenarios/vms/rate_dispute/stages.py`):
+
+| Module | What it proves |
+|---|---|
+| `test_seller_filing.py` | the storefront's administrator ends delivery as a failure through the storefront client's interruption, and the storefront records the end and files `delivery_end` as the payee; a mediation-double rule, held at its gate, rules the filing as the dispute authority documents a mechanical ruling — basis `payee_filed`, a delivery end, a `stop` at that end returning its period and the Agreement's premature-stop `penalty`, with no `reverse` of its own — and closes the case. Lane time passes the second period's end before the rule resumes, so the part earns after the end; the double then stops the part as the authority, a stop now since its time passed, reverses the period earned since the end as that stop's own reversal, and takes the penalty from what the part still holds. The storefront records the ruling's end with no filing beyond its own |
+| `test_buyer_contested_case.py` | the buyer files `delivery_end` through the mediation kit's dispute adapter in the harness (`file_as_buyer`), the storefront's respondent discovery contests the case with an append, and an operator decision through the typed control client rules a `stop` returning its period and a `reverse` of the held first period, closing the case. The storefront records the ruled end with no filing |
+
+The seller's filing needs the part funded past its first reservation, so it
+calls the payments double's reservation control first, as the rate rows do. Each
+module reads the dispute authority's signed record as the buyer, through the
+mediation kit's public client (`read_record`), and the payments snapshot, and
+asserts on both through its row's assertion in
+`tests/e2e/roles/helpers/producer_assertions.py`, which names the fields it
+compares exactly, by relation, or not at all; the payment rows' and the
+recurring purchase's endings assert through that module's payment assertions the
+same way. Each then completes the teardown through the shared teardown stages,
+checks the payer got back everything the part did not keep for the seller, and,
+once the case is closed, reads the seller's list showing the deal `ended` with no
+open case or extension. No stage steps the storefront's servicing while a ruling
+waits at its gate, and each module removes its rules through
+`lane_double_rules`. Off a Compose lane's injected lane time and doubles the
+modules are blocked.
+
+### Live verification
+
+The live verification scenarios compare a hosted authority's outputs with what
+the lanes' doubles emit. Each extends a lane row in the live verification form.
+A payment ending runs its lane twin's shared stages against the run's external
+payments target, on wall time, until the input its lane twin gives the payments
+double; gives the live authority that input through the same client code; polls
+the authority's signed transaction snapshot until the output appears, bounded;
+and asserts on it through the lane twin's shared assertion in
+`tests/e2e/roles/helpers/producer_assertions.py`, which names the fields it
+compares exactly, by relation, or not at all. A different output fails the
+observation. No stage runs after it: what the storefront does with the output is
+the lane twin's evidence. Where the lane twin moves lane time or calls a
+double's control, the live scenario waits for the instant the authority recorded
+(a pending stop's, a funded boundary) or the Agreement fixes, bounded by the
+term, and leaves reserving to the authority's own scheduler.
+
+The modules are in no lane. A deployment prepares a topology meeting the
+requirements below, runs them through `test-module`, and records its own
+sanitized summary of the outcome; raw logs and records stay in its storage.
+Each module checks its prerequisites at its first fixtures, before its holds and
+anything it buys: against no external payments target, against a lane's own
+double (LANE_OWNED), with no provenance to label its evidence, or with a
+topology that misses a requirement below that the harness can read — test mode,
+mock provisioning, a payer's balance — it is a blocked skip naming what is
+missing, and with a setting the run owes missing it fails naming the setting.
+A requirement only the deal itself shows is checked where the deal shows it,
+still a blocked skip naming it: the dispute authority the bought Agreement pins,
+and the storefront's dispute credential, which the seller's filing reveals and
+the storefront's lifecycle read of the deal reports before the contested case's
+contest.
+Only the session's fixtures and the VM lane's idempotent host registration, an
+autouse fixture, set up before them. Each module's first own stage logs the
+live-evidence label with its provenance, every stage logs the identifiers it
+reads, and the module logs its observation's outcome at its end: made, failed,
+or unproven naming what a skipped stage lacked
+(`tests/e2e/roles/helpers/qualification.py`).
+
+```bash
+make test-module MODULE=e2e_vm_live_rate_servicing ACTIVE_PROFILES=<the topology's profiles>
+```
+
+`e2e_vm_live_rate_servicing`, four modules under
+`tests/e2e/roles/scenarios/vms/live/`, each on a deal of its own:
+
+| Module | What it proves | Input to the payments authority | Output compared |
+|---|---|---|---|
+| `test_buyer_stop.py` | the buyer's stop, twin of `e2e_vm_recurring_purchase`'s buyer end | the buyer's own `market end`, a payer stop with no notice, sent no earlier than a minute after the Agreement's start, as its twin's is | the part stopped with cause `payer` and `charged`, the started periods settled, the rest refunded (`assert_payer_stop`) |
+| `test_funds_exhausted.py` | funds running out, twin of the rate servicing row | none beyond the purchase: the rate payer's balance, three periods' price | a `terms` stop at the funded boundary the snapshot last reported, three periods settled (`assert_funds_exhausted`) |
+| `test_preemption.py` | a spot seller's preemption, twin of the rate servicing row | the seller's notice through the typed seller lifecycle client, as `deals preempt` sends it | a pending `payee` stop due the notice after its receipt (`assert_payee_stop_pending`), then the final stop then, `returned`, the unstarted remainder refunded (`assert_payee_stop`) |
+| `test_term_end.py` | the term end, twin of the maximum-term row | none beyond the purchase: the Agreement's end | a `terms` stop at the Agreement's end, `returned` (`assert_term_end`) |
+
+What a topology provides for them, naming no deployment:
+
+- **Provisioning: mock.** They prove the payments authority, not delivery, so
+  this repository's VM storefront, provisioning service and registry run with
+  provisioning in its mock mode, its test controls, fulfillment convergence and
+  lease watchdog reachable as in a lane, and the storefront's loops pausable
+  through its administrator. The storefront settles in `arkhai.payments.v1`
+  against the payments target and declares rate servicing for `charged` and
+  `returned` with no setup charge, as the VM chart's production example does;
+  the buyer's registry recommends a dispute authority whose advertised minimum
+  filing window PAYMENTS.DISPUTE_WINDOW_SECONDS covers beside the delivery
+  deadline, as every compute payments option requires. The site holds no
+  reservation but the run's: a module's cleanup releases every reservation the
+  site holds. No rate servicing module files a case.
+- **Payments: Arkhai payments in test mode, executing rate parts.** The target
+  starts a rate part, keeps it reserved ahead by its own scheduler as far as the
+  payer's balance pays, holds a payee's stop with notice as pending until it is
+  due, and stops a part by its terms at its funded boundary and at its mandate's
+  end. LIVEMODE is false.
+- **Accounts and starting balances.** The run's buyer account
+  (PAYMENTS.BUYER_ACCOUNT, with BUYER_API_KEY) holds at least one term's price
+  at the run's period as each of the buyer's stop, the preemption and the term
+  end starts, which each module reads before it buys — less is a blocked skip
+  naming this requirement — and nothing else spends from it during a run. The
+  seller account
+  (PAYMENTS.SELLER_ACCOUNT) is the storefront's. Funds running out pays from a
+  rate payer (PAYMENTS.RATE_PAYER_ACCOUNT, with RATE_PAYER_API_KEY) holding
+  exactly three periods' price at the run's period — 49 998 USD/6 base units at
+  a one-minute period, 750 000 at the lanes' fifteen minutes — and nothing else;
+  any other balance makes that module a blocked skip naming this requirement,
+  before it buys anything, and a run naming no rate payer or key fails that
+  module naming the setting. No module funds an account.
+- **Run settings.** The `PAYMENTS` section as every payment scenario reads it,
+  with LANE_OWNED unset. The `LIVE` section (environment prefix `ARKHAI_LIVE__`,
+  `tests/e2e/roles/helpers/live_verification.py`): PERIOD_SECONDS, the option's
+  period (900); PAYEE_NOTICE_SECONDS, the spot seller's notice (120);
+  MAXIMUM_TERM_SECONDS, the Agreement's duration the buyer asks for, at most the
+  listing's hour (3600); POLL_BOUND_SECONDS, how long an output is polled for
+  once due (120); and the provenance the evidence is labelled with,
+  SOURCE_REVISION, TARGET_ALIAS and PAYMENTS_REVISION, without which each module
+  is a blocked skip naming the setting. The buyer's `market` is SOURCE_REVISION's
+  own, installed from the run checkout's wheels, since a branch's package
+  versions may be unpublished: the buyer's environment `make init-buyer` builds
+  at the repository root, or the harness's own once `make dist-ci` and
+  `make -C e2e-tests init` have run, which MARKET_CLI_BIN names
+  (`tests/e2e/roles/buyer_cli.py`). The period, notice and term set how long
+  a run takes on wall time, the term end waiting out the whole term, so a
+  deployment states short ones, within what a deal can hold: the harness refuses
+  a period longer than the term and a notice no shorter than it, and the market
+  refuses the rest — publication an option whose five-minute approval window,
+  five-minute delivery deadline and period do not fit in the listing's hour, and
+  negotiation a term shorter than the time to approval's expiry plus the
+  delivery deadline and a period. Funds running out fails naming the term when
+  it lasts at most its three periods, since the term end would come first,
+  and the preemption fails naming the notice when it is no shorter than the term
+  left once the deal is delivered.
+- **What the caller owes between runs.** Resetting the rate payer to exactly
+  three periods' price, which a run leaves empty, and topping up the buyer. A
+  module stops only the deal its input stops; funds running out and the term end
+  leave the authority to stop theirs, and a module's cleanup ends an approved
+  deal no input stopped by the buyer's own `end`. Each module releases the
+  site's reserved resources and removes its mock gates' rules; once its holds are
+  released the storefront services the stopped deals and tears them down on its
+  own.
+
+```bash
+make test-module MODULE=e2e_vm_live_dispute ACTIVE_PROFILES=<the topology's profiles>
+```
+
+`e2e_vm_live_dispute`, two modules under `tests/e2e/roles/scenarios/vms/live/`,
+each on a deal of its own, extend `e2e_vm_rate_dispute`'s rows the same way.
+Each runs the recurring purchase's shared stages, waits until the payments
+authority holds the first period's earnings, and files as its lane twin does,
+through the same client code. It then polls the hosted dispute authority's signed record,
+read as the buyer through the mediation kit's public client, until the case is
+closed, within POLL_BOUND_SECONDS, and asserts on the record and the payments
+snapshot through its lane twin's dispute assertion. No module calls an operator
+endpoint of the authority: a ruling is the authority's own. The wait for the
+first period's earnings is a poll of the payments snapshot, bounded by the time
+left in the first period and POLL_BOUND_SECONDS after it.
+
+| Module | What it proves | Input to the dispute authority | Output compared |
+|---|---|---|---|
+| `test_seller_filing.py` | the seller's filing, twin of the rate-dispute row | the storefront's own `delivery_end` filing as the payee, made when its administrator ends the delivery as a failure through the storefront client's interruption | the authority's mechanical ruling: the part protected by an extension, basis `payee_filed`, the delivery end the one the storefront claimed, an authority stop returning its period with its reversal of any earnings since the end, the Agreement's premature-stop penalty capped at what the part then held, each reversal matched to the effect whose id its payload names, the extension lifted and the case closed (`assert_payee_filing_ruled`) |
+| `test_buyer_contested_case.py` | the buyer's contested case, twin of the rate-dispute row | the buyer's `delivery_end` filing through the mediation kit's dispute adapter in the harness (`file_as_buyer`), then the storefront's contest, an append its respondent discovery makes in one servicing step | the ruling the topology's policy makes: the part protected, the payee's answer before the ruling, basis `operator`, an authority stop returning its period with its reversal of any earnings since the ruled end, and a reversal payments applied as ruled, the extension lifted and the case closed; the ruled delivery end and the reverse amount are the policy's and not compared (`assert_contested_case_ruled`) |
+
+The contested case makes three observations: the buyer's filing, the
+storefront's contest and the policy's ruling. With no ruling of the case once
+POLL_BOUND_SECONDS has passed, its last stage is a blocked skip naming the
+ruling-policy requirement below, so the ruling is unproven while the filing and
+the contest stand; a ruling made with the case still open at the bound, or any
+other ruling, fails it. The seller's filing makes one observation, which an
+authority leaving the filing unruled at the bound fails, since it documents the
+mechanical ruling.
+
+What a topology provides for them, beside what the rate servicing modules need
+above, naming no deployment:
+
+- **Provisioning: mock**, as above. The storefront also holds a dispute
+  credential for the dispute authority, which it files as the payee and answers
+  the respondent listing with; a deployment proves it before a run with the
+  storefront's own `check-mediation --origin <the authority's origin>` in the
+  storefront's process. The seller's filing reads the storefront's refusal of a
+  filing for want of one, and the contested case reads the storefront's
+  lifecycle read of the deal before its contest, whose authority outcome names
+  the missing credential; either is a blocked skip naming this requirement, the
+  contested case's leaving the contest and the ruling unproven while the
+  buyer's filing stands. The
+  buyer's registry recommends that authority, so the Agreement pins it: an
+  Agreement pinning another is a blocked skip naming both, once the deal is
+  bought. Each module files one case.
+- **Dispute: a hosted mediation authority serving `arkhai.mediation.v1`**
+  against the payments target in test mode, so its effects move only test-mode
+  money — filing with each part's protection by an extension at the payments
+  target, appends, the respondent listing, and signed record reads by either
+  party — applying a ruling's effects at that payments target before it records
+  the case closed. The seller's filing compares the mechanical ruling the
+  authority documents for a payee's `delivery_end` — a delivery end at the
+  claimed instant, a `stop` returning its period, whose application reverses
+  any earnings since the end under the stop's id, and the premature-stop
+  penalty, with no `reverse` of its own — and an authority that does not
+  make it within POLL_BOUND_SECONDS of the filing fails the observation, as a
+  different ruling does: that output is the authority's own, not the
+  topology's.
+- **Ruling policy, for the buyer's contested case.** A buyer's `delivery_end`
+  filing that the storefront contests goes to the authority's operators. The
+  topology applies a policy standing in for that person's decision: once the
+  payee has answered, once, it rules the case as an operator, basis
+  `operator`, with exactly these effects in this order — a delivery end, a
+  `stop` of the part returning its period, and a `reverse` of the part of an
+  amount it chooses — applies them, a stop whose time has passed with its
+  reversal of the earnings since, and closes the case as ruled, within
+  POLL_BOUND_SECONDS of the contest. Without it the ruling is unproven; a
+  ruling with other effects, another order or another basis fails it.
+- **Accounts and starting balances.** The buyer account holds at least one
+  term's price at the run's period as each module starts, as above. MEDIATION's
+  ACCOUNT and RECORD_KEY are the authority's identity, the one the buyer's
+  registry recommends; BUYER_API_KEY is the buyer's token at it, which the
+  buyer's filing and both modules' record reads use.
+- **Run settings.** The `PAYMENTS` and `LIVE` sections as above, with
+  POLL_BOUND_SECONDS covering the authority's or the policy's time to rule; the
+  `MEDIATION` section (`tests/e2e/roles/helpers/mediation.py`) naming the hosted
+  authority, with LANE_OWNED unset — a lane-owned target is a blocked skip
+  naming it — and no CONTROL_TOKEN. Where the authority's origin resolves only
+  inside the topology, PROXY_URL names an HTTP proxy the run reaches, such as a
+  forward to one in the topology: the harness reaches the origin through it, and
+  the buyer processes it starts receive it as their HTTPS_PROXY with loopback
+  excluded, so every HTTPS request they make outside loopback goes through it.
+  SERVICE_URL stays the origin the Agreement pins, and its certificate is
+  verified against it, under CA_BUNDLE_PATH when one is set. LIVE.MEDIATION_REVISION states
+  the mediation authority's revision identifier, beside the other provenance,
+  without which each module is a blocked skip naming the setting. A missing
+  BUYER_API_KEY fails each module naming it.
+- **What the caller owes between runs.** Topping up the buyer, and closing a
+  case a module left open: the contested case's, awaiting an operator, when no
+  policy rules it, and the seller's filing's when the authority did not rule it.
+  The contested case's cleanup ends a deal no ruling stopped by the buyer's own
+  `end`; the seller's filing leaves its deal to the authority's ruling. Each
+  module releases the site's reserved resources and removes its mock gates'
+  rules, as above.
+
 ### Real bare-metal provisioning
 
 `e2e_bare_metal_real_provisioning` runs the canonical complete deal against a
@@ -619,6 +867,11 @@ virtualization; it needs no GPU.
    fits twice within capacity. Direct access states `public_host`; relay access
    states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
    and their verified `ssh_host_public_key`, and have no VM listing shape.
+   A VM host may state its independently confirmed `ssh_host_public_key`, which
+   the scenario registers as the host's pin; without it the host must already
+   hold a pin in the provisioning service, and the scenario refuses one with
+   neither before declaring capacity, naming the field. It never captures the
+   key a host presents, and a reapply restates the pin held at registration.
    A VM target may state `resource_id` to select its scenario declaration;
    otherwise it uses `compute-e2e-real-001`. Listing adoption, registration,
    purchase checks, capacity reuse and reapply use that same identifier.
@@ -655,6 +908,43 @@ and reports each unconfirmed removal. The first SSH session stays open across th
 second guest's create and teardown, with a maximum five-second observed gap;
 management connectivity is checked around each operation. The two smaller guests
 prove tunnel coexistence and require no GPU.
+
+`e2e_vm_guest_isolation` (`tests/e2e/roles/scenarios/vms/test_vm_guest_isolation.py`)
+proves VM guest isolation on the same target. It subclasses the real VM
+scenario's stages and fixtures, so it makes the same two deals and shares their
+teardown, and adds its own stages while both guests run and the first holds its
+heartbeat. Its guest probes run in each guest as its buyer, under `sudo` with
+the tenant password the deal delivered; its host-side stages restart libvirtd,
+reload UFW, read the guest policy's chains and counters, plant the first guest
+unconverged and run the host kit's convergence command, through an operator
+route the VM host's optional `guest_isolation` section names:
+
+```yaml
+      guest_isolation:
+        operator:                 # harness-local; the key is referenced, never copied
+          host: <route-host>
+          port: <route-port>
+          user: <user that may sudo -n python3>
+          key_path: <harness-local key path>
+        private_destinations:     # optional; neither needs to answer
+          refused: <private IPv4 address>
+          listed: <private IPv4 address host preparation was given>
+```
+
+Both destinations are distinct IPv4 addresses in the guest policy's private
+ranges and outside the guests' network; host preparation must have been given
+`listed` in `guest_allowed_private_destinations`. Without the section every
+host-side stage skips naming it, and without `private_destinations` the
+private-destination stages skip naming that. The probes are one fixed program,
+`guest_isolation_probe.py`, beside the module. The module is marked
+`e2e_vm_guest_isolation`, runs in no lane, and logs each observation, O1 to O9,
+as made, failed or unproven after its last stage;
+[`VALIDATION_RUNBOOK.md`, "Prove guest isolation"](../docs/development/VALIDATION_RUNBOOK.md#prove-guest-isolation)
+lists them and what the target needs:
+
+```bash
+make test-module MODULE=e2e_vm_guest_isolation ACTIVE_PROFILES=local,real-provisioning-target
+```
 
 ---
 

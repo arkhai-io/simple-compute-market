@@ -1,9 +1,10 @@
 # Release handbook
 
 For the owner who releases this repository's packages and artifacts: how a marketplace
-release goes, loading a release candidate, what the deployment does with it, running
-the lanes on its images, cutting a release, deciding a release's migration floor, the
-import package renames consumers meet, and diagnosing a load or a cut that fails. It
+release goes, merging `dev` into `main` and describing the release, loading a release
+candidate, what the deployment does with it, running the lanes on its images, cutting a
+release, deciding a release's migration floor, the
+compatibility paths due to retire, the import package renames consumers meet, and diagnosing a load or a cut that fails. It
 sits beside the [operator handbook](operator-handbook.md), for whoever runs a
 deployment, and the [change workflow handbook](change-workflow-handbook.md), for
 operating the workflow. What a change must satisfy for its packages to release — what a
@@ -21,9 +22,11 @@ those bytes ship.
 
 ## The release
 
-1. **Change.** Work lands on `dev` and then `main`. CI builds and tests, including
-   building the wheelhouse and resolving every declared distribution against it, and
-   publishes nothing.
+1. **Change.** Work lands on `dev` and then `main`, through a release pull request that
+   describes the release to its users
+   ([The release pull request](#the-release-pull-request)). CI builds and tests,
+   including building the wheelhouse and resolving every declared distribution against
+   it, and publishes nothing.
 2. **Release candidate.** An operator loads `main`'s commit with `make load-candidate`
    ([Loading a release candidate](#loading-a-release-candidate)).
 3. **Validation and promotion.** The deployment validates the release candidate, builds
@@ -38,12 +41,58 @@ A fault found during validation is fixed on `main`, and a later commit becomes t
 release candidate. A release candidate that fails before production gets no branch, no
 tag and no public artifact.
 
+## The release pull request
+
+`dev` reaches `main` through one pull request per release. It comes from a branch
+`release/merge-dev-to-main-<semver>`, cut from `dev`, with `origin/main` merged into it
+and any conflict resolved there, so neither long-lived branch changes until the pull
+request merges. It merges with a merge commit, which keeps `dev`'s history on `main`.
+That merge commit is the commit loaded as the release candidate.
+
+Its description is the release's notes, written for the people who use the release:
+sellers running storefronts and buyers using `market`. It summarizes what they can
+now do since the last merge to `main`, and is built in this order:
+
+1. **The roadmap's goals.** Each goal's value statement in
+   [`ROADMAP.md`](development/ROADMAP.md) says what its delivered work is worth to a
+   user. The description is organized by goal and opens each section with that value.
+2. **The archived changes.** Every change archived since the last merge to `main` is
+   placed under the goal it serves, from its proposal's Why and What Changes.
+3. **The merged pull requests.** The pull requests merged into `dev` in that window
+   supply the line items, and their count.
+
+The description has these sections, in order:
+
+- a headline paragraph saying what the release brings since the last merge to `main`,
+  with how many pull requests and changes it delivers, followed by "It is the first
+  release where:" and its few headline features;
+- **upgrade notes and breaking changes**: what an operator or a consumer must do or
+  expect on upgrading, including each compatibility path the release first carries and
+  any migration floor it sets;
+- one section per goal with delivered work, opening with the goal's value, then grouped
+  line items, each leading with what a user can now do in one or two lines; a goal the
+  release completes is marked complete, and work that ships but is not yet switched on
+  for users says so;
+- **operations and deployment**: what changes for whoever runs a deployment;
+- **known limits**: what the release does not do or has not shown, including
+  observations its live evidence left unproven;
+- **merge notes**: how `main` was merged into the release branch and any conflict
+  resolved.
+
+Work on the repository's own change workflow, guidance and agent tooling is not a user
+feature; it is mentioned briefly under operations, if at all. Like every description
+here, it is public
+([`repository-content.md`](guidance/engineering/repository-content.md)): it names
+what a user can see, never a private deployment, host or project.
+
 ## Loading a release candidate
 
-Fetch the release tags first (`git fetch --tags <remote>`), since the version check
-compares only the tags the checkout holds
-([`package-versions.md`, "The version check"](guidance/repository/package-versions.md#the-version-check)).
-Then, at the commit to load:
+First, retire every row of [Compatibility to retire](#compatibility-to-retire)
+due at this release, or move it. Then fetch the release tags
+(`git fetch --tags <remote>`), since the version check compares only the tags the
+checkout holds
+([`package-versions.md`, "The version check"](guidance/repository/package-versions.md#the-version-check)),
+and, at the commit to load:
 
 ```bash
 make load-candidate AR_PROJECT=<project> AR_LOCATION=<region>
@@ -53,8 +102,9 @@ The root publishing targets, this one among them, require explicit `AR_PROJECT` 
 `AR_LOCATION`, supplied on the make command line or in the environment. `AR_PREFIX`
 defaults to `AR_PROJECT` and names the repositories: `<prefix>-docker` for images,
 `<prefix>-cli` for the binary, and `<prefix>-candidates`, the candidate store, for the
-wheels and the chart package. The candidate store is provisioned outside this
-repository. In one invocation, in this order, the load (`scripts/load_candidate.py`):
+wheels and the chart package. `AR_CANDIDATES` names another generic repository as the
+candidate store. The candidate store is provisioned outside this repository. In one
+invocation, in this order, the load (`scripts/load_candidate.py`):
 
 1. builds the wheelhouse once (`make dist`), runs `make check-release-versions` on it,
    and takes its digest (`scripts/wheelhouse_digest.py`);
@@ -179,7 +229,10 @@ Once production runs the release, and the deployment's PyPI read has passed agai
    not a development fixture.
 2. In a fresh worktree at the release candidate's commit, create `releases/<semver>`,
    add the deployment's bill of materials as `manifests/release-bom.cdx.json` in one
-   commit changing nothing else, and tag that commit `marketplace-v<semver>`.
+   commit changing nothing else, and tag that commit `marketplace-v<semver>`; and on
+   `main`, record the release in `First released in` for each row of
+   [Compatibility to retire](#compatibility-to-retire) it first carries, and confirm
+   no row names this release in `Retires in`.
 3. Run `make check-release-record TAG=marketplace-v<semver>`, and confirm its version
    check names the newest marketplace release among the tags it compared.
 4. Push the branch and the tag.
@@ -209,6 +262,21 @@ the release's published packages as the fixtures' READMEs describe, and leaves
 deployments older than the new floor to start from a fresh database. Moving the
 floor is a decision about which deployments stay upgradeable, so it is made for
 each release, not by default.
+
+## Compatibility to retire
+
+Code kept only for older deployments retires at a stated release
+([`package-versions.md`, "Compatibility paths retire on a schedule"](guidance/repository/package-versions.md#compatibility-paths-retire-on-a-schedule)).
+Before loading a release candidate, retire on `main` every row due at the release
+it will become, removing what the row names, or move the row to a later release
+with its reason in the row. When the release is cut, record it in `First
+released in` for every row it is the first to carry.
+
+| Compatibility path | First released in | Retires in | What retiring removes | A deployment still holding the old form |
+|---|---|---|---|---|
+| Adoption of hosts registered before host keys were pinned | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
+| Convergence of guests created before guest isolation | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
+| Removal of the per-port guest rules hosts were prepared with before the guest policy | — | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
 
 ## Import package renames
 

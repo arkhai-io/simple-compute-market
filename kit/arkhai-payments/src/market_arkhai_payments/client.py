@@ -43,8 +43,9 @@ class PaymentsClient:
     """Authenticated HTTP client with no local transaction or servicing state.
 
     Use a WorkOS user-scoped API key for normal service calls. The explicit
-    ``development_account`` mode sends the service's development-only account
-    header and is intended for local integration runs.
+    ``development_account`` option sends ``X-Account-ID`` in place of a
+    credential, for local integration runs; only a service that admits header
+    identity accepts it.
 
     ``ca_bundle`` names a PEM file the client verifies the service against,
     instead of the default trust store; the bundle is loaded here, so one that is
@@ -77,7 +78,7 @@ class PaymentsClient:
         if url.username or url.password:
             raise ValueError("service_url must not embed credentials")
         if url.scheme != "https" and not _is_loopback(url.host):
-            raise ValueError("WorkOS credentials require HTTPS outside loopback development")
+            raise ValueError("WorkOS credentials require HTTPS outside loopback")
         headers: dict[str, str] = {}
         if api_key is not None:
             if not api_key.strip() or "\r" in api_key or "\n" in api_key:

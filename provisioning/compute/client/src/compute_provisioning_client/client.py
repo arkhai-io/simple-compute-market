@@ -32,6 +32,8 @@ from compute_provisioning_contracts import (
     HostCreate,
     HostDefinitionsImportRequest,
     HostDefinitionsImportResponse,
+    HostKeyCaptureRequest,
+    HostKeyCaptureResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -247,6 +249,15 @@ def _text(payload: Any) -> str:
     if not isinstance(payload, str):
         raise ComputeProvisioningError("expected a text response")
     return payload
+
+
+def _capture_host_key(host_id: str, fingerprint: str, replace: bool) -> _Call:
+    return _Call(
+        "POST",
+        f"/api/v1/hosts/{host_id}/host-keys/capture",
+        HostKeyCaptureRequest(fingerprint=fingerprint, replace=replace),
+        parse=_model(HostKeyCaptureResponse),
+    )
 
 
 def _export_hosts() -> _Call:
@@ -698,6 +709,13 @@ class ComputeProvisioningClient(SigningBase):
         """Whether the host's connection is reachable; an unreachable host is a result, not an error."""
         return await self._run(_connectivity(host_id), request_id)
 
+    async def capture_host_key(
+        self, host_id: str, fingerprint: str, *, replace: bool = False,
+        request_id: str | None = None,
+    ) -> HostKeyCaptureResponse:
+        """Pin the verified fingerprint observed at the registered SSH endpoint."""
+        return await self._run(_capture_host_key(host_id, fingerprint, replace), request_id)
+
     async def export_hosts(self, *, request_id: str | None = None) -> str:
         """The registry as a host definitions document's YAML text, with no secret."""
         return await self._run(_export_hosts(), request_id)
@@ -1043,6 +1061,13 @@ class SyncComputeProvisioningClient(SigningBase):
     def check_connectivity(self, host_id: str, *, request_id: str | None = None) -> ConnectivityResult:
         """See ``ComputeProvisioningClient.check_connectivity``."""
         return self._run(_connectivity(host_id), request_id)
+
+    def capture_host_key(
+        self, host_id: str, fingerprint: str, *, replace: bool = False,
+        request_id: str | None = None,
+    ) -> HostKeyCaptureResponse:
+        """See the asynchronous client's host-key capture method."""
+        return self._run(_capture_host_key(host_id, fingerprint, replace), request_id)
 
     def export_hosts(self, *, request_id: str | None = None) -> str:
         """See ``ComputeProvisioningClient.export_hosts``."""

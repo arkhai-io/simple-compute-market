@@ -22,6 +22,29 @@ REAL_PROVISIONING_TARGET:
       # service (invented name), for host diagnostics to report beside the
       # host's own units.
       # management_unit: example-agent.service
+      # Optional: the VM host's independently confirmed OpenSSH public key.
+      # Without it the host must already hold a pin in the provisioning service,
+      # stated by an earlier run or captured by an operator who compared its
+      # fingerprint; the scenario refuses an unpinned host rather than trusting
+      # the key it presents.
+      # Deterministic test fixture only, never a public-network identity.
+      # ssh_host_public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJS'
+      # Optional: the inputs of e2e_vm_guest_isolation's host-side stages, which
+      # restart libvirtd, reload UFW and alter a running guest on this host.
+      # Without it those stages skip, naming guest_isolation. The operator route
+      # and its key path are harness-local and invented here; the key is
+      # referenced, never copied. Neither private destination needs to answer;
+      # both are invented private addresses, and host preparation must have
+      # been given the listed one in guest_allowed_private_destinations.
+      # guest_isolation:
+      #   operator:
+      #     host: 127.0.0.1
+      #     port: 16002
+      #     user: example-observer
+      #     key_path: /run/secrets/example-observer-key
+      #   private_destinations:
+      #     refused: 10.20.0.7
+      #     listed: 10.20.0.8
     - host_id: example-bm-1
       domain: bare_metal
       physical_host_id: example-machine-1

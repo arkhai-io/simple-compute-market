@@ -24,8 +24,7 @@ LOCAL_VALUES := local-values.yaml
 # his credential toward the mediation double the release's registry recommends,
 # and the registry reads its administrator key from arkhai-registry-runtime.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-registry-runtime arkhai-bob-identity \
-	arkhai-bob-runtime arkhai-provisioning-identity arkhai-provisioning-runtime \
-	arkhai-provisioning-ssh
+	arkhai-bob-runtime arkhai-provisioning-identity arkhai-provisioning-runtime
 # ConfigMaps the release's workloads read under $(LOCAL_VALUES) and no chart
 # creates, provisioned out of band the same way: the storefronts' CA bundle,
 # which holds the lane doubles' committed lane CA.
@@ -195,8 +194,7 @@ check-local-secrets:
 TOPOLOGY_RELEASE := arkhai-bare-metal-seller
 TOPOLOGY_VALUES  := bare-metal-release-values.yaml
 # Out-of-band Secrets $(TOPOLOGY_RELEASE) reads beyond $(LOCAL_SECRETS), whose
-# provisioning SSH and runtime Secrets it shares; $(TOPOLOGY_VALUES) says what
-# each holds.
+# provisioning runtime Secret it shares; $(TOPOLOGY_VALUES) says what each holds.
 TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-storefront-runtime \
 	arkhai-bare-metal-provisioning-identity
 # The components (app.kubernetes.io/name) whose Deployments topology-up restarts
@@ -227,10 +225,6 @@ DEV_ACCOUNT_PROVISIONING_ADMIN      := 5
 DEV_ACCOUNT_REGISTRY_ADMIN          := 6
 DEV_ACCOUNT_BARE_METAL_STOREFRONT   := 8
 DEV_ACCOUNT_BARE_METAL_PROVISIONING := 9
-# The SSH key both provisioning services mount. Mock provisioning never opens a
-# connection, so it is the committed placeholder the bare-metal Compose lane
-# mounts; a release provisioning real hosts names its own key file here.
-PROVISIONING_SSH_KEY_FILE := ../dev-env/bare-metal/ssh-key-placeholder
 
 # $(TOPOLOGY_VALUES) names both releases' Services by the release names above,
 # so the topology targets refuse a RELEASE or TOPOLOGY_RELEASE given on the
@@ -298,7 +292,6 @@ topology-secrets:
 	DEV_ACCOUNT_REGISTRY_ADMIN="$(DEV_ACCOUNT_REGISTRY_ADMIN)" \
 	DEV_ACCOUNT_BARE_METAL_STOREFRONT="$(DEV_ACCOUNT_BARE_METAL_STOREFRONT)" \
 	DEV_ACCOUNT_BARE_METAL_PROVISIONING="$(DEV_ACCOUNT_BARE_METAL_PROVISIONING)" \
-	PROVISIONING_SSH_KEY_FILE="$(PROVISIONING_SSH_KEY_FILE)" \
 	TEST_VOLUMES="$(TEST_VOLUMES)" TEST_VOLUME_SIZE="$(TEST_VOLUME_SIZE)" \
 		./scripts/topology-secrets.sh
 

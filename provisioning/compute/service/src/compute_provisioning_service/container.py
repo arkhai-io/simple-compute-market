@@ -13,6 +13,7 @@ from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning import JobExecutorTable
 from compute_provisioning.hosts import ConnectionCodecs
+from compute_provisioning.hosts.route_service import HostKeyProbe
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.jobs.submission import JobSubmissionService
@@ -24,6 +25,7 @@ from compute_provisioning_ansible import (
     ansible_readiness_component,
     probe_connectivity,
 )
+from compute_provisioning_ansible.probes import describe_host_pins, scan_host_key
 from compute_provisioning_ansible.runner import AnsibleRunner
 from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.relays import (
@@ -218,6 +220,7 @@ def _make_host_authority(session_factory, codecs):
         codecs=codecs,
         pool_change_hooks=host_pool_change_hooks(codecs),
         connection_change_hooks=host_connection_change_hooks(codecs),
+        pin_fields={SshConnectionCodec.kind: "host_keys"},
     )
 
 
@@ -266,13 +269,23 @@ def _make_probe_runner(cfg):
     return AnsibleRunner(cfg)
 
 
-def _make_connectivity_probes(runner) -> Mapping[str, Any]:
+def _make_connectivity_probes(runner, host_authority) -> Mapping[str, Any]:
     """Each connection kind's probe; the Ansible implementation probes ``ssh``."""
 
     async def probe_ssh(host):
-        return await probe_connectivity(runner, host)
+        return await probe_connectivity(
+            runner, host, adopt_host_key=host_authority.adopt_host_key
+        )
 
     return MappingProxyType({SSH_CONNECTION_KIND: probe_ssh})
+
+
+def _make_host_key_probes(runner) -> Mapping[str, HostKeyProbe]:
+    if issubclass(type(runner), AnsibleRunner):
+        return MappingProxyType({
+            SSH_CONNECTION_KIND: HostKeyProbe(describe_pins=describe_host_pins, scan=scan_host_key)
+        })
+    return MappingProxyType({})
 
 
 def _make_job_engine(session_factory, job_executors, host_authority, cfg):
@@ -493,8 +506,9 @@ class Container(containers.DeclarativeContainer):
     probe_runner = providers.Singleton(_make_probe_runner, cfg=config)
 
     connectivity_probes = providers.Singleton(
-        _make_connectivity_probes, runner=probe_runner
+        _make_connectivity_probes, runner=probe_runner, host_authority=host_authority
     )
+    host_key_probes = providers.Singleton(_make_host_key_probes, runner=probe_runner)
 
     job_engine = providers.Singleton(
         _make_job_engine,
@@ -572,6 +586,8 @@ class Container(containers.DeclarativeContainer):
 
     bare_metal_runtime = providers.Singleton(
         build_bare_metal_runtime,
+        adopt_host_key=providers.Callable(_runtime_value, runtime=host_authority,
+                                         name=providers.Object("adopt_host_key")),
         relay_port_allocator=relay_port_allocator,
         relay_resolver=relay_execution_resolver,
         connection_codecs=connection_codecs,
@@ -795,6 +811,7 @@ resolved_definition_documents: "tuple[Any, ...] | None" = None
 resolved_background_tasks: "tuple[Any, ...] | None" = None
 resolved_host_authority: "HostAuthority | None" = None
 resolved_connectivity_probes: Mapping[str, Any] | None = None
+resolved_host_key_probes: Mapping[str, HostKeyProbe] | None = None
 resolved_vm_operations_service: Any | None = None
 resolved_host_operations_service: Any | None = None
 resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None

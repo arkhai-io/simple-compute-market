@@ -9,7 +9,7 @@ from market_deal_lifecycle.acknowledgements import verify_end_acknowledgement
 from market_deal_lifecycle_client import LifecycleClient, LifecycleClientError
 from market_deal_lifecycle_contracts.models import Accepted, CommitMessage, HintMessage, SubmitResponse
 from market_identity import (
-    RequestEnvelope, TrustedIdentitySet,
+    EMPTY_BODY, RequestEnvelope, TrustedIdentitySet,
     canonical_body_hash, canonical_json, sign_request,
 )
 from market_deal_servicing import (
@@ -62,10 +62,11 @@ def routes(rig):
     transport = httpx.ASGITransport(app=app)
     trust = TrustedIdentitySet(identities=(rig["seller"].identity,))
 
-    async def raw(body, *, nid="deal", signer=rig["buyer"], role="buyer", operation="lifecycle_peer"):
+    async def raw(body, *, nid="deal", signer=rig["buyer"], role="buyer", operation="lifecycle_peer",
+                  method="POST", url=None):
         # Raw requests only exercise inputs the typed client deliberately cannot encode.
         request = sign_request(signer=signer, envelope=RequestEnvelope(
-            role=role, principal=signer.identity, method="POST", operation=operation, resource=nid,
+            role=role, principal=signer.identity, method=method, operation=operation, resource=nid,
             request_id=uuid.uuid4().hex, timestamp=now, body_hash=canonical_body_hash(body),
         ))
         headers = {
@@ -75,9 +76,11 @@ def routes(rig):
             "X-Market-Role": role, "X-Market-Request-ID": request.request_id,
             "X-Market-Timestamp": str(now), "X-Market-Signature": request.proof.value,
         }
-        url = f"/api/v1/negotiations/{nid}/lifecycle" if role == "buyer" else f"/api/v1/admin/lifecycle/{nid}"
+        if url is None:
+            url = f"/api/v1/negotiations/{nid}/lifecycle" if role == "buyer" else f"/api/v1/admin/lifecycle/{nid}"
+        content = None if body is EMPTY_BODY else canonical_json(body)
         async with httpx.AsyncClient(transport=transport, base_url="http://fixture") as http:
-            return await http.post(url, content=canonical_json(body), headers=headers)
+            return await http.request(method, url, content=content, headers=headers)
 
     return locals()
 
@@ -123,6 +126,25 @@ async def test_refuses_relay_backdating_future_and_introduction_before_any_effec
     rig["physical"].apply_end.assert_not_called()
     rig["payment"].submit.assert_not_called()
     rig["payment"].read.assert_not_called()
+
+
+async def test_the_buyers_routes_refuse_the_administrator_under_its_own_role(routes, rig):
+    """The storefronts mount these routes; a request signed under `admin` by
+    an active administrator, over the buyer's own operation and resource, is
+    refused on each, and nothing reaches the deal."""
+    raw = routes["raw"]
+    administrator = rig["authority_signer"]
+    url = "/api/v1/negotiations/deal/lifecycle"
+    submitted = await raw(
+        {"kind": "hint", "negotiation_id": "deal", "operation_key": "administrator-hint"},
+        signer=administrator, role="admin", operation="lifecycle_peer", url=url,
+    )
+    read = await raw(
+        EMPTY_BODY, signer=administrator, role="admin", operation="lifecycle_buyer_read",
+        method="GET", url=url,
+    )
+    assert (submitted.status_code, read.status_code) == (403, 403)
+    assert routes["peers"] == []
 
 
 async def test_outage_receipt_before_fulfillment_retry_and_owner_only_exact_reports(routes, rig):

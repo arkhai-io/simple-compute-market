@@ -19,8 +19,10 @@ package = false
 # pyyaml: the task-file structure tests parse the role's YAML directly. Ansible
 # is not a dependency of this project's tests -- they deliberately validate
 # structure without it, so that coverage does not depend on Ansible being
-# installed -- which means the YAML parser has to be declared here.
-dev = ["pytest>=8.0", "pyyaml>=6.0"]
+# installed -- which means the YAML parser has to be declared here. jinja2: the
+# guest policy and guest interface tests render the roles' templates with the
+# engine, and the block trimming, Ansible renders templates with.
+dev = ["pytest>=8.0", "pyyaml>=6.0", "jinja2>=3.1"]
 
 [tool.pytest.ini_options]
 pythonpath = ["tests"]

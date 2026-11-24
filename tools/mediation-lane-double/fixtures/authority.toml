@@ -19,7 +19,7 @@ record_seed = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
 record_key = "ed25519:2b8hSHSKhcidparY7gsPwtEF_TnUGkx5ZTY1TwrikAw"
 
 # The authority account's bearer token at the payments double, with which the
-# double extends, reverses and lifts as the authority.
+# double extends, stops, reverses and lifts as the authority.
 payments_token = "payments-lane-double-dispute-authority-public-development-token"
 
 # The bearer token of the double's control routes under /test/, on its

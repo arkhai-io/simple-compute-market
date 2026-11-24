@@ -3,13 +3,17 @@
 # This file coordinates all the sub-tasks for Host Kit installation and VM operations
 #
 # Task Flow:
-# 0. Preconditions - the passthrough override is valid and the CPU offers
-#    hardware virtualization, both checked before anything on the host changes
+# 0. Preconditions - the passthrough override and the guests' private
+#    destinations are valid and the CPU offers hardware virtualization, all
+#    checked before anything on the host changes
 # 1. System Packages - Install basic tools and packages
 # 2. GPU Passthrough - Configure GPU passthrough (when a GPU is present, or the
 #    operator enables it)
 # 3. KVM Setup - Configure KVM virtualization
 # 4. KVM Network - Setup KVM networking
+# 4a. Guest Network Policy - Refuse a host that cannot isolate its guests,
+#    install the chains holding each guest to DHCP and DNS on its host, and
+#    converge every running guest to an isolated, filtered port
 # 5. Security Hardening - Apply security configurations
 # 6. Golden Image Build - Build golden images (if vm_image_type == "golden")
 # 7. GPU Detection Service - Setup GPU detection service (with passthrough)
@@ -50,6 +54,28 @@
       svm, so this host cannot run KVM guests. On a cloud instance, create it
       with nested virtualization enabled. Nothing on the host has been changed.
   when: cpu_virt_support.rc != 0
+  tags:
+    - always
+
+# Each entry is written into a firewall rule (templates/guest-policy.rules.j2),
+# so anything but an IPv4 address or CIDR block is refused before it can be.
+# `match` anchors at the start; `\Z`, unlike `$`, admits no trailing newline.
+- name: Validate the private destinations guests may reach
+  assert:
+    that:
+      - guest_allowed_private_destinations is sequence
+      - guest_allowed_private_destinations is not string
+      - guest_allowed_private_destinations is not mapping
+      - >-
+        guest_allowed_private_destinations
+        | reject('match', '((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(/(3[0-2]|[12]?[0-9]))?\Z')
+        | list | length == 0
+    fail_msg: >-
+      guest_allowed_private_destinations must be a list of IPv4 addresses or
+      CIDR blocks, such as ['10.0.5.20', '10.0.6.0/24']; it is
+      {{ guest_allowed_private_destinations }}. Nothing on the host has been
+      changed.
+    quiet: true
   tags:
     - always
 
@@ -144,6 +170,21 @@
     - kvm_network
     - host_setup
 
+# After libvirt and its default network are up, and before security hardening,
+# which saves the rules this installs.
+- name: Include the guest network policy
+  include_tasks:
+    file: guest-policy.yml
+    apply:
+      tags:
+        - guest_policy
+        - security_hardening
+        - host_setup
+  tags:
+    - guest_policy
+    - security_hardening
+    - host_setup
+
 - name: Include security hardening
   include_tasks:
     file: security-hardening.yml
@@ -226,24 +267,22 @@
       - "2. Hardware virtualization confirmed, /dev/kvm present, nested virtualization enabled"
       - "3. Default libvirt network has been configured"
       - "4. A bridge network setup script has been created at /tmp/setup_bridge.sh"
-      - "5. Security hardening applied - VMs blocked from accessing host SSH"
-      - "6. Network isolation rules configured and persistent"
+      - "5. Guest policy installed - a guest reaches only DHCP and DNS on its host, no other guest, and no link-local or private destination but {{ guest_allowed_private_destinations | join(', ') if guest_allowed_private_destinations else 'none listed' }}"
+      - "6. Guest policy kept first in INPUT and FORWARD at boot, after libvirt starts and after UFW reloads"
       - "7. Fail2ban intrusion prevention system installed and configured"
       - "8. GPU detection service {{ 'configured and enabled' if gpu_passthrough_configured | bool else 'not installed' }}"
       - "9. FRP client installed and configured for remote access"
       - ""
       - "SECURITY FEATURES ACTIVE:"
-      - "  ✓ VM-to-host SSH access blocked (iptables + SSH config)"
-      - "  ✓ Libvirt security hardening applied"
-      - "  ✓ Network isolation service enabled"
+      - "  ✓ Each guest created on an isolated bridge port under libvirt's clean-traffic filter; running guests converged to the same, any not converged and any whose filter waits for its next start named above"
+      - "  ✓ Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD (iptables), ARKHAI-GUEST-V6 (ip6tables), and sshd DenyUsers for the guest subnet"
+      - "  ✓ Libvirt security hardening: {{ 'applied' if not (skip_libvirt_security | default(true) | bool) else 'skipped (skip_libvirt_security=true)' }}"
       - "  ✓ SSH connection monitoring configured"
       - "  ✓ Fail2ban monitoring and auto-banning suspicious IPs"
-      - "  ✓ Custom filters for VM and libvirt attack detection"
       - "  ✓ SSH public key(s) injected into authorized_keys (if supplied)"
       - ""
       - "FAIL2BAN JAILS ACTIVE:"
       - "  - SSH brute force protection (6 attempts, 20 min ban)"
-      - "  - VM SSH attack detection (4 attempts, 20 min ban, internal network only)"
       - "  - Bridged SSH attack detection (4 attempts, 20 min ban, all ports except 22)"
       - "  - All jails use iptables-allports (complete IP blocking)"
       - ""
@@ -263,14 +302,13 @@
       - "  - Use the vm-management role to download cloud images and manage VMs"
       - ""
       - "Security Verification:"
-      - "  - Check iptables: sudo iptables -L INPUT | grep 192.168.122"
+      - "  - Check the guest policy: sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD; sudo ip6tables -S ARKHAI-GUEST-V6"
+      - "  - Check it leads: sudo iptables -S INPUT | head -2; sudo iptables -S FORWARD | head -2"
       - "  - Check SSH config: sudo sshd -T | grep -i deny"
-      - "  - Monitor logs: sudo tail -f /var/log/auth.log | grep BLOCKED-VM-SSH"
       - "  - Check fail2ban: sudo fail2ban-client status"
       - "  - View banned IPs: sudo fail2ban-client status sshd"
       - "  - Check bridged attacks: sudo fail2ban-client status bridged-ssh-attacks"
       - "  - Monitor fail2ban logs: sudo tail -f /var/log/fail2ban.log"
-      - "  - Monitor bridge SSH logs: sudo tail -f /var/log/kern.log | grep BLOCKED-BRIDGE-SSH"
       - ""
       - "To test: virsh list --all"
   tags: verify_kvm

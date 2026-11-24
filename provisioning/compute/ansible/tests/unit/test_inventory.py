@@ -158,6 +158,6 @@ def test_an_inventory_round_trips_through_the_rendered_execution_inventory() -> 
         ]
 
     assert stated(reparsed) == stated(parsed)
-    # Every entry is submitted at version 2, the one version served, whether
+    # Every entry is submitted at version 3, the one version served, whether
     # or not it states a tenant-facing port.
-    assert {host.connection.version for host in parsed} == {2}
+    assert {host.connection.version for host in parsed} == {3}

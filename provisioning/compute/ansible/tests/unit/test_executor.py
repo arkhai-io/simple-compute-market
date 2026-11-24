@@ -44,7 +44,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={
             "ssh_host": "10.0.0.1",
             "public_host": "203.0.113.1",
@@ -325,13 +325,19 @@ def test_a_process_group_is_never_signalled(pid, monkeypatch) -> None:
 @pytest.mark.parametrize("ending", ["success", "failure", "timeout", "cancelled"])
 def test_no_file_outlives_its_run(ending) -> None:
     """Whatever ends the run, the variables file, the decrypted key, and the
-    inventory are removed."""
+    inventory and known-hosts files are removed."""
     key = Fernet.generate_key().decode()
     seen: dict = {}
     runner = _runner(seen=seen)
-    runner.write_inventory = AnsibleRunner(
-        SimpleNamespace(), ssh_codec=SshConnectionCodec(key)
-    ).write_inventory
+    real_runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(key))
+
+    def write_inventory(*args, **kwargs):
+        inventory = real_runner.write_inventory(*args, **kwargs)
+        (seen["known_hosts"],) = inventory.known_hosts_paths
+        assert seen["known_hosts"].is_file()
+        return inventory
+
+    runner.write_inventory = write_inventory
     inner_wait = runner.wait_for_playbook
 
     async def wait(run, timeout_seconds, log_callback=None, redact=None):
@@ -354,7 +360,7 @@ def test_no_file_outlives_its_run(ending) -> None:
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
         ),
@@ -370,6 +376,7 @@ def test_no_file_outlives_its_run(ending) -> None:
     assert seen["key existed"]
     assert not seen["key"].exists()
     assert not seen["inventory"].exists()
+    assert not seen["known_hosts"].exists()
     variables_path = runner.start_playbook.call_args.kwargs["extra_vars_path"]
     assert not variables_path.exists()
 
@@ -392,7 +399,7 @@ def test_a_key_that_cannot_be_decrypted_fails_the_run_naming_the_host(
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.1.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", ciphertext)},
         ),

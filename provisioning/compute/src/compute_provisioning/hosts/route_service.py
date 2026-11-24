@@ -11,6 +11,7 @@ probed some other way.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from compute_provisioning_contracts import (
@@ -18,6 +19,9 @@ from compute_provisioning_contracts import (
     HostCreate,
     HostDefinitionsImportRequest,
     HostDefinitionsImportResponse,
+    HostKeyCaptureConflict,
+    HostKeyCaptureRequest,
+    HostKeyCaptureResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -30,6 +34,7 @@ from compute_provisioning.hosts.definitions import (
 )
 from compute_provisioning.hosts.execution import ExecutionHost
 from compute_provisioning.hosts.service import (
+    ConnectionChangeRefusedError,
     HostAuthority,
     HostNotFoundError,
     PoolChangeRefusedError,
@@ -37,6 +42,25 @@ from compute_provisioning.hosts.service import (
 from compute_provisioning.route_errors import ProvisioningRouteError
 
 ConnectivityProbe = Callable[[ExecutionHost], Awaitable[ConnectivityResult]]
+
+
+@dataclass(frozen=True)
+class HostKeyProbeResult:
+    endpoint: str
+    presented: str | None = None
+    key: str | None = field(default=None, repr=False)
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class HostKeyProbe:
+    describe_pins: Callable[[ExecutionHost], HostKeyCaptureResponse]
+    scan: Callable[[ExecutionHost], Awaitable[HostKeyProbeResult]]
+
+
+def _key_conflict(conflict: HostKeyCaptureConflict) -> ProvisioningRouteError:
+    return ProvisioningRouteError(409, conflict.model_dump(mode="json", exclude_none=True))
+
 
 
 def _missing(host_id: str) -> ProvisioningRouteError:
@@ -48,9 +72,11 @@ class HostRouteService:
         self,
         host_authority: HostAuthority,
         probes: Mapping[str, ConnectivityProbe],
+        host_key_probes: Mapping[str, HostKeyProbe] | None = None,
     ) -> None:
         self._hosts = host_authority
         self._probes = MappingProxyType(dict(probes))
+        self._host_key_probes = MappingProxyType(dict(host_key_probes or {}))
 
     def list_hosts(self, *, search: str | None = None, include_disabled: bool = False) -> HostListResponse:
         hosts = list(self._hosts.list_hosts(search=search, enabled_only=not include_disabled))
@@ -156,4 +182,49 @@ class HostRouteService:
         return await probe(execution_host)
 
 
-__all__ = ["ConnectivityProbe", "HostRouteService"]
+    async def capture_host_key(
+        self, host_id: str, body: HostKeyCaptureRequest
+    ) -> HostKeyCaptureResponse:
+        observed = self._hosts.lookup(host_id)
+        if observed is None:
+            raise _missing(host_id)
+        kind = observed.connection.kind
+        probe = self._host_key_probes.get(kind)
+        if probe is None:
+            raise ProvisioningRouteError(
+                422, f"no host-key probe is registered for connection kind {kind!r}"
+            )
+        current = probe.describe_pins(observed)
+        if current.pinned_fingerprints and not body.replace:
+            raise _key_conflict(HostKeyCaptureConflict(
+                code="host_key_pinned", endpoint=current.endpoint,
+                pinned_fingerprints=current.pinned_fingerprints,
+            ))
+        discovery = await probe.scan(observed)
+        if discovery.key is None or discovery.presented is None:
+            raise _key_conflict(HostKeyCaptureConflict(
+                code="no_host_key_presented", endpoint=discovery.endpoint, reason=discovery.reason,
+            ))
+        fingerprint = discovery.presented.rsplit(" ", 1)[-1]
+        if fingerprint != body.fingerprint:
+            raise _key_conflict(HostKeyCaptureConflict(
+                code="host_key_mismatch", endpoint=discovery.endpoint, presented=discovery.presented,
+            ))
+        try:
+            committed, applied = self._hosts.capture_host_key(
+                observed, discovery.key, replace=body.replace
+            )
+        except HostNotFoundError as exc:
+            raise _missing(host_id) from exc
+        except ConnectionChangeRefusedError as exc:
+            raise ProvisioningRouteError(409, str(exc)) from exc
+        result = probe.describe_pins(committed)
+        if not applied:
+            raise _key_conflict(HostKeyCaptureConflict(
+                code="host_key_pinned", endpoint=result.endpoint,
+                pinned_fingerprints=result.pinned_fingerprints,
+            ))
+        return result
+
+
+__all__ = ["ConnectivityProbe", "HostKeyProbe", "HostKeyProbeResult", "HostRouteService"]

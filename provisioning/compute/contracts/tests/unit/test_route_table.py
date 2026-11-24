@@ -66,6 +66,16 @@ def test_the_lease_routes_admit_their_roles(method, path, roles) -> None:
     assert contract.allowed_roles == roles
 
 
+def test_host_key_capture_is_an_administrator_operation() -> None:
+    contract, resource = PROVISIONING_ROUTE_TABLE.resolve(
+        "POST", "/api/v1/hosts/fixture/host-keys/capture", {}
+    )
+
+    assert contract.allowed_roles == ("admin",)
+    assert contract.operation == "provisioning_host_key_capture"
+    assert resource == "fixture"
+
+
 def test_the_family_table_names_no_domain_route() -> None:
     for method, path in (
         ("GET", "/api/v1/bare-metal/leases/"),

@@ -12,7 +12,7 @@ from __future__ import annotations
 import injected_time
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.sql import func
+from sqlalchemy.sql import false, func
 
 from market_resource_pools import ResourcePool
 
@@ -41,6 +41,7 @@ class Host(Base):
     connection_version = Column(Integer, nullable=False, default=1, server_default="1")
     connection_public = Column(JSON, nullable=False, default=dict)
     connection_protected = Column(JSON, nullable=False, default=dict)
+    host_key_adoption_pending = Column(Boolean, nullable=False, default=False, server_default=false())
     enabled = Column(Boolean, nullable=False, default=True)
     pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), nullable=True)
     # Both are returned on a host's view, so they are the process source's

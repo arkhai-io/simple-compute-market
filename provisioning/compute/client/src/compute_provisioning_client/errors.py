@@ -6,9 +6,12 @@ from __future__ import annotations
 class ComputeProvisioningError(Exception):
     """A refused or failed request; ``status_code`` is the HTTP status, if any."""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, status_code: int | None = None, code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
 
 
 class ComputeProvisioningAuthenticationError(ComputeProvisioningError):

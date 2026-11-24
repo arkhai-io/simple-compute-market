@@ -133,6 +133,13 @@ What a storefront takes outside its configuration files is
 The provisioning chart's `mockMode` appends the `mock` profile to
 `ACTIVE_PROFILES`
 ([`helm.md`, "A chart value toggles a mock profile"](../guidance/engineering/helm.md#a-chart-value-toggles-a-mock-profile)).
+It also decides the SSH key: without `mockMode` the Deployment mounts
+`id_ed25519` from the existing Secret `sshKey.secretName` names at
+`/home/appuser/.ssh/id_ed25519`, the path a host's `ssh` connection names as its
+`key_path`, and the chart refuses an empty or absent name. Under `mockMode` the
+mock runner opens no connection, so no key is mounted, the name may be empty,
+and the Secret it names need not exist. The runtime Secret
+`sshDecryptionKey.secretName` names is mounted in either mode.
 
 **The umbrella's `helm` profile.** The generated `helm` profile, in the
 `<release>-helm-profile` ConfigMap the smoke-test pods, contract validation and
@@ -540,7 +547,8 @@ storefront, `dev-env`, contract validation, and the e2e-tests chart disabled. It
 storefront's `internalRegistryTrust` pins, and its chain and Alkahest address book are
 release 1's `dev-env`. Every identity the overlay names is a well-known development
 value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses release
-1's provisioning SSH and runtime Secrets and reads three of its own.
+1's provisioning runtime Secret and reads three of its own. Both releases run mock
+provisioning, so neither mounts an SSH key or reads a Secret for one.
 
 In the local release
 ([`local-clusters.md`](../guidance/repository/local-clusters.md#a-local-release-configures-a-service-through-the-values-a-deployment-uses)),
@@ -577,8 +585,8 @@ Agreement does not fix is a blocked skip there.
   creates when absent (`make -C helm topology-secrets CHANGE=<change>` for a
   change's validation namespace), deriving each key with `cast` from Foundry's
   default development mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices
-  (development values only); provisioning's SSH key is the committed mock
-  placeholder, `PROVISIONING_SSH_KEY_FILE`. It takes the committed lane CA, from
+  (development values only); it writes no SSH key Secret, since mock
+  provisioning mounts none. It takes the committed lane CA, from
   `tools/lane-double-controls/tls/`, for the ConfigMap, and from the payments lane
   double's committed fixtures the seller's token, which it
   writes as `[Settlement.arkhai_payments] api_key` into both storefronts' runtime
@@ -669,13 +677,21 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
 - Compute provisioning rewrites every host's `ssh` connection stored at version 1
   to version 2 with the same public fields and ciphertext
   (`20261108_001_ssh_connections_version_2`), failing, naming every refused host
-  and rewriting nothing, where the version-2 codec refuses one. A host submission
-  must state its connection's version.
+  and rewriting nothing, where the fields version 2 and version 3 share are
+  refused. A host submission must state its connection's version.
 - Compute provisioning then adds a job's `execution_started_at` and `finished_at`
   (`20261118_001_ansible_jobs_execution_instants`), nullable and not backfilled:
   every job the earlier engine recorded reads null in both, and is never
   classified as never started, since that engine recorded no start before it
   acted on the host.
+- Compute provisioning then adds `hosts.host_key_adoption_pending` and rewrites
+  every host's `ssh` connection stored at version 2 to version 3 with the same
+  public fields and protected values and no `host_keys`, marking each host it
+  rewrites pending adoption (`20261119_001_ssh_connections_version_3`). It fails,
+  naming every refused host and rewriting nothing, where the version-3 codec
+  refuses a row or a row already states `host_keys`. The first check of a marked
+  host records the key it presents as its pin
+  ([`physical-provisioning`, "The host registry owns the connection"](../../openspec/specs/physical-provisioning/architecture.md#the-host-registry-owns-the-connection)).
 - Each compute storefront creates the tables v0.3.0 created only when a store
   opened — deal servicing's, and the bare-metal lifecycle cursor — with
   `IF NOT EXISTS`, leaving any present as they are

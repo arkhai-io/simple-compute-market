@@ -12,7 +12,7 @@ from compute_provisioning_contracts import HostDefinition
 
 from compute_provisioning.hosts.definitions import parse_host_definitions, render_host_definitions
 
-_CONNECTION = "{kind: ssh, version: 2, public: {ssh_host: 192.0.2.5, key_path: /keys/id}}"
+_CONNECTION = "{kind: ssh, version: 3, public: {ssh_host: 192.0.2.5, key_path: /keys/id}}"
 
 
 def _problems(yaml_text: str) -> list[tuple[str, str]]:
@@ -55,7 +55,7 @@ def test_an_empty_hosts_list_is_valid_and_a_null_pool_is_an_omitted_one() -> Non
         (f"hosts: [{{connection: {_CONNECTION}}}]\n", [("hosts[0].host_id", "required_field")]),
         ("hosts: [{host_id: kvm1}]\n", [("hosts[0].connection", "required_field")]),
         (
-            "hosts: [{host_id: kvm1, connection: {version: 2}}]\n",
+            "hosts: [{host_id: kvm1, connection: {version: 3}}]\n",
             [("hosts[0].connection.kind", "required_field")],
         ),
         (
@@ -87,7 +87,7 @@ def test_an_empty_hosts_list_is_valid_and_a_null_pool_is_an_omitted_one() -> Non
             [("hosts[0].rack", "unknown_field")],
         ),
         (
-            "hosts: [{host_id: kvm1, connection: {kind: ssh, version: 2, port: 22}}]\n",
+            "hosts: [{host_id: kvm1, connection: {kind: ssh, version: 3, port: 22}}]\n",
             [("hosts[0].connection.port", "unknown_field")],
         ),
         (
@@ -109,7 +109,7 @@ def test_an_entry_carrying_key_material_is_refused_at_its_location() -> None:
         "  - host_id: kvm1\n"
         "    connection:\n"
         "      kind: ssh\n"
-        "      version: 2\n"
+        "      version: 3\n"
         "      public: {ssh_host: 192.0.2.5}\n"
         "      secrets: {private_key: not-a-real-key}\n"
     )
@@ -156,7 +156,7 @@ def test_a_rendered_document_states_pool_and_enabled_and_parses_back() -> None:
                 "enabled": False,
                 "connection": {
                     "kind": "ssh",
-                    "version": 2,
+                    "version": 3,
                     "public": {"ssh_host": "192.0.2.7", "key_path": None, "ssh_port": 22},
                 },
             }
@@ -165,7 +165,7 @@ def test_a_rendered_document_states_pool_and_enabled_and_parses_back() -> None:
             {
                 "host_id": "kvm1",
                 "pool_id": "vm-default",
-                "connection": {"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.5"}},
+                "connection": {"kind": "ssh", "version": 3, "public": {"ssh_host": "192.0.2.5"}},
             }
         ),
     )
@@ -178,13 +178,13 @@ def test_a_rendered_document_states_pool_and_enabled_and_parses_back() -> None:
                 "host_id": "bm1",
                 "pool_id": None,
                 "enabled": False,
-                "connection": {"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.7", "ssh_port": 22}},
+                "connection": {"kind": "ssh", "version": 3, "public": {"ssh_host": "192.0.2.7", "ssh_port": 22}},
             },
             {
                 "host_id": "kvm1",
                 "pool_id": "vm-default",
                 "enabled": True,
-                "connection": {"kind": "ssh", "version": 2, "public": {"ssh_host": "192.0.2.5"}},
+                "connection": {"kind": "ssh", "version": 3, "public": {"ssh_host": "192.0.2.5"}},
             },
         ]
     }

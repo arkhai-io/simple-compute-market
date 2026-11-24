@@ -139,7 +139,7 @@ The provisioning migration that rewrites `ssh` connections to version 3 MUST mar
 
 ### Requirement: A VM guest reaches no other guest on its host
 
-Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, in a chain of the host kit's own reached before any rule libvirt or UFW installs, and MUST keep that rule first across a restart of libvirt, a reload of UFW, and a reboot. A host whose libvirt lacks port isolation or the nwfilter driver MUST fail host preparation naming what is missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
+Every VM guest MUST be created with its interface's bridge port isolated and with libvirt's `clean-traffic` filter binding it to its MAC address and the address it leased by DHCP. VM host preparation MUST drop forwarding from the guests' bridge back to it, in a chain of the host kit's own reached before any rule libvirt or UFW installs, and MUST keep that rule first across a restart of libvirt, a reload of UFW, and a reboot. A host whose libvirt is older than 6.1 or lacks the nwfilter driver's `clean-traffic` filter, whose virt-install is older than 3.0, or which lacks `ebtables`, MUST fail host preparation naming each item missing. A guest's address discovery, DHCP reservation, and teardown are unchanged.
 
 #### Scenario: A guest probes another guest on its host
 
@@ -159,12 +159,18 @@ Every VM guest MUST be created with its interface's bridge port isolated and wit
 
 ### Requirement: A VM guest reaches only DHCP and DNS on its host and no undeclared private destination
 
-VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except traffic of connections already established and each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. These rules MUST sit in chains of the host kit's own, reached before any rule libvirt or UFW installs and kept first across a restart of libvirt and a reload of UFW; host preparation MUST NOT leave in place a rule accepting all traffic from the guests' bridge to the host. Connections the host opens to a guest and DNATed buyer connections, from public or private addresses, are unaffected.
+VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except traffic of connections already established and each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. On a host whose kernel has IPv6, it MUST drop every IPv6 packet from the guests' bridge, to the host and forwarded alike. These rules MUST sit in chains of the host kit's own, reached before any rule libvirt or UFW installs and kept first across a restart of libvirt and a reload of UFW; host preparation MUST NOT leave in place a rule accepting all traffic from the guests' bridge to the host. Connections the host opens to a guest and DNATed buyer connections, from public or private addresses, are unaffected.
 
 #### Scenario: A guest reaches a service on its host
 
 - **WHEN** a guest connects to a port on its host other than DHCP or DNS
 - **THEN** the connection is dropped
+
+#### Scenario: A guest whose filter waits for its next start sends IPv6
+
+- **GIVEN** a host whose `default` network carries IPv6, and a running guest whose `clean-traffic` filter waits for its next start
+- **WHEN** the guest sends IPv6 to a port on its host or to an address beyond it
+- **THEN** the packets are dropped
 
 #### Scenario: A guest reaches the cloud metadata address
 
@@ -194,7 +200,7 @@ VM host preparation MUST accept, from the guests' bridge to the host, only DHCP,
 
 ### Requirement: VM host preparation converges running guests
 
-VM host preparation MUST isolate the bridge port of every running guest without interrupting its link, MUST apply the `clean-traffic` filter to it live where libvirt accepts that and otherwise at the guest's next start, and MUST write both into the guest's saved definition so that a restart or a host reboot keeps them. It MUST report every running guest it could not converge.
+VM host preparation MUST isolate the bridge port of every running guest without interrupting its link, MUST apply the `clean-traffic` filter to it live where libvirt accepts that and otherwise at the guest's next start, and MUST write both into the guest's saved definition so that a restart or a host reboot keeps them. It MUST report, for each running guest by name, whether its port is isolated, whether its filter applied live or waits for its next start, whether its saved definition carries both, and the reason for any step that failed, and MUST name every running guest it could not converge.
 
 #### Scenario: A host prepared before isolation is prepared again
 
@@ -207,7 +213,69 @@ VM host preparation MUST isolate the bridge port of every running guest without 
 - **WHEN** host preparation cannot isolate a running guest's port
 - **THEN** it reports the guest by name
 
+#### Scenario: libvirt refuses a live filter
+
+- **WHEN** host preparation converges a running guest whose filter libvirt will not apply live
+- **THEN** the guest's port is isolated, its saved definition carries the filter for its next start, and the report says the filter waits for that start
+
+#### Scenario: A host lacks a prerequisite of isolation
+
+- **WHEN** VM host preparation runs on a host whose virt-install is older than 3.0 and which lacks `ebtables`
+- **THEN** it fails before installing the guest policy, naming both
+
 ## MODIFIED Requirements
+
+### Requirement: Host registry records the connection port
+
+The host registry MUST record the SSH port the provisioner connects to for each host, defaulting to 22. The registry is the authority for how a host is reached — address, user, key material, and port — and every execution path MUST derive its connection from a rendered inventory rather than constructing one, so that a host reached through a reverse tunnel, a NAT forward, or a bastion is reachable by every operation without any of them being changed individually.
+
+Rendered inventories MUST emit `ansible_port` for every host, including hosts on the default port, so that a rendered inventory states what the registry holds rather than leaving the default implied by an absent line.
+
+An `ansible_port` supplied through the INI input format MUST be preserved rather than discarded. A value that is not a port number between 1 and 65535 MUST cause its entry to be rejected rather than replaced with a default, because a substituted port produces an unreachable host whose failure resembles a network fault rather than a bad inventory line.
+
+The registry MAY also record a tenant-facing port, `public_port`, for a host. The port is optional on an SSH connection. A connection submission MUST state its version; the host contract carries no default. A rendered inventory MUST emit `public_port` for a host whose record states one, and MUST NOT emit it for a host whose record states none. A host whose record states no tenant-facing port MUST be stored with no `public_port` field, not even a null one. A `public_port` supplied through the INI input format MUST be preserved, and a value that is not a port number between 1 and 65535 MUST cause its entry to be rejected, as for `ansible_port`. A connection built from the INI format or the typed connection factory MUST use the served SSH connection version.
+
+#### Scenario: A host is registered on a tunnel port
+
+- **WHEN** a host is registered with an SSH port other than 22
+- **THEN** the recorded port is returned by the host endpoints and appears as `ansible_port` in every rendered inventory for that host
+
+#### Scenario: A host is registered without a port
+
+- **WHEN** a host is registered with no SSH port supplied
+- **THEN** the registry records port 22 and rendered inventories state it explicitly
+
+#### Scenario: An inventory file supplies a port
+
+- **WHEN** an INI inventory carrying `ansible_port` is imported
+- **THEN** the port is stored against the host and survives to the rendered inventory the provisioner connects with
+
+#### Scenario: An inventory file supplies a malformed port
+
+- **WHEN** an INI inventory entry carries an `ansible_port` that is not a port number between 1 and 65535
+- **THEN** that entry is rejected with a warning naming the host, other entries in the same file are still imported, and no host is registered with a substituted port
+
+#### Scenario: An inventory file supplies a tenant-facing port
+
+- **WHEN** an INI inventory entry carrying `public_port` is imported
+- **THEN** the port is stored against the host and appears as `public_port` in the rendered inventory for that host
+
+#### Scenario: An inventory file supplies a malformed tenant-facing port
+
+- **WHEN** an INI inventory entry carries a `public_port` that is not a port number between 1 and 65535
+- **THEN** that entry is rejected with a warning naming the host, other entries in the same file are still imported, and no host is registered with a substituted or missing tenant-facing port
+
+#### Scenario: A host is registered with no tenant-facing port
+
+- **WHEN** a host is registered or imported with an `ssh` connection that states no tenant-facing port
+- **THEN** it is stored at the served version with no `public_port` field, and its rendered inventory carries the connection's own address and port
+
+#### Scenario: A version-1 or unversioned connection is submitted
+
+- **WHEN** a host is submitted with an `ssh` connection at a version the registry does not serve, or stating no version
+- **THEN** an unsupported submission is refused naming the version served; an
+  unversioned submission is refused as missing its required `version`; and nothing is
+  stored
 
 ### Requirement: Host connections are typed by their implementation's codec
 
@@ -311,7 +379,7 @@ connection, reading its host's when it is dispatched.
 #### Scenario: A version-1 connection's fields are not valid at version 2
 
 - **WHEN** the provisioning migration finds a host's stored `ssh` version 1 connection
-  whose public fields the version-2 codec refuses
+  whose public fields are invalid at version 2
 - **THEN** the migration fails naming the host, and nothing is rewritten
 
 ### Requirement: Every provisioning route admits the administrator
@@ -332,6 +400,46 @@ is assembled.
 
 - **WHEN** a domain declares a route whose roles omit `admin`
 - **THEN** the provisioning service refuses to assemble its route table
+
+### Requirement: Execution readiness is reported in system status
+
+The provisioning service's system status MUST report whether execution is mocked, as a
+boolean for the deployment and per composed executor by offering mode, derived from the
+composed executors rather than from deployment profiles, together with each contributed
+readiness component's readiness and a versioned detail. A component that is not ready MUST
+degrade the status. The status MUST NOT disclose a database URL or any credential.
+Readiness MUST have no route of its own, and an execution implementation MUST contribute
+its readiness rather than serve it. Once any Ansible executor is real, the Ansible
+readiness component MUST refuse an enabled host's `ssh` connection exactly as execution
+refuses it, reporting itself not ready with a reason naming the host, and MUST report
+every other host as it would without it; it MUST skip a host of another connection kind.
+The Ansible component's detail MUST be of kind `compute_provisioning.ansible.readiness` at
+schema version 3. An embedded key's existence flag says whether it decrypts under
+the configured key. A host whose stored connection execution refuses has no SSH key
+entry. When any Ansible executor is real, each enabled SSH host without a pin or a
+pending-adoption mark MUST make the component not ready, with the host named in its
+reasons. Hosts marked for adoption MUST be listed in hosts_pending_key_adoption.
+The absence of a pin for those hosts MUST NOT make the component unready.
+
+#### Scenario: Every executor is mocked
+
+- **WHEN** the service runs with every composed executor mocked
+- **THEN** status reports execution as mocked, and lists each offering mode's executor as
+  mocked
+
+#### Scenario: A domain's playbook is missing
+
+- **WHEN** the Ansible executor for one offering mode names a playbook that does not exist
+- **THEN** the Ansible component reports that playbook and is not ready, and the status is
+  degraded
+
+#### Scenario: An enabled host is stored at an unserved connection version
+
+- **WHEN** system status is read while an enabled host is stored at `ssh` version 1 and an
+  Ansible executor is real, whether its key is a file that exists or a protected key that
+  decrypts
+- **THEN** the Ansible component is not ready, its reasons naming the host and the version
+  served, and every other enabled host is reported as it would be without it
 
 ### Requirement: Host connectivity is probed by connection kind
 

@@ -92,6 +92,7 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_background_tasks = composed.background_tasks
     _container_module.resolved_host_authority = container.host_authority()
     _container_module.resolved_connectivity_probes = container.connectivity_probes()
+    _container_module.resolved_host_key_probes = container.host_key_probes()
     _container_module.resolved_vm_operations_service = container.vm_operations_service()
     _container_module.resolved_host_operations_service = container.host_operations_service()
     _container_module.resolved_lease_lifecycle_service = container.lease_lifecycle_service()

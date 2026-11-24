@@ -23,6 +23,19 @@ vm_ssh_authorized_keys: []
 vm_ssh_key_user: "{{ ansible_user }}"
 
 # ============================================
+# Guest network policy
+# ============================================
+
+# Private destinations a guest may open connections to, each an IPv4 address or
+# CIDR block, such as a seller's package mirror on its LAN. A guest otherwise
+# reaches no link-local address (a cloud's metadata service among them) and no
+# private range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10):
+# those are the seller's networks, its management route, and its cloud
+# credentials. Replies to a buyer connecting from a private address pass
+# without being listed. Empty unless a seller lists one (tasks/guest-policy.yml).
+guest_allowed_private_destinations: []
+
+# ============================================
 # GPU passthrough
 # ============================================
 
