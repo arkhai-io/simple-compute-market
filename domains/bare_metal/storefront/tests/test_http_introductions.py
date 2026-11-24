@@ -135,8 +135,8 @@ def _app(runtime: BareMetalStorefrontRuntime):
     )
 
 
-async def _insert_contact_listing(runtime: BareMetalStorefrontRuntime) -> dict:
-    option = _contact_option()
+async def _insert_contact_listing(runtime: BareMetalStorefrontRuntime, *, option: dict | None = None) -> dict:
+    option = option or _contact_option()
     await runtime.db.upsert_bare_metal_listing(
         listing_id="intro-listing",
         status="open",
@@ -674,7 +674,8 @@ def _backdate_reveal(db_path: str, obligation_ref: str, *, days: int) -> None:
     try:
         triggers = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='trigger' "
-            "AND tbl_name='contact_introductions'"
+            "AND tbl_name='contact_introductions' "
+            "AND name IN ('contact_introductions_redaction_only', 'contact_introductions_keep_unredacted')"
         ).fetchall()
         conn.execute("DROP TRIGGER contact_introductions_redaction_only")
         conn.execute("DROP TRIGGER contact_introductions_keep_unredacted")

@@ -5,6 +5,7 @@ material that side already holds. Delivery is never authoritative: it cannot
 fail a deal, cannot slow a counterparty, and carries no payload into a log.
 """
 
+from .builtin.smtp_attempt import send_bounded_smtp
 from .config import (
     RESERVED_SECTION_KEYS,
     SINK_KEY,
@@ -41,6 +42,7 @@ from .sinks import (
 )
 
 __all__ = [
+    "send_bounded_smtp",
     "DEFAULT_TIMEOUT_SECONDS",
     "INTRODUCTION_REVEALED",
     "RESERVED_SECTION_KEYS",

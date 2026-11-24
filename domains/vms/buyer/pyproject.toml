@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-vms-buyer"
-version = "0.13.0"
+version = "0.13.1"
 license = "MIT"
 description = "The VM buyer domain of the market CLI: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12,<3.14"
@@ -19,7 +19,7 @@ dependencies = [
   "arkhai-core>=0.6.0",
   "arkhai-injected-time>=0.1.0",
   "arkhai-kit-alkahest>=0.12.0",
-  "arkhai-kit-contact-exchange==0.5.1",
+  "arkhai-kit-contact-exchange==0.6.0",
   "arkhai-kit-arkhai-payments>=0.8.0",
   "arkhai-kit-identity==0.5.0",
   "arkhai-kit-deal-lifecycle>=0.3.0",

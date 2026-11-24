@@ -339,6 +339,12 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
                 preview=retention.preview,
             )
         )
+    worker = runtime.contact_delivery_worker
+    if worker is not None:
+        composed.append(_Loop(
+            "contact_delivery", "contact-delivery", worker.tick,
+            interval_seconds=5, initial_delay_seconds=5,
+        ))
     return tuple(composed)
 
 

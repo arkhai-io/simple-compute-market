@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 import logging
 from types import MappingProxyType
 from typing import Any
@@ -88,7 +89,7 @@ SELLER_STAGES = SettlementStageTable(
         # An introduction delivers nothing through capacity and is completed by
         # its reveal, so it has no settle operation or recovery gate.
         CONTACT_MECHANISM: ContactStage(
-            create_contact_exchange_registration,
+            partial(create_contact_exchange_registration, explicit_delivery=True),
             verify=None,
             revalidate=None,
             fulfils_through_capacity=False,

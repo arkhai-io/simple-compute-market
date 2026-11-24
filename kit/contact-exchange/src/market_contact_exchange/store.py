@@ -43,6 +43,13 @@ class SQLiteIntroductionStore:
         finally:
             conn.close()
 
+    async def transaction(self, operation: Callable[[sqlite3.Connection], _T]) -> _T:
+        """Serialize capture, finalization and outbox claims in one write transaction."""
+        def apply(conn: sqlite3.Connection) -> _T:
+            conn.execute("BEGIN IMMEDIATE")
+            return operation(conn)
+        return await asyncio.to_thread(self._run, apply, commit=True)
+
     async def insert(self, record: IntroductionRecord) -> IntroductionRecord:
         """Persist one revealed introduction exactly once (idempotent replays)."""
 

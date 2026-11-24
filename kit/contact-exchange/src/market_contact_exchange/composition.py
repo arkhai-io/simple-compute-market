@@ -34,9 +34,12 @@ from .settlement_config import (
     MECHANISM,
     ContactSettlementConfig,
     resolve_seller_contact,
+    resolve_contact_delivery,
     validate_contact_origins,
 )
 from .store import SQLiteIntroductionStore
+from .delivery_contract import ContactDeliveryConfig
+from .delivery_routes import ContactDeliveryRouteService
 
 
 class LoadNegotiationThread(Protocol):
@@ -118,6 +121,7 @@ async def accepted_introduction(
             seller_principal=Identity.model_validate(obligation.claimant_principal),
             introduction_package=dict(package) if isinstance(package, Mapping) else {},
             origin=await load_origin(negotiation_id),
+            expiration_unix=obligation.expiration_unix,
         ),
         obligation,
     )
@@ -218,6 +222,62 @@ class ContactExchangeComposition:
             return None
         return resolve_seller_contact(section, agreement.origin, self._known_origins)
 
+    def delivery_config(self, agreement: IntroductionAgreement) -> ContactDeliveryConfig | None:
+        """The private route and sender authorized for this agreement's origin."""
+        section = self._config()
+        if section is None:
+            return None
+        return resolve_contact_delivery(section, agreement.origin)
+
+    def _delivery_snapshot(self, agreement: IntroductionAgreement) -> tuple[dict[str, str], ContactDeliveryConfig | None]:
+        return dict(self._resolve_seller_contact(agreement) or {}), self.delivery_config(agreement)
+
+    def explicit_delivery_configured(self) -> bool:
+        section = self._config()
+        return bool(section and (section.delivery is not None or any(origin.delivery is not None for origin in section.origins.values())))
+
+    async def prepare_delivery(self, agreement_ref: str, obligation_ref: str) -> IntroductionAgreement:
+        agreement, _ = await self._accepted(agreement_ref, obligation_ref)
+        return agreement
+
+    async def complete_delivery(self, agreement: IntroductionAgreement) -> None:
+        """Drive the one non-financial obligation to collected; every step is
+        idempotent, so a retried start converges instead of failing."""
+
+        _, obligation = await self._accepted(
+            agreement.agreement_ref, agreement.obligation_ref
+        )
+        runtime = self._settlement_runtime
+        await runtime.register_plan(
+            agreement_ref=agreement.agreement_ref,
+            obligations=[obligation.model_dump(mode="json")],
+        )
+        materialized = await runtime.materialize(
+            obligation_ref=agreement.obligation_ref,
+            local_principal=agreement.buyer_principal,
+            worker_id=_worker("introduction-materialize"),
+        )
+        await runtime.bind_fulfillment(
+            agreement.obligation_ref,
+            f"introduction:{agreement.obligation_ref}",
+            local_principal=agreement.seller_principal,
+        )
+        checked = await runtime.check(
+            obligation_ref=agreement.obligation_ref,
+            local_principal=agreement.seller_principal,
+            worker_id=_worker("introduction-check"),
+        )
+        collected = await runtime.collect(
+            obligation_ref=agreement.obligation_ref,
+            local_principal=agreement.seller_principal,
+            worker_id=_worker("introduction-collect"),
+        )
+        if "delivery_policy" in agreement.introduction_package and any(
+            getattr(result, "status", None) != "succeeded"
+            for result in (materialized, checked, collected)
+        ):
+            raise RuntimeError("introduction completion has not succeeded")
+
     def reveal_service(
         self, authorize: AuthorizeIntroduction
     ) -> IntroductionRouteService | None:
@@ -256,46 +316,15 @@ class ContactExchangeComposition:
                 )
             )
 
-        async def complete(agreement: IntroductionAgreement) -> None:
-            """Drive the one non-financial obligation to collected; every step is
-            idempotent, so a retried start converges instead of failing."""
-
-            _, obligation = await self._accepted(
-                agreement.agreement_ref, agreement.obligation_ref
-            )
-            runtime = self._settlement_runtime
-            await runtime.register_plan(
-                agreement_ref=agreement.agreement_ref,
-                obligations=[obligation.model_dump(mode="json")],
-            )
-            await runtime.materialize(
-                obligation_ref=agreement.obligation_ref,
-                local_principal=agreement.buyer_principal,
-                worker_id=_worker("introduction-materialize"),
-            )
-            await runtime.bind_fulfillment(
-                agreement.obligation_ref,
-                f"introduction:{agreement.obligation_ref}",
-                local_principal=agreement.seller_principal,
-            )
-            await runtime.check(
-                obligation_ref=agreement.obligation_ref,
-                local_principal=agreement.seller_principal,
-                worker_id=_worker("introduction-check"),
-            )
-            await runtime.collect(
-                obligation_ref=agreement.obligation_ref,
-                local_principal=agreement.seller_principal,
-                worker_id=_worker("introduction-collect"),
-            )
-
-        return IntroductionRouteService(
+        return ContactDeliveryRouteService(
+            transaction=self._store.transaction,
+            snapshot=self._delivery_snapshot,
             callbacks=IntroductionRouteCallbacks(
                 prepare=prepare,
                 authorize=authorize,
                 persist=persist,
                 load=self._store.load,
-                complete=complete,
+                complete=self.complete_delivery,
                 claim_seller_dispatch=self._store.claim_seller_dispatch,
             ),
             resolve_seller_contact=self._resolve_seller_contact,

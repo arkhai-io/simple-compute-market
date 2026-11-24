@@ -268,3 +268,37 @@ __all__ = [
     "load_introduction",
     "select_expired_introductions",
 ]
+
+
+def _add_contact_delivery(conn: sqlite3.Connection) -> None:
+    conn.execute("""CREATE TABLE contact_finalizations (
+        obligation_ref TEXT NOT NULL, finalization_id TEXT NOT NULL,
+        agreement_ref TEXT NOT NULL, status TEXT NOT NULL, code TEXT,
+        expires_at INTEGER, salt BLOB, buyer_fingerprint TEXT,
+        seller_fingerprint TEXT, token_digest TEXT, committed_fingerprint TEXT,
+        PRIMARY KEY (obligation_ref,finalization_id))""")
+    conn.execute("CREATE UNIQUE INDEX contact_one_finalization ON contact_finalizations(obligation_ref) WHERE status='committed'")
+    conn.execute("""CREATE TABLE contact_delivery_intents (
+        intent_id TEXT PRIMARY KEY, obligation_ref TEXT NOT NULL,
+        recipient_role TEXT NOT NULL, policy_kind TEXT NOT NULL,
+        status TEXT NOT NULL, route TEXT, attempts INTEGER NOT NULL,
+        attempt_id TEXT, claim_expires_at INTEGER, next_attempt_at INTEGER,
+        failure_code TEXT,
+        UNIQUE(obligation_ref,recipient_role,policy_kind))""")
+    conn.execute("""CREATE TABLE contact_delivery_attempts (
+        attempt_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL, finished_at INTEGER,
+        status TEXT NOT NULL, failure_code TEXT)""")
+
+    conn.execute("""CREATE TRIGGER contact_delivery_payload_redaction
+        AFTER UPDATE OF payloads_deleted_at ON contact_introductions
+        WHEN NEW.payloads_deleted_at IS NOT NULL
+        BEGIN
+            UPDATE contact_delivery_intents SET route=NULL,status='failed',failure_code='configuration_unavailable'
+            WHERE obligation_ref=NEW.obligation_ref AND status NOT IN ('accepted','failed','needs_review');
+            UPDATE contact_finalizations SET salt=NULL,buyer_fingerprint=NULL,seller_fingerprint=NULL,token_digest=NULL
+            WHERE obligation_ref=NEW.obligation_ref AND status!='committed';
+        END""")
+
+
+EXPLICIT_DELIVERY = Migration("contact-exchange-0001-explicit-delivery", _add_contact_delivery)

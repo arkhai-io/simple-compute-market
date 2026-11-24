@@ -826,3 +826,10 @@ archives were pruned on that basis: `add-hosted-fiat-settlement`,
 `build-hosted-producer-locally`, `confirm-checkout-was-completed`,
 `consume-direct-instrument-setup`, `keep-a-parked-reason`,
 `resolve-development-client-in-ci`, and `write-development-run-evidence`.
+
+
+## Explicit contact delivery
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`explicit-contact-delivery`](explicit-contact-delivery/) | active; source milestone awaiting review | Native contact option identity, reviewed two-sided finalization, recipient-owned durable delivery, preserved ordinary callers and migration-aware disabled recovery; packaging and hosted release gates remain open |

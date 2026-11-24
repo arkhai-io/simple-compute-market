@@ -1834,7 +1834,8 @@
                           "object",
                           "null"
                         ]
-                      }
+                      },
+                      "^[dD][eE][lL][iI][vV][eE][rR][yY]$": false
                     }
                   },
                   "type": [
@@ -1842,6 +1843,7 @@
                     "null"
                   ]
                 },
+                "^[dD][eE][lL][iI][vV][eE][rR][yY]$": false,
                 "^[pP][rR][oO][fF][iI][lL][eE][sS]$": {
                   "additionalProperties": {
                     "additionalProperties": false,
@@ -1864,6 +1866,74 @@
                         "type": [
                           "string",
                           "null"
+                        ]
+                      },
+                      "^[dD][eE][lL][iI][vV][eE][rR][yY]_[pP][oO][lL][iI][cC][yY]$": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "patternProperties": {
+                              "^[kK][iI][nN][dD]$": {
+                                "anyOf": [
+                                  {
+                                    "const": "contact-delivery.v1",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "^[mM][oO][dD][eE]$": {
+                                "anyOf": [
+                                  {
+                                    "const": "two-sided-contact",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "^[cC][hH][aA][nN][nN][eE][lL]$": {
+                                "anyOf": [
+                                  {
+                                    "const": "email",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "^[tT][rR][iI][gG][gG][eE][rR]$": {
+                                "anyOf": [
+                                  {
+                                    "const": "explicit-finalization",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "^[rR][eE][cC][iI][pP][iI][eE][nN][tT]_[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
+                                "anyOf": [
+                                  {
+                                    "const": "each-party-own-route",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
                         ]
                       }
                     }

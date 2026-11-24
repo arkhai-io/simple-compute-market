@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-contact-exchange"
-version = "0.5.1"
+version = "0.6.0"
 description = "Introduction-only settlement: contact exchange with no payment and no provisioning"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
