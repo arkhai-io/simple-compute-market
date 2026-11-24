@@ -55,8 +55,9 @@ The root publishing targets, this one among them, require explicit `AR_PROJECT` 
 `AR_LOCATION`, supplied on the make command line or in the environment. `AR_PREFIX`
 defaults to `AR_PROJECT` and names the repositories: `<prefix>-docker` for images,
 `<prefix>-cli` for the binary, and `<prefix>-candidates`, the candidate store, for the
-wheels and the chart package. The candidate store is provisioned outside this
-repository. In one invocation, in this order, the load (`scripts/load_candidate.py`):
+wheels and the chart package. `AR_CANDIDATES` names another generic repository as the
+candidate store. The candidate store is provisioned outside this repository. In one
+invocation, in this order, the load (`scripts/load_candidate.py`):
 
 1. builds the wheelhouse once (`make dist`), runs `make check-release-versions` on it,
    and takes its digest (`scripts/wheelhouse_digest.py`);
