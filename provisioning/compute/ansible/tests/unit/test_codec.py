@@ -37,6 +37,12 @@ def test_an_extra_variable_may_not_replace_one_of_the_jobs_own() -> None:
         render_extra_vars({"host_id": "h"}, {"host_id": "elsewhere"})
 
 
+@pytest.mark.parametrize("name", ["ansible_connection", "ansible_host_key_checking", "ansible_ssh_args"])
+def test_extra_variables_cannot_replace_the_registered_transport(name) -> None:
+    with pytest.raises(ValueError, match=name):
+        render_extra_vars({"host_id": "h"}, {name: "fixture"})
+
+
 def test_the_variables_file_is_created_owner_only() -> None:
     path = write_extra_vars(AnsibleJobPlan(variables={"secret": "s"}, limit="h"))
     try:

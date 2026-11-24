@@ -37,7 +37,7 @@ _HOST = ExecutionHost(
     pool_id="default",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={"ssh_host": "192.0.2.5", "ssh_port": 22, "ssh_user": "ops"},
     ),
 )

@@ -113,7 +113,7 @@ class TestTheDigestGate:
             "  - host_id: kvm1\n"
             "    connection:\n"
             "      kind: ssh\n"
-            "      version: 2\n"
+            "      version: 3\n"
             "      public: {ssh_host: 10.0.0.1, key_path: /keys/id}\n",
             encoding="utf-8",
         )

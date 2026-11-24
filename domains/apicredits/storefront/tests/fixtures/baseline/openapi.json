@@ -2794,6 +2794,38 @@
           },
           {
             "in": "query",
+            "name": "buyer_scheme",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Buyer Scheme"
+            }
+          },
+          {
+            "in": "query",
+            "name": "buyer_identifier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Buyer Identifier"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -2849,7 +2881,7 @@
             "MarketplaceTimestamp": []
           }
         ],
-        "summary": "List negotiations for a listing",
+        "summary": "List negotiations for a listing (admin)",
         "tags": [
           "negotiations",
           "negotiations"
@@ -2914,7 +2946,7 @@
             "MarketplaceTimestamp": []
           }
         ],
-        "summary": "Get negotiation detail",
+        "summary": "Get negotiation detail (admin)",
         "tags": [
           "negotiations",
           "negotiations"

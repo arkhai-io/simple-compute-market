@@ -431,3 +431,13 @@ def test_a_feed_still_truncated_after_the_bound_fails_rather_than_reading_draine
     )
     with pytest.raises(AssertionError, match="still reports a truncated page"):
         drain_capacity_events(admin)
+
+
+def test_reapply_reports_a_changed_or_missing_management_pin_without_key_material():
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    prior = _snapshot(host_pins=(("host", ("fixture-pin",)),))
+    changed = _snapshot(host_pins=(("host", ()),))
+    faults = registration_faults("vm", prior, changed, now=now)
+    assert "vm: management SSH pins changed" in faults
+    assert "vm: management SSH host is unpinned after reapplying" in faults
+    assert all("fixture-pin" not in fault for fault in faults)

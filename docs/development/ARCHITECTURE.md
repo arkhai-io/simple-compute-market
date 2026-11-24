@@ -750,6 +750,31 @@ Authenticated service-to-service calls use the scheme-neutral version 2 request 
 
 Each signed hop checks the signer's timestamp against the verifier's own instant within a skew, 300 s almost everywhere, in both directions, so the two parties on a hop must agree on time within it. A timestamp is a claim checked within a tolerance, never an order between two parties. Every signer and verifier therefore reads its timestamps and its freshness reference from its process's one time source ([injected time](../../openspec/specs/injected-time/architecture.md#one-source-per-process)). In an end-to-end lane every party — the storefronts, the provisioning service and the site it hosts, the registries, the API-credits service and the inference service and the site ledger each hosts, the metering gate the sample app and the inference gateway each host, both lane doubles, the chain, the buyer and the harness's own signing clients — runs on one lane time the scenario sets, so moving time keeps every hop within the skew: a party moved alone would break every signed exchange with a party that did not move ([lane time](../../openspec/specs/test-compatibility/architecture.md#lane-time-and-the-doubles-controls)). The skew stays a security parameter no configuration widens. One operation alone is exempt from request freshness: the time-setting operation of a signed administrator surface, present only on an instance configured for injected time, whose signature, principal, operation and request-id reservation are verified as every request's ([`marketplace-identity`](../../openspec/specs/marketplace-identity/spec.md)).
 
+### The administrator's reach
+
+The administrator is the operator of the service it calls, and what it may reach
+follows from what that service holds. On a route that acts on resources the
+operator owns, the administrator is admitted beside any role the route names:
+every route of the provisioning service and of a site authority is such a route,
+since hosts, leases, capacity and the ledger are all the operator's, and a role
+that can administer the whole authority but not one named route only obstructs
+the person holding it. On a route whose authorization binds the caller to a deal
+as a party — a buyer's negotiation and settlement routes, a seller acting as
+counterparty, a service peer's callback — the administrator is never authorized
+as that party. It acts there only through administrator operations, which record
+it as the administrator, so a party's history holds only what that party sent. A
+storefront's own records of its deals, such as bare-metal lease-ready evidence,
+are the storefront operator's, and its administrator reads them.
+
+Each service states its form in its specification and holds it with a test: the
+provisioning service refuses, when it assembles its route table, a route that does
+not admit `admin`; `kit/site` admits `admin` on every site contract without
+enumerating it; each storefront refuses an administrator's request on its party
+routes and admits it on its administrator routes. How an administrator
+authenticates is separate from what it reaches: the registry's administrator
+presents a bearer key, and the API-credits service accepts a shared administrator
+key when signing is not configured.
+
 ### Terms
 
 | Term | Definition | Primary authority |

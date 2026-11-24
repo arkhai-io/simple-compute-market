@@ -82,7 +82,7 @@ def hosts(session_factory, relays):
             ("host-unplaced", None, None, True),
         ):
             host = Host(host_id=host_id, enabled=enabled, pool_id=placed_in)
-            host.set_connection(ConnectionEnvelope(kind="ssh", version=2, public={}))
+            host.set_connection(ConnectionEnvelope(kind="ssh", version=3, public={}))
             db.add(host)
             if declared_in is not None:
                 db.add(CapacityBucket(

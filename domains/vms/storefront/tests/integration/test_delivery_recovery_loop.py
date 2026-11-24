@@ -2,10 +2,11 @@
 
 Application integration: the served VM storefront and its typed clients over
 SQLite (``tests.recurring_world``), with the payments service the in-process
-engine behind ``PaymentsClient``. The buyer negotiates the on-demand option with
-an Agreement start at wall time and settles while the deal lifecycle's clock
-runs an hour behind it, so the deal is committed and waits for its start. With
-the storefront's loops held, the clock is brought to the start and
+engine behind ``PaymentsClient``. The buyer negotiates the on-demand option and
+the storefront resolves the Agreement start at acceptance. The buyer settles
+while the deal lifecycle's clock runs an hour behind acceptance, so the
+committed deal waits for its start. With the storefront loops held, the clock
+is brought to the start and
 ``delivery-recovery`` is stepped once through the typed admin client; its
 re-drive reaches the world's site and provisioning fakes through the deal
 lifecycle's capacity runtime and fulfillment client, and re-checks the deal
@@ -71,7 +72,7 @@ class _Recomposed:
 
 
 async def _waiting_deal(world, settled, offset: list[int]) -> tuple[str, list[str]]:
-    """A deal negotiated to start at wall time and settled while the lifecycle's
+    """A deal negotiated to start at acceptance and settled while the lifecycle's
     clock runs ``offset`` seconds behind it, committed and waiting for its start.
 
     ``offset`` is then set to zero, bringing the deal to its start, and the
@@ -80,14 +81,12 @@ async def _waiting_deal(world, settled, offset: list[int]) -> tuple[str, list[st
     start is never after it.
     """
     listing = await _published(world)
-    start = datetime.now(timezone.utc).replace(microsecond=0)
     reply = await world.app.buyer.negotiate_new(
         listing_id=listing["listing_id"],
         # One period at the clause's 2.5 an hour, in base units.
         initial_amount=625_000,
         provision_terms=make_vm_provision_terms(
             duration_seconds=3600, ssh_public_key="ssh-ed25519 test",
-            start_utc=start.isoformat().replace("+00:00", "Z"),
         ).model_dump(mode="json"),
         settlement_selection={
             "option_id": _on_demand(listing)["option_id"], "expiration_unix": 2_147_483_647,

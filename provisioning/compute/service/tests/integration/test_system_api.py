@@ -21,8 +21,11 @@ What is NOT covered here (unit test jurisdiction):
 
 from __future__ import annotations
 
+from base64 import b64encode
+
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
-from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning.hosts.db import Host
+from compute_provisioning_ansible import MockAnsibleRunner, ssh_connection
 from compute_provisioning_ansible.readiness import (
     ANSIBLE_COMPONENT,
     ANSIBLE_READINESS_KIND,
@@ -34,6 +37,7 @@ from compute_provisioning_contracts import (
     SUPPORTED_COMPUTE_PROVISIONING_MAJOR_VERSIONS,
     ConvergenceCycleResponse,
     HealthResponse,
+    HostCreate,
     LeaseCheckResponse,
     PrincipalRotationResponse,
     SystemStatusResponse,
@@ -168,7 +172,7 @@ class TestSystemStatus:
         assert component is not None
         assert (component.detail.kind, component.detail.schema_version) == (
             ANSIBLE_READINESS_KIND,
-            2,
+            3,
         )
         detail = AnsibleReadinessDetail.model_validate(component.detail.payload)
         assert {(p.offering_mode, p.path, p.exists) for p in detail.playbooks} == {
@@ -177,6 +181,33 @@ class TestSystemStatus:
         }
         assert component.ready is False
         assert resp.checks["execution"] == "degraded"
+
+    async def test_readiness_distinguishes_pinned_pending_and_unpinned_hosts(
+        self, client_and_queue, session_factory, tmp_path,
+    ):
+        clients, _ = client_and_queue
+        key_path = tmp_path / "fixture-key"
+        key_path.touch()
+        # Deterministic test-only public key, never a public-network identity.
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"r" * 32
+        pinned = "ssh-ed25519 " + b64encode(blob).decode("ascii")
+        for host, host_keys in (("pinned", [pinned]), ("pending", None), ("unpinned", None)):
+            await clients.family.register_host(HostCreate(
+                host_id=host,
+                connection=ssh_connection(
+                    ssh_host="192.0.2.44", key_path=str(key_path), host_keys=host_keys,
+                ),
+            ))
+        with session_factory() as db, db.begin():
+            db.get(Host, "pending").host_key_adoption_pending = True
+
+        status = await clients.family.get_system_status()
+        component = status.component(ANSIBLE_COMPONENT)
+        assert component is not None and not component.ready
+        detail = AnsibleReadinessDetail.model_validate(component.detail.payload)
+        assert detail.hosts_pending_key_adoption == ["pending"]
+        reasons = [reason for reason in detail.not_ready_reasons if "no pinned SSH" in reason]
+        assert len(reasons) == 1 and "host 'unpinned'" in reasons[0]
 
     async def test_status_discloses_no_database_url(self, client_and_queue):
         client, _ = client_and_queue

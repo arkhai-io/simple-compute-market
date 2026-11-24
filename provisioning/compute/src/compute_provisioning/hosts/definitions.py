@@ -10,7 +10,7 @@ contract's field names, as a top-level ``hosts`` list of
         enabled: true             # optional, default true
         connection:
           kind: ssh
-          version: 2              # required: a document's meaning has no default
+          version: 3              # required: a document's meaning has no default
           public:
             ssh_host: 192.0.2.5
             key_path: /home/appuser/.ssh/id_ed25519
@@ -211,6 +211,7 @@ def reconcile_host_definitions_in_session(
 
     named = {definition.host_id for definition in definitions}
     not_named = tuple(host_id for host_id in hosts.host_ids_in_session(db) if host_id not in named)
+    hosts.lock_existing_hosts_in_session(db, tuple(named))
     diff = HostDefinitionsDiff()
     problems: list[HostDefinitionProblem] = []
     for index, definition in enumerate(definitions):

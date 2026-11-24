@@ -17,7 +17,7 @@ import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from core_storefront.auth import (
     AuthenticatedPrincipal,
@@ -33,6 +33,36 @@ from market_identity import EMPTY_BODY, Identity, Signer, TrustedIdentitySet
 from arkhai_api_selling.publish_route import seller_resource
 
 NOT_INITIALIZED = "storefront is not initialized"
+
+# Each is bound into the signed resource; any other parameter, or a repeated
+# one, could change what is returned without changing what was signed.
+_NEGOTIATION_LIST_QUERY = frozenset(
+    {"limit", "offset", "buyer_identifier", "buyer_scheme", "terminal_state"}
+)
+
+
+def negotiation_list_resource(request: Request, listing_id: str) -> str:
+    """The signed resource of a negotiation list, rebuilt from its query.
+
+    The canonical storefront client builds the same string: the listing, then
+    the sorted, percent-encoded query with ``limit`` and ``offset`` defaulted.
+    """
+    query = request.query_params
+    if not set(query.keys()) <= _NEGOTIATION_LIST_QUERY or any(
+        len(query.getlist(name)) != 1 for name in query.keys()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="negotiation query contains an unauthenticated alias",
+        )
+    values = {"limit": query.get("limit", "50"), "offset": query.get("offset", "0")}
+    for name in ("buyer_identifier", "buyer_scheme", "terminal_state"):
+        value = query.get(name)
+        if value is not None:
+            values[name] = value
+    return f"{listing_id}/negotiations?" + urlencode(
+        sorted(values.items()), quote_via=quote, safe=""
+    )
 
 
 @dataclass(frozen=True)

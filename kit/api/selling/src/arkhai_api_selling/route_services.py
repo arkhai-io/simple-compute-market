@@ -411,7 +411,7 @@ def _source_unavailable(exc: NegotiationUnavailableError) -> dict[str, Any]:
 
 
 class NegotiationRoutes:
-    """The administrator's negotiation introspection, advance, and force-accept."""
+    """The administrator's negotiation reads, advance, and force-accept."""
 
     def __init__(
         self,
@@ -434,13 +434,28 @@ class NegotiationRoutes:
         listing_id: str,
         *,
         terminal_state: str | None,
+        buyer_scheme: str | None = None,
+        buyer_identifier: str | None = None,
         limit: int,
         offset: int,
     ) -> NegotiationListResponse:
+        if (buyer_scheme is None) != (buyer_identifier is None):
+            raise RouteRefusal(
+                422, "buyer_scheme and buyer_identifier must be supplied together"
+            )
+        try:
+            buyer_principal = (
+                Identity(scheme=buyer_scheme, identifier=buyer_identifier)
+                if buyer_scheme is not None and buyer_identifier is not None
+                else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise RouteRefusal(422, "invalid buyer principal") from exc
         try:
             threads = await self._service().list_for_order(
                 listing_id=listing_id,
                 terminal_state=terminal_state or None,
+                buyer_principal=buyer_principal,
                 limit=limit,
                 offset=offset,
             )
@@ -461,7 +476,14 @@ class NegotiationRoutes:
             raise RouteRefusal(exc.status_code, str(exc)) from exc
         return NegotiationDetailResponse(**detail)
 
-    async def advance(self, listing_id: str, neg_id: str, body: AdvanceRequest) -> AdvanceResponse:
+    async def advance(
+        self,
+        listing_id: str,
+        neg_id: str,
+        body: AdvanceRequest,
+        *,
+        actor_principal: Identity,
+    ) -> AdvanceResponse:
         try:
             result = await self._service().advance(
                 listing_id=listing_id,
@@ -469,6 +491,7 @@ class NegotiationRoutes:
                 action=body.action,
                 proposal=body.proposal,
                 reason=body.reason,
+                actor_principal=actor_principal,
             )
         except NegotiationServiceError as exc:
             raise RouteRefusal(exc.status_code, str(exc)) from exc

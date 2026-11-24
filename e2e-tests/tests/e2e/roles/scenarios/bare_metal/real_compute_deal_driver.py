@@ -53,11 +53,12 @@ def bare_metal_executor_is_real(execution: Any) -> Any:
 
 def target_connection(target: BareMetalHost) -> ConnectionSubmission:
     """The operator's management connection, separate from the buyer relay."""
-    return ConnectionSubmission(kind="ssh", version=2, public={
+    return ConnectionSubmission(kind="ssh", version=3, public={
         "ssh_host": target.connection.ssh_host,
         "ssh_port": target.connection.ssh_port,
         "ssh_user": target.connection.ssh_user,
         "key_path": target.connection.ssh_key_path,
+        "host_keys": [target.ssh_host_public_key],
     })
 
 

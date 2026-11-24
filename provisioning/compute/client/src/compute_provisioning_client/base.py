@@ -221,7 +221,11 @@ class SigningBase:
         self._verify(response, signed, body)
         if not response.is_success and response.status_code not in accepted_statuses:
             detail = body.get("detail", response.text) if isinstance(body, dict) else body
-            raise ComputeProvisioningError(str(detail), status_code=response.status_code)
+            code = detail.get("code") if isinstance(detail, dict) else None
+            raise ComputeProvisioningError(
+                str(detail), status_code=response.status_code,
+                code=code if isinstance(code, str) else None,
+            )
         return body
 
     def _current_authorities(self, status_code: int) -> TrustedIdentitySet:

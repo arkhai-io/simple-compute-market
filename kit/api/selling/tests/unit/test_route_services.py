@@ -401,16 +401,20 @@ async def test_a_continuation_refusal_carries_no_hint():
 class _NegotiationService:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
+        self.queries: list[dict] = []
+        self.advances: list[dict] = []
 
-    async def list_for_order(self, **query):
+    async def list_for_order(self, *, listing_id, terminal_state, buyer_principal, limit, offset):
         if self.error:
             raise self.error
+        self.queries.append({"buyer_principal": buyer_principal})
         return [{"negotiation_id": "neg-1"}]
 
-    async def advance(self, **kwargs):
+    async def advance(self, *, listing_id, neg_id, action, proposal, reason, actor_principal):
         if self.error:
             raise self.error
-        return {"action": "counter"}
+        self.advances.append({"actor_principal": actor_principal})
+        return {"negotiation_id": neg_id, "action": action}
 
 
 async def test_negotiation_introspection_maps_the_services_refusals():
@@ -424,17 +428,40 @@ async def test_negotiation_introspection_maps_the_services_refusals():
     )
     refused = await _refused(routes.list("L-1", terminal_state="", limit=50, offset=0))
     assert (refused.status_code, refused.detail) == (404, "listing gone")
-    refused = await _refused(routes.advance("L-1", "neg-1", AdvanceRequest(action="exit")))
+    refused = await _refused(
+        routes.advance("L-1", "neg-1", AdvanceRequest(action="exit"), actor_principal=BUYER)
+    )
     assert refused.status_code == 404
 
+    service = _NegotiationService()
     listed = NegotiationRoutes(
         repository=lambda: object(),
-        negotiation_service=lambda: _NegotiationService(),
+        negotiation_service=lambda: service,
         runtime=lambda: None,
         signer=lambda: CLAIMANT_SIGNER,
     )
     page = await listed.list("L-1", terminal_state=None, limit=50, offset=0)
     assert (page.count, page.listing_id) == (1, "L-1")
+    await listed.list(
+        "L-1",
+        terminal_state=None,
+        buyer_scheme=BUYER.scheme.value,
+        buyer_identifier=BUYER.identifier,
+        limit=50,
+        offset=0,
+    )
+    assert [query["buyer_principal"] for query in service.queries] == [None, BUYER]
+    half = await _refused(
+        listed.list("L-1", terminal_state=None, buyer_scheme="ed25519", limit=50, offset=0)
+    )
+    malformed = await _refused(
+        listed.list(
+            "L-1", terminal_state=None, buyer_scheme="nope", buyer_identifier="x", limit=50, offset=0
+        )
+    )
+    assert (half.status_code, malformed.status_code) == (422, 422)
+    await listed.advance("L-1", "neg-1", AdvanceRequest(action="exit"), actor_principal=BUYER)
+    assert service.advances == [{"actor_principal": BUYER}]
     unavailable = await _refused(listed.force_accept("L-1", "neg-1", SimpleNamespace(amount=1), actor_principal=BUYER))
     assert (unavailable.status_code, unavailable.detail) == (503, "storefront negotiation is unavailable")
 

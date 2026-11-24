@@ -485,20 +485,24 @@ class SshSession:
         command: str,
         *,
         timeout: float | None = None,
+        stdin: str | None = None,
     ) -> subprocess.CompletedProcess[str] | None:
         """One ``ssh`` run, or ``None`` when it ran out of time.
 
         ``timeout`` defaults to a full attempt's time. ``ssh`` itself fails
         within its ``ConnectTimeout`` when the host does not answer, so an
         attempt runs out of time only once the host has answered and the
-        connection has not finished.
+        connection has not finished. ``stdin``, when given, is written to the
+        remote command's standard input.
         """
+        written = {} if stdin is None else {"input": stdin}
         try:
             result = self._run(
                 self.argv(endpoint, key, command),
                 capture_output=True,
                 text=True,
                 timeout=self._attempt_seconds if timeout is None else timeout,
+                **written,
             )
         except subprocess.TimeoutExpired:
             return None
@@ -527,7 +531,9 @@ class SshSession:
                 return _fingerprint(fields[2])
         return None
 
-    def run(self, endpoint: SshEndpoint, key: SshKey, command: str) -> str:
+    def run(
+        self, endpoint: SshEndpoint, key: SshKey, command: str, *, stdin: str | None = None,
+    ) -> str:
         """Run ``command`` as ``endpoint.user`` and return its output.
 
         A connection that cannot be made is retried until the retry window
@@ -536,11 +542,16 @@ class SshSession:
         short would fail it for a reason unrelated to connecting. A host key
         other than the one this run trusted fails at once, and so does the
         command failing once connected.
+
+        ``stdin``, when given, is the command's standard input on every
+        attempt. It is never part of the command, so a secret it carries, such
+        as a password ``sudo -S`` reads, is in no argument list and in no
+        failure this raises.
         """
         first_contact = self.host_key_fingerprint(endpoint) is None
         deadline = self._clock() + self._connect_retry_seconds
         while True:
-            result = self._attempt(endpoint, key, command)
+            result = self._attempt(endpoint, key, command, stdin=stdin)
             if result is not None and result.returncode != _SSH_FAILED:
                 break
             if self._clock() >= deadline:

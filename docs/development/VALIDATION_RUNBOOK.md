@@ -895,6 +895,9 @@ A VM host needs:
 - an x86-64 Ubuntu 24.04 install, the platform the scenario has run against,
   with outbound network access, which scratch-image VM creation uses to fetch
   its cloud image;
+- libvirt 6.1 or later with the nwfilter driver's `clean-traffic` filter, and
+  virt-install 3.0 or later, which guest isolation needs; host preparation
+  installs `ebtables` and refuses a host lacking any of them, naming each;
 - no GPU. A host with an NVIDIA or AMD GPU is given passthrough boot
   configuration (section 22), and the scenario deals a GPU-less shape either
   way;
@@ -1024,13 +1027,48 @@ VM entry under `hosts`:
 - `capacity`, the sellable `vcpu_count`, `ram_gb`, and `disk_gb` from section 21;
 - `listing_shape`, an explicit guest shape fitting twice within that capacity.
 
+A VM entry may add `ssh_host_public_key`, the host's OpenSSH public key as its
+type and base64, confirmed independently of the host — from the host's console
+or its provider, say — and the scenario registers it as the host's pin. Without
+it, the host must already hold a pin in the provisioning service, stated by an
+earlier run or captured by an operator who compared the fingerprint the host
+presents ([the operator handbook, "Capturing and rotating a host key"](../operator-handbook.md#capturing-and-rotating-a-host-key));
+the scenario refuses a host with neither before declaring capacity, naming
+`ssh_host_public_key`, and never captures the key a host presents. A reapply
+restates the pin held at registration.
+
+For `e2e_vm_guest_isolation` (section 25), a VM entry adds the optional
+`guest_isolation` section:
+
+- `operator`: `host`, `port`, `user` and `key_path` of a harness-local route to
+  the KVM host's own sshd, whose user may run Python as root through `sudo -n`.
+  The key path is harness-local, separate from `connection.ssh_key_path`, and
+  referenced, never copied. The operator route is pinned to
+  `ssh_host_public_key` when the entry states one; otherwise the key it first
+  presents is trusted for the run;
+- `private_destinations`, optional: `refused` and `listed`, two distinct IPv4
+  addresses in the guest policy's private ranges (`10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), outside the guests'
+  network `192.168.122.0/24`. Neither needs to answer. Host preparation must
+  have been given `listed`, and not `refused`, in
+  `guest_allowed_private_destinations` (section 22,
+  `-e '{"guest_allowed_private_destinations": ["<listed>"]}'`), and `listed`
+  must be an address the host sends to rather than holding for ARP: through a
+  gateway, or answered on its link.
+
+Without the section, the module's host-side stages skip naming it; without
+`private_destinations`, its private-destination stages skip naming that. An
+older harness refuses the section as an unknown field. The committed example
+shows it commented, with invented values.
+
 A bare-metal entry uses `domain: bare_metal`, adds `physical_host_id` and its
 operator-verified `ssh_host_public_key`, and omits `listing_shape`. At most one
 host per domain is allowed. Direct and relay access fields cannot be mixed.
 The target names no relay token or grant key and carries no private host key.
 
-The scenario registers its host with an `ssh` connection at version 2, naming
-`connection.ssh_key_path` as the service's `key_path`. It reconciles an earlier
+The scenario registers its host with an `ssh` connection at version 3, naming
+`connection.ssh_key_path` as the service's `key_path` and the pin as its
+`host_keys`. It reconciles an earlier
 registration with the target; the key itself remains in the service filesystem.
 Git ignores the real target file; never commit it. The model in
 `e2e-tests/src/e2e_harness/real_provisioning_target.py` documents the fields.
@@ -1097,6 +1135,53 @@ restore capacity. Management connectivity must survive. Unreachable SSH is not
 proof of successful revocation. Its relay port may remain quarantined after
 capacity is released. An absent target skips before mutation; skipped stages
 are not qualification evidence.
+
+### Prove guest isolation
+
+`e2e_vm_guest_isolation` proves VM guest isolation on the VM host: it makes the
+real VM scenario's two deals, and while both guests run and the first holds its
+heartbeat, probes from each guest and reads and acts on the host through the
+target's `guest_isolation` operator route (section 24). It restarts libvirtd,
+reloads UFW, and plants the first guest unconverged before running the host
+kit's `arkhai-guest-converge`, so run it only against a host whose guests are
+the run's alone:
+
+```bash
+make -C e2e-tests test-module MODULE=e2e_vm_guest_isolation ACTIVE_PROFILES=local,real-provisioning-target
+```
+
+Beyond section 21's VM host, the run needs the `guest_isolation` section and its
+`private_destinations` as section 24 describes them, and UFW enabled on the
+host, or the reload stage skips. Guest probes become root in each guest with the
+tenant password the deal delivered to its buyer, so the guest's sudo needs no
+change. After its last stage the module logs each observation as made, failed or
+unproven, with what an unproven one names, and the host's libvirt version:
+
+- O1: ARP, ICMP and TCP from one guest to the other, directly and through the
+  gateway, refused;
+- O2: an ARP claim of the other guest's address dropped while its buyer still
+  reaches it, and the filter's parameters in each guest's live definition;
+- O3: DHCP and DNS pass, and another host port is refused by the policy's drop;
+- O4: the metadata address `169.254.169.254` refused by its drop;
+- O5: the refused destination refused by its drop, and the listed one admitted
+  by its accept and seen leaving the host on its routed interface;
+- O6: a buyer from a private address reaching their guest. It is unproven under
+  relay access, naming the route it lacks, and under direct access, naming the
+  create's masquerade, which shows the guest only the host's address;
+- O7: O3 to O5 again after a libvirtd restart and after a UFW reload, with the
+  policy's jumps first;
+- O8: the first guest, planted unconverged, converged with its heartbeat's
+  longest gap at most five seconds, its port isolated, its saved definition
+  carrying the isolation and the filter, and its probes of the other guest
+  refused again;
+- O9: the filter the fixture detached live bound live again. It is unproven,
+  naming the libvirt version, when libvirt refuses the fixture's live filter
+  removal or convergence leaves the filter for the guest's next start.
+
+A refusal counts only when its rule's counter rose across the probe, so a
+failure names the rule that did not count. A run's evidence leaves the
+deployment as a sanitized summary per observation, with its run identifier and
+the host's libvirt version, naming no host, address or credential.
 
 ### Run the qualification scenarios on a candidate
 

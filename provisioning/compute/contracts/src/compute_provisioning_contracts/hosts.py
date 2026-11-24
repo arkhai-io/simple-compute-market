@@ -21,11 +21,13 @@ connection states its ``version`` in both.
 
 from __future__ import annotations
 
+from base64 import b64decode, b64encode
+from binascii import Error as Base64Error
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 
 class ConnectionSubmission(BaseModel):
@@ -116,6 +118,25 @@ class HostListResponse(BaseModel):
     total: int
 
 
+class ConnectivityHostKey(BaseModel):
+    """The server identity seen while checking an SSH connection."""
+
+    endpoint: str
+    pinned: bool
+    presented: str
+    matched: bool | None = None
+    pinned_fingerprints: list[str] | None = None
+
+
+    @model_serializer(mode="wrap")
+    def _serialize_status(self, handler):
+        data = handler(self)
+        if not self.pinned:
+            data.pop("matched", None)
+            data.pop("pinned_fingerprints", None)
+        return data
+
+
 class ConnectivityResult(BaseModel):
     """Whether a host's connection could be reached and authenticated."""
 
@@ -126,15 +147,63 @@ class ConnectivityResult(BaseModel):
     detail: str = Field(
         description="The probe's output on success, or its error on failure."
     )
+    host_key: ConnectivityHostKey | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_observation(self, handler):
+        data = handler(self)
+        if "host_key" not in self.model_fields_set:
+            data.pop("host_key", None)
+        return data
+
+
+
+class HostKeyCaptureRequest(BaseModel):
+    """An independently verified SSH fingerprint and optional replacement."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    fingerprint: str
+    replace: bool = False
+
+    @field_validator("fingerprint")
+    @classmethod
+    def _valid_fingerprint(cls, value: str) -> str:
+        prefix, separator, encoded = value.partition(":")
+        guidance = "expected SHA256: followed by a Base64-encoded 32-byte digest"
+        if prefix != "SHA256" or not separator:
+            raise ValueError(guidance)
+        try:
+            digest = b64decode(encoded + "=" * (-len(encoded) % 4), validate=True)
+        except (Base64Error, ValueError):
+            raise ValueError(guidance) from None
+        canonical = b64encode(digest).decode("ascii") if len(digest) == 32 else ""
+        if not canonical or encoded not in (canonical, canonical.rstrip("=")):
+            raise ValueError(guidance)
+        return "SHA256:" + canonical.rstrip("=")
+
+
+class HostKeyCaptureResponse(BaseModel):
+    endpoint: str
+    pinned_fingerprints: list[str]
+
+
+class HostKeyCaptureConflict(BaseModel):
+    code: Literal["host_key_mismatch", "host_key_pinned", "no_host_key_presented"]
+    endpoint: str
+    presented: str | None = None
+    pinned_fingerprints: list[str] | None = None
+    reason: str | None = None
 
 
 class HostDefinitionConnection(BaseModel):
     """A host definitions entry's connection: its public fields and no secret.
 
     ``version`` is required because a document's meaning must not depend on a
-    default; a service refuses a kind or version it does not serve. A key is
-    named by its file path among the public fields, never carried: the model
-    refuses a ``secrets`` field like any field it does not define, and a
+    default; a service refuses a kind or version it does not serve. For SSH
+    version 3 the public fields can include the provisioner's key file path
+    and the host's public key pins. The model refuses private key submissions
+    in a ``secrets`` field like any field it does not define, and a
     document's validation reports it under its own code,
     ``HostDefinitionProblemCode.CONNECTION_SECRETS``.
 

@@ -344,7 +344,7 @@ class TestDispatchRequiresARegisteredHost:
             "    pool_id: no-such-pool\n"
             "    connection:\n"
             "      kind: ssh\n"
-            "      version: 2\n"
+            "      version: 3\n"
             "      public: {ssh_host: 198.51.100.7, ssh_user: root, key_path: /keys/id}\n"
         )
         assert refused_document.applied is False

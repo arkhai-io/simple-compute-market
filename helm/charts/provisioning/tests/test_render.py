@@ -21,8 +21,10 @@ Standard library only: values are written as JSON, which is YAML.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
+import textwrap
 from pathlib import Path
 
 CHART = Path(__file__).resolve().parents[1]
@@ -44,7 +46,7 @@ _HOSTS = {
             "pool_id": "default",
             "connection": {
                 "kind": "ssh",
-                "version": 2,
+                "version": 3,
                 "public": {"ssh_host": "10.0.0.5", "key_path": "/home/appuser/.ssh/id_ed25519"},
             },
         }
@@ -128,7 +130,7 @@ def test_a_host_definitions_document_renders_verbatim_and_read_only() -> None:
     # The ConfigMap ends at the next manifest; the document is its last key here.
     body = document[1].split("\n---", 1)[0]
     assert body.startswith("    hosts:\n")
-    for text in ("host_id: kvm1", "pool_id: default", "kind: ssh", "version: 2",
+    for text in ("host_id: kvm1", "pool_id: default", "kind: ssh", "version: 3",
                  "ssh_host: 10.0.0.5", "key_path: /home/appuser/.ssh/id_ed25519"):
         assert text in body, f"{text} missing from the rendered host document"
     assert (
@@ -136,6 +138,30 @@ def test_a_host_definitions_document_renders_verbatim_and_read_only() -> None:
         "              subPath: host-definitions.yaml\n"
         "              readOnly: true\n"
     ) in rendered.stdout
+
+
+    python = os.environ.get("PROVISIONING_PYTHON")
+    if not python:
+        print("skip: PROVISIONING_PYTHON unset; the host definitions parser did not run")
+        return
+    consume = """
+import sys
+from compute_provisioning.hosts.definitions import parse_host_definitions
+from compute_provisioning_ansible import SSH_CONNECTION_VERSION, SshConnectionCodec
+
+definitions, problems = parse_host_definitions(sys.stdin.read())
+assert not problems, problems
+(host,) = definitions
+assert host.host_id == "kvm1"
+assert host.connection.kind == "ssh" and host.connection.version == SSH_CONNECTION_VERSION
+connection = SshConnectionCodec().build(host.connection.public, {})
+assert connection.public["ssh_host"] == "10.0.0.5"
+"""
+    loaded = subprocess.run(
+        [python, "-c", consume], input=textwrap.dedent(body),
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert loaded.returncode == 0, loaded.stderr
 
 
 def _config_checksum(manifest: str) -> str:

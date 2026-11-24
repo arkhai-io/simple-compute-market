@@ -83,8 +83,8 @@ ROLES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/listings/{listing_id}/resume"): "admin",
     ("POST", "/api/v1/listings/publish-from-quota"): "seller",
     ("POST", "/api/v1/listings/{listing_id}/close"): "seller",
-    ("GET", "/api/v1/listings/{listing_id}/negotiations"): "public",
-    ("GET", "/api/v1/listings/{listing_id}/negotiations/{neg_id}"): "public",
+    ("GET", "/api/v1/listings/{listing_id}/negotiations"): "admin",
+    ("GET", "/api/v1/listings/{listing_id}/negotiations/{neg_id}"): "admin",
     ("POST", "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance"): "admin",
     ("POST", "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept"): "admin",
     ("POST", "/api/v1/negotiate/new"): "buyer",
@@ -118,6 +118,9 @@ PROBE_BODIES: dict[tuple[str, str], Any] = {
     ("POST", "/api/v1/settle/{escrow_uid}"): {
         "negotiation_id": SEGMENTS["negotiation_id"],
         "buyer_principal": BUYER.model_dump(mode="json"),
+    },
+    ("POST", "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance"): {
+        "action": "exit",
     },
     ("POST", "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept"): {
         "amount": 1,

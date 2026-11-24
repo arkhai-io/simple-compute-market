@@ -867,6 +867,11 @@ virtualization; it needs no GPU.
    fits twice within capacity. Direct access states `public_host`; relay access
    states only `relay_id`. Bare-metal hosts additionally state `physical_host_id`
    and their verified `ssh_host_public_key`, and have no VM listing shape.
+   A VM host may state its independently confirmed `ssh_host_public_key`, which
+   the scenario registers as the host's pin; without it the host must already
+   hold a pin in the provisioning service, and the scenario refuses one with
+   neither before declaring capacity, naming the field. It never captures the
+   key a host presents, and a reapply restates the pin held at registration.
    A VM target may state `resource_id` to select its scenario declaration;
    otherwise it uses `compute-e2e-real-001`. Listing adoption, registration,
    purchase checks, capacity reuse and reapply use that same identifier.
@@ -903,6 +908,43 @@ and reports each unconfirmed removal. The first SSH session stays open across th
 second guest's create and teardown, with a maximum five-second observed gap;
 management connectivity is checked around each operation. The two smaller guests
 prove tunnel coexistence and require no GPU.
+
+`e2e_vm_guest_isolation` (`tests/e2e/roles/scenarios/vms/test_vm_guest_isolation.py`)
+proves VM guest isolation on the same target. It subclasses the real VM
+scenario's stages and fixtures, so it makes the same two deals and shares their
+teardown, and adds its own stages while both guests run and the first holds its
+heartbeat. Its guest probes run in each guest as its buyer, under `sudo` with
+the tenant password the deal delivered; its host-side stages restart libvirtd,
+reload UFW, read the guest policy's chains and counters, plant the first guest
+unconverged and run the host kit's convergence command, through an operator
+route the VM host's optional `guest_isolation` section names:
+
+```yaml
+      guest_isolation:
+        operator:                 # harness-local; the key is referenced, never copied
+          host: <route-host>
+          port: <route-port>
+          user: <user that may sudo -n python3>
+          key_path: <harness-local key path>
+        private_destinations:     # optional; neither needs to answer
+          refused: <private IPv4 address>
+          listed: <private IPv4 address host preparation was given>
+```
+
+Both destinations are distinct IPv4 addresses in the guest policy's private
+ranges and outside the guests' network; host preparation must have been given
+`listed` in `guest_allowed_private_destinations`. Without the section every
+host-side stage skips naming it, and without `private_destinations` the
+private-destination stages skip naming that. The probes are one fixed program,
+`guest_isolation_probe.py`, beside the module. The module is marked
+`e2e_vm_guest_isolation`, runs in no lane, and logs each observation, O1 to O9,
+as made, failed or unproven after its last stage;
+[`VALIDATION_RUNBOOK.md`, "Prove guest isolation"](../docs/development/VALIDATION_RUNBOOK.md#prove-guest-isolation)
+lists them and what the target needs:
+
+```bash
+make test-module MODULE=e2e_vm_guest_isolation ACTIVE_PROFILES=local,real-provisioning-target
+```
 
 ---
 

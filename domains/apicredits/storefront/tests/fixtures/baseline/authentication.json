@@ -126,22 +126,28 @@
     "role": "seller"
   },
   {
+    "admitted_roles": [
+      "admin"
+    ],
     "method": "GET",
     "name": "NegotiationsController.list_negotiations",
-    "operation": null,
+    "operation": "admin_list_negotiations",
     "path": "/api/v1/listings/{listing_id}/negotiations",
-    "probe": "unsigned request answered 404",
-    "resource": null,
-    "role": "public"
+    "probe": "unsigned request answered 401",
+    "resource": "L-baseline/negotiations?limit=50&offset=0",
+    "role": "admin"
   },
   {
+    "admitted_roles": [
+      "admin"
+    ],
     "method": "GET",
     "name": "NegotiationsController.get_negotiation",
-    "operation": null,
+    "operation": "admin_get_negotiation",
     "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}",
-    "probe": "unsigned request answered 404",
-    "resource": null,
-    "role": "public"
+    "probe": "unsigned request answered 401",
+    "resource": "L-baseline/negotiations/N-baseline",
+    "role": "admin"
   },
   {
     "admitted_roles": [
@@ -149,10 +155,10 @@
     ],
     "method": "POST",
     "name": "NegotiationsController.advance_negotiation",
-    "operation": "NegotiationsController.advance_negotiation",
+    "operation": "admin_advance_negotiation",
     "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
     "probe": "unsigned request answered 401",
-    "resource": "/api/v1/listings/L-baseline/negotiations/N-baseline/advance",
+    "resource": "L-baseline/N-baseline",
     "role": "admin"
   },
   {

@@ -25,6 +25,7 @@ from sqlalchemy import Connection, text
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.hosts.migrations import BASELINE as HOSTS_BASELINE
+from compute_provisioning.hosts.migrations import mark_hosts_for_key_adoption
 from compute_provisioning.jobs.migrations import BASELINE as JOBS_BASELINE
 from compute_provisioning.jobs.migrations import MIGRATIONS as JOBS_MIGRATIONS
 from compute_provisioning.relays.migrations import BASELINE as RELAYS_BASELINE
@@ -146,6 +147,7 @@ def _json_mapping(value: Any, *, label: str) -> dict[str, Any]:
 
 
 _SSH_VERSION_2 = 2
+_SSH_VERSION_3 = 3
 
 
 def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
@@ -161,24 +163,39 @@ def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
     decrypts; if it refuses any, the migration fails naming every refused host
     and rewrites none.
 
-    The target version is fixed at 2 rather than read from the codec: this
-    mapping is exact only from version 1 to version 2. A codec serving another
-    version refuses every version-2 envelope it is asked to check, so the
-    migration then fails naming each host instead of stamping a version whose
-    fields it never mapped.
+    This step writes version 2. Validation uses only the fields that version
+    2 and version 3 share; a version-1 row cannot already carry a host pin.
 
     Only the host row holds a connection: a job names its host and reads the
     host's connection when it is dispatched, so an unfinished job runs against
     the rewritten one.
     """
+    rows = _validated_legacy_ssh_hosts(connection, 1, _SSH_VERSION_2)
+    for host_id in rows:
+        connection.execute(
+            text("UPDATE hosts SET connection_version = :version WHERE host_id = :host_id"),
+            {"version": _SSH_VERSION_2, "host_id": host_id},
+        )
+    if rows:
+        logger.info(
+            "Rewrote %d ssh connection(s) from version 1 to version %d",
+            len(rows),
+            _SSH_VERSION_2,
+        )
+
+
+def _validated_legacy_ssh_hosts(
+    connection: Connection, source_version: int, destination_version: int
+) -> list[str]:
+    """Validate the named version's rows before writing any of them."""
     codec = SshConnectionCodec()
     rows = connection.execute(
         text(
             "SELECT host_id, connection_public, connection_protected FROM hosts "
-            "WHERE connection_kind = :kind AND connection_version = 1 "
+            "WHERE connection_kind = :kind AND connection_version = :version "
             "ORDER BY host_id"
         ),
-        {"kind": SSH_CONNECTION_KIND},
+        {"kind": SSH_CONNECTION_KIND, "version": source_version},
     ).mappings().all()
     refused: list[str] = []
     for row in rows:
@@ -190,10 +207,12 @@ def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
                 row["connection_protected"],
                 label=f"hosts {row['host_id']} connection_protected",
             )
+            if "host_keys" in public:
+                raise ValueError("a connection from before host pinning cannot state host_keys")
             codec.validate(
                 ConnectionEnvelope(
                     kind=SSH_CONNECTION_KIND,
-                    version=_SSH_VERSION_2,
+                    version=_SSH_VERSION_3,
                     public=public,
                     protected={
                         name: ProtectedValue.from_stored(value)
@@ -205,22 +224,20 @@ def _rewrite_ssh_connections_to_version_2(connection: Connection) -> None:
             refused.append(f"host {row['host_id']!r}: {exc}")
     if refused:
         raise MigrationDataError(
-            f"{len(refused)} ssh connection(s) stored at version 1 are not valid at "
-            f"version {_SSH_VERSION_2}, so none was rewritten; submit each "
-            f"host again at version {_SSH_VERSION_2}, then rerun the migration:\n  "
+            f"{len(refused)} ssh connection(s) stored at version {source_version} are not valid at "
+            f"version {destination_version}, so none was rewritten; restore a database "
+            f"backup with valid connection records for these hosts, then rerun the migration:\n  "
             + "\n  ".join(refused)
         )
-    for row in rows:
-        connection.execute(
-            text("UPDATE hosts SET connection_version = :version WHERE host_id = :host_id"),
-            {"version": _SSH_VERSION_2, "host_id": row["host_id"]},
-        )
-    if rows:
-        logger.info(
-            "Rewrote %d ssh connection(s) from version 1 to version %d",
-            len(rows),
-            _SSH_VERSION_2,
-        )
+    return [row["host_id"] for row in rows]
+
+
+def _rewrite_ssh_connections_to_version_3(connection: Connection) -> None:
+    """Mark every upgraded host for adoption without altering its stored fields."""
+    host_ids = _validated_legacy_ssh_hosts(connection, _SSH_VERSION_2, _SSH_VERSION_3)
+    mark_hosts_for_key_adoption(connection, host_ids, _SSH_VERSION_3)
+    if host_ids:
+        logger.info("Marked %d SSH hosts for host-key adoption", len(host_ids))
 
 
 SERVICE_BASELINE: Migration[Connection] = Migration(
@@ -230,6 +247,10 @@ SERVICE_BASELINE: Migration[Connection] = Migration(
 
 SSH_CONNECTIONS_VERSION_2: Migration[Connection] = Migration(
     "20261108_001_ssh_connections_version_2", _rewrite_ssh_connections_to_version_2
+)
+
+SSH_CONNECTIONS_VERSION_3: Migration[Connection] = Migration(
+    "20261119_001_ssh_connections_version_3", _rewrite_ssh_connections_to_version_3
 )
 
 FLOOR_IDS: tuple[str, ...] = (
@@ -292,6 +313,11 @@ CHAIN: Chain[Connection] = Chain(
         FULFILLMENT_BASELINE,
         SITE_BASELINE,
     ),
-    migrations=(*SITE_MIGRATIONS, SSH_CONNECTIONS_VERSION_2, *JOBS_MIGRATIONS),
+    migrations=(
+        *SITE_MIGRATIONS,
+        SSH_CONNECTIONS_VERSION_2,
+        *JOBS_MIGRATIONS,
+        SSH_CONNECTIONS_VERSION_3,
+    ),
     floor_ids=FLOOR_IDS,
 )

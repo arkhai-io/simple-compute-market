@@ -435,6 +435,27 @@ async def test_the_operator_role_reaches_a_seller_route(client):
 
 
 @pytest.mark.asyncio
+async def test_the_operator_role_reaches_a_credits_route_naming_the_seller(signed_app):
+    """The key list, a credits ledger route whose contract names only
+    `seller`, answers the authority client signing under `admin` as the
+    operator, and the client verifies the authority's signed response."""
+    operator = AuthorityClient(
+        "http://credits-service",
+        label=ISSUANCE_LABEL,
+        transport=httpx.ASGITransport(app=signed_app),
+        signer=OPERATOR_SIGNER,
+        caller_role="admin",
+        expected_authorities=TrustedIdentitySet(
+            identities=(Ed25519Signer(AUTHORITY_SEED).identity,),
+        ),
+    )
+
+    listed = await operator.list_keys(owner_id=BUYER)
+
+    assert listed["keys"] == []
+
+
+@pytest.mark.asyncio
 async def test_liveness_is_reachable_without_a_credential(client):
     for path in ("/health", "/api/v1/system/health"):
         response = await client.get(path)

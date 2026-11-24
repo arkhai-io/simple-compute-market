@@ -46,7 +46,7 @@ the code imports carries its language's tag.
 | `configuration` | topic | How a service resolves its configuration and secrets, and the documents it is given |
 | `packaging` | topic | Builds, artifacts, locks, environments, and images |
 | `deployment` | topic | How a service is deployed and started: dependencies, startup refusals, rehearsal |
-| `versioning` | topic | Version numbers, compatibility commitments, and versioned contracts |
+| `versioning` | topic | Version numbers, compatibility commitments, versioned contracts, and retiring compatibility |
 | `python` | tool | The Python language and the libraries Python code imports |
 | `uv` | tool | The uv package and project manager |
 | `hatchling` | tool | The Hatchling build backend |
