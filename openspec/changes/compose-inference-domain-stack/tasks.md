@@ -2461,10 +2461,10 @@ change to implementation.
       run `make check-guidance`.
 - [ ] 12.11 **Documentation citations.** `make check-doc-citations
       CHANGE=compose-inference-domain-stack` after promotion, every match
-      resolved; then `scripts/change-workflow openspec validate
+      resolved; then `change-workflow openspec validate
       compose-inference-domain-stack --strict` as the last check before the
       archive.
-- [ ] 12.12 **Archival.** `scripts/change-workflow openspec archive
+- [ ] 12.12 **Archival.** `change-workflow openspec archive
       compose-inference-domain-stack -y`, merging the six deltas into
       `openspec/specs/{api-family,inference,deployment-state,
       test-compatibility,market-composition,storefront-publication}/spec.md` and
