@@ -1081,6 +1081,35 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             }
 
 
+async def test_contact_delivery_and_settlement_steps_use_their_own_workers(tmp_path, monkeypatch) -> None:
+    class ContactWorker:
+        ticks = 0
+
+        async def tick(self):
+            self.ticks += 1
+            return {"loop": "contact_delivery", "processed_limit": 2}
+
+    contact_worker = ContactWorker()
+    monkeypatch.setattr(
+        "arkhai_bare_metal_storefront.runtime.explicit_contact_delivery_worker",
+        lambda runtime: contact_worker,
+    )
+    runtime, repository = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            await admin.admin_pause_lifecycle_loops()
+            settlement = await admin.admin_run_lifecycle_cycle("settlement-servicing")
+            assert settlement == {"loop": "settlement_servicing", "processed": 0}
+            assert repository.sweeps == 1
+            assert contact_worker.ticks == 0
+            delivery = await admin.admin_run_lifecycle_cycle("contact-delivery")
+            assert delivery == {"loop": "contact_delivery", "processed_limit": 2}
+            assert contact_worker.ticks == 1
+            assert repository.sweeps == 1
+            assert set(runtime.loops.states().values()) == {"paused"}
+
+
 async def test_the_lifecycle_pause_refuses_an_unsigned_request(tmp_path) -> None:
     runtime, _repository = _runtime_with_servicing(str(tmp_path / "storefront.db"))
     app = _app(runtime)
