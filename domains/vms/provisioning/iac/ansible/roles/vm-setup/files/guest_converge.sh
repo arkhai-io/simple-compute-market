@@ -1,9 +1,9 @@
 #!/bin/sh
 # Converges every running VM guest to the interface a guest is created with
 # (vm-management's templates/guest-interface-args.j2): an isolated bridge port
-# under libvirt's clean-traffic filter. A guest created before guests were
-# isolated holds neither, and an isolated port can still be reached from one
-# that is not, so each running guest is converged while it runs:
+# under libvirt's clean-traffic filter. A running guest may hold neither, and
+# an isolated port can still be reached from one that is not, so each running
+# guest is converged while it runs:
 #
 #   - its tap's bridge port is set isolated (`bridge link set ... isolated on`),
 #     which does not drop the link;

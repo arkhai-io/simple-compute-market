@@ -159,12 +159,18 @@ Every VM guest MUST be created with its interface's bridge port isolated and wit
 
 ### Requirement: A VM guest reaches only DHCP and DNS on its host and no undeclared private destination
 
-VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except traffic of connections already established and each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. These rules MUST sit in chains of the host kit's own, reached before any rule libvirt or UFW installs and kept first across a restart of libvirt and a reload of UFW; host preparation MUST NOT leave in place a rule accepting all traffic from the guests' bridge to the host. Connections the host opens to a guest and DNATed buyer connections, from public or private addresses, are unaffected.
+VM host preparation MUST accept, from the guests' bridge to the host, only DHCP, DNS to the bridge's address, and traffic of connections already established, and MUST drop everything else. It MUST drop forwarding from the guests' bridge to link-local addresses and to private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), except traffic of connections already established and each destination the host-kit variable `guest_allowed_private_destinations` lists, which is empty by default. On a host whose kernel has IPv6, it MUST drop every IPv6 packet from the guests' bridge, to the host and forwarded alike. These rules MUST sit in chains of the host kit's own, reached before any rule libvirt or UFW installs and kept first across a restart of libvirt and a reload of UFW; host preparation MUST NOT leave in place a rule accepting all traffic from the guests' bridge to the host. Connections the host opens to a guest and DNATed buyer connections, from public or private addresses, are unaffected.
 
 #### Scenario: A guest reaches a service on its host
 
 - **WHEN** a guest connects to a port on its host other than DHCP or DNS
 - **THEN** the connection is dropped
+
+#### Scenario: A guest whose filter waits for its next start sends IPv6
+
+- **GIVEN** a host whose `default` network carries IPv6, and a running guest whose `clean-traffic` filter waits for its next start
+- **WHEN** the guest sends IPv6 to a port on its host or to an address beyond it
+- **THEN** the packets are dropped
 
 #### Scenario: A guest reaches the cloud metadata address
 

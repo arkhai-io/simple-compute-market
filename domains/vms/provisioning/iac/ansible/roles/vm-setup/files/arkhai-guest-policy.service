@@ -1,7 +1,7 @@
 # Keeps the VM guest policy's chains installed and their jumps first in INPUT
-# and FORWARD: at boot, after the saved rules, UFW and libvirt have installed
-# theirs, and again each time libvirtd starts, since libvirt re-adds its rules
-# then. WantedBy libvirtd enqueues this unit with every start of libvirtd, a
+# and FORWARD, iptables' and ip6tables': at boot, after the saved rules, UFW
+# and libvirt have installed theirs, and again each time libvirtd starts, since
+# libvirt re-adds its rules then. WantedBy libvirtd enqueues this unit with every start of libvirtd, a
 # restart and a socket activation after an idle exit included, and After runs
 # it once libvirtd has started. It keeps no active state (no RemainAfterExit),
 # so each of those starts runs it again rather than finding it already active.

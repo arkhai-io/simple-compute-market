@@ -4,23 +4,28 @@
 # Each guest's interface is an isolated bridge port under libvirt's
 # clean-traffic filter (vm-management's templates/guest-interface-args.j2). This file
 # refuses a host that cannot give a guest either, then installs the host side:
-# two chains of the host kit's own, each jumped to from the first position of
-# its built-in chain for packets from the guests' bridge.
+# chains of the host kit's own, each jumped to from the first position of its
+# built-in chain for packets from the guests' bridge.
 #
 #   ARKHAI-GUEST-IN   a guest reaches only DHCP and DNS on its host;
 #   ARKHAI-GUEST-FWD  a guest's forwarded packet never goes back out on the
 #                     bridge to another guest, and reaches no link-local or
 #                     private destination unless guest_allowed_private_destinations
-#                     lists it.
+#                     lists it;
+#   ARKHAI-GUEST-V6   (ip6tables) no IPv6 packet from a guest reaches the host
+#                     or is forwarded, as clean-traffic drops a filtered
+#                     guest's, so a guest whose filter waits for its next start
+#                     has no IPv6 path around the IPv4 chains.
 #
-# The rules are in templates/guest-policy.rules.j2 and the installer in
-# files/guest_policy.sh. They lead INPUT and FORWARD because an appended rule
-# would follow UFW's accepts on INPUT and libvirt's LIBVIRT_FWO accept on
-# FORWARD and never run; under libvirt's nftables backend its accepts sit in a
-# table of their own and stop no drop here. libvirt re-adds its rules when it
-# starts and UFW when it reloads, so the installer runs again after each.
-# security-hardening.yml, which runs after this file, saves the installed rules
-# with the rest of the host's.
+# The IPv4 rules are in templates/guest-policy.rules.j2 and the installer, which
+# holds the IPv6 chain, in files/guest_policy.sh. They lead INPUT and FORWARD
+# because an appended rule would follow UFW's accepts on INPUT and libvirt's
+# LIBVIRT_FWO accept on FORWARD and never run; under libvirt's nftables backend
+# its accepts sit in a table of their own and stop no drop here. libvirt re-adds
+# its rules when it starts and UFW when it reloads, so the installer runs again
+# after each, and at boot. security-hardening.yml, which runs after this file,
+# saves the installed IPv4 rules with the rest of the host's; nothing saves the
+# IPv6 chain, which the installer's unit puts back at boot.
 #
 # Last, every guest already running is converged to the interface a new guest
 # is created with, and each it could not converge is named.
@@ -170,8 +175,8 @@
 # Running guests: converged to an isolated, filtered port
 # ============================================
 
-# A guest created before guests were isolated still runs on a port that is not
-# isolated, from which it can reach every new guest at layer 2. The command
+# A running guest may hold a bridge port that is not isolated and no filter,
+# and from such a port it can reach every isolated guest at layer 2. The command
 # (files/guest_converge.sh) isolates each running guest's port without dropping
 # its link, binds its filter live where libvirt accepts that, and writes both
 # into its saved definition, printing one JSON line per guest. Host preparation

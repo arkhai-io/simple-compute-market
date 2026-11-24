@@ -468,6 +468,41 @@ per-port rules from a host an earlier release prepared (5.3) is a compatibility 
 The `physical-provisioning` scenario "A host lacks a prerequisite of isolation" is held
 by 5.2's native preflight case, which names every missing item.
 
+**Pre-closeout triage, 69 F1 (decision, fix).** The chains matched only IPv4, so a
+running guest whose filter waits for its next start (D9) could reach the host's open
+ports over IPv6, and be forwarded, on a host whose `default` network carries IPv6. The
+owner chose to drop it in the policy (D8, "Settled at 69 F1"), over refusing such a
+bridge at host preparation or recording a limit, with no new real-host run (Risks).
+`files/guest_policy.sh` now runs, after the IPv4 transaction, an
+`ip6tables-restore -w --noflush` transaction filling `ARKHAI-GUEST-V6` with one drop and
+putting its jumps first in ip6tables' `INPUT` and `FORWARD` for `-i virbr0`, deleting
+any present by rule; it skips it, saying so, where `$PROC_ROOT/sys/net/ipv6` (`/proc` by
+default) is absent. The unit and the UFW hook run the same script, so the jumps are
+re-asserted with the IPv4 ones; nothing saves the IPv6 chain, which the unit restores at
+boot. The printed summaries name the chain. The `physical-provisioning` delta's
+requirement drops IPv6 from the bridge, with the scenario "A guest whose filter waits
+for its next start sends IPv6". `host_fakes`' `iptables` and `iptables-restore` also
+serve as `ip6tables` and `ip6tables-restore`, over rules of their own.
+`test_guest_policy.py` passed (unit, the real installer against the fakes; `make -C
+domains/vms/provisioning/iac test`, 233 passed, 15 native cases skipped without local
+Ansible). Its new cases: IPv6 dropped ahead of UFW's and libvirt's ip6tables jumps,
+the jumps first and single after both re-add theirs, no ip6tables call on a kernel
+without IPv6, and a refused IPv6 transaction failing the installer with the IPv4 policy
+standing; the rerun case and the printed summaries cover IPv6 too. `run test-before`
+at `b6c2d299b` (the test file against the earlier code and fakes): 8 failed, 22 passed,
+6 native skipped. The no-IPv6 message, the refused transaction's exit 0 and the
+summaries failed on the code; the three cases seeding ip6tables rules failed on the
+earlier fake's missing `family` argument. Real `ip6tables-restore` parsing is not
+exercised, as for the IPv4 transaction (5.2). `scripts/change-workflow run pre-commit`
+over both fixes: "after-functional-change …: passed, exit 0"; "pre-commit-functional
+…: passed, exit 0"; "pre-commit …: passed, exit 0". The fresh-context check found no
+defect in the script, its order or the design and delta; it found a comment's "one jump
+to each chain", untrue of a chain jumped from both built-ins, the role's claim that
+hardening saves the installed rules, untrue of the IPv6 chain, three lines left
+unwrapped, the refused-transaction case not holding the IPv4 policy, and the fake's
+`rules()` relaxed to return nothing for an unwritten table. All were fixed, the last by
+reverting it; nothing was declined.
+
 ## 6. Running guests converge through one installed command
 
 Replanned against the reviewed design (D18–D24, design review 41) after section 6 was
@@ -646,6 +681,13 @@ so a tap libvirt re-attaches before the guest restarts, as after a restart of th
 so no observation shows either way, and the saved definition keeps the isolation from
 the guest's next start. The 6a operator probe runs `/usr/local/sbin/arkhai-guest-converge`
 and reads its lines, `changed` and the three `filter` values among them.
+
+**Pre-closeout triage, 69 F2 (fix, accepted by default).** The comments heading
+`files/guest_converge.sh` and the convergence command in `tasks/guest-policy.yml`
+explained it as for a guest "created before guests were isolated", the feature's
+history. Both now state the current condition: a running guest may hold a bridge port
+that is not isolated and no filter, and an isolated port can still be reached from one
+that is not. Comments only; the IaC suite run for 69 F1 (section 5) passed over them.
 
 ## 6a. The real-host proof of guest isolation, as a scenario
 

@@ -3,9 +3,10 @@
 The rules template is rendered with Jinja2 as Ansible renders it, block
 trimming included, and its chains read rule by rule. The installer,
 `files/guest_policy.sh`, runs as its real shell against the stateful fake
-`iptables` and `iptables-restore` of `host_fakes`, over chains already holding
-the jumps UFW and libvirt install, so the order it leaves behind is read back
-from the fake's rules. The removal of per-port guest rules from a host runs as
+`iptables`, `ip6tables` and their restores of `host_fakes`, over chains
+already holding the jumps UFW and libvirt install, and over a /proc with or
+without IPv6, so the order it leaves behind is read back from the fakes'
+rules. The removal of per-port guest rules from a host runs as
 its real shell the same way. Where ansible-core 2.17 to 2.19 is
 installed, as in the native Ansible gate, the preconditions run through
 ansible-playbook against fake `virsh`, `virt-install` and `ebtables`, so
@@ -65,6 +66,19 @@ PRIVATE_DROPS = [
 ]
 INPUT_JUMP = "-A INPUT -i virbr0 -j ARKHAI-GUEST-IN"
 FORWARD_JUMP = "-A FORWARD -i virbr0 -j ARKHAI-GUEST-FWD"
+GUEST_V6 = ["-A ARKHAI-GUEST-V6 -m comment --comment arkhai-guest-isolation -j DROP"]
+INPUT6_JUMP = "-A INPUT -i virbr0 -j ARKHAI-GUEST-V6"
+FORWARD6_JUMP = "-A FORWARD -i virbr0 -j ARKHAI-GUEST-V6"
+
+# The jumps a host's ip6tables built-in chains may already hold: UFW's, and
+# libvirt's on a network declaring an IPv6 address.
+UFW_AND_LIBVIRT_V6 = [
+    "-A INPUT -j LIBVIRT_INP",
+    "-A INPUT -j ufw6-before-logging-input",
+    "-A INPUT -j ufw6-before-input",
+    "-A FORWARD -j LIBVIRT_FWO",
+    "-A FORWARD -j ufw6-before-forward",
+]
 
 # The jumps a prepared host's built-in chains already hold: UFW's on INPUT and
 # libvirt's on both, which accept a guest's packets once reached.
@@ -95,11 +109,13 @@ def _tasks(path: Path) -> list[dict]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def _run_sh(command: str, host: FakeHost, scripts: dict[str, str]) -> subprocess.CompletedProcess:
+def _run_sh(
+    command: str, host: FakeHost, scripts: dict[str, str], extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     """COMMAND run by `sh`, as the shell module and the unit run it, with the
-    host's fake commands first on PATH."""
+    host's fake commands first on PATH and EXTRA in its environment."""
     with fake_binaries(scripts) as bin_dir:
-        env = host.environment({"PATH": f"{bin_dir}:{os.environ['PATH']}"})
+        env = host.environment({"PATH": f"{bin_dir}:{os.environ['PATH']}", **(extra or {})})
         return subprocess.run(
             ["sh", "-c", command], capture_output=True, text=True, env=env, timeout=30
         )
@@ -157,13 +173,16 @@ class TestTheInstaller(unittest.TestCase):
         self.host = FakeHost(self.root / "host")
         self.rules = self.root / "guest-policy.rules"
         self.rules.write_text(_render(["10.0.5.20"]), encoding="utf-8")
+        # A kernel with IPv6, as its /proc shows it.
+        self.proc = self.root / "proc"
+        (self.proc / "sys/net/ipv6").mkdir(parents=True)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
     def _install(self, rules: Path | None = None) -> subprocess.CompletedProcess:
         command = shlex.join(["sh", str(INSTALLER), str(rules or self.rules)])
-        return _run_sh(command, self.host, self.host.binaries())
+        return _run_sh(command, self.host, self.host.binaries(), {"PROC_ROOT": str(self.proc)})
 
     def test_the_script_parses(self) -> None:
         result = subprocess.run(["sh", "-n", str(INSTALLER)], capture_output=True, text=True)
@@ -207,12 +226,71 @@ class TestTheInstaller(unittest.TestCase):
 
     def test_a_second_run_changes_nothing(self) -> None:
         self.host.set_rules("filter", UFW_AND_LIBVIRT)
+        self.host.set_rules("filter", UFW_AND_LIBVIRT_V6, family="ip6tables")
         self.assertEqual(self._install().returncode, 0)
         first = self.host.rules("filter")
+        first6 = self.host.rules("filter", family="ip6tables")
 
         self.assertEqual(self._install().returncode, 0)
 
         self.assertEqual(self.host.rules("filter"), first)
+        self.assertEqual(self.host.rules("filter", family="ip6tables"), first6)
+
+    def test_ipv6_from_the_bridge_is_dropped_ahead_of_ufw_and_libvirt(self) -> None:
+        self.host.set_rules("filter", UFW_AND_LIBVIRT_V6, family="ip6tables")
+
+        result = self._install()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rules = self.host.rules("filter", family="ip6tables")
+        self.assertEqual(_chain(rules, "INPUT"), [INPUT6_JUMP, *_chain(UFW_AND_LIBVIRT_V6, "INPUT")])
+        self.assertEqual(
+            _chain(rules, "FORWARD"), [FORWARD6_JUMP, *_chain(UFW_AND_LIBVIRT_V6, "FORWARD")]
+        )
+        self.assertEqual(_chain(rules, "ARKHAI-GUEST-V6"), GUEST_V6)
+        # The IPv4 chains stay out of ip6tables, and the IPv6 one out of iptables.
+        self.assertEqual(_chain(rules, "ARKHAI-GUEST-IN"), [])
+        self.assertEqual(_chain(self.host.rules("filter"), "ARKHAI-GUEST-V6"), [])
+
+    def test_after_ufw_and_libvirt_re_add_theirs_the_ipv6_jumps_are_first_again(self) -> None:
+        self.host.set_rules("filter", UFW_AND_LIBVIRT_V6, family="ip6tables")
+        self.assertEqual(self._install().returncode, 0)
+        rules = self.host.rules("filter", family="ip6tables")
+        self.host.set_rules("filter", [
+            "-A INPUT -j ufw6-before-input", "-A FORWARD -j LIBVIRT_FWO", *rules,
+        ], family="ip6tables")
+
+        result = self._install()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rules = self.host.rules("filter", family="ip6tables")
+        self.assertEqual(_chain(rules, "INPUT")[0], INPUT6_JUMP)
+        self.assertEqual(_chain(rules, "FORWARD")[0], FORWARD6_JUMP)
+        self.assertEqual(rules.count(INPUT6_JUMP), 1)
+        self.assertEqual(rules.count(FORWARD6_JUMP), 1)
+
+    def test_a_kernel_without_ipv6_gets_the_ipv4_policy_and_no_ip6tables_call(self) -> None:
+        (self.proc / "sys/net/ipv6").rmdir()
+        self.host.set_rules("filter", UFW_AND_LIBVIRT)
+
+        result = self._install()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(_chain(self.host.rules("filter"), "INPUT")[0], INPUT_JUMP)
+        self.assertFalse(any(c.startswith("ip6tables") for c in self.host.calls()))
+        self.assertIn("no IPv6 policy installed", result.stdout)
+
+    def test_a_refused_ipv6_transaction_fails_the_installer(self) -> None:
+        refusing = {**self.host.binaries(),
+                    "ip6tables-restore": "#!/bin/sh\necho 'ip6tables-restore: refused' >&2\nexit 1\n"}
+        command = shlex.join(["sh", str(INSTALLER), str(self.rules)])
+
+        result = _run_sh(command, self.host, refusing, {"PROC_ROOT": str(self.proc)})
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ip6tables-restore: refused", result.stderr)
+        # The IPv4 policy, installed first, stands.
+        self.assertEqual(_chain(self.host.rules("filter"), "INPUT")[0], INPUT_JUMP)
 
     def test_a_refilled_chain_holds_the_rules_rendered_now(self) -> None:
         """A seller's list changed between preparations: the chain is refilled
@@ -235,7 +313,7 @@ class TestTheInstaller(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("absent.rules", result.stderr)
         self.assertEqual(self.host.rules("filter"), UFW_AND_LIBVIRT)
-        self.assertFalse(any(c.startswith("iptables") for c in self.host.calls()))
+        self.assertFalse(any(c.startswith(("iptables", "ip6tables")) for c in self.host.calls()))
 
 
 class TestHostPreparationInstallsThePolicy(unittest.TestCase):
@@ -610,6 +688,7 @@ class TestNoPerPortGuestRuleRemains(unittest.TestCase):
                 printed = "\n".join(task["debug"]["msg"])
                 self.assertIn("ARKHAI-GUEST-IN", printed)
                 self.assertIn("ARKHAI-GUEST-FWD", printed)
+                self.assertIn("ARKHAI-GUEST-V6", printed)
                 for claim in ("isolation service", "BLOCKED-VM-SSH", "BLOCKED-BRIDGE-SSH",
                               "grep 192.168.122"):
                     self.assertNotIn(claim, printed)

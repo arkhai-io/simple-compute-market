@@ -404,6 +404,28 @@ kit's `iptables-restore` unit, which restores nothing at boot on a host with nei
 reads a seed ISO, and the host's SSH into a guest, frpc's proxy, and DNATed buyer SSH
 are connections the host opened or forwards, so none needs more.
 
+The same installer drops every IPv6 packet from the bridge, in a third chain jumped
+from the first position of ip6tables' `INPUT` and `FORWARD`, in its own
+`ip6tables-restore -w --noflush` transaction and re-asserted with the IPv4 jumps:
+
+```text
+-I INPUT 1 -i virbr0 -j ARKHAI-GUEST-V6
+-I FORWARD 1 -i virbr0 -j ARKHAI-GUEST-V6
+-A ARKHAI-GUEST-V6 -m comment --comment arkhai-guest-isolation -j DROP
+```
+
+A guest under `clean-traffic` sends no IPv6, since the filter drops every frame that
+is not IPv4 or ARP, so the drop takes nothing from a filtered guest. It closes the path
+of a running guest whose filter waits for its next start (D9): on a host whose
+`default` network declares an IPv6 address, libvirt leaves IPv6 enabled on `virbr0`,
+and that guest's IPv6 would reach the host's ports UFW opens, its SSH among them, and be
+forwarded, past chains that match only IPv4. libvirt's stock `default` declares none
+and disables IPv6 on the bridge, but the host kit keeps a network it finds. A kernel
+without IPv6 has no ip6tables filter table and no IPv6 to drop; the installer skips the
+transaction there. Settled at 69 F1, over refusing at host preparation a bridge that
+carries IPv6, a check made once that a later edit of the network escapes, and over
+recording the path as a limit, which leaves the requirement unmet.
+
 A VM create inserts its guest's two forwarding accepts for DNATed buyer SSH at
 `FORWARD`'s first position, ahead of the policy's jump. They match no packet a guest
 originates: the inbound accept requires `! -i virbr0`, and the reply accept
@@ -975,7 +997,10 @@ key when signing is not configured.
   A private-source buyer (O6) stays unproven under the create's masquerade, and on a
   target whose buyers reach guests only through a relay; its replies' passage rests on
   the static chain-order tests and O7. Live filter restoration (O9) may stay unproven
-  on a host whose libvirt refuses live filter changes.
+  on a host whose libvirt refuses live filter changes. D8's IPv6 drop is proven only by
+  the installer's tests against fake `ip6tables`, and rests for its effect on O3 to O5's
+  real-host proof of the same jump-first mechanism over IPv4; no real-host run probes
+  IPv6, which needs a target whose `default` network carries it (69 F1).
 
 ## Open Questions
 

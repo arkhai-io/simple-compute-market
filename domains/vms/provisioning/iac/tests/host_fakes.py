@@ -13,7 +13,8 @@ as the real commands answer:
   xtables lock, is accepted and changes nothing;
 - `iptables-restore --noflush` applies a table's chain declarations, appends,
   inserts and deletes to those rules in one transaction, changing nothing when
-  a command fails;
+  a command fails; `ip6tables` and `ip6tables-restore` are the same fakes over
+  rules of their own;
 - `virsh` keeps domains with their state, address, MAC, and storage, and the
   `default` network's DHCP reservations in `net-dumpxml` form; a domain given
   `interfaces` also has its running and saved definitions, each interface's
@@ -65,12 +66,17 @@ def refused(key):
     return True
 """
 
-_IPTABLES = _PREAMBLE + r'''
+# Installed as `iptables` and as `ip6tables`, each family keeping its own rules.
+_FAMILY = r'''
+FAMILY = "ip6tables" if Path(sys.argv[0]).name.startswith("ip6tables") else "iptables"
+'''
+
+_IPTABLES = _PREAMBLE + _FAMILY + r'''
 args = [a for a in sys.argv[1:] if a != "-w"]
 table = "filter"
 if args[:1] == ["-t"]:
     table, args = args[1], args[2:]
-path = STATE / f"iptables.{table}"
+path = STATE / f"{FAMILY}.{table}"
 rules = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 op = args[0]
 if op == "-S":
@@ -100,7 +106,7 @@ sys.exit(2)
 # and `-D CHAIN rule` deletes the first rule equal to it, or fails. Unlike the
 # real command, it stores each rule as written, not as iptables normalises it
 # (no implicit `-m udp`, no `/32`), and flushes a built-in chain declared too.
-_IPTABLES_RESTORE = _PREAMBLE + r'''
+_IPTABLES_RESTORE = _PREAMBLE + _FAMILY + r'''
 if sorted(a for a in sys.argv[1:] if a != "-w") != ["--noflush"]:
     print(f"fake iptables-restore: unsupported {sys.argv[1:]}", file=sys.stderr)
     sys.exit(2)
@@ -110,7 +116,7 @@ for number, line in enumerate(sys.stdin.read().splitlines(), start=1):
     if not line or line.startswith("#"):
         continue
     if line.startswith("*"):
-        path = STATE / f"iptables.{line[1:]}"
+        path = STATE / f"{FAMILY}.{line[1:]}"
         rules = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
         continue
     if line == "COMMIT":
@@ -426,6 +432,8 @@ class FakeHost:
             "iptables": _IPTABLES,
             "iptables-restore": _IPTABLES_RESTORE,
             "iptables-save": _IPTABLES_SAVE,
+            "ip6tables": _IPTABLES,
+            "ip6tables-restore": _IPTABLES_RESTORE,
             "virsh": _VIRSH,
             "bridge": _BRIDGE,
             "ufw": _UFW,
@@ -437,13 +445,14 @@ class FakeHost:
     def environment(self, base: dict[str, str]) -> dict[str, str]:
         return {**base, "FAKE_HOST_STATE": str(self.state)}
 
-    def set_rules(self, table: str, rules: list[str]) -> None:
-        (self.state / f"iptables.{table}").write_text(
+    def set_rules(self, table: str, rules: list[str], family: str = "iptables") -> None:
+        (self.state / f"{family}.{table}").write_text(
             "".join(rule + "\n" for rule in rules), encoding="utf-8"
         )
 
-    def rules(self, table: str) -> list[str]:
-        return (self.state / f"iptables.{table}").read_text(encoding="utf-8").splitlines()
+    def rules(self, table: str, family: str = "iptables") -> list[str]:
+        """TABLE's rules as FAMILY (`iptables` or `ip6tables`) holds them."""
+        return (self.state / f"{family}.{table}").read_text(encoding="utf-8").splitlines()
 
     def set_virsh(
         self,

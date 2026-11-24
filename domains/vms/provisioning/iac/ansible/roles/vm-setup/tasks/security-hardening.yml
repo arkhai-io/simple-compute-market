@@ -647,7 +647,7 @@
   debug:
     msg:
       - "=== VM Security Hardening Applied ==="
-      - "1. Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD first in INPUT and FORWARD: a guest reaches only DHCP and DNS on its host, no other guest, and no link-local or private destination but {{ guest_allowed_private_destinations | join(', ') if guest_allowed_private_destinations else 'none listed' }}"
+      - "1. Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD first in INPUT and FORWARD: a guest reaches only DHCP and DNS on its host, no other guest, and no link-local or private destination but {{ guest_allowed_private_destinations | join(', ') if guest_allowed_private_destinations else 'none listed' }}; ARKHAI-GUEST-V6 first in ip6tables' INPUT and FORWARD drops all IPv6 from the guests' bridge"
       - "2. Guest policy re-installed at boot, after libvirt starts and after UFW reloads (arkhai-guest-policy.service, /etc/ufw/after.init)"
       - "3. Iptables rules saved persistently"
       - "4. UFW allows the host's connections out to its guests: {{ 'Yes' if ufw_vm_security.stdout is defined and 'UFW allows' in ufw_vm_security.stdout else 'No' }}"
@@ -656,7 +656,7 @@
       - "7. SSH daemon configuration hardened"
       - "8. Fail2ban intrusion prevention system installed and configured"
       - ""
-      - "To verify: sudo iptables -S INPUT | head -2; sudo iptables -S FORWARD | head -2; sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD"
+      - "To verify: sudo iptables -S INPUT | head -2; sudo iptables -S FORWARD | head -2; sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD; sudo ip6tables -S ARKHAI-GUEST-V6"
       - "Fail2ban status: sudo fail2ban-client status"
   tags: security_hardening
 
@@ -680,7 +680,7 @@
       - "8. Installation script has been cleaned up"
       - ""
       - "SECURITY FEATURES ACTIVE:"
-      - "  ✓ Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD (iptables) and sshd DenyUsers for the guest subnet"
+      - "  ✓ Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD (iptables), ARKHAI-GUEST-V6 (ip6tables), and sshd DenyUsers for the guest subnet"
       - "  ✓ Libvirt security hardening: {{ 'applied' if not (skip_libvirt_security | default(true) | bool) else 'skipped (skip_libvirt_security=true)' }}"
       - "  ✓ SSH connection monitoring configured"
       - "  ✓ Fail2ban monitoring and auto-banning suspicious IPs"
@@ -698,7 +698,7 @@
       - "  - Use the vm-management role to download cloud images and manage VMs"
       - ""
       - "Security Verification:"
-      - "  - Check the guest policy: sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD"
+      - "  - Check the guest policy: sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD; sudo ip6tables -S ARKHAI-GUEST-V6"
       - "  - Check it leads: sudo iptables -S INPUT | head -2; sudo iptables -S FORWARD | head -2"
       - "  - Check SSH config: sudo sshd -T | grep -i deny"
       - "  - Check fail2ban: sudo fail2ban-client status"
