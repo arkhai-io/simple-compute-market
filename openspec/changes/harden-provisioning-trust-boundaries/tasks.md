@@ -1155,7 +1155,7 @@ the run's findings name (sections 5, 6 and 6a's files).
   is cloud-init's for `root`. The tenant user is made later in the same file
   (`useradd`, a generated password by `chpasswd`, `usermod -aG sudo`), so its sudo asks
   for that password.
-- [ ] 7a.2 Fix what the run finds. For each failed observation, or each unproven one
+- [x] 7a.2 Fix what the run finds. For each failed observation, or each unproven one
   D22 does not admit, diagnose it from the summary, fix the code it names in the section
   that owns it — the guest interface, the policy chains or their re-assertion (5), the
   convergence command (6), the scenario or its probes (6a) — with a focused test at the
@@ -1166,7 +1166,7 @@ the run's findings name (sections 5, 6 and 6a's files).
   order after libvirtd, `ufw reload` running `after.init`) are discharged by O2 and O7
   being made, or each becomes a finding here. (D7, D8, D9, D22.) Verify: the focused
   tests of each fix, and a recorded run meeting D22.
-  In progress; it stays open until a recorded run meets D22.
+  Three runs; the third meets D22 (below).
   **Run 1's finding: the guest probe's sudo (6a).** The buyer's tenant user has sudo
   through the `sudo` group, with a password. The deal delivers that password to the
   buyer: settle status's `tenant_credentials` carry `password` (the VM storefront's
@@ -1266,7 +1266,8 @@ the run's findings name (sections 5, 6 and 6a's files).
   an `ETH_P_ALL` socket saw five: the SYN and its retransmits. It also confirmed the
   forward path is as designed:
   - FORWARD jumps to the guest chain first;
-  - the listed accept counted 15 packets, five attempts in each of three stages;
+  - the listed accept counted 15 packets, which the deployment read as five attempts
+    in each of three stages;
   - no other forward-hook table drops;
   - forwarding is on, and the route goes via a gateway on that interface.
 
@@ -1310,11 +1311,89 @@ the run's findings name (sections 5, 6 and 6a's files).
   that on a busy uplink the socket's buffer could overflow during the 30 seconds and
   drop the guest's SYN. That would be a false failure, never a false pass, so it is
   left for a run to show.
-- [ ] 7a.3 Verification point. System: the recorded `e2e_vm_guest_isolation` run
+
+  **Run 3** (system, external topology): `guest-isolation-20261124T140115Z`, commit
+  `8e38ee217`, the host re-prepared from that commit's host kit, libvirt 10.0.0. The
+  module: 61 passed, 1 skipped, 0 failed (16m10s). Runs 1 and 2 are superseded.
+  - O1 made: ARP, ICMP and TCP from one guest to the other, directly and through the
+    gateway, refused.
+  - O2 made: the address claim dropped while the other buyer still reaches its guest,
+    and the filter's parameters present in each guest's live definition.
+  - O3 made: DHCP and DNS pass, and the host port got no answer while
+    `ARKHAI-GUEST-IN`'s closing drop counted packets. That drop is a catch-all, so
+    the guests' own broadcast or multicast may also count there (the 6a handoff).
+  - O4 made: the metadata address is refused by its drop, whose counter rose.
+  - O5 made: the refused destination is refused by its drop, whose counter rose. The
+    listed one is admitted by its accept, whose counter rose, and the guest's packets
+    to it were seen leaving on the routed interface. The deployment reports 15 seen
+    in each of the three stages and attributes them to five attempts and their
+    retransmits; the scenario reports only the count.
+  - O6 unproven: the target's buyers reach its guests through a relay (09k8), the
+    run's only skip.
+  - O7 made: O3–O5 held, with both jumps first, after a libvirtd restart and after a
+    UFW reload.
+  - O8 made: each fixture step exited 0, and the host read the guest planted (port
+    not isolated, saved definition stripped). After convergence, which reported the
+    port isolated, the filter live and the saved definition carrying both, the host
+    read the port isolated from `bridge` and the saved definition carrying both. The
+    heartbeat's longest gap and the guest-to-guest refusals held.
+  - O9 made: the filter was bound live again on libvirt 10.0.0.
+
+  Judged against D22: met. O1–O5, O7 and O8 are made, O6 is unproven only for want of
+  a private-source buyer route, and O9 is made.
+  Section 5's handoff items are discharged now that O2 and O7 are made, as this task
+  reads them. One limit stays, on real `iptables-restore --noflush`: the run shows
+  each jump first in its built-in chain and the policy's decisions holding after the
+  restart and the reload, not that nothing was left behind.
+  - `jump_faults` reads only the first rule, so a leftover duplicate jump lower down
+    would pass.
+  - `deciding_rule` takes the first matching rule, so an `ARKHAI-GUEST-FWD` refilled
+    without being flushed, its rules doubled, would pass too.
+
+  Either leftover would change no decision: a packet would meet the same rules again
+  and be decided the same way. So this is recorded here, not fixed.
+
+  Done. Each run's finding was diagnosed from its summary and fixed in the section
+  that owns it, 6a both times, with a focused unit test (runs 1 and 2 above). The
+  third run meets D22. No finding needed a decision D7, D8, D9 or D22 does not make.
+- [x] 7a.3 Verification point. System: the recorded `e2e_vm_guest_isolation` run
   meeting D22 (7a.1, or a later run 7a.2 records). Unit, library integration: the suites of whatever 7a.2 changed,
   as their sections name them.
   End-to-end: `e2e_vm_guest_isolation` on the deployment's real host, in no lane; no
   lane scenario exercises it.
+  Done. System: run 3, `guest-isolation-20261124T140115Z` at `8e38ee217`, meets D22
+  (7a.2). 7a.2 changed only e2e harness code: section 6a's scenario, its probe and
+  its driver, and the shared SSH helper (`ssh_access.py`). Its suites pass at
+  `8e38ee217`:
+  - `test_vm_guest_isolation.py`, 82: unit, but for the module's two
+    pytest-subprocess static configuration tests;
+  - `test_ssh_access.py` and `test_real_vm_lane.py`, unit;
+  - the whole e2e unit suite among `make test`, which `run pre-commit`'s
+    pre-commit-functional ran: "local evidence for the tree c0b38146f6aa …: PASSED",
+    "pre-commit-functional at 201c4c0bd…: passed, exit 0". That was the tree
+    committed as `8e38ee217`.
+
+  7a.2 changed nothing under sections 5 or 6, so neither section's suites are owed
+  again. End-to-end confirmed: `e2e_vm_guest_isolation` ran on the deployment's real
+  host, in no lane; no lane scenario exercises section 7a. No owed evidence.
+
+**Handoff.** Section 7a is complete. The real-host evidence for D7, D8 and D9 is run 3
+(7a.2). Closeout's promotion (8.9) should name `e2e_vm_guest_isolation` in `TESTING.md`
+(the 6a handoff). It should also carry what a target needs for this module to
+`VALIDATION_RUNBOOK.md` "24. Describe The Target" and `e2e-tests/README.md`, where
+8.9 already places the section:
+- an operator route whose user may `sudo -n` Python as root, reaching the KVM host's
+  own sshd (the runs used one);
+- `private_destinations` whose listed address host preparation was given in
+  `guest_allowed_private_destinations` (the runs used one);
+- a listed address the host sends to rather than holding for ARP: through a gateway,
+  or answered on its link (the probe's egress watch, not shown by a run);
+- UFW active, or O7's reload stage skips;
+- the run's guests alone on the host (D21's precondition).
+
+Guest probes get root with the tenant password each deal delivers, so no target
+needs to change the guest's sudo. Still for the round's triage: design.md's Context
+says the tenant user has passwordless sudo, which run 1 showed is false.
 
 ## 8. Closeout
 
