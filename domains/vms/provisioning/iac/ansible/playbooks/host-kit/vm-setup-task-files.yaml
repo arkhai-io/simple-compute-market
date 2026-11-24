@@ -68,6 +68,11 @@
         name: ../../roles/vm-setup
         tasks_from: kvm-network
 
+    - name: Parse the guest network policy tasks
+      import_role:
+        name: ../../roles/vm-setup
+        tasks_from: guest-policy
+
     - name: Parse the security hardening tasks
       import_role:
         name: ../../roles/vm-setup

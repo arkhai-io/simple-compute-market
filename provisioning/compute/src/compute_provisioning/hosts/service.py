@@ -27,12 +27,14 @@ carries a protected value's scheme only.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, Optional
 
+from market_fulfillment import begin_sqlite_write_transaction
 from market_resource_pools import ResourcePool
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from .connection import ConnectionCodecs, ConnectionEnvelope
@@ -165,7 +167,12 @@ def _view(host: Host) -> HostResponse:
 
 def _execution_host(host: Host) -> ExecutionHost:
     """A host as an internal read returns it: its full protected envelope."""
-    return ExecutionHost(host_id=host.host_id, pool_id=host.pool_id, connection=host.connection())
+    return ExecutionHost(
+        host_id=host.host_id,
+        pool_id=host.pool_id,
+        connection=host.connection(),
+        host_key_adoption_pending=host.host_key_adoption_pending,
+    )
 
 
 class HostAuthority:
@@ -180,11 +187,13 @@ class HostAuthority:
         codecs: ConnectionCodecs,
         pool_change_hooks: Sequence[PoolChangeHook] = (),
         connection_change_hooks: Sequence[ConnectionChangeHook] = (),
+        pin_fields: Mapping[str, str] | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._codecs = codecs
         self._pool_change_hooks = tuple(pool_change_hooks)
         self._connection_change_hooks = tuple(connection_change_hooks)
+        self._pin_fields = dict(pin_fields or {})
 
     # ------------------------------------------------------------------
     # Reads
@@ -301,6 +310,14 @@ class HostAuthority:
         """
         return self._session_factory()
 
+    def lock_existing_hosts_in_session(self, db: Session, host_ids: Sequence[str]) -> None:
+        """Take overlapping batches' row locks in host ID order."""
+        if host_ids and db.get_bind().dialect.name != "sqlite":
+            db.execute(
+                select(Host.host_id).where(Host.host_id.in_(host_ids))
+                .order_by(Host.host_id).with_for_update()
+            ).all()
+
     def put_host_in_session(
         self,
         db: Session,
@@ -340,7 +357,9 @@ class HostAuthority:
         stated = pool_id is not POOL_UNSTATED
         if stated and pool_id is not None:
             self._require_pool_exists(db, pool_id)
-        existing = db.query(Host).filter(Host.host_id == host_id).one_or_none()
+        existing = (
+            db.query(Host).filter(Host.host_id == host_id).with_for_update().one_or_none()
+        )
         if existing is None:
             host = Host(
                 host_id=host_id,
@@ -355,6 +374,15 @@ class HostAuthority:
                 db.flush()
                 self._move_to_pool(db, host, pool_id)
             return "created"
+        connection_db = db.connection()
+        # SQLite does not lock rows on SELECT. Reserve the writer before using
+        # the stored pin as the basis of an update, then refresh the snapshot.
+        if (
+            connection_db.dialect.name == "sqlite"
+            and not connection_db.connection.driver_connection.in_transaction
+        ):
+            begin_sqlite_write_transaction(db)
+            db.refresh(existing)
         stored = existing.connection()
         built = self._build(connection, previous=stored)
         target_pool = pool_id if stated else existing.pool_id
@@ -376,6 +404,8 @@ class HostAuthority:
             return "unchanged"
         if not same_connection:
             existing.set_connection(built)
+        if self._states_host_pin(connection):
+            existing.host_key_adoption_pending = False
         moved = self._move_to_pool(db, existing, target_pool)
         if not same_connection and not moved:
             self._connection_changed(db, existing)
@@ -404,11 +434,16 @@ class HostAuthority:
         explicitly, it unplaces the host, through the pool-change hooks.
         """
         with self._session_factory() as db:
-            host = self._require_host(db, host_id)
+            begin_sqlite_write_transaction(db)
+            host = db.get(Host, host_id, with_for_update=True)
+            if host is None:
+                raise HostNotFoundError(host_id)
             if data.connection is not None:
                 host.set_connection(
                     self._build(data.connection, previous=host.connection())
                 )
+                if self._states_host_pin(data.connection):
+                    host.host_key_adoption_pending = False
             if data.enabled is not None:
                 host.enabled = data.enabled
             moved = False
@@ -419,6 +454,77 @@ class HostAuthority:
             db.commit()
             db.refresh(host)
             return _view(host)
+
+    def adopt_host_key(
+        self, observed: ExecutionHost, key: str
+    ) -> ExecutionHost:
+        """Record the first observed key while the host still awaits adoption."""
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            host = db.get(Host, observed.host_id, with_for_update=True)
+            if host is None:
+                raise HostNotFoundError(observed.host_id)
+            if not host.host_key_adoption_pending:
+                return _execution_host(host)
+            stored = host.connection()
+            if stored != observed.connection:
+                raise ConnectionChangeRefusedError(
+                    f"host {host.host_id!r}: connection changed while checking its host key"
+                )
+            field = self._pin_fields.get(stored.kind)
+            if field is None:
+                raise ValueError(f"connection kind {stored.kind!r} does not carry host pins")
+            built = self._codecs.build(
+                stored.kind, stored.version, {**stored.public, field: [key]}, {}, previous=stored
+            )
+            db.execute(
+                update(Host)
+                .where(Host.host_id == host.host_id, Host.host_key_adoption_pending.is_(True))
+                .values(connection_public=dict(built.public), host_key_adoption_pending=False)
+            )
+            db.refresh(host)
+            result = _execution_host(host)
+            db.commit()
+            return result
+
+    def capture_host_key(
+        self, observed: ExecutionHost, key: str, *, replace: bool = False
+    ) -> tuple[ExecutionHost, bool]:
+        """Store an operator-confirmed pin while the observed endpoint still applies.
+
+        Returns the current host and whether the write was made. A caller seeing
+        an existing pin with replacement disabled must report it as a conflict.
+        """
+        with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            host = db.get(Host, observed.host_id, with_for_update=True)
+            if host is None:
+                raise HostNotFoundError(observed.host_id)
+            stored = host.connection()
+            field = self._pin_fields.get(stored.kind)
+            if field is None:
+                raise ValueError(f"connection kind {stored.kind!r} does not carry host pins")
+            if stored.public.get(field) and not replace:
+                return _execution_host(host), False
+            previous = observed.connection
+            before_probe = {name: value for name, value in previous.public.items() if name != field}
+            current = {name: value for name, value in stored.public.items() if name != field}
+            if (stored.kind, stored.version, current) != (previous.kind, previous.version, before_probe):
+                raise ConnectionChangeRefusedError(
+                    f"host {host.host_id!r}: connection changed while checking its host key"
+                )
+            built = self._codecs.build(
+                stored.kind, stored.version, {**stored.public, field: [key]}, {}, previous=stored
+            )
+            host.connection_public = dict(built.public)
+            host.host_key_adoption_pending = False
+            result = _execution_host(host)
+            db.commit()
+            return result, True
+
+    def _states_host_pin(self, connection: ConnectionSubmission) -> bool:
+        field = self._pin_fields.get(connection.kind)
+        return field is not None and field in connection.public
 
     def enable_host(self, host_id: str) -> HostResponse:
         return self._set_enabled(host_id, True)
@@ -448,6 +554,8 @@ class HostAuthority:
             return []
         applied: list[str] = []
         with self._session_factory() as db:
+            begin_sqlite_write_transaction(db)
+            self.lock_existing_hosts_in_session(db, [entry.host_id for entry in entries])
             for entry in entries:
                 # An inventory entry cannot state ``enabled``, so an existing
                 # host keeps its own.

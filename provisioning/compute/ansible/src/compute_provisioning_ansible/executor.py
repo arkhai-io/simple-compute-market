@@ -15,10 +15,12 @@ the registered host it names.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from compute_provisioning.hosts import ExecutionHost
+from compute_provisioning.hosts.service import ConnectionChangeRefusedError, HostNotFoundError
 from compute_provisioning.jobs import (
     JobFailure,
     JobOutcome,
@@ -28,7 +30,9 @@ from compute_provisioning.jobs import (
 )
 
 from .codec import AnsibleJobCodec, matches_any, write_extra_vars
-from .runner import AnsibleError, inventory_target, redact_ansible_output
+from .mock import MockAnsibleRunner
+from .host_keys import HostKeyRefusal, key_fingerprint, observe_host_key
+from .runner import AnsibleError, AnsibleRunner, InventoryTarget, inventory_target, redact_ansible_output
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +67,13 @@ class AnsibleJobExecutor:
         *,
         timeout_seconds: int,
         additional_non_retryable_errors: Iterable[str] = (),
+        adopt_host_key: Callable[[ExecutionHost, str], ExecutionHost] | None = None,
     ) -> None:
         self._runner = runner
         self._codec = codec
         self._playbook_path = playbook_path
         self._timeout_seconds = timeout_seconds
+        self._adopt_host_key = adopt_host_key
         self._additional_non_retryable_errors = tuple(additional_non_retryable_errors)
 
     @property
@@ -92,8 +98,18 @@ class AnsibleJobExecutor:
 
     async def execute(self, run: JobRun) -> JobOutcome:
         plan = self._codec.prepare(run)
-        host = inventory_target(run.host)
         runner = self._runner
+        host = inventory_target(run.host, include_host_keys=not isinstance(runner, MockAnsibleRunner))
+        if issubclass(type(runner), AnsibleRunner):
+            runner.validate_authentication_key(host)
+            try:
+                host = await self._verified_target(run.host, host)
+            except HostKeyRefusal as exc:
+                return JobFailure(
+                    error=ProvisioningErrorEnvelope(
+                        code="host_key_refused", message=str(exc), retryable=False
+                    )
+                )
         vars_path = write_extra_vars(plan)
         # Owns the inventory and any decrypted key file. It and the variables
         # file are removed in the finally below whether the run succeeds,
@@ -146,6 +162,33 @@ class AnsibleJobExecutor:
             if inventory is not None:
                 inventory.cleanup()
             vars_path.unlink(missing_ok=True)
+
+
+    async def _verified_target(
+        self, registered: ExecutionHost, target: InventoryTarget
+    ) -> InventoryTarget:
+        timeout = min(self._timeout_seconds, 10)
+        if registered.host_key_adoption_pending and self._adopt_host_key is not None:
+            discovery = await observe_host_key(target, pins=None, timeout_seconds=timeout)
+            if not discovery.verified or discovery.key is None:
+                raise HostKeyRefusal(target, discovery.presented, discovery.reason)
+            try:
+                committed = self._adopt_host_key(registered, discovery.key)
+            except (ConnectionChangeRefusedError, HostNotFoundError):
+                raise HostKeyRefusal(target, discovery.presented, discovery.reason) from None
+            refreshed = inventory_target(committed)
+            if (refreshed.ssh_host, refreshed.ssh_port) != (target.ssh_host, target.ssh_port):
+                raise HostKeyRefusal(target, discovery.presented, discovery.reason)
+            target = refreshed
+            if discovery.presented not in {key_fingerprint(pin) for pin in target.host_keys}:
+                raise HostKeyRefusal(target, discovery.presented, discovery.reason)
+
+        if not target.host_keys:
+            raise HostKeyRefusal(target, None)
+        check = await observe_host_key(target, pins=target.host_keys, timeout_seconds=timeout)
+        if not check.verified:
+            raise HostKeyRefusal(target, check.presented, check.reason)
+        return target
 
     async def cancel(self, handle: Mapping[str, Any]) -> None:
         """Ask the runner to stop the run ``handle`` names.

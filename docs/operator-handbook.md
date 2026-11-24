@@ -180,8 +180,8 @@ stacks by the file the stack mounts and names with
 `PROVISIONING_HOST_DEFINITIONS_PATH`. Each entry has the host registration
 API's field names: `host_id`, an optional `pool_id`, an optional `enabled`, and
 a `connection` of `kind`, a required `version`, and `public` — for `ssh`,
-`ssh_host`, `ssh_user`, `ssh_port`, `public_host`, `public_port`, and
-`key_path`:
+`ssh_host`, `ssh_user`, `ssh_port`, `public_host`, `public_port`, `key_path`,
+and `host_keys`:
 
 ```yaml
 hosts:
@@ -189,12 +189,14 @@ hosts:
     pool_id: vm-default
     connection:
       kind: ssh
-      version: 2
+      version: 3
       public:
         ssh_host: 10.0.0.5
         public_host: 203.0.113.9
         ssh_user: ubuntu
         key_path: /home/appuser/.ssh/id_ed25519
+        host_keys:
+          - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK0p…
 ```
 
 The addresses are documentation values. The contract is the
@@ -234,13 +236,24 @@ membership".
   for a new host. An entry stating `connection.secrets` is refused. Registering
   a host with key material is done through the API: `POST /api/v1/hosts` with
   `secrets`, or the INI import route's `embedded` mode.
-- **Every `ssh` connection is version 2.** A host stored at version 1 runs
-  nothing until it is submitted again at version 2: through the host API's
+- **`host_keys` is the host's pin.** It lists the host's OpenSSH public keys,
+  each its type and base64 without a comment; an empty list, a malformed key or
+  an unknown type is refused, naming the field. The Ansible executor checks the
+  host against its pin before every job and connectivity check, and refuses a
+  host with no pin ([Capturing and rotating a host key](#capturing-and-rotating-a-host-key)).
+  An entry omitting `host_keys` keeps the stored pin, whatever else it changes,
+  `ssh_host` and `ssh_port` included, since the key identifies the machine
+  rather than its route; an entry stating it replaces the pin. The export
+  carries each host's pin, and the INI import, which carries none, keeps it.
+- **Every `ssh` connection is version 3.** A host stored at an earlier version
+  runs nothing until it is submitted again at version 3: through the host API's
   update (`PUT /api/v1/hosts/{host_id}`), restating every stored public field,
   `key_path` included where the host has one, or an import naming the same key.
   Until then, once any Ansible executor is real, system status's `ansible`
   component is not ready, its reasons naming the host and the version served,
-  and the host has no `ssh_keys` entry.
+  and the host has no `ssh_keys` entry. The upgrade's migration rewrites every
+  stored connection to version 3
+  ([What the upgrade from v0.3.0 changes](#what-the-upgrade-from-v030-changes)).
 - **A host record describes how to reach a machine, not its hardware.** No host
   write, from a document, an import route, or the host API, declares capacity;
   declare the machine in a capacity document or through the capacity API, naming
@@ -362,6 +375,82 @@ original: configure the key the host's key was protected under, which recovers
 every host it protected, or configure a new one and submit each affected host's
 private key again.
 
+#### Capturing and rotating a host key
+
+The Ansible executor reaches a host only when the key it presents matches the
+host's pin, its connection's `host_keys`. Before a job's recorded start it makes
+one SSH connection that runs nothing on the host, against a transient
+`known_hosts` holding the pin under `[ssh_host]:ssh_port`; a host behind a
+management tunnel is checked at its tunnel port. A host is pinned in one of two
+ways:
+
+- **State the key** at registration, in the host document or the host API's
+  connection, read from the host's console or its provider — on the host,
+  `/etc/ssh/ssh_host_ed25519_key.pub` — rather than over the network the pin
+  protects.
+- **Capture it** once the host is registered. Its connectivity check
+  (`GET /api/v1/hosts/{host_id}/connectivity`) reports, for an unpinned host,
+  the key the host presents, storing nothing:
+
+  ```json
+  {"host": "kvm1", "reachable": true, "detail": "kvm1 | SUCCESS …",
+   "host_key": {"endpoint": "[10.0.0.5]:22", "pinned": false,
+                "presented": "ssh-ed25519 SHA256:Q1m9xkP3…"}}
+  ```
+
+  Compare that fingerprint with the one the host shows you independently, such
+  as `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` at its console, and only
+  when they match record it, with the `admin` role:
+
+  ```bash
+  curl … -X POST /api/v1/hosts/kvm1/host-keys/capture \
+    -d '{"fingerprint": "SHA256:Q1m9xkP3…"}'
+  ```
+
+  The family client's `capture_host_key(host_id, fingerprint, replace=False)`
+  makes the same call. The capture probes the host again and records the key
+  only when it presents the fingerprint you named, answering the endpoint and
+  the pinned fingerprints. It answers 404 for an unknown host, 422 for a host
+  whose connection kind presents no key or for a malformed fingerprint (not
+  `SHA256:` and a base64 digest), and, recording nothing, 409 with a `code`:
+  `host_key_mismatch`, with the endpoint and the fingerprint presented;
+  `host_key_pinned`, with the pinned fingerprints, for a host already pinned;
+  or `no_host_key_presented`, with the endpoint and the probe's reason, when the
+  probe reached no SSH handshake.
+
+For a pinned host the connectivity check reports whether the key matched, and a
+mismatch answers `reachable: false` with the refusal as its `detail`. A probe
+that reaches no handshake reports `host_key` null with its reason in `detail`.
+Once any Ansible executor is real, system status's `ansible` component is not
+ready while an enabled host has no pin, naming the host and its endpoint, and
+lists the hosts pending adoption ([What the upgrade from v0.3.0
+changes](#what-the-upgrade-from-v030-changes)) in `hosts_pending_key_adoption`,
+which do not make it not ready.
+
+**Rotating a key.** State the new keys in the host document or through the host
+API, or capture the new key with `"replace": true`. To rotate without a refusal
+between, state the old key and the new one together, change the host's key, and
+then state the new key alone.
+
+**Recovering a host-key refusal.** A job against a host presenting another key,
+or with no pin, fails before its execution starts, unretried, and runs nothing on
+the host. Its error names the host, its endpoint, the presented and pinned
+fingerprints, and how to recover:
+
+```text
+host 'kvm1' at '[10.0.0.5]:22': SSH host key verification refused (presented: ssh-ed25519 SHA256:…; pinned: ssh-ed25519 SHA256:…). Verify the host fingerprint independently and capture or state its host key.
+```
+
+Find out why the key changed before trusting it: a reinstalled or replaced
+machine, a port forwarded to another machine, or an interception. Once you have
+confirmed the new key from the host itself, replace the pin as for a rotation. A
+teardown refused this way counts as never started, so it runs again under a new
+job once the host is pinned, while its lease stays `releasing`
+([`physical-provisioning`, "Proof-driven release"](../openspec/specs/physical-provisioning/architecture.md#proof-driven-release)).
+A key that changes
+between that check and the playbook fails the playbook as started, and a teardown
+so failed waits for you to verify the host and force-release its lease.
+
 ### Capacity definitions
 
 A capacity document holds a top-level `resources` list. It is configured by
@@ -454,6 +543,16 @@ redacted unless an operator configures otherwise".
   is the Ansible controller, never on a managed host: whoever can read that
   container's filesystem can read it. Your file replaces the packaged one whole,
   so restate any of its settings you rely on.
+- **Host-key verification is rendered per host, and no configuration turns it
+  off.** Each inventory line the service writes states
+  `ansible_host_key_checking=true`, `ansible_ssh_args` with the service's own
+  baseline, and `ansible_ssh_common_args` naming the job's transient
+  `known_hosts` with `GlobalKnownHostsFile=/dev/null` and
+  `StrictHostKeyChecking=yes`. Host variables outrank any configuration, so a
+  file of your own stating `host_key_checking = False`, or its own `ssh_args`,
+  changes neither, and neither does the packaged configuration's own
+  `host_key_checking = False`
+  ([Capturing and rotating a host key](#capturing-and-rotating-a-host-key)).
 
 ## Payments access
 
@@ -845,6 +944,14 @@ For each service, in its own deployment:
    the init container's or the container's log names the migration that failed,
    and the migrations before it stay applied.
 4. **Verify** with `--check`, which now exits 0, and the service's health.
+5. **For compute provisioning, pin or adopt its hosts.** The upgrade marks every
+   host it holds pending adoption; check system status's
+   `hosts_pending_key_adoption`, and pin any host you would rather not adopt on
+   first contact, as "What the upgrade from v0.3.0 changes" describes.
+6. **Prepare every VM host again with this release's host kit** (`vm-setup.yaml`)
+   before the release at which guest convergence retires
+   ([the release handbook, "Compatibility to retire"](release-handbook.md#compatibility-to-retire)):
+   it installs the guest policy and converges the guests already running.
 
 To roll back, deploy the earlier image over the backup taken in step 1, never
 over the migrated database.
@@ -935,11 +1042,37 @@ sequence:
 - **Host connections.** Compute provisioning rewrites every host's `ssh`
   connection stored at version 1 — which v0.3.0 itself wrote, and refuses, so that
   every job dispatched to such a host failed before any playbook ran — to version
-  2, with the same address, user, port and key. A host whose stored fields version
-  2 refuses fails the migration naming it, and nothing is rewritten: correct that
+  2, and then every connection at version 2 to version 3, with the same address,
+  user, port and key and no `host_keys`. A host whose stored fields version 3
+  refuses fails the migration naming it, and nothing is rewritten: correct that
   host from the backup's values, or remove it, then upgrade again. After the
-  upgrade a host submission must state its connection's `version`; one stating
-  none is refused, as is version 1.
+  upgrade a host submission must state its connection's `version`, 3; one stating
+  none, or another, is refused.
+- **Hosts are adopted by their first check.** Every host the migration rewrites
+  is marked pending adoption. Its first job, before its recorded start, or its
+  first connectivity check connects running nothing and sending no credential,
+  records the key the host presents as its pin, and clears the mark; whichever
+  adoption commits first wins, and every job then checks against that committed
+  pin. What it trusts is the host's first answer after the upgrade, which is
+  what the host was trusted with on every contact before it. To trust none, pin
+  each host before its first job, by stating its `host_keys` or capturing its
+  key ([Capturing and rotating a host key](#capturing-and-rotating-a-host-key));
+  either clears the mark, and a capture after an adoption answers
+  `host_key_pinned` unless it states `replace`. A host registered after the
+  upgrade is never marked, so it is refused until pinned. Adoption retires at a
+  stated release ([the release handbook, "Compatibility to retire"](release-handbook.md#compatibility-to-retire));
+  a host still pending then is refused until you pin it.
+- **VM guests are isolated.** This release's host kit puts every new guest on an
+  isolated bridge port under libvirt's `clean-traffic` filter and installs the
+  guest policy, so a guest reaches no other guest, only DHCP and DNS on its host,
+  and no link-local or private destination unless
+  `guest_allowed_private_destinations` lists it; it needs libvirt 6.1,
+  virt-install 3.0, and `ebtables`, and refuses a host lacking any. Preparing an
+  upgraded host again with it converges every running guest live, naming any it
+  could not, and removes the per-port guest rules an earlier release installed
+  (the VM IaC README's "Guest network isolation"). Prepare every VM host again
+  before guest convergence retires: a guest never converged keeps a port that
+  is not isolated until it is torn down.
 - **The stalled-teardown grace.** `lease_watchdog_grace_period_seconds` defaults
   to 3600 in the service and both charts, sized for teardowns of expected length:
   a lease still `releasing` past it is marked `release_failed` with

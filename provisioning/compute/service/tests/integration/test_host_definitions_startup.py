@@ -85,7 +85,7 @@ def _entry(host_id: str, *, pool_id: str | None = None, ssh_host: str = "10.0.0.
     entry.update(fields)
     entry["connection"] = {
         "kind": "ssh",
-        "version": 2,
+        "version": 3,
         "public": {"ssh_host": ssh_host, "ssh_user": "ubuntu", "key_path": "/keys/id"},
     }
     return entry
@@ -295,9 +295,9 @@ def test_a_structurally_invalid_document_fails_startup_and_the_next_start_retrie
         "hosts:\n"
         "  - host_id: kvm1\n"
         "    colour: blue\n"
-        "    connection: {kind: ssh, version: 2, public: {ssh_host: 10.0.0.1, key_path: /keys/id}}\n"
+        "    connection: {kind: ssh, version: 3, public: {ssh_host: 10.0.0.1, key_path: /keys/id}}\n"
         "  - host_id: kvm2\n"
-        "    connection: {kind: ssh, version: 2, public: {ssh_host: 10.0.0.2, key_path: /keys/id}}\n"
+        "    connection: {kind: ssh, version: 3, public: {ssh_host: 10.0.0.2, key_path: /keys/id}}\n"
     )
 
     for _ in range(2):

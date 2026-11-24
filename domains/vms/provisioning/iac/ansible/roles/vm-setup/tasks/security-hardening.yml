@@ -266,48 +266,66 @@
   notify: restart sshd
   tags: security_hardening
 
-- name: Create iptables rules to block VM-to-host SSH access
+# What a guest reaches on its host is the guest policy's alone (guest-policy.yml):
+# its chain accepts DHCP and DNS from the guests' bridge and drops everything
+# else, port 22 included. Per-port guest rules are no part of it: a host holding
+# any of the forms below has each removed, so no rule accepting all traffic from
+# the guests' bridge sits behind the policy, and nothing but the policy filters
+# a guest's traffic to its host. Only these exact drop and log forms are
+# removed, whoever wrote them; an accept of port 22, or any other rule, stays.
+- name: Remove per-port guest rules from the host
   shell: |
-    echo "Setting up iptables rules to block VM-to-host SSH access..."
-    
-    # Block VMs from accessing host SSH (port 22)
-    iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP 2>/dev/null || \
-      iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP
-    
-    # Block additional VM networks if configured
-    iptables -C INPUT -s 192.168.100.0/16 -p tcp --dport 22 -j DROP 2>/dev/null || \
-      iptables -I INPUT -s 192.168.100.0/16 -p tcp --dport 22 -j DROP
-    
-    # Allow libvirt bridge traffic for VM operations (non-SSH)
-    iptables -C INPUT -i virbr+ -p tcp --dport 22 -j DROP 2>/dev/null || \
-      iptables -I INPUT -i virbr+ -p tcp --dport 22 -j DROP
-    
-    # Block VMs from accessing other host services (optional - uncomment as needed)
-    # iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 80 -j DROP 2>/dev/null || \
-    #   iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 80 -j DROP
-    # iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 443 -j DROP 2>/dev/null || \
-    #   iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 443 -j DROP
-    
-    echo "VM-to-host SSH access blocked via iptables"
-  register: iptables_vm_security
+    set -eu
+    # The port-22 drops and logs from the guest subnets and bridges, exactly as
+    # `iptables -S` prints them. Each is deleted as printed; eval keeps a
+    # quoted log prefix whole.
+    rules="$(iptables -S INPUT)"
+    printf '%s\n' "$rules" | while IFS= read -r rule; do
+      case "$rule" in
+        "-A INPUT -s 192.168.122.0/24 -p tcp -m tcp --dport 22 -j DROP"|\
+        "-A INPUT -s 192.168.0.0/16 -p tcp -m tcp --dport 22 -j DROP"|\
+        "-A INPUT -i virbr"*" -p tcp -m tcp --dport 22 -j DROP"|\
+        "-A INPUT -i br"[0-9]*" -p tcp -m tcp --dport 22 -j DROP"|\
+        "-A INPUT -s 192.168.122.0/24 -p tcp -m tcp --dport 22 -j LOG --log-prefix "*BLOCKED-VM-SSH*|\
+        "-A INPUT -i br"[0-9]*" -p tcp -m tcp --dport 22 -j LOG --log-prefix "*BLOCKED-BRIDGE-SSH*)
+          eval "iptables -D ${rule#-A }"
+          echo "removed: $rule"
+          ;;
+      esac
+    done
+    if command -v ufw >/dev/null 2>&1; then
+      for rule in \
+          "deny from 192.168.122.0/24 to any port 22" \
+          "deny from 192.168.100.0/16 to any port 22" \
+          "allow in on virbr0 from 192.168.122.0/24"; do
+        if ufw --force delete $rule 2>/dev/null | grep -q '^Rule deleted'; then
+          echo "removed: ufw $rule"
+        fi
+      done
+    fi
+    if [ -e /etc/systemd/system/vm-network-isolation.service ]; then
+      systemctl disable --now vm-network-isolation.service || true
+      rm -f /etc/systemd/system/vm-network-isolation.service
+      systemctl daemon-reload
+      echo "removed: vm-network-isolation.service"
+    fi
+    if [ -e /usr/local/bin/vm-network-isolation.sh ]; then
+      rm -f /usr/local/bin/vm-network-isolation.sh
+      echo "removed: /usr/local/bin/vm-network-isolation.sh"
+    fi
+  register: guest_rules_replaced
+  changed_when: "'removed:' in guest_rules_replaced.stdout"
   tags: security_hardening
 
-- name: Configure firewall rules using UFW (if available)
+# Only the host's own connections to its guests, such as its SSH into a guest
+# it has just created: a guest's packets to the host are the guest policy's.
+- name: Allow the host's connections out to its guests through UFW
   shell: |
     if command -v ufw >/dev/null 2>&1; then
-      echo "Configuring UFW rules for VM security..."
-      
-      # Deny SSH from VM networks
-      ufw --force deny from 192.168.122.0/24 to any port 22
-      ufw --force deny from 192.168.100.0/16 to any port 22
-      
-      # Allow libvirt bridge traffic (non-SSH)
-      ufw --force allow in on virbr0 from 192.168.122.0/24
       ufw --force allow out on virbr0 to 192.168.122.0/24
-      
-      echo "UFW VM security rules configured"
+      echo "UFW allows the host's connections out on virbr0"
     else
-      echo "UFW not available, using iptables rules only"
+      echo "UFW not available"
     fi
   register: ufw_vm_security
   tags: security_hardening
@@ -599,66 +617,6 @@
       - "Security Rollback: {{ 'Yes - incompatible security settings removed' if security_rollback is defined and security_rollback.changed else 'No - security settings applied successfully' if not (skip_libvirt_security | default(true) | bool) else 'Not applicable (security hardening skipped)' }}"
   tags: security_hardening
 
-- name: Create VM network isolation script
-  copy:
-    dest: /usr/local/bin/vm-network-isolation.sh
-    content: |
-      #!/bin/bash
-      # Block VMs from accessing host SSH/services via iptables rules on all VM networks and bridges
-      
-      set -e
-      echo "Applying VM network isolation rules..."
-      
-      iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP 2>/dev/null || \
-        iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j DROP
-      
-      for bridge in $(brctl show | awk '/^virbr/ {print $1}'); do
-        iptables -C INPUT -i $bridge -p tcp --dport 22 -j DROP 2>/dev/null || \
-          iptables -I INPUT -i $bridge -p tcp --dport 22 -j DROP
-      done
-      
-      for bridge in $(brctl show | awk '/^br[0-9]/ {print $1}'); do
-        iptables -C INPUT -i $bridge -p tcp --dport 22 -j DROP 2>/dev/null || \
-          iptables -I INPUT -i $bridge -p tcp --dport 22 -j DROP
-        iptables -C INPUT -i $bridge -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-BRIDGE-SSH: " 2>/dev/null || \
-          iptables -I INPUT -i $bridge -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-BRIDGE-SSH: "
-      done
-      
-      iptables -C INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-VM-SSH: " 2>/dev/null || \
-        iptables -I INPUT -s 192.168.122.0/24 -p tcp --dport 22 -j LOG --log-prefix "BLOCKED-VM-SSH: "
-      
-      echo "VM network isolation rules applied successfully"
-    mode: '0755'
-  tags: security_hardening
-
-- name: Create systemd service for VM network isolation
-  copy:
-    dest: /etc/systemd/system/vm-network-isolation.service
-    content: |
-      [Unit]
-      Description=VM Network Isolation Security Rules
-      After=network.target libvirtd.service
-      Wants=libvirtd.service
-      
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/local/bin/vm-network-isolation.sh
-      RemainAfterExit=yes
-      
-      [Install]
-      WantedBy=multi-user.target
-  register: vm_isolation_service
-  tags: security_hardening
-
-- name: Enable and start VM network isolation service
-  systemd:
-    name: vm-network-isolation.service
-    enabled: yes
-    state: started
-    daemon_reload: yes
-  when: vm_isolation_service is changed
-  tags: security_hardening
-
 - name: Configure audit logging for SSH attempts from VMs
   shell: |
     if command -v auditctl >/dev/null 2>&1; then
@@ -689,25 +647,16 @@
   debug:
     msg:
       - "=== VM Security Hardening Applied ==="
-      - "1. SSH access blocked from VM networks (192.168.122.0/24, 192.168.100.0/16)"
-      - "2. Iptables rules configured and saved persistently"
-      - "3. UFW rules applied (if UFW available): {{ 'Yes' if ufw_vm_security.stdout is defined and 'UFW' in ufw_vm_security.stdout else 'No' }}"
-      - "4. Libvirt security settings hardened"
-      - "5. VM network isolation service created and enabled"
+      - "1. Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD first in INPUT and FORWARD: a guest reaches only DHCP and DNS on its host, no other guest, and no link-local or private destination but {{ guest_allowed_private_destinations | join(', ') if guest_allowed_private_destinations else 'none listed' }}; ARKHAI-GUEST-V6 first in ip6tables' INPUT and FORWARD drops all IPv6 from the guests' bridge"
+      - "2. Guest policy re-installed at boot, after libvirt starts and after UFW reloads (arkhai-guest-policy.service, /etc/ufw/after.init)"
+      - "3. Iptables rules saved persistently"
+      - "4. UFW allows the host's connections out to its guests: {{ 'Yes' if ufw_vm_security.stdout is defined and 'UFW allows' in ufw_vm_security.stdout else 'No' }}"
+      - "5. Libvirt security settings: {{ 'Applied' if not (skip_libvirt_security | default(true) | bool) else 'Skipped (skip_libvirt_security=true)' }}"
       - "6. SSH audit logging configured: {{ 'Yes' if audit_config.stdout is defined and 'audit' in audit_config.stdout else 'No' }}"
       - "7. SSH daemon configuration hardened"
       - "8. Fail2ban intrusion prevention system installed and configured"
       - ""
-      - "=== Security Measures Active ==="
-      - "- VMs cannot SSH to host (port 22 blocked)"
-      - "- VM bridge interfaces restricted"
-      - "- Libvirt processes run with reduced privileges"
-      - "- Network isolation enforced at startup"
-      - "- Connection attempts logged for monitoring"
-      - "- Fail2ban monitoring SSH brute force, DDoS, and VM attacks"
-      - "- Automatic IP banning for suspicious activity"
-      - ""
-      - "To verify: sudo iptables -L INPUT | grep 192.168.122"
+      - "To verify: sudo iptables -S INPUT | head -2; sudo iptables -S FORWARD | head -2; sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD; sudo ip6tables -S ARKHAI-GUEST-V6"
       - "Fail2ban status: sudo fail2ban-client status"
   tags: security_hardening
 
@@ -725,22 +674,19 @@
       - "2. Nested virtualization has been enabled (if supported)"
       - "3. Default libvirt network has been configured"
       - "4. A bridge network setup script has been created at /tmp/setup_bridge.sh"
-      - "5. Security hardening applied - VMs blocked from accessing host SSH"
-      - "6. Network isolation rules configured and persistent"
+      - "5. Guest policy installed - a guest reaches only DHCP and DNS on its host and no other guest"
+      - "6. Guest policy kept first in INPUT and FORWARD at boot, after libvirt starts and after UFW reloads"
       - "7. Fail2ban intrusion prevention system installed and configured"
       - "8. Installation script has been cleaned up"
       - ""
       - "SECURITY FEATURES ACTIVE:"
-      - "  ✓ VM-to-host SSH access blocked (iptables + SSH config)"
-      - "  ✓ Libvirt security hardening applied"
-      - "  ✓ Network isolation service enabled"
+      - "  ✓ Guest policy chains ARKHAI-GUEST-IN and ARKHAI-GUEST-FWD (iptables), ARKHAI-GUEST-V6 (ip6tables), and sshd DenyUsers for the guest subnet"
+      - "  ✓ Libvirt security hardening: {{ 'applied' if not (skip_libvirt_security | default(true) | bool) else 'skipped (skip_libvirt_security=true)' }}"
       - "  ✓ SSH connection monitoring configured"
       - "  ✓ Fail2ban monitoring and auto-banning suspicious IPs"
-      - "  ✓ Custom filters for VM and libvirt attack detection"
       - ""
       - "FAIL2BAN JAILS ACTIVE:"
       - "  - SSH brute force protection (6 attempts, 20 min ban)"
-      - "  - VM SSH attack detection (4 attempts, 20 min ban, internal network only)"
       - "  - Bridged SSH attack detection (4 attempts, 20 min ban, all ports except 22)"
       - "  - All jails use iptables-allports (complete IP blocking)"
       - ""
@@ -752,14 +698,13 @@
       - "  - Use the vm-management role to download cloud images and manage VMs"
       - ""
       - "Security Verification:"
-      - "  - Check iptables: sudo iptables -L INPUT | grep 192.168.122"
+      - "  - Check the guest policy: sudo iptables -S ARKHAI-GUEST-IN; sudo iptables -S ARKHAI-GUEST-FWD; sudo ip6tables -S ARKHAI-GUEST-V6"
+      - "  - Check it leads: sudo iptables -S INPUT | head -2; sudo iptables -S FORWARD | head -2"
       - "  - Check SSH config: sudo sshd -T | grep -i deny"
-      - "  - Monitor logs: sudo tail -f /var/log/auth.log | grep BLOCKED-VM-SSH"
       - "  - Check fail2ban: sudo fail2ban-client status"
       - "  - View banned IPs: sudo fail2ban-client status sshd"
       - "  - Check bridged attacks: sudo fail2ban-client status bridged-ssh-attacks"
       - "  - Monitor fail2ban logs: sudo tail -f /var/log/fail2ban.log"
-      - "  - Monitor bridge SSH logs: sudo tail -f /var/log/kern.log | grep BLOCKED-BRIDGE-SSH"
       - ""
       - "To test: virsh list --all"
   tags: verify_kvm

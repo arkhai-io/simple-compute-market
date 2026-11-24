@@ -583,6 +583,27 @@ physical machine.
   names a relay
 - **THEN** the target is refused, naming the field
 
+A VM target MAY state its management SSH public key. A VM scenario registering a
+host MUST state that pin when supplied. Otherwise it MUST preserve a pin already
+stored for the host, and MUST refuse before declaring capacity, naming the field,
+when the host holds none. A scenario MUST NOT capture a key the host presents.
+A reapply MUST
+restate the pin held at registration and verify that the management pins are
+retained. A bare-metal scenario MUST state the target's management SSH public key
+at registration.
+
+#### Scenario: A VM target with no pin is refused
+
+- **WHEN** a real VM scenario registers a host whose target states no management SSH
+  public key and which holds no stored pin
+- **THEN** the scenario refuses before declaring capacity, naming
+  `ssh_host_public_key`, and captures nothing
+
+#### Scenario: Provisioning registration is reapplied with an existing pin
+
+- **WHEN** a real VM or bare-metal scenario reapplies its host registration
+- **THEN** the registered management SSH keys match those from before the reapply
+
 ### Requirement: External authority effects retain their evidence owner
 
 Payment-service ledger, hold release/extensions, fees, top-ups, payouts and provider recovery MUST remain the payments service's evidence; cases and outcomes MUST remain the dispute authority's. Deterministic local evidence MUST NOT claim physical hardware effects.
@@ -1453,3 +1474,47 @@ reading the deal `ended` with no open extension.
   decision rules a stop with `returned` and a reverse
 - **THEN** the storefront records the ruled end, the payer is returned what the ruling
   reverses, and after the case closes the seller's list reads the deal `ended`
+
+### Requirement: VM guest isolation is proven on a real host
+
+An external-topology module, `e2e_vm_guest_isolation`, MUST prove VM guest isolation on a configured real-provisioning target by extending the real VM scenario's two deals on one host, adding its stages while both guests run and the first holds a session with a liveness check, and sharing that scenario's teardown. It MUST belong to no default lane and MUST report a blocked skip without the target.
+
+A VM target MAY state, at version 2, a `guest_isolation` section naming a harness-local operator route to the host — its address, port, user, and the path of a key the harness references and never copies — and MAY name two private destinations, `refused` and `listed`, neither of which needs to answer. The module MUST perform every host-side step through that route alone, running fixed operator code under `sudo -n`: restarting libvirtd, reloading UFW, reading the guest policy's chains and rule counters, planting a guest unconverged, and running the host kit's installed convergence command. Guest-side probes MUST run as fixed code in a guest through the shared SSH helper. A refusal of a host port, of a link-local destination, or of a private destination MUST count only when the matching policy rule's counter rose across the probe. A listed destination's forwarding MUST count only when its accept counter rose and, through the operator route, the guest's packet to it was seen leaving the host on the interface the host routes that destination through. The module MUST confirm from the policy's chain that the `listed` destination is admitted and the `refused` one is not.
+
+The module MUST report, as made, failed, or unproven, each observation: guest-to-guest ARP, ICMP and TCP refused, directly and through the gateway (O1); an ARP claim of the other guest's address dropped while its buyer still reaches it, with the filter's parameters in the guest's live definition (O2); DHCP and DNS passing and another host port refused (O3); the link-local metadata address refused (O4); the unlisted private destination refused and the listed one admitted and seen leaving the host (O5); a buyer from a private address reaching their guest (O6); O3 to O5 holding after a libvirtd restart and after a UFW reload, with the policy's jumps first (O7); a guest planted unconverged — its live port isolation cleared and its saved definition stripped of the isolation and the filter — converged with its session's longest gap at most five seconds, its port isolated, its saved definition carrying both, and its probes of the other guest refused again (O8); and the filter the fixture detached live bound live again by the convergence (O9). O9 MUST be made only when the fixture detached the filter live and the filter is bound live afterwards; when libvirt refuses the fixture's live removal, or the convergence reports the filter waiting for the guest's next start while the guest's live definition does not name it, O9 MUST be unproven, naming the libvirt version, and MUST NOT be reported as made. A stage whose input the target does not name MUST skip naming it.
+
+#### Scenario: The target names no operator route
+
+- **WHEN** the module runs against a VM target with no `guest_isolation` section
+- **THEN** every host-side stage skips naming `guest_isolation`, and every observation but O1 and O6 is unproven naming it
+
+#### Scenario: A refusal the policy did not make
+
+- **WHEN** a guest's connection to a private destination gets no answer while the matching drop rule's counter is unchanged
+- **THEN** the stage fails rather than counting the refusal
+
+#### Scenario: Buyers reach the guests through a relay
+
+- **WHEN** the VM target's access is a relay
+- **THEN** the stage observing a private-source buyer skips naming the route it lacks, and O6 is unproven
+
+#### Scenario: A buyer's forwarded connection is masqueraded
+
+- **WHEN** the VM target's access is direct and the guest sees its buyer's session from the host's own address on the guests' network
+- **THEN** the stage observing a private-source buyer skips naming the masquerade that hides the buyer's address, and O6 is unproven rather than made
+
+#### Scenario: A planted guest is converged
+
+- **WHEN** the module clears the first guest's port isolation, filter and saved definition through the operator route and runs the convergence command
+- **THEN** the first guest's session shows no gap over five seconds, its port is isolated, its saved definition carries the isolation and the filter, and its probes of the other guest are refused again (O8)
+- **AND** O9 is made only if its filter is bound live again
+
+#### Scenario: libvirt refuses the fixture's live filter removal
+
+- **WHEN** the fixture cannot detach the first guest's filter live
+- **THEN** it plants the cleared isolation and the stripped saved definition alone, O8 is judged as before, and O9 is unproven naming the libvirt version
+
+#### Scenario: A listed destination's packet does not leave the host
+
+- **WHEN** a guest probes the `listed` destination, its accept counter rises, and no packet from the guest to that destination is seen leaving on the interface the host routes it through
+- **THEN** O5 fails rather than counting the destination as forwarded

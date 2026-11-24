@@ -10,7 +10,9 @@ See openspec/specs/deployment-state/spec.md.
 
 from __future__ import annotations
 
-from sqlalchemy import Connection
+from collections.abc import Sequence
+
+from sqlalchemy import Connection, text
 
 from market_schema_migrations import Migration
 
@@ -41,3 +43,20 @@ BASELINE: Migration[Connection] = Migration(
     "v0_3_0_baseline_compute_provisioning_hosts", _create_baseline
 )
 """``hosts`` as the v0.3.0 release built it."""
+
+
+def mark_hosts_for_key_adoption(
+    connection: Connection, host_ids: Sequence[str], version: int,
+) -> None:
+    """Add the adoption flag and mark the rows whose connection was validated."""
+    connection.exec_driver_sql(
+        "ALTER TABLE hosts ADD COLUMN host_key_adoption_pending BOOLEAN NOT NULL DEFAULT FALSE"
+    )
+    if host_ids:
+        connection.execute(
+            text(
+                "UPDATE hosts SET connection_version = :version, host_key_adoption_pending = TRUE "
+                "WHERE host_id = :host_id"
+            ),
+            [{"version": version, "host_id": host_id} for host_id in host_ids],
+        )

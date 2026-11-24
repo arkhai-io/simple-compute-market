@@ -12,6 +12,7 @@ stage classes, so pytest does not collect them here.
 from __future__ import annotations
 
 import importlib
+from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -33,6 +34,7 @@ from storefront_client.models import ListingListResponse, ListingSummary
 
 from e2e_harness.real_provisioning_target import VmHost
 from tests.e2e.roles.helpers.compute_deal import DealLease
+from tests.e2e.roles.helpers.real_provisioning import pin_registered_vm
 from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
     LISTED_HOURLY_RATE,
@@ -141,6 +143,41 @@ def test_a_new_host_is_registered_with_the_connection_given():
     assert_registered_as_target(hosts.get_host(HOST), TARGET)
 
 
+def test_a_configured_vm_key_is_stated_and_a_captured_pin_is_restated():
+    # Test-only SSH wire bytes with no corresponding private key.
+    blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"t" * 32
+    key = "ssh-ed25519 " + b64encode(blob).decode("ascii")
+    configured = VmHost.model_validate({
+        **TARGET.model_dump(), "ssh_host_public_key": key,
+    })
+    hosts = FakeHosts()
+    register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(configured))
+
+    assert hosts.get_host(HOST).connection.public["host_keys"] == [key]
+    assert target_connection(TARGET, registered_pins=[key]).public["host_keys"] == [key]
+
+
+def test_an_unpinned_vm_is_refused_before_supply_without_capturing_what_it_presents():
+    host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
+    client = MagicMock()
+    client.get_host.return_value = host
+
+    with pytest.raises(AssertionError, match="ssh_host_public_key"):
+        pin_registered_vm(client, host)
+    client.check_connectivity.assert_not_called()
+    client.capture_host_key.assert_not_called()
+
+
+def test_a_vm_pinned_before_the_run_keeps_its_stored_pin():
+    host = _host(HOST, REAL_POOL_ID, target_connection(TARGET))
+    pinned = _host(HOST, REAL_POOL_ID, target_connection(TARGET, registered_pins=["fixture"]))
+    client = MagicMock()
+    client.get_host.return_value = pinned
+
+    assert pin_registered_vm(client, host) is pinned
+    client.capture_host_key.assert_not_called()
+
+
 def test_an_unchanged_host_is_left_as_it_is():
     hosts = FakeHosts(**{HOST: _host(HOST, REAL_POOL_ID, target_connection(TARGET))})
     register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
@@ -184,13 +221,13 @@ def test_without_a_connection_a_new_host_gets_the_placeholder_and_an_old_one_kee
     assert body.connection.public == {
         "ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"
     }
-    assert body.connection.version == 2
+    assert body.connection.version == 3
     (update,) = hosts.updates
     assert update.connection is None and update.pool_id == "pool"
 
 
 def test_the_target_connection_is_at_the_version_the_service_accepts():
-    assert target_connection(TARGET).version == 2
+    assert target_connection(TARGET).version == 3
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
         ConnectionSubmission(kind="ssh", version=1, public=target_connection(TARGET).public),
@@ -199,7 +236,7 @@ def test_the_target_connection_is_at_the_version_the_service_accepts():
         assert_registered_as_target(hosts.get_host(HOST), TARGET)
     register_e2e_host(hosts, name=HOST, pool_id=REAL_POOL_ID, connection=target_connection(TARGET))
     (update,) = hosts.updates
-    assert update.connection.version == 2
+    assert update.connection.version == 3
     assert_registered_as_target(hosts.get_host(HOST), TARGET)
 
 
@@ -207,7 +244,7 @@ def test_a_host_registered_otherwise_is_not_the_target():
     hosts = FakeHosts(**{HOST: _host(
         HOST, REAL_POOL_ID,
         ConnectionSubmission(
-            kind="ssh", version=2, public={**target_connection(TARGET).public, "ssh_port": 2200}
+            kind="ssh", version=3, public={**target_connection(TARGET).public, "ssh_port": 2200}
         ),
     )})
     with pytest.raises(AssertionError, match="not the target's"):
@@ -559,9 +596,10 @@ def _listing_for(
     )
 
 
-def _driver(*, storefront_admin_client=None, target=TARGET) -> RealVmComputeDealDriver:
+def _driver(*, storefront_admin_client=None, storefront_client=None,
+            target=TARGET) -> RealVmComputeDealDriver:
     return RealVmComputeDealDriver(
-        provisioning_client=None, storefront_client=None,
+        provisioning_client=None, storefront_client=storefront_client,
         storefront_admin_client=storefront_admin_client, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=None, site_id="site",
         vm_operator_client=None, target=target, buyer_public_key="k",
@@ -1030,6 +1068,42 @@ def test_relay_endpoint_is_the_reservations_leased_port():
     holding.remote_port += 1
     with pytest.raises(AssertionError, match="differs"):
         driver.delivered_access(state)
+
+
+class _SettleStatus:
+    """Settle status as the buyer reads it, by escrow."""
+
+    def __init__(self, credentials):
+        self.credentials = credentials
+        self.read: list[str] = []
+
+    def get_settle_status(self, escrow_uid):
+        self.read.append(escrow_uid)
+        return SimpleNamespace(tenant_credentials=self.credentials)
+
+
+def test_the_tenant_password_is_the_one_the_deals_settle_status_delivers():
+    settlement = _SettleStatus({"password": "example-tenant-password", "key_type": "provided"})
+    driver = _driver(storefront_client=settlement)
+    assert driver.tenant_password(RealVmDealState(real_escrow_uid="escrow")) == \
+        "example-tenant-password"
+    assert settlement.read == ["escrow"]
+
+
+def test_the_second_deals_tenant_password_is_read_from_the_second_escrow():
+    settlement = _SettleStatus({"password": "example-tenant-password"})
+    driver = _driver(storefront_client=settlement)
+    state = RealVmDealState(real_escrow_uid="first-escrow", second_escrow_uid="second-escrow")
+    driver.tenant_password(driver.second_deal_state(state))
+    assert settlement.read == ["second-escrow"]
+
+
+@pytest.mark.parametrize("credentials", [None, {}, {"password": "", "key_type": "provided"}])
+def test_no_delivered_tenant_password_fails_naming_the_fields_never_a_value(credentials):
+    driver = _driver(storefront_client=_SettleStatus(credentials))
+    with pytest.raises(AssertionError, match="delivered no tenant password") as failed:
+        driver.tenant_password(RealVmDealState(real_escrow_uid="escrow"))
+    assert "provided" not in str(failed.value)
 
 
 def test_released_relay_port_requires_release_expiry_and_no_active_owner():

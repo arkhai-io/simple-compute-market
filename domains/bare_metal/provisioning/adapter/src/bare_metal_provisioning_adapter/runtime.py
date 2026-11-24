@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from compute_provisioning.hosts import ExecutionHost
 from compute_provisioning import TeardownRerunPolicy
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 from compute_provisioning.jobs.submission import JobSubmissionService
@@ -36,6 +38,7 @@ class BareMetalProvisioningRuntime:
     playbook_path: Any
     settings: Any
     relay_resolver: Any = None
+    adopt_host_key: Callable[[ExecutionHost, str], ExecutionHost] | None = None
 
     def job_executor(self) -> AnsibleJobExecutor:
         """What runs both bare-metal access actions."""
@@ -44,6 +47,7 @@ class BareMetalProvisioningRuntime:
             BareMetalAnsibleCodec(relay_resolver=self.relay_resolver),
             self.playbook_path,
             timeout_seconds=self.settings.ansible_timeout_seconds,
+            adopt_host_key=self.adopt_host_key,
             additional_non_retryable_errors=self.settings.additional_non_retryable_errors,
         )
 
@@ -71,6 +75,7 @@ def build_bare_metal_runtime(
     relay_port_allocator=None,
     relay_resolver=None,
     connection_codecs=None,
+    adopt_host_key: Callable[[ExecutionHost, str], ExecutionHost] | None = None,
 ) -> BareMetalProvisioningRuntime:
     """The bare-metal runtime over the service's one job authority, and its one
     teardown rerun policy, which the release status reads too."""
@@ -102,4 +107,5 @@ def build_bare_metal_runtime(
         playbook_path=config.resolved_bare_metal_playbook_path,
         settings=config,
         relay_resolver=relay_resolver,
+        adopt_host_key=adopt_host_key,
     )

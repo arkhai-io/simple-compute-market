@@ -37,12 +37,12 @@ hosts:
     pool_id: default
     connection:
       kind: ssh
-      version: 2
+      version: 3
       public: {ssh_host: 10.0.0.1, ssh_user: ubuntu, key_path: /keys/id}
   - host_id: kvm2
     connection:
       kind: ssh
-      version: 2
+      version: 3
       public: {ssh_host: 10.0.0.2, ssh_user: ubuntu, key_path: /keys/id}
 """
 

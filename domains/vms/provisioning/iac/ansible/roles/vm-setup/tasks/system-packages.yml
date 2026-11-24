@@ -163,10 +163,12 @@
     - packer
     - build_setup
 
+# ebtables: libvirt's network filter driver runs it to hold each guest to its
+# own addresses (tasks/guest-policy.yml).
 - name: Add KVM virtualization packages to script
   lineinfile:
     path: /tmp/install_tools.sh
-    line: "apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager virt-viewer libguestfs-tools qemu-guest-agent"
+    line: "apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst virt-manager virt-viewer libguestfs-tools qemu-guest-agent ebtables"
     insertafter: EOF
   tags: kvm
 

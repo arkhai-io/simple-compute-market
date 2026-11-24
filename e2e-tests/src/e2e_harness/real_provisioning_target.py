@@ -1,12 +1,13 @@
 """Typed operator targets for the real-provisioning scenarios.
 
 The ignored ``config-real-provisioning-target.yml`` profile holds public host
-metadata and service-side key paths, never keys or relay credentials. Each lane
+metadata, public SSH host keys and service-side authentication key paths. Each lane
 selects its own domain's host; missing configuration skips, invalid configuration
 fails before scenario mutations.
 """
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Self
@@ -28,11 +29,37 @@ _Count = Annotated[int, Field(strict=True, gt=0)]
 _Text = Annotated[str, Field(strict=True, min_length=1)]
 
 
+#: The private ranges the VM host kit's guest policy drops a guest's forwarded
+#: packets to unless a seller lists the destination
+#: (``domains/vms/provisioning/iac/ansible/roles/vm-setup/templates/guest-policy.rules.j2``).
+GUEST_POLICY_PRIVATE_RANGES = tuple(
+    ipaddress.IPv4Network(block)
+    for block in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+)
+#: libvirt's ``default`` network, which every VM guest is attached to.
+GUESTS_NETWORK = ipaddress.IPv4Network("192.168.122.0/24")
+
+
 def _harness_local_path(value: str, field: str) -> str:
     """A path on the harness's own machine: absolute, with no ``..`` component."""
     if not value.startswith("/") or ".." in value.split("/"):
         raise ValueError(f"{field} must be an absolute harness-local path")
     return value
+
+
+def _guest_policy_private_address(value: str, field: str) -> str:
+    """An IPv4 address in one of the guest policy's private ranges."""
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ValueError:
+        raise ValueError(f"{field} must be an IPv4 address") from None
+    if not any(address in block for block in GUEST_POLICY_PRIVATE_RANGES):
+        ranges = ", ".join(str(block) for block in GUEST_POLICY_PRIVATE_RANGES)
+        raise ValueError(f"{field} must be in a private range the guest policy drops ({ranges})")
+    if address in GUESTS_NETWORK:
+        raise ValueError(f"{field} must not be on the guests' own network {GUESTS_NETWORK}, "
+                         "which the guest policy's other rules decide")
+    return str(address)
 
 
 class _Section(BaseModel):
@@ -86,10 +113,63 @@ class _Host(_Section):
     capacity: Capacity
 
 
+class CleanupOperator(_Section):
+    """A harness-local operator route to a host, running fixed observer code
+    under ``sudo -n``; its key is referenced, never copied. The bare-metal
+    cleanup qualification and the VM guest-isolation proof each name one."""
+
+    host: _Text
+    port: Annotated[int, Field(strict=True, ge=1, le=65535)]
+    user: _Text
+    key_path: _Text
+
+    @field_validator("key_path")
+    @classmethod
+    def absolute_key_path(cls, value: str) -> str:
+        return _harness_local_path(value, "key_path")
+
+
+class PrivateDestinations(_Section):
+    """Two private destinations a guest probes, neither of which needs to answer:
+    one host preparation was not given (``refused``) and one it was given in
+    ``guest_allowed_private_destinations`` (``listed``)."""
+
+    refused: _Text
+    listed: _Text
+
+    @field_validator("refused", "listed")
+    @classmethod
+    def private_address(cls, value: str, info: ValidationInfo) -> str:
+        return _guest_policy_private_address(value, info.field_name)
+
+    @model_validator(mode="after")
+    def distinct(self) -> Self:
+        if self.refused == self.listed:
+            raise ValueError("listed must differ from refused")
+        return self
+
+
+class GuestIsolation(_Section):
+    """The opt-in inputs of the VM guest-isolation proof: the operator route its
+    host-side steps take, and the private destinations its guests probe."""
+
+    operator: CleanupOperator
+    private_destinations: PrivateDestinations | None = None
+
+
 class VmHost(_Host):
     domain: Literal["vm"]
     resource_id: _Text | None = None
     listing_shape: Capacity
+    #: Without it, every host-side stage of the guest-isolation proof skips,
+    #: naming this field.
+    guest_isolation: GuestIsolation | None = None
+    ssh_host_public_key: _Text | None = None
+
+    @field_validator("ssh_host_public_key")
+    @classmethod
+    def valid_host_key(cls, value: str | None) -> str | None:
+        return canonical_host_public_key(value) if value is not None else None
     #: The operator's management client on the host, a systemd service whose
     #: name this repository cannot know, for host diagnostics to report beside
     #: the host's own units. Optional.
@@ -109,20 +189,6 @@ class VmHost(_Host):
                 if getattr(shape, dimension) * 2 > getattr(capacity, dimension):
                     raise ValueError(f"listing_shape.{dimension} must fit twice within capacity.{dimension}")
         return shape
-
-
-class CleanupOperator(_Section):
-    """Harness-local observation route; its key is referenced, never copied."""
-
-    host: _Text
-    port: Annotated[int, Field(strict=True, ge=1, le=65535)]
-    user: _Text
-    key_path: _Text
-
-    @field_validator("key_path")
-    @classmethod
-    def absolute_key_path(cls, value: str) -> str:
-        return _harness_local_path(value, "key_path")
 
 
 class CleanupQualification(_Section):

@@ -1,4 +1,11 @@
-"""Negotiations controller — admin introspection of negotiation threads."""
+"""Negotiations controller — the administrator's reads and controls of threads.
+
+Every route here is the administrator's, verified under the operation and
+resource the canonical storefront client signs for it, which every storefront
+verifies too: a thread carries its buyer's principal and the agreed terms, and
+the administrator acts on it only as the administrator, so the round it drives
+is recorded as its own.
+"""
 
 from __future__ import annotations
 
@@ -7,12 +14,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
+from market_identity import Identity
 from market_storefront_kit import DealControlRouteError, NegotiationControlRouteService
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.middleware.admin_auth import (
     authenticate_admin,
-    require_admin_principal,
+    negotiation_list_resource,
 )
 from core_storefront.models.negotiation_models import (
     AdvanceRequest,
@@ -40,19 +48,41 @@ class NegotiationsController:
     @router.get(
         "/{listing_id}/negotiations",
         response_model=NegotiationListResponse,
-        summary="List negotiations for a listing",
+        summary="List negotiations for a listing (admin)",
     )
     async def list_negotiations(
         self,
         listing_id: str,
+        request: Request,
         terminal_state: Annotated[str | None, Query()] = None,
+        buyer_scheme: Annotated[str | None, Query()] = None,
+        buyer_identifier: Annotated[str | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> NegotiationListResponse:
+        await authenticate_admin(
+            request,
+            operation="admin_list_negotiations",
+            resource=negotiation_list_resource(request, listing_id),
+        )
+        if (buyer_scheme is None) != (buyer_identifier is None):
+            raise HTTPException(
+                status_code=422,
+                detail="buyer_scheme and buyer_identifier must be supplied together",
+            )
+        try:
+            buyer_principal = (
+                Identity(scheme=buyer_scheme, identifier=buyer_identifier)
+                if buyer_scheme is not None and buyer_identifier is not None
+                else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="invalid buyer principal") from exc
         try:
             threads = await self._svc.list_for_order(
                 listing_id=listing_id,
                 terminal_state=terminal_state or None,
+                buyer_principal=buyer_principal,
                 limit=limit,
                 offset=offset,
             )
@@ -69,13 +99,19 @@ class NegotiationsController:
     @router.get(
         "/{listing_id}/negotiations/{neg_id}",
         response_model=NegotiationDetailResponse,
-        summary="Get negotiation detail",
+        summary="Get negotiation detail (admin)",
     )
     async def get_negotiation(
         self,
         listing_id: str,
         neg_id: str,
+        request: Request,
     ) -> NegotiationDetailResponse:
+        await authenticate_admin(
+            request,
+            operation="admin_get_negotiation",
+            resource=f"{listing_id}/negotiations/{neg_id}",
+        )
         try:
             detail = await self._svc.get_detail(listing_id=listing_id, neg_id=neg_id)
         except NegotiationServiceError as exc:
@@ -86,14 +122,19 @@ class NegotiationsController:
         "/{listing_id}/negotiations/{neg_id}/advance",
         response_model=AdvanceResponse,
         summary="Drive one negotiation round (admin)",
-        dependencies=[Depends(require_admin_principal)],
     )
     async def advance_negotiation(
         self,
         listing_id: str,
         neg_id: str,
         body: AdvanceRequest,
+        request: Request,
     ) -> AdvanceResponse:
+        actor_principal = await authenticate_admin(
+            request,
+            operation="admin_advance_negotiation",
+            resource=f"{listing_id}/{neg_id}",
+        )
         try:
             result = await self._svc.advance(
                 listing_id=listing_id,
@@ -101,6 +142,7 @@ class NegotiationsController:
                 action=body.action,
                 proposal=body.proposal,
                 reason=body.reason,
+                actor_principal=actor_principal,
             )
         except NegotiationServiceError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc))
@@ -121,8 +163,6 @@ class NegotiationsController:
         body: ForceAcceptRequest,
         request: Request,
     ) -> ForceAcceptResponse:
-        # The canonical storefront client's signed contract, which every
-        # storefront binding this control verifies, not this route's own name.
         actor_principal = await authenticate_admin(
             request,
             operation="admin_force_accept_negotiation",

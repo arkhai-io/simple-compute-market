@@ -107,6 +107,7 @@ def test_registration_composes_typed_pool_host_and_declaration_and_reconciles():
     assert authority.pool["policy_tags"]["capacity_backing"] == "backed"
     assert authority.pool["policy_tags"]["deliverable_modes"] == ["bare_metal"]
     assert authority.host.connection == target_connection(TARGET)
+    assert authority.host.connection.public["host_keys"] == [TARGET.ssh_host_public_key]
     call = instance.site_capacity_admin.register_resource.await_args
     assert call.args == (REAL_RESOURCE_ID,)
     assert call.kwargs["capacity"] == {"units": 1, **TARGET.capacity.model_dump()}

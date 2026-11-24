@@ -27,7 +27,7 @@ from bare_metal_provisioning_adapter.services.mock_output import (
     shipped_output,
 )
 from compute_provisioning.jobs.db import JobRecord
-from compute_provisioning_ansible import MockAnsibleRunner
+from compute_provisioning_ansible import SSH_CONNECTION_VERSION, MockAnsibleRunner
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.release import (
     FulfillmentReleaseExecutor,
@@ -546,7 +546,7 @@ async def test_a_reclaim_refused_before_its_playbook_is_run_again_while_the_leas
     )
     assert await _capacity_held(clients, capacity_reservation_id)
 
-    _host_version(2)
+    _host_version(SSH_CONNECTION_VERSION)
     source.set(source.now() + 60)
     await _converge_cycle(clients)
     assert _teardown_keys(capacity_reservation_id) == [
@@ -576,7 +576,7 @@ async def test_with_reruns_disabled_a_refused_reclaim_waits_for_an_operator(
 
     await clients.family.check_leases()
     lease = await clients.family.get_lease(capacity_reservation_id)
-    _host_version(2)
+    _host_version(SSH_CONNECTION_VERSION)
     source.set(source.now() + 86400)
     await _converge_cycle(clients)
     await _converge_cycle(clients)
@@ -604,7 +604,7 @@ async def test_a_reclaim_finished_before_starts_were_recorded_is_not_run_again(
 
     await clients.family.check_leases()
     lease = await clients.family.get_lease(capacity_reservation_id)
-    _host_version(2)
+    _host_version(SSH_CONNECTION_VERSION)
     source.set(source.now() + 86400)
     await _converge_cycle(clients)
 
@@ -639,7 +639,7 @@ async def test_a_lease_timed_out_with_a_rerun_pending_is_retried_and_waits_for_i
         LeaseState.RELEASING
     )
 
-    _host_version(2)
+    _host_version(SSH_CONNECTION_VERSION)
     await _converge_cycle(clients)
     rerun = _aggregate(capacity_reservation_id).teardown_provider_metadata["teardown_job_id"]
     assert (await test_client.wait_for_job(rerun, timeout=5.0))["status"] == "succeeded"
@@ -759,7 +759,7 @@ async def test_a_compensating_reclaim_refused_before_its_playbook_runs_again_com
         LeaseState.RELEASING
     )
 
-    _host_version(2)
+    _host_version(SSH_CONNECTION_VERSION)
     source.set(source.now() + 60)
     await _converge_cycle(clients)
     rerun = _aggregate(capacity_reservation_id).teardown_provider_metadata["teardown_job_id"]

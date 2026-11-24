@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import uuid
 from collections.abc import Mapping
@@ -30,6 +31,20 @@ from compute_provisioning.jobs import JobRun
 from compute_provisioning.relays.variables import RELAY_JOB_RESERVED_VARIABLES
 
 from .runner import AnsibleResult, InventoryTarget
+
+
+# Ansible extra variables outrank inventory, including settings for the
+# transport chosen by the runner. A job always connects as the inventory says.
+_CONNECTION_VARIABLES = frozenset({
+    "ansible_connection",
+    "ansible_host",
+    "ansible_host_key_checking",
+    "ansible_password",
+    "ansible_port",
+    "ansible_private_key_file",
+    "ansible_user",
+})
+_EXTRA_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -107,7 +122,13 @@ def render_extra_vars(
     reserved when absent from the emitted variables: global extra-vars would
     override include_role inputs and registered results.
     """
-    colliding = sorted((set(variables) | RELAY_JOB_RESERVED_VARIABLES) & set(extra_variables))
+    invalid = sorted(name for name in extra_variables if not _EXTRA_VARIABLE_NAME.fullmatch(name))
+    if invalid:
+        raise ValueError(f"extra variable names must be identifiers: {invalid!r}")
+    reserved = set(variables) | RELAY_JOB_RESERVED_VARIABLES | _CONNECTION_VARIABLES
+    colliding = sorted(
+        name for name in extra_variables if name in reserved or name.startswith("ansible_ssh_")
+    )
     if colliding:
         raise ValueError(
             "extra variables collide with the job's own variables: "

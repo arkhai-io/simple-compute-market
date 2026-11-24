@@ -16,7 +16,8 @@ value decrypts when an executor's readiness is reported.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -47,6 +48,25 @@ class ProtectedValue:
         return cls(scheme=str(stored["scheme"]), ciphertext=str(stored["ciphertext"]))
 
 
+class _PublicFields(Mapping[str, Any]):
+    """An immutable snapshot that exposes fields in their original wire types."""
+
+    def __init__(self, fields: Mapping[str, Any]) -> None:
+        self._fields = deepcopy(dict(fields))
+
+    def __getitem__(self, key: str) -> Any:
+        return deepcopy(self._fields[key])
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._fields)
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def __repr__(self) -> str:
+        return repr(self._fields)
+
+
 @dataclass(frozen=True)
 class ConnectionEnvelope:
     kind: str
@@ -62,7 +82,7 @@ class ConnectionEnvelope:
         for name, value in self.protected.items():
             if not isinstance(value, ProtectedValue):
                 raise TypeError(f"protected value {name!r} is not a ProtectedValue")
-        object.__setattr__(self, "public", MappingProxyType(dict(self.public)))
+        object.__setattr__(self, "public", _PublicFields(self.public))
         object.__setattr__(self, "protected", MappingProxyType(dict(self.protected)))
 
     def stored_protected(self) -> dict[str, dict[str, str]]:

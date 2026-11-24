@@ -60,6 +60,7 @@ class VmProvisioningRuntime:
             self.codec,
             self.config.resolved_vm_playbook_path,
             timeout_seconds=self.config.ansible_timeout_seconds,
+            adopt_host_key=self.host_authority.adopt_host_key,
             additional_non_retryable_errors=self.config.additional_non_retryable_errors,
         )
 

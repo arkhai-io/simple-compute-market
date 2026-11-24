@@ -11,7 +11,7 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.12.0",
     # 0.11.0 first sets the provisioning service's time.
-    "arkhai-compute-provisioning-client>=0.11.0",
+    "arkhai-compute-provisioning-client>=0.12.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "pytest>=8.0",
@@ -169,6 +169,7 @@ markers = [
     "e2e_bare_metal_real_provisioning: Canonical whole-host deal through real grant/reclaim jobs and pinned relay SSH; in no lane, skips without a bare-metal real-provisioning target",
     "e2e_vm_qualification: Runbook observation 2 on the real-provisioning target's KVM host — two CPU-only `market buy` purchases in arkhai.payments.v1 against the run's payments target, the first guest's SSH heartbeat across the second's create and teardown, host diagnostics before, during and after, both leases ended by back-dating and a stepped lease-watchdog cycle; in no lane, blocked without both targets",
     "e2e_bare_metal_qualification: Runbook observations 4 and 5 on the real-provisioning target's machine — a `market bare-metal buy` purchase in arkhai.payments.v1 ended by the buyer's teardown, with bounded working data seeded and observed absent, then a successor whose reclaim refuses a planted foreign descendant until fixture-only repair; in no lane, blocked without both targets",
+    "e2e_vm_guest_isolation: VM guest isolation on the real-provisioning target's KVM host — the real VM deal's two guests on one host, probed from a guest and, through the operator route its target's guest_isolation section names, on the host: guest-to-guest traffic, an address claim, DHCP and DNS, a host port, the metadata address and private destinations refused or forwarded by counter and egress, again after a libvirtd restart and a UFW reload, and a guest planted unconverged converged under its buyer's heartbeat, each observation O1 to O9 logged as made, failed or unproven; in no lane, blocked without the target",
     "e2e_real_provisioning_reapply: Runbook observation 6 — both real hosts' canonical registrations reapplied and a publication cycle stepped, with listings, registrations, relay quarantine and the consumed-UID history unchanged; in no lane, blocked without both targets",
     "e2e_bare_metal_publication: Bare-metal lane — publication from pool declarations, discovery, withdrawal, reinstatement, and a disabled host's close and reopen against a mock-profile site",
     "e2e_bare_metal_payment_deal: Bare-metal fixed-term payment purchase through the shared buyer-purchase stages — receipt-gated mock access, same-settlement re-drive, the buyer's CLI teardown, then a separate seller refund of the still-held payment; runs against the bare-metal lane's payments double, blocked without a configured or ready external target",

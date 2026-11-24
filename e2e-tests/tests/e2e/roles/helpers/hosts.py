@@ -17,10 +17,10 @@ from compute_provisioning_contracts import ConnectionSubmission, HostCreate, Hos
 #: The connection a host is registered with when the scenario reaches it through
 #: the mock profile, which connects to nothing. A `key_path` connection names a
 #: key file without carrying it, so no key material is needed. The service
-#: accepts an `ssh` connection only at version 2.
+#: accepts an `ssh` connection only at version 3.
 PLACEHOLDER_CONNECTION = ConnectionSubmission(
     kind="ssh",
-    version=2,
+    version=3,
     public={"ssh_host": "127.0.0.1", "ssh_user": "e2e", "key_path": "/dev/null"},
 )
 
