@@ -3,7 +3,7 @@
 For the owner who releases this repository's packages and artifacts: how a marketplace
 release goes, loading a release candidate, what the deployment does with it, running
 the lanes on its images, cutting a release, deciding a release's migration floor, the
-import package renames consumers meet, and diagnosing a load or a cut that fails. It
+compatibility paths due to retire, the import package renames consumers meet, and diagnosing a load or a cut that fails. It
 sits beside the [operator handbook](operator-handbook.md), for whoever runs a
 deployment, and the [change workflow handbook](change-workflow-handbook.md), for
 operating the workflow. What a change must satisfy for its packages to release — what a
@@ -40,10 +40,12 @@ tag and no public artifact.
 
 ## Loading a release candidate
 
-Fetch the release tags first (`git fetch --tags <remote>`), since the version check
-compares only the tags the checkout holds
-([`package-versions.md`, "The version check"](guidance/repository/package-versions.md#the-version-check)).
-Then, at the commit to load:
+First, retire every row of [Compatibility to retire](#compatibility-to-retire)
+due at this release, or move it. Then fetch the release tags
+(`git fetch --tags <remote>`), since the version check compares only the tags the
+checkout holds
+([`package-versions.md`, "The version check"](guidance/repository/package-versions.md#the-version-check)),
+and, at the commit to load:
 
 ```bash
 make load-candidate AR_PROJECT=<project> AR_LOCATION=<region>
@@ -179,7 +181,10 @@ Once production runs the release, and the deployment's PyPI read has passed agai
    not a development fixture.
 2. In a fresh worktree at the release candidate's commit, create `releases/<semver>`,
    add the deployment's bill of materials as `manifests/release-bom.cdx.json` in one
-   commit changing nothing else, and tag that commit `marketplace-v<semver>`.
+   commit changing nothing else, and tag that commit `marketplace-v<semver>`; and on
+   `main`, record the release in `First released in` for each row of
+   [Compatibility to retire](#compatibility-to-retire) it first carries, and confirm
+   no row names this release in `Retires in`.
 3. Run `make check-release-record TAG=marketplace-v<semver>`, and confirm its version
    check names the newest marketplace release among the tags it compared.
 4. Push the branch and the tag.
@@ -209,6 +214,21 @@ the release's published packages as the fixtures' READMEs describe, and leaves
 deployments older than the new floor to start from a fresh database. Moving the
 floor is a decision about which deployments stay upgradeable, so it is made for
 each release, not by default.
+
+## Compatibility to retire
+
+Code kept only for older deployments retires at a stated release
+([`package-versions.md`, "Compatibility paths retire on a schedule"](guidance/repository/package-versions.md#compatibility-paths-retire-on-a-schedule)).
+Before loading a release candidate, retire on `main` every row due at the release
+it will become, removing what the row names, or move the row to a later release
+with its reason in the row. When the release is cut, record it in `First
+released in` for every row it is the first to carry.
+
+| Compatibility path | First released in | Retires in | What retiring removes | A deployment still holding the old form |
+|---|---|---|---|---|
+| Adoption of hosts registered before host keys were pinned | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
+| Convergence of guests created before guest isolation | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
+| Removal of the per-port guest rules hosts were prepared with before the guest policy | — | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
 
 ## Import package renames
 

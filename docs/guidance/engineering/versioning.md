@@ -45,6 +45,8 @@ version, in stages: one release's readers accept both forms, a later release's w
 switch, and a release after that removes the old form. This is a path for deprecating a
 field, not a limit on how a contract may change: a field that changes meaning, or a
 structure replaced by a richer one, is judged under the rules above on its own merits.
+Each later stage's release is named when the first stage lands
+([Retiring compatibility, "A staged change names each stage's release"](retiring-compatibility.md#a-staged-change-names-each-stages-release)).
 
 ## Compatibility is owed to what has been deployed
 
@@ -52,7 +54,8 @@ Migration paths, compatibility shims and recovery machinery are built only for f
 deployment has run: a kind of record, a message, a configuration key's use. A form
 changed again before any deployment ran it affects no one, so it is revised with no
 migration or deprecation and none is built ahead of it; a form a deployment does run
-keeps the path the rules above give it.
+keeps the path the rules above give it. A path built for such a form is added with its
+retirement ([Retiring compatibility](retiring-compatibility.md)).
 
 The rule holds only against a named record of what has been deployed, such as a
 release tag cut only once production runs the release. A project relaxing

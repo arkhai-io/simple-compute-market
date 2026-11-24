@@ -166,6 +166,8 @@ Release is proof-driven and split across two cooperating owners. Lease lifecycle
 
 A teardown's job is adopted, not run again, unless its record proves its execution never started. The job engine records two instants on every job from the process's time source: `execution_started_at`, committed when the executor reports, immediately before it starts anything that can act on the host, that the execution is starting — the Ansible executor before it spawns the playbook — and `finished_at`, stamped on every terminal transition. The start's report raises when it cannot be committed or the job has left `running`, so no attempt acts on a host without a recorded start and a job cancelled since its claim spawns nothing; a retry keeps the first instant. A job's execution never started when it is `failed`, not `cancelled`, and records `finished_at` but neither a start nor a handle: it was refused before anything acted on its host — by the engine, or by its executor's codec, inventory, host key or relay — so running it again does exactly what it should have. A job with no `finished_at` was finished by an engine that recorded the handle only after spawning the playbook, so a missing handle there proves nothing, and it is never so classified; a recorded start without a handle counts as started. The job view carries both instants.
 
+The Ansible executor checks a host's key against its pin ([The host registry owns the connection](#the-host-registry-owns-the-connection)) before it reports the start, so a host presenting another key, or one with no pin, fails its job as never started, unretried: a teardown so refused runs again once the operator settles the key, by the rerun rule below, and nothing touched the host meanwhile. A key that changes between that check and the playbook fails the playbook as started, and an operator handles it, as for any started teardown.
+
 The job-backed provider's `dispatch_teardown` adopts the reservation's latest teardown job. When that job's execution never started and a rerun is ready, it submits rerun *n* under `"{reservation}:teardown:rerun-{n}"`, *n* counting the teardown jobs already bound, from the frozen prepared teardown operation's parameters; the first teardown is `"{reservation}:teardown"`. A crash between submitting and recording finds the rerun as the latest job and adopts it, and concurrent dispatches collapse on the job identity. Rerun *n* is ready once the previous job has been finished for the job retry policy's delay after *n* − 1 retries, up to `teardown_rerun_limit` reruns. One compute-owned predicate (`teardown_rerun`) decides from the reservation's teardown jobs, read through one unpaginated engine-internal read, whether the teardown is not rerunnable, waiting, ready, or spent; dispatch acts on it, and the release status reads it beside the aggregate, as it reads the compensable predicate. A `teardown_failed` aggregate whose rerun is waiting or ready, or whose latest job is still unsettled, reads as tearing down, so the lease stays `releasing`; one not rerunnable or spent reads as failed, the message for a never-started teardown saying so and how many reruns were spent, and the lease enters `release_failed`, which then means only that an operator must act. A teardown whose execution started, a cancelled one, and one finished before starts were recorded stay failed, their capacity held, until an operator verifies the host and force-releases. The lease's `release_job_id` is the fulfillment, so a new teardown job touches neither it nor convergence, which requeues every `teardown_failed` row as before.
 
 The lease watchdog's grace is the backstop for every stuck release: a lease still `releasing` past `lease_watchdog_grace_period_seconds`, timed from when it entered `releasing`, enters `release_failed` with `teardown_timeout`, whether its teardown is in progress, a rerun is pending, its status read keeps failing, or its teardown keeps failing to begin. Its default, 3600 seconds, covers a teardown of expected length succeeding on a job retry or a rerun ([configuration](configuration.md#secrets-are-named-not-carried)). A longer teardown is timed out like any other, and since an operator's retry-release re-observes the same aggregate, one that has since reached `torn_down` is released by that call, and one with a rerun pending returns to `releasing` and waits for it.
@@ -356,6 +358,136 @@ the hardware does not have, and its failure mode is silent cross-guest DMA. In a
 marketplace renting isolation to strangers, the correct outcome is an accurate
 report that the device is unavailable.
 
+## Guests are isolated from each other
+
+Every VM guest on a host attaches to libvirt's `default` network (`virbr0`,
+`192.168.122.0/24`), and no guest shares a layer-2 segment with another by
+anyone's choice: a seller gains nothing by it, and different buyers' guests
+sharing one could reach each other and claim each other's addresses. A private
+network for one buyer's guests would be a buyer feature with its own
+representation in negotiation; no pool or seller setting places guests on a
+shared segment.
+
+**Port isolation and the anti-spoofing filter.** Every guest's interface is
+defined once, by the `vm-management` role's `templates/guest-interface-args.j2`,
+which every `virt-install` site looks up, GPU guests' included: a virtio NIC on
+`default` with `<port isolated='yes'/>` and libvirt's `clean-traffic` filter,
+its parameters `CTRL_IP_LEARNING=dhcp` and `DHCPSERVER=192.168.122.1`. It is a
+template rather than a variable because a pool's `extra_vars` override any
+variable. An isolated bridge port forwards only to ports that are not isolated,
+which on `virbr0` is the bridge itself, so a guest reaches DHCP, DNS and the NAT
+uplink but never another guest at layer 2; `clean-traffic` holds it to its MAC
+address and the address it leased, so it cannot claim another guest's address by
+ARP, and drops every frame that is not IPv4 or ARP. A libvirt network per guest
+would need subnet allocation, a dnsmasq per guest and a rewrite of every
+teardown path reading `default`; a filter of the host kit's own would have to
+keep ARP and DHCP correct by hand. Host preparation refuses, naming each missing
+item, a host whose libvirt predates 6.1 (port isolation), whose virt-install
+predates 3.0 (the `--xml` edits that set the filter's parameters), or which
+lacks the nwfilter driver's `clean-traffic` filter or `ebtables`, which host
+preparation installs.
+
+**The guest policy.** The host kit's `tasks/guest-policy.yml` installs chains of
+its own, each jumped to from the first position of its built-in chain for
+packets arriving from `virbr0`:
+
+- `ARKHAI-GUEST-IN` (from `INPUT`): a guest reaches DHCP, DNS to the bridge's
+  address, and replies of connections already established; everything else to
+  the host, its SSH included, is dropped;
+- `ARKHAI-GUEST-FWD` (from `FORWARD`): a forwarded packet going back out on
+  `virbr0` is dropped first, closing the hairpin through the gateway to another
+  guest; replies of established connections pass, a buyer connecting from a
+  private address included; an accept for each
+  `guest_allowed_private_destinations` entry, empty by default, follows; then
+  link-local (`169.254.0.0/16`, a cloud's metadata service among it) and the
+  private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `100.64.0.0/10`) are dropped, and anything else returns to `FORWARD`, where
+  libvirt's NAT accepts it;
+- `ARKHAI-GUEST-V6` (from ip6tables' `INPUT` and `FORWARD`): every IPv6 packet
+  from the bridge is dropped. A filtered guest sends none, so the drop takes
+  nothing from it; it closes the IPv6 path of a running guest whose filter waits
+  for its next start, on a host whose `default` network carries IPv6.
+
+A guest that reaches the seller's networks, its management route, or its cloud
+credentials has crossed the boundary a seller places beside buyers as surely as
+one that reaches another guest, so the private ranges are closed unless the
+seller lists a destination. A connection the guest opens toward a private
+address has its first packet dropped and never becomes established.
+
+The jumps lead their built-in chains because an appended rule would follow UFW's
+accepts on `INPUT` and libvirt's `LIBVIRT_FWO` accept on `FORWARD` and never
+run; under libvirt's nftables backend its accepts sit in a table of their own and
+stop no drop here. libvirt re-adds its rules when it starts and UFW when it
+reloads, so the policy is installed again after each. Host preparation renders
+the IPv4 rules to `/etc/arkhai/guest-policy.rules` and installs
+`/usr/local/sbin/arkhai-guest-policy`, which installs each family in one
+`iptables-restore -w --noflush` transaction, `ip6tables-restore` for IPv6,
+skipped on a kernel without IPv6: declaring each chain flushes and refills it,
+any jump to it already present is deleted by its rule, and a new one is inserted
+first, so no packet sees the chains empty or a jump missing, and every run leaves
+exactly one jump from each built-in chain at position one. It runs from
+`arkhai-guest-policy.service`, a oneshot ordered after UFW, the saved rules and
+libvirtd, wanted by `multi-user.target` and by `libvirtd.service`, keeping no
+active state so every libvirtd start, a socket activation included, runs it
+again; and from a block of UFW's `/etc/ufw/after.init`, which UFW runs each time
+it starts or reloads, leaving the rest of an operator's hook as it is.
+Installing the policy through UFW's `before.rules` instead would couple it to
+UFW's layout and leave hosts without UFW needing another path. Host
+preparation's security hardening saves the installed IPv4 rules with the host's
+others; nothing saves the IPv6 chain, which the unit installs at boot. The
+policy does not rely on the host kit's `iptables-restore` unit.
+
+What a guest reaches on its host is the policy's alone: no per-port guest rule
+sits behind it, and host preparation deletes from a host an earlier release
+prepared the exact port-22 drop and log forms, `ufw allow in on virbr0 from
+192.168.122.0/24` and `vm-network-isolation.service` with its script, a
+compatibility path with a scheduled retirement ([the release handbook,
+"Compatibility to retire"](../../../docs/release-handbook.md#compatibility-to-retire)).
+Its `allow out on virbr0` governs only the host's own connections to its guests
+and stays. A VM create inserts its guest's two forwarding accepts for DNATed
+buyer SSH at `FORWARD`'s first position, ahead of the policy's jump; they match
+no packet a guest originates, the inbound accept requiring `! -i virbr0` and the
+reply accept `--ctstate ESTABLISHED`. cloud-init reads a seed ISO, and the
+host's SSH into a guest, frpc's proxy and DNATed buyer SSH are connections the
+host opens or forwards, so none needs more.
+
+**Converging running guests.** An isolated port can still be reached from one
+that is not, so a running guest holding a port that is not isolated, or no
+filter, could reach every isolated guest at layer 2 for as long as it runs, and
+VM leases may be open-ended. Host preparation installs
+`/usr/local/sbin/arkhai-guest-converge` (`vm-setup/files/guest_converge.sh`) and
+runs it after the policy. For each running guest on `default` it sets the tap's
+bridge port isolated (`bridge link set dev <tap> isolated on`), which does not
+drop the link; applies `clean-traffic` through `virsh update-device --live`
+where libvirt accepts it, leaving the interface's `<port>` element as libvirt
+holds it, and otherwise leaves the filter for the guest's next start; and writes
+the isolated port and the filter into the saved definition through
+`virsh update-device --config`, so a restart, an autostart or a host reboot keeps
+them. No buyer session is interrupted: restarting running guests would interrupt
+every buyer, and isolating new guests only would leave their isolation to the
+oldest guest on the host. The command prints one JSON line per running guest —
+`name`, `port_isolated`, `filter` (`live`, `next_start` or `none`),
+`saved_definition`, `changed` and `error` — and reports a filter `live` only when
+the running definition names it and libvirt lists an active binding of it on
+the guest's tap (`virsh nwfilter-binding-list`). It exits non-zero only when it
+cannot run at all, and host preparation fails only then: it names each guest
+left unconverged and each whose filter waits for its next start, since failing
+would leave every other host step undone for one guest the operator can act on.
+Callers read these lines rather than `virsh`; the real-host proof of guest
+isolation runs the same command
+([test-compatibility](../test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation)).
+
+The convergence leaves residual exposure. Until a guest's filter applies at its
+next start, port isolation keeps it from other guests at layer 2 but not from
+claiming another guest's address to the host's own end of the bridge. A
+converged guest's running definition still says its port is not isolated, so a
+tap libvirt attaches to the bridge again before the guest restarts, as after the
+network is restarted, comes up not isolated until the saved definition applies
+at the guest's next start. The convergence is a compatibility path with a
+scheduled retirement ([the release handbook, "Compatibility to
+retire"](../../../docs/release-handbook.md#compatibility-to-retire)); a guest
+never converged keeps a port that is not isolated until it is torn down.
+
 ## The host registry owns the connection
 
 Address, user, key material, and port are one descriptor and live together in
@@ -371,7 +503,7 @@ pool has no buyer relay; for a relay-backed pool, the leased relay endpoint is
 delivered instead. A VM guest is reached at its own forwarded or relayed port,
 never the host's `public_host` or `public_port`.
 
-The `ssh` connection is served at version 2 alone. A submission must state its
+The `ssh` connection is served at version 3 alone. A submission must state its
 version — the contract gives it no default — and one stating no version, or
 another, is refused. A host stored at a version no codec serves is refused
 before any inventory is written, and runs nothing until it is submitted again
@@ -380,21 +512,83 @@ field. A protected key it neither resubmits nor replaces with a key file is
 carried forward from the stored row as ciphertext, never read or decrypted.
 
 No reader upgrades a stored connection. Besides a submission, only a recorded
-migration with an exact mapping rewrites one: compute provisioning's chain
+migration with an exact mapping rewrites one. Compute provisioning's chain
 rewrites every host's `ssh` connection stored at version 1 — which the v0.3.0
 chain wrote and v0.3.0 refuses — to version 2 with the same public fields and
 the same ciphertext, since version 2 is version 1 with an optional
-`public_port` falling back to the connection's port. The target version is the
-literal 2, not the codec's current one, so a later codec version makes the
-migration fail rather than stamp a version it never mapped; a host whose fields
-the version-2 codec refuses fails the migration, naming it, and nothing is
-rewritten. Only the `hosts` row stores a connection: a job reads its host's at
+`public_port` falling back to the connection's port; a later migration rewrites
+every connection stored at version 2 to version 3 with the same public fields
+and protected values and no `host_keys`, since version 3 is version 2 with an
+optional pin, and marks each host it rewrites pending adoption (below). Each
+writes its literal target version, not the codec's current one, and validates
+each row before writing any, against the fields the versions share and refusing
+a row that already states `host_keys`; a host it refuses fails the migration,
+naming it, and nothing is rewritten. Only the `hosts` row stores a connection: a job reads its host's at
 dispatch, through the host lookup the job engine is given, and no job record,
 parameter or envelope carries a copy, so a job queued before the migration
 dispatches against the rewritten host. A teardown that had already failed on a
 version-1 host is not re-run by the migration ([Proof-driven
 release](#proof-driven-release)); the operator handbook's upgrade procedure
 recovers it.
+
+A host's SSH key is part of the same descriptor. The connection's `host_keys`
+are its pin: OpenSSH public keys, each its type and base64 without a comment,
+which identify the machine rather than its route, so a submission that omits
+them keeps the stored pin whatever else it changes, `ssh_host` and `ssh_port`
+included, and the INI import, which carries none, keeps it too. A pin is
+replaced only by stating other keys or by a capture with `replace`; stating the
+old key with the new lets a host rotate without a refusal between. Keeping the
+pin in the connection, rather than in a record beside it or a `known_hosts`
+file an operator mounts, keeps an SSH concept with the codec that owns its
+kind's fields and keeps the inventory reproducible from the registry.
+
+A pin is stated at registration, or captured: an operator's connectivity check
+of an unpinned host reports the key it presents, with its endpoint
+`[ssh_host]:ssh_port` and SHA-256 fingerprint, and stores nothing, and the
+capture route records that key only when the host presents the fingerprint the
+operator names, which the operator compared from an independent source. The
+probe that observes a key completes the SSH key exchange with authentication
+disabled, so it runs nothing and sends no credential. Capture is an operator's
+act rather than a job's because a host's first job is usually its preparation,
+which sends the relay's client token: capturing there would hand that token to
+whoever answered. A host-key certificate authority would need a CA the operator
+runs and would leave a host another party prepared unsigned; the
+representation leaves room for one.
+
+The rule is the Ansible executor's, whose concept the host key is. For every
+job and probe the runner writes an owner-only `known_hosts` holding the pin
+under `[ssh_host]:ssh_port`, removed with any decrypted key file, and renders
+verification as host variables, which outrank any Ansible configuration:
+`ansible_host_key_checking=true`, `ansible_ssh_args` with the service's own
+baseline, and `ansible_ssh_common_args` naming that file with
+`GlobalKnownHostsFile=/dev/null` and `StrictHostKeyChecking=yes`. A setting in
+a configuration file would not hold: an operator's `ansible_cfg` replaces the
+packaged file whole, Ansible's ssh plugin emits `StrictHostKeyChecking=no`
+ahead of the common arguments when checking is off, and `ssh` keeps the first
+value it reads. Before a job's recorded start, the executor makes one
+connection against the pin that runs nothing on the host, and refuses an
+unpinned or mismatched host, naming the host, its endpoint, the presented and
+pinned fingerprints and how to recover ([Proof-driven
+release](#proof-driven-release)). A host behind a management tunnel is checked
+at its tunnel port, so a port handed to another machine is refused on mismatch.
+The mock executor reaches no host and reads no pins, as every lane registers
+hosts without keys.
+
+A host the version-3 migration rewrote is pending adoption, a flag on its
+`hosts` row outside the connection that neither the export nor the host
+definitions document carries. For such a host, the check before a job's start,
+or a connectivity check, accepts the key presented into an empty file and
+records it as the pin, clearing the mark, in one compare-and-set that takes
+effect only while the host is still pending. Every job then checks against the
+committed pin, never the key it observed, so a job whose observation lost to
+another adoption fails before its start. The adopting connection sends nothing
+secret, and what it trusts is a deployed host's first answer after the upgrade,
+which is what such a host was trusted with on every earlier contact; strict
+refusal of every deployed host until an operator pins it would be an outage
+from the upgrade on. Stating `host_keys`, or capturing, clears the mark, and a
+host registered after the upgrade is never marked. The adoption is a
+compatibility path with a scheduled retirement ([the release handbook,
+"Compatibility to retire"](../../../docs/release-handbook.md#compatibility-to-retire)).
 
 The port renders explicitly even at its default, so an inventory line states
 what the registry holds rather than leaving the default implied by an absent

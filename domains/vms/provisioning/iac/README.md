@@ -5,7 +5,7 @@ A comprehensive Terraform and Ansible-based Infrastructure as Code solution for 
 ## Features
 
 ### Core Capabilities
-- 🏢 **Multi-Tenant Architecture**: Complete tenant isolation with separate storage pools, network ranges, SSH keys, and resource quotas
+- 🏢 **Guest Isolation**: every guest on an isolated bridge port under libvirt's `clean-traffic` filter, reaching no other guest on its host, only DHCP and DNS on the host itself, and no link-local or private destination the seller does not list; running guests are converged by host preparation
 - 🖥️ **Complete VM Lifecycle Management**: Create, start, stop, restart, destroy, and monitor VMs across tenants
 - ⚙️ **Automated KVM Host Setup**: Comprehensive hypervisor configuration, security hardening, and GPU passthrough support
 - 🐧 **Ubuntu Cloud Image Deployment**: Automated OS provisioning with cloud-init for networking and SSH
@@ -28,6 +28,7 @@ A comprehensive Terraform and Ansible-based Infrastructure as Code solution for 
 - **Ubuntu/Debian KVM hosts** with sudo access and virtualization support
 - **Python 3.6+** on Ansible control node
 - **Hardware virtualization** support (Intel VT-x or AMD-V)
+- **libvirt 6.1+** with the nwfilter driver's `clean-traffic` filter, **virt-install 3.0+**, and `ebtables`, which host preparation installs: guest isolation needs each, and host preparation refuses a host lacking any, naming each
 - **GPU-enabled host** with NVIDIA or AMD GPU and proper GPU setup (optional, for GPU passthrough features)
 - **GCP credentials** (optional, for GCS image storage)
 - **FRP server** (optional, for remote SSH access)
@@ -605,10 +606,6 @@ tenant_isolation:
     ssh_keys: /etc/ssh/tenant_keys        # Tenant SSH key storage
     logs: /var/log/tenants                # Tenant-specific logs
     configs: /etc/tenants                 # Tenant configurations
-  network:
-    base_network: 192.168.100.0/16  # Base network for tenant isolation
-    subnet_size: 24                 # /24 subnets per tenant
-    enable_network_isolation: true  # Network isolation between tenants
   security:
     enable_selinux_labels: true     # SELinux security labels
     enforce_resource_limits: true   # Resource quota enforcement
@@ -644,6 +641,10 @@ packer_variables:
   generate_new_templates: true      # Enable generation of new Packer files
 ```
 
+No setting here isolates guests' networks. Every guest's interface and the host
+kit's guest policy do, whatever a variable or a pool's `extra_vars` say
+([Guest network isolation](#guest-network-isolation)).
+
 ## Infrastructure Architecture
 
 ### KVM Host Setup (vm-setup role)
@@ -653,14 +654,55 @@ packer_variables:
 - **Hardware Virtualization**: required — preparation refuses a host whose CPU exposes neither Intel VT-x (`vmx`) nor AMD-V (`svm`), or that has no `/dev/kvm` once the KVM modules load; nested virtualization is enabled where supported
 - **User Permissions**: Automatic addition of users to libvirt and kvm groups for virtualization access
 - **GPU Passthrough Support**: applied only where an NVIDIA or AMD GPU is present, or as `gpu_passthrough` forces: IOMMU configuration, VFIO driver configuration, and binding of the GPUs the IOMMU group audit finds bindable
-- **Network Configuration**: KVM bridge networking setup, network isolation rules, and persistent iptables configurations
-- **Security Hardening**: SSH access restrictions from VM networks, iptables rules blocking VM-to-host SSH, network isolation service, audit logging setup
-- **Intrusion Prevention**: Fail2ban installation with custom jails for SSH protection, VM network attack detection, bridged network monitoring, and iptables-allports banning
+- **Network Configuration**: KVM bridge networking setup and persistent iptables configurations
+- **Guest Network Policy**: the chains holding each guest to DHCP and DNS on its host and away from other guests and undeclared private destinations, kept first after libvirt and UFW reload their rules, and every running guest converged to an isolated, filtered port ([Guest network isolation](#guest-network-isolation))
+- **Security Hardening**: SSH configuration, the default-deny firewall, audit logging setup, and removal of the per-port guest rules an earlier release installed
+- **Intrusion Prevention**: Fail2ban installation with custom jails for SSH protection, bridged network monitoring, and iptables-allports banning
 - **FRP Client Setup**: Fast Reverse Proxy client installation, systemd service configuration, and secure tunneling for remote VM access
 - **Golden Image Pipeline**: Packer installation, GCP SDK setup, HashiCorp repository configuration, and automated image building with GCS storage integration
 
 > **Operational reboot guardrail**: Shut down running VMs before rebooting the host. If guests are still running, `libvirtd` can block systemd shutdown while it waits for those domains to stop, which in turn makes host reboots hang indefinitely.
 - **GPU Detection Service**: Automated GPU monitoring service, hardware detection scripts, and resource availability tracking, installed with GPU passthrough's configuration
+
+#### Guest network isolation
+
+Every guest a create makes, GPU guests included, attaches to libvirt's `default`
+network on an isolated bridge port under libvirt's `clean-traffic` filter
+(`vm-management/templates/guest-interface-args.j2`), so it reaches no other
+guest at layer 2 and cannot claim another guest's address. Host preparation's
+`tasks/guest-policy.yml` refuses a host lacking libvirt 6.1, virt-install 3.0,
+the `clean-traffic` filter or `ebtables`, naming each, then installs the guest
+policy: chains of the host kit's own, `ARKHAI-GUEST-IN`, `ARKHAI-GUEST-FWD` and,
+for IPv6, `ARKHAI-GUEST-V6`, each jumped to first from its built-in chain for
+packets from `virbr0`. A guest reaches DHCP and DNS on its host and nothing else
+there, its SSH included; nothing it forwards goes back out to another guest; and
+it reaches no link-local address (a cloud's metadata service among them) and no
+private range (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+`100.64.0.0/10`) unless `guest_allowed_private_destinations` lists the
+destination, such as a package mirror on the seller's LAN:
+
+```bash
+ansible-playbook -i <inventory> playbooks/host-kit/vm-setup.yaml \
+  -e '{"guest_allowed_private_destinations": ["10.20.0.8", "10.30.0.0/24"]}'
+```
+
+Each entry is an IPv4 address or CIDR block, and host preparation refuses
+anything else before changing the host. Replies to a buyer connecting from a
+private address pass without being listed. The rules are rendered to
+`/etc/arkhai/guest-policy.rules` and installed by
+`/usr/local/sbin/arkhai-guest-policy`, run by `arkhai-guest-policy.service` at
+boot and after every libvirtd start, and by UFW's `/etc/ufw/after.init` each
+time UFW starts or reloads, so the jumps stay first after either re-adds its own
+rules.
+
+Host preparation then runs `/usr/local/sbin/arkhai-guest-converge`, which
+converges every running guest to the interface a new guest is created with
+without interrupting its sessions: it isolates the guest's bridge port, binds
+its filter live where libvirt accepts that and otherwise at the guest's next
+start, and writes both into its saved definition. It prints one JSON line per
+guest, and the play names each guest it could not converge and each whose
+filter waits for its next start, with the reason; it fails only when the
+command cannot run at all. The `guest_policy` tag runs these steps alone.
 
 #### VM Setup Command Examples
 
@@ -798,7 +840,8 @@ ansible-playbook -i inventory/ playbooks/host-kit/vm-setup.yaml \
 - `host_setup`: Complete host preparation (excludes VM operations)
 - `gpu_passthrough`: GPU detection and passthrough configuration
 - `kvm_config`: KVM/QEMU installation and setup
-- `kvm_network`: Network bridge and isolation setup
+- `kvm_network`: Network bridge setup
+- `guest_policy`: Guest network policy and the convergence of running guests
 - `security_hardening`: Security features (SSH, firewall, fail2ban)
 - `ssh_keys`: Inject SSH public key(s) into authorized_keys only (also runs as part of `security_hardening` / `host_setup`)
 - `frp_client`: FRP client installation and configuration
@@ -840,7 +883,7 @@ required cleanup, since its running client may still forward traffic.
 - **Health Checks**: VM status verification, process monitoring, and operational state validation
 - **JSON Output Formatting**: Structured data output for monitoring systems and API integration
 - **Inventory Management**: VM listing and registration, automatic Ansible inventory updates, and resource tracking
-- **Network Isolation**: Tenant-specific network configuration, bridge setup, and traffic segmentation
+- **Network Isolation**: every guest's interface defined once, an isolated port on libvirt's `default` network under the `clean-traffic` filter, and each create's forwarding accepts for its buyer's SSH matching no packet a guest originates ([Guest network isolation](#guest-network-isolation))
 - **Storage Management**: Dynamic disk allocation, tenant-specific storage pools, and resource quota enforcement
 
 #### Execution Flow

@@ -536,10 +536,28 @@ Rejected:
 - **Held.** Provisioning's assembly refusal and `kit/site`'s test stay. Each storefront
   — VM, bare metal, API credits — gains a test that a request signed as the
   administrator is refused on its buyer, counterparty-seller and service routes and
-  admitted on its administrator routes.
+  admitted on its administrator routes. As implemented, each storefront's test
+  classifies every route its app mounts and sweeps its party routes signed under
+  `admin`; it shows each refusal, not its cause, since no positive control signs the
+  same request under the party's role, and on VM and bare metal a deal-bound route
+  that checks the stored owner first refuses for ownership before reaching the role.
+  The lifecycle routes both storefronts mount from `kit/deal-servicing` are held
+  once there. The credits service's case is an application-integration test through
+  `CreditsServiceClient`, since a case in its static route-parity table could not
+  fail while `permits("admin")` holds.
 - **Fixed.** The API-credits storefront's `GET /api/v1/listings/{id}/negotiations` and
   `…/negotiations/{neg_id}` require the administrator, as the other storefronts' do;
-  the shared storefront client already signs them so.
+  the shared storefront client already signs them so. As implemented, both reads
+  verify the administrator under the canonical client's own contracts,
+  `admin_list_negotiations` over the listing and its sorted, percent-encoded query
+  (any other or repeated query name refused with 400, as the VM and bare-metal
+  storefronts rebuild it) and `admin_get_negotiation`, since
+  `require_admin_principal` verified the route's name and path, which no client
+  signs; the list also reads the buyer filter the client signs. The advance had the
+  same mismatch and passed the negotiation service no actor, so it moved onto
+  `admin_advance_negotiation` with the authenticated administrator, taken from
+  `kit-owned-storefront-auth-and-persistence`, which keeps pause and resume and the
+  third copies of the list-resource builder and buyer-filter parsing to fold in.
 - **Recorded.** The registry's administrator authenticating by a bearer key rather than
   a signed principal is an unowned gap in the change index. The API-credits service's
   `X-Admin-Key` fallback is `redesign-authenticated-requests`'.
@@ -650,6 +668,15 @@ live definition names with no binding is reported waiting for the next start, wi
 the missing binding as its reason (50 F2), and fails O9 rather than leaving it
 unproven, since libvirt took the live change and did not refuse it.
 
+As implemented, the report's `filter` has a third value, `none`, when neither
+definition holds the filter, so a guest whose saved definition was not written is
+never reported as waiting for a start that would not bind it, and each line carries
+`changed`, which host preparation's `changed_when` reads. Both definitions are edited
+by `virsh update-device` — `--live` with the running element, its `<port>` left as
+libvirt holds it, since whether libvirt takes a live `<port>` change varies by
+version, and `--config` with the saved element — rather than a `define` of the whole
+domain, which would drop what `dumpxml` omits without `--security-info`.
+
 Rejected:
 - a guest an earlier release actually made, by preparing the host and creating the
   guest with v0.3.0's host kit and images, which needs a second deployment in one run,
@@ -722,6 +749,14 @@ observing O6 on the host, by a packet watch on the forwarded port or the connect
 tracking entry's original source through the operator route, which would make O6
 under the masquerade at the cost of another probe operation (50 F1, the owner's
 choice).
+
+Settled by the real-host runs, within this decision: the egress watch's packet socket
+is bound to every protocol (`ETH_P_ALL`), since Linux hands a transmitted frame only
+to packet sockets bound so, and one bound to IPv4 alone sees only received frames;
+the guest probe becomes root with the tenant password the deal delivered to its buyer,
+read from settle status and sent on standard input, rather than the create granting
+passwordless sudo, a product change outside D7–D9, or probes without root, which raw
+frames, the gateway route and `accept_redirects` need.
 
 ### D22 — Closeout waits on observations O1 to O5, O7 and O8 being made
 
@@ -1000,7 +1035,11 @@ key when signing is not configured.
   on a host whose libvirt refuses live filter changes. D8's IPv6 drop is proven only by
   the installer's tests against fake `ip6tables`, and rests for its effect on O3 to O5's
   real-host proof of the same jump-first mechanism over IPv4; no real-host run probes
-  IPv6, which needs a target whose `default` network carries it (69 F1).
+  IPv6, which needs a target whose `default` network carries it (69 F1). The proof
+  shows each jump first and the policy's decisions holding after a reload, not that
+  a refill left nothing behind: a leftover duplicate jump lower in a built-in chain,
+  or a chain refilled with its rules doubled, would pass, and would decide nothing
+  differently.
 
 ## Open Questions
 
@@ -1019,3 +1058,33 @@ key when signing is not configured.
 - **A keyring whose private keys a KMS holds.** Part of the deferred credential work;
   revisit when a deployment requires that the provisioning container hold no
   long-lived key material (D11).
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — one change for the provisioning trust gaps | None: it groups this change's work |
+| D2 — host keys, guest isolation and the administrator stance together | None: it settles this change's scope |
+| D3 — a host's key is stated, or captured by an operator's probe | `openspec/specs/physical-provisioning/spec.md#requirement-a-hosts-pinned-keys-are-stated-or-captured-by-an-operator` (archive); `openspec/specs/physical-provisioning/architecture.md#the-host-registry-owns-the-connection`; `docs/operator-handbook.md#capturing-and-rotating-a-host-key`; `docs/seller-quickstart.md#4-prepare-your-kvm-hosts`; `docs/bare-metal-seller-quickstart.md#define-the-selected-site` |
+| D4 — the pin is `host_keys` in the `ssh` connection, at version 3 | `openspec/specs/physical-provisioning/spec.md` — "Host connections are typed by their implementation's codec", "Host registry records the connection port", "The Ansible executor reaches only hosts matching their pinned key" (archive); `openspec/specs/physical-provisioning/architecture.md#the-host-registry-owns-the-connection`; `docs/development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup`; `docs/operator-handbook.md#host-definitions`, `#ansible-configuration` |
+| D5 — the check reports, the capture route records, a mismatch is refused before the start; the real-target harness pins only from an independent source | `openspec/specs/physical-provisioning/spec.md` — the pinning and executor requirements (archive); `openspec/specs/physical-provisioning/architecture.md#proof-driven-release`; `docs/operator-handbook.md#capturing-and-rotating-a-host-key`; `openspec/specs/test-compatibility/spec.md#requirement-a-real-provisioning-target-is-a-typed-versioned-settings-section` (archive); `openspec/specs/test-compatibility/architecture.md#ordinary-arkhai-purchase-evidence`; `docs/development/VALIDATION_RUNBOOK.md#24-describe-the-target`; `e2e-tests/README.md#real-provisioning-target-and-vm-lane`; `docs/development/TESTING.md#the-real-provisioning-lane` |
+| D6 — deployed hosts are adopted by the probe before their first job | `openspec/specs/physical-provisioning/spec.md#requirement-hosts-deployed-before-pins-are-adopted-before-their-first-job` (archive); `openspec/specs/physical-provisioning/architecture.md#the-host-registry-owns-the-connection`; `docs/development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup`; `docs/operator-handbook.md#the-procedure`, `#what-the-upgrade-from-v030-changes`; `docs/release-handbook.md#compatibility-to-retire`, its first row |
+| D7 — port isolation, an anti-spoofing filter and a forwarding drop | `openspec/specs/physical-provisioning/spec.md#requirement-a-vm-guest-reaches-no-other-guest-on-its-host` (archive); `openspec/specs/physical-provisioning/architecture.md#guests-are-isolated-from-each-other`; `domains/vms/provisioning/iac/README.md#guest-network-isolation`, "Prerequisites", "Core Capabilities"; `docs/seller-quickstart.md#4-prepare-your-kvm-hosts`; `docs/development/VALIDATION_RUNBOOK.md#21-provide-real-compute-hosts` |
+| D8 — a guest reaches DHCP and DNS on its host and no undeclared private destination; IPv6 from the bridge dropped | `openspec/specs/physical-provisioning/spec.md#requirement-a-vm-guest-reaches-only-dhcp-and-dns-on-its-host-and-no-undeclared-private-destination` (archive); `openspec/specs/physical-provisioning/architecture.md#guests-are-isolated-from-each-other`; `domains/vms/provisioning/iac/README.md#guest-network-isolation`, "Global Settings"; `docs/seller-quickstart.md#4-prepare-your-kvm-hosts` |
+| D9 — the host kit converges running guests live | `openspec/specs/physical-provisioning/spec.md#requirement-vm-host-preparation-converges-running-guests` (archive); `openspec/specs/physical-provisioning/architecture.md#guests-are-isolated-from-each-other`; `docs/operator-handbook.md#the-procedure`, `#what-the-upgrade-from-v030-changes`; `docs/release-handbook.md#compatibility-to-retire`, its second row |
+| D10 — no guest shares a segment by anyone's choice | `openspec/specs/physical-provisioning/architecture.md#guests-are-isolated-from-each-other` |
+| D11 — host credential protection deferred | `docs/development/ROADMAP.md`, Goal 1's credential row (unowned); `openspec/changes/README.md`, the unowned gaps `harden-provisioning-trust-boundaries`' design found — both written with the design |
+| D12, D13 — deferred with D11 | None |
+| D14 — the administrator reaches every route acting on its operator's resources, and is never a party | `docs/development/ARCHITECTURE.md#the-administrators-reach` |
+| D15 — the rule written once, stated by each service, and held by tests | `openspec/specs/physical-provisioning/spec.md#requirement-every-provisioning-route-admits-the-administrator`, `openspec/specs/site-capacity/spec.md#requirement-a-site-authority-admits-the-administrator-on-every-route`, `openspec/specs/api-credits/spec.md#requirement-the-credits-services-site-authority-admits-the-administrator-on-every-route`, `openspec/specs/storefront-publication/spec.md#requirement-a-storefront-never-authorizes-its-administrator-as-a-party` (archive); `docs/development/ARCHITECTURE.md#the-administrators-reach`; the registry's bearer key, an unowned gap in `openspec/changes/README.md`, written with the design |
+| D16 — compatibility code is added with its retirement | `docs/guidance/engineering/retiring-compatibility.md`; `docs/guidance/engineering/versioning.md#a-field-may-be-renamed-or-retired-in-stages`, `#compatibility-is-owed-to-what-has-been-deployed`; `docs/guidance/engineering/README.md#tags` (`versioning`); `docs/guidance/repository/package-versions.md#compatibility-paths-retire-on-a-schedule`; `docs/release-handbook.md#compatibility-to-retire`, its introduction, "Loading a release candidate" and "Cutting a release"; the inventory of existing paths, an unowned gap in `openspec/changes/README.md`, written with the design |
+| D17 — the first implementation cadence | None: the cadence is this change's |
+| D18 — the real-host proof reaches the host through an operator route its target names | `openspec/specs/test-compatibility/spec.md#requirement-vm-guest-isolation-is-proven-on-a-real-host` (archive); `openspec/specs/test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation`; `docs/development/VALIDATION_RUNBOOK.md#24-describe-the-target`, `#prove-guest-isolation`; `e2e-tests/README.md#real-provisioning-target-and-vm-lane`. The principle that such a route adds no reach the deployment lacks stays in D18 alone, by the owner's choice |
+| D19 — `e2e_vm_guest_isolation` extends the real-provisioning scenario's two-guest window | `openspec/specs/test-compatibility/spec.md#requirement-vm-guest-isolation-is-proven-on-a-real-host` (archive); `openspec/specs/test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation`; `docs/development/VALIDATION_RUNBOOK.md#prove-guest-isolation`; `e2e-tests/README.md#real-provisioning-target-and-vm-lane`; `docs/development/TESTING.md#the-real-provisioning-lane` |
+| D20 — convergence is one installed command, proven on a guest planted unconverged | `openspec/specs/physical-provisioning/spec.md#requirement-vm-host-preparation-converges-running-guests` (archive); `openspec/specs/physical-provisioning/architecture.md#guests-are-isolated-from-each-other`; `openspec/specs/test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation`; `domains/vms/provisioning/iac/README.md#guest-network-isolation`; `docs/seller-quickstart.md#4-prepare-your-kvm-hosts` |
+| D21 — the target's `guest_isolation` section, and probes attributed by counters | `openspec/specs/test-compatibility/spec.md#requirement-vm-guest-isolation-is-proven-on-a-real-host` (archive); `openspec/specs/test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation`; `docs/development/VALIDATION_RUNBOOK.md#24-describe-the-target`; `e2e-tests/README.md#real-provisioning-target-and-vm-lane`; the committed example target under `e2e-tests/config/`, written in implementation |
+| D22 — closeout waits on O1 to O5, O7 and O8 | None: it settles this change's closeout gate. Run 3 met it (`tasks.md` 7a.2, 8.8) |
+| D23 — removing the older per-port guest rules is a compatibility path | `docs/release-handbook.md#compatibility-to-retire`, its third row; `openspec/specs/physical-provisioning/architecture.md#guests-are-isolated-from-each-other` |
+| D24 — the remaining work's cadence | None: the cadence is this change's |
+| Roadmap currency | `docs/development/ROADMAP.md`, Goal 1: its current state states host-key checking, guest isolation and the administrator's reach; the three gap rows this change owned are removed; the embedded-credential row stays, unowned |
+| Campaign index currency | `openspec/changes/README.md`: this change's row, linked to its archive directory, and its line in Goal 1's campaign graph; the unowned rows its design and implementation added stay |

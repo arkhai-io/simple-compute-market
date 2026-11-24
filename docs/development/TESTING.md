@@ -686,6 +686,11 @@ relay identifier. Unknown or foreign fields fail by name; version 1 is refused
 with conversion instructions. A relayed run requires an enabled relay with a
 configured token and active grant key before taking holds or registering supply.
 The target contains no private key or relay secret.
+A VM host may state its management SSH public key, which the lane registers as
+the host's pin; without it the host must already hold a pin, and the lane
+refuses one with neither before declaring capacity, naming the field. It never
+captures the key a host presents
+([test-compatibility architecture](../../openspec/specs/test-compatibility/architecture.md#ordinary-arkhai-purchase-evidence)).
 Without the profile every stage skips naming it, and nothing is written to the
 stack.
 
@@ -750,6 +755,23 @@ refusal, ordinary expiry/release, closed access and released/quarantined relay
 holdings require a configured real host. The module belongs to no pipeline lane;
 without its target it skips before any holds or supply writes. Unit and mock
 pipeline results do not substitute for this physical qualification.
+
+`e2e_vm_guest_isolation`
+(`e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_guest_isolation.py`), also in
+no lane, proves VM guest isolation on the same VM target. It subclasses
+`e2e_vm_real_provisioning`'s stages and fixtures, so it makes the same two deals
+and shares their recovery and teardown, and adds fourteen stages while both
+guests run and the first holds its heartbeat. Its guest probes run in each guest
+as its buyer; its host-side stages restart libvirtd, reload UFW, read the guest
+policy's counters, plant the first guest unconverged and run the host kit's
+convergence command through an operator route the target's optional
+`guest_isolation` section names, skipping naming it without one. It reports each
+of its observations, O1 to O9, as made, failed or unproven through the
+qualification modules' helper
+([test-compatibility, "The real-host proof of guest isolation"](../../openspec/specs/test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation)).
+Its unit tests run its judgements over sample host output and pytest over the
+module, collected and blocked without a target; no lane runs its probes against a
+real kernel.
 
 The real-provisioning modules and the qualification modules below share the
 target's resource and adopt its sole compatible open listing, retaining closed
