@@ -36,6 +36,7 @@ from tests.e2e.roles.helpers.qualification import (
     observation_outcomes,
     stage_observations,
 )
+from tests.e2e.roles.helpers.ssh_access import SshEndpoint
 from tests.e2e.roles.scenarios.vms import guest_isolation_probe as probe
 from tests.e2e.roles.scenarios.vms import test_real_provisioning_deal as real_deal
 from tests.e2e.roles.scenarios.vms import test_vm_guest_isolation as module
@@ -45,10 +46,12 @@ from tests.e2e.roles.scenarios.vms.guest_isolation import (
     METADATA,
     PRIVATE_SOURCE_ROUTE,
     PROBE,
+    IsolationProbes,
     admission_faults,
     binding_bound,
     claim_faults,
     converged_faults,
+    deal_tenant_passwords,
     deciding_rule,
     filter_faults,
     guest_to_guest_faults,
@@ -65,6 +68,8 @@ from tests.e2e.roles.scenarios.vms.guest_isolation import (
     probe_command,
     refusal_faults,
 )
+from tests.e2e.roles.scenarios.vms.real_compute_deal_driver import RealVmDealState
+from tests.unit import test_real_vm_lane as vm_lane
 from tests.unit.test_qualification_modules import _lane_modules, _registered_markers
 from tests.unit.test_real_provisioning_target import EXAMPLE
 
@@ -511,7 +516,90 @@ def test_the_operator_command_is_sudo_n_python3_with_the_probes_text_and_json():
     assert argv[:5] == ["sudo", "-n", "--", "python3", "-c"]
     assert argv[5] == PROBE.read_text()
     assert json.loads(argv[6]) == request
-    assert shlex.split(probe_command(request, sudo=False))[:2] == ["python3", "-c"]
+    assert shlex.split(probe_command(request, sudo=()))[:2] == ["python3", "-c"]
+
+
+ACCESS = SshEndpoint(host="192.0.2.30", port=30022, user="tenant")
+OTHER_ACCESS = SshEndpoint(host="192.0.2.30", port=30023, user="tenant")
+
+
+class _GuestSession:
+    """The shared SSH seam as a guest probe uses it: each command it was given
+    and its standard input, answered with an empty probe report."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[SshEndpoint, str, str | None]] = []
+
+    def run(self, endpoint, key, command, *, stdin=None):
+        self.calls.append((endpoint, command, stdin))
+        return "{}"
+
+
+def _guest_probes(tenant_password) -> tuple[IsolationProbes, _GuestSession]:
+    session = _GuestSession()
+    probes = IsolationProbes(target=None, operator_ssh=None, guest_ssh=session, buyer_key=None,
+                             tenant_password=tenant_password)
+    return probes, session
+
+
+def test_a_guest_probe_gives_sudo_the_delivered_tenant_password_on_standard_input():
+    read = []
+    probes, session = _guest_probes(lambda endpoint: read.append(endpoint) or "example-tenant-password")
+    probes.guest(ACCESS, "interface")
+    probes.guest(ACCESS, "peers")
+    (endpoint, command, stdin), (_, _, again) = session.calls
+    argv = shlex.split(command)
+    assert endpoint == ACCESS
+    assert argv[:7] == ["sudo", "-S", "-p", "", "--", "python3", "-c"]
+    assert argv[7] == PROBE.read_text() and json.loads(argv[8]) == {"operation": "interface"}
+    assert stdin == again == "example-tenant-password\n"
+    assert read == [ACCESS]
+    assert "example-tenant-password" not in command
+    assert "example-tenant-password" not in repr(probes)
+
+
+def test_a_guest_probe_without_sudo_reads_no_password_and_sends_none():
+    probes, session = _guest_probes(lambda endpoint: pytest.fail("no password is needed"))
+    probes.guest(ACCESS, "peer", sudo=False)
+    ((_, command, stdin),) = session.calls
+    assert shlex.split(command)[:2] == ["python3", "-c"] and stdin is None
+
+
+class _SettleStatus:
+    """Settle status as the buyer reads it: each escrow's tenant credentials."""
+
+    def __init__(self, passwords: dict[str, str]) -> None:
+        self.passwords = passwords
+
+    def get_settle_status(self, escrow_uid):
+        return SimpleNamespace(tenant_credentials={"password": self.passwords[escrow_uid],
+                                                   "key_type": "provided"})
+
+
+def _two_deals() -> tuple[object, RealVmDealState]:
+    driver = vm_lane._driver(storefront_client=_SettleStatus({
+        "first-escrow": "example-first-password", "second-escrow": "example-second-password",
+    }))
+    state = RealVmDealState(real_escrow_uid="first-escrow", second_escrow_uid="second-escrow",
+                            delivered_access=ACCESS, second_access=OTHER_ACCESS)
+    return driver, state
+
+
+def test_each_guest_gets_the_tenant_password_its_own_deal_delivered():
+    driver, state = _two_deals()
+    password = deal_tenant_passwords(driver, state)
+    assert password(ACCESS) == "example-first-password"
+    assert password(OTHER_ACCESS) == "example-second-password"
+
+
+def test_a_guest_no_deal_delivered_has_no_password_and_is_not_probed():
+    driver, state = _two_deals()
+    probes, session = _guest_probes(deal_tenant_passwords(driver, state))
+    unknown = SshEndpoint(host="192.0.2.30", port=30024, user="tenant")
+    with pytest.raises(AssertionError, match="no deal of this run delivered the guest at "
+                                             "tenant@192.0.2.30:30024"):
+        probes.guest(unknown, "interface")
+    assert session.calls == []
 
 
 def test_every_operation_the_scenario_asks_for_is_one_the_probe_offers():

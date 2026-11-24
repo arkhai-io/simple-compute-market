@@ -596,9 +596,10 @@ def _listing_for(
     )
 
 
-def _driver(*, storefront_admin_client=None, target=TARGET) -> RealVmComputeDealDriver:
+def _driver(*, storefront_admin_client=None, storefront_client=None,
+            target=TARGET) -> RealVmComputeDealDriver:
     return RealVmComputeDealDriver(
-        provisioning_client=None, storefront_client=None,
+        provisioning_client=None, storefront_client=storefront_client,
         storefront_admin_client=storefront_admin_client, storefront_service_client=None,
         site_capacity_admin_client=None, site_capacity=None, site_id="site",
         vm_operator_client=None, target=target, buyer_public_key="k",
@@ -1067,6 +1068,42 @@ def test_relay_endpoint_is_the_reservations_leased_port():
     holding.remote_port += 1
     with pytest.raises(AssertionError, match="differs"):
         driver.delivered_access(state)
+
+
+class _SettleStatus:
+    """Settle status as the buyer reads it, by escrow."""
+
+    def __init__(self, credentials):
+        self.credentials = credentials
+        self.read: list[str] = []
+
+    def get_settle_status(self, escrow_uid):
+        self.read.append(escrow_uid)
+        return SimpleNamespace(tenant_credentials=self.credentials)
+
+
+def test_the_tenant_password_is_the_one_the_deals_settle_status_delivers():
+    settlement = _SettleStatus({"password": "example-tenant-password", "key_type": "provided"})
+    driver = _driver(storefront_client=settlement)
+    assert driver.tenant_password(RealVmDealState(real_escrow_uid="escrow")) == \
+        "example-tenant-password"
+    assert settlement.read == ["escrow"]
+
+
+def test_the_second_deals_tenant_password_is_read_from_the_second_escrow():
+    settlement = _SettleStatus({"password": "example-tenant-password"})
+    driver = _driver(storefront_client=settlement)
+    state = RealVmDealState(real_escrow_uid="first-escrow", second_escrow_uid="second-escrow")
+    driver.tenant_password(driver.second_deal_state(state))
+    assert settlement.read == ["second-escrow"]
+
+
+@pytest.mark.parametrize("credentials", [None, {}, {"password": "", "key_type": "provided"}])
+def test_no_delivered_tenant_password_fails_naming_the_fields_never_a_value(credentials):
+    driver = _driver(storefront_client=_SettleStatus(credentials))
+    with pytest.raises(AssertionError, match="delivered no tenant password") as failed:
+        driver.tenant_password(RealVmDealState(real_escrow_uid="escrow"))
+    assert "provided" not in str(failed.value)
 
 
 def test_released_relay_port_requires_release_expiry_and_no_active_owner():

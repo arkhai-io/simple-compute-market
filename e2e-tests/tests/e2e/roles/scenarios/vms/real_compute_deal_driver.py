@@ -322,6 +322,19 @@ class RealVmComputeDealDriver(VmDealDriverBase, RealComputeObservations):
         self.assert_relay_delivery(deal_state.fulfillment_id, endpoint)
         return endpoint
 
+    def tenant_password(self, deal_state: Any) -> str:
+        """The tenant password the deal delivered with its access, as the buyer
+        reads it from settle status. A failure names the credential's fields,
+        never its values."""
+        status = self.storefront_client.get_settle_status(deal_state.real_escrow_uid)
+        credentials = status.tenant_credentials or {}
+        password = credentials.get("password")
+        assert isinstance(password, str) and password, (
+            "the settlement delivered no tenant password; its tenant credentials carry "
+            f"{sorted(credentials)}"
+        )
+        return password
+
     def _buyer_address(self) -> str:
         """The address a buyer reaches the guest at under the target's access mode."""
         if self.target.access.mode == "direct":

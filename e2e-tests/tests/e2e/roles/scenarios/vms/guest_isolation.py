@@ -2,9 +2,11 @@
 
 The probes are ``guest_isolation_probe.py``, fixed Python carried with a JSON
 argument over the shared SSH seam (``ssh_access.SshSession.run``): in a guest,
-under ``sudo`` as its buyer; on the host, as ``sudo -n -- python3 -c <probe>
-<arguments>`` through the operator route the VM target's ``guest_isolation``
-section names, whose key is referenced, never copied. What they report is
+as ``sudo -S -p '' -- python3 -c <probe> <arguments>`` as its buyer, whose
+sudo asks for the tenant password the deal delivered, written to its standard
+input; on the host, as ``sudo -n -- python3 -c <probe> <arguments>`` through
+the operator route the VM target's ``guest_isolation`` section names, whose
+key is referenced, never copied. What they report is
 judged here, by pure functions over what the host and the guests printed:
 
 - a refusal counts only when the guest policy rule that should make it counted
@@ -32,7 +34,8 @@ import re
 import shlex
 import threading
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -108,13 +111,36 @@ def private_destinations(target: VmHost) -> PrivateDestinations:
 # ===========================================================================
 
 
-def probe_command(request: dict[str, Any], *, sudo: bool = True) -> str:
-    """The probe's own text and its JSON argument as one remote command, run
-    as ``sudo -n -- python3 -c <probe> <arguments>`` unless SUDO is false."""
-    argv = ["python3", "-c", PROBE.read_text(), json.dumps(request)]
-    if sudo:
-        argv = ["sudo", "-n", "--", *argv]
-    return shlex.join(argv)
+#: How the probe becomes root on the host: the operator route's user may run
+#: Python as root without a password, and ``-n`` fails rather than prompting.
+OPERATOR_SUDO = ("sudo", "-n", "--")
+#: How it becomes root in a guest: a create gives the buyer's tenant user sudo
+#: through the ``sudo`` group, which asks for the tenant password the deal
+#: delivered, so ``-S`` reads it from standard input with no prompt printed.
+BUYER_SUDO = ("sudo", "-S", "-p", "", "--")
+
+
+def probe_command(request: dict[str, Any], *, sudo: tuple[str, ...] = OPERATOR_SUDO) -> str:
+    """The probe's own text and its JSON argument as one remote command,
+    ``<sudo> python3 -c <probe> <arguments>``, with no sudo when SUDO is
+    empty."""
+    return shlex.join([*sudo, "python3", "-c", PROBE.read_text(), json.dumps(request)])
+
+
+def deal_tenant_passwords(driver: Any, deal_state: Any) -> Callable[[SshEndpoint], str]:
+    """The tenant password of each guest the run's two deals delivered, by the
+    endpoint delivered, read from that deal's settle status through DRIVER
+    (``RealVmComputeDealDriver.tenant_password``)."""
+
+    def tenant_password(endpoint: SshEndpoint) -> str:
+        if endpoint == deal_state.delivered_access:
+            return driver.tenant_password(deal_state)
+        if endpoint == deal_state.second_access:
+            return driver.tenant_password(driver.second_deal_state(deal_state))
+        raise AssertionError(f"no deal of this run delivered the guest at {endpoint.user}@"
+                             f"{endpoint.host}:{endpoint.port}, so no tenant password is known")
+
+    return tenant_password
 
 
 def _answer(output: str, operation: str) -> dict[str, Any]:
@@ -127,12 +153,16 @@ def _answer(output: str, operation: str) -> dict[str, Any]:
 @dataclass
 class IsolationProbes:
     """The run's routes to the probes: the operator route to the host, and the
-    buyer's session to each guest."""
+    buyer's session to each guest, with the tenant password the deal that
+    delivered a guest's endpoint delivered with it, read once when a probe
+    first needs it."""
 
     target: VmHost
     operator_ssh: SshSession
     guest_ssh: SshSession
     buyer_key: SshKey
+    tenant_password: Callable[[SshEndpoint], str]
+    _tenant_passwords: dict[SshEndpoint, str] = field(default_factory=dict, repr=False)
 
     def operator(self, operation: str, **arguments: Any) -> dict[str, Any]:
         route = operator_route(self.target).operator
@@ -143,8 +173,18 @@ class IsolationProbes:
 
     def guest(self, endpoint: SshEndpoint, operation: str, *, sudo: bool = True,
               **arguments: Any) -> dict[str, Any]:
+        """The probe's OPERATION in the guest at ENDPOINT, as root unless SUDO
+        is false. The tenant password goes to sudo on standard input, never in
+        the command, so no failure the seam raises carries it."""
         request = {"operation": operation, **arguments}
-        output = self.guest_ssh.run(endpoint, self.buyer_key, probe_command(request, sudo=sudo))
+        if not sudo:
+            return _answer(self.guest_ssh.run(endpoint, self.buyer_key,
+                                              probe_command(request, sudo=())), operation)
+        if endpoint not in self._tenant_passwords:
+            self._tenant_passwords[endpoint] = self.tenant_password(endpoint)
+        password = self._tenant_passwords[endpoint]
+        output = self.guest_ssh.run(endpoint, self.buyer_key,
+                                    probe_command(request, sudo=BUYER_SUDO), stdin=f"{password}\n")
         return _answer(output, operation)
 
     def guest_while_egress_is_watched(

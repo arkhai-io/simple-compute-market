@@ -1106,7 +1106,7 @@ host", and the real-host scenarios of the two guest-isolation requirements and o
 host preparation converges running guests". Touches this task list, and whatever code
 the run's findings name (sections 5, 6 and 6a's files).
 
-- [ ] 7a.1 Record the run. The deployment providing the controlled target and its
+- [x] 7a.1 Record the run. The deployment providing the controlled target and its
   operator route runs `e2e_vm_guest_isolation` against a stack deployed from this
   branch (`make -C e2e-tests test-module MODULE=e2e_vm_guest_isolation
   ACTIVE_PROFILES=local,real-provisioning-target`, as `VALIDATION_RUNBOOK.md` sections
@@ -1125,6 +1125,36 @@ the run's findings name (sections 5, 6 and 6a's files).
   and return the change to design (design.md, Open Questions, "The host-side steps
   without an operator route"). (D22.) Verify: the recorded summary, and its judgement
   against D22.
+  Done: the first run is recorded, and it does not meet D22. Later runs are recorded
+  under 7a.2.
+  **Run 1** (system, external topology): `guest-isolation-20261124T102647Z`, commit
+  `d90458802`, host libvirt 10.0.0. The module: 8 failed, 49 passed, 5 skipped.
+  - O1 failed. The guest probe, run as the buyer as `sudo -n -- python3 -c <probe>`,
+    exited 1 with "sudo: a password is required" (09k1); 09k3 skipped for want of
+    09k1's state.
+  - O2, O3, O4 and O5 failed, from the same cause (09k1; 09k4 skipped, and 09k5, 09k6
+    and 09k7 failed).
+  - O6 unproven: the target's buyers reach its guests through a relay (09k8). D22
+    admits this.
+  - O7 failed at each guest probe (09k9–09k12). The host steps before those probes
+    passed: libvirtd restarted and came back active, the policy unit ran again and
+    succeeded, and `ufw reload` exited 0.
+  - O8 and O9 failed: never reached (09k1); 09k13 and 09k14 skipped.
+
+  Passed: every shared real-VM stage, both deals and teardowns among them, with the
+  heartbeat surviving the second guest's create. 09k2 passed, and so did the counter
+  reads before each failed guest probe, so the operator route works. The deployment
+  reports UFW still active after the run, and the guest chains as prepared.
+  Judged against D22: not met. O1–O5, O7 and O8 must be made, and O9 made or unproven
+  for one of its two admitted reasons; O9 failed. Every failure has one
+  cause, the guest probe's sudo (7a.2); no observation reached a judgement of the
+  policy itself.
+  **Correction to the pre-run assessment.** Before the run, this section's session
+  told the deployment that the guest probe's `sudo -n` would work because the create
+  gives the buyer `NOPASSWD:ALL`. That was wrong: `vm-create.yml`'s `NOPASSWD` entry
+  is cloud-init's for `root`. The tenant user is made later in the same file
+  (`useradd`, a generated password by `chpasswd`, `usermod -aG sudo`), so its sudo asks
+  for that password.
 - [ ] 7a.2 Fix what the run finds. For each failed observation, or each unproven one
   D22 does not admit, diagnose it from the summary, fix the code it names in the section
   that owns it — the guest interface, the policy chains or their re-assertion (5), the
@@ -1136,8 +1166,74 @@ the run's findings name (sections 5, 6 and 6a's files).
   order after libvirtd, `ufw reload` running `after.init`) are discharged by O2 and O7
   being made, or each becomes a finding here. (D7, D8, D9, D22.) Verify: the focused
   tests of each fix, and a recorded run meeting D22.
+  In progress; it stays open until a recorded run meets D22.
+  **Run 1's finding: the guest probe's sudo (6a).** The buyer's tenant user has sudo
+  through the `sudo` group, with a password. The deal delivers that password to the
+  buyer: settle status's `tenant_credentials` carry `password` (the VM storefront's
+  `fulfillment_result_connection`). The fix uses that credential, inside D21's "a fixed
+  Python probe run under `sudo` in a guest". It gives the scenario no reach the buyer
+  lacks, and it changes neither the create nor any design decision. Rejected:
+  - the create granting the buyer passwordless sudo, which changes every guest's tenant
+    setup, a product change outside D7–D9;
+  - running the probes without sudo, since raw ARP, ICMP and DHCP frames, the `/32`
+    route and `accept_redirects` all need root in the guest.
+
+  What changed:
+  - `ssh_access.SshSession.run` takes an optional `stdin`, written to the remote
+    command on every attempt and never part of the command, so no argument list or
+    raised failure carries it.
+  - `guest_isolation.probe_command` takes the sudo prefix: `OPERATOR_SUDO`
+    (`sudo -n --`) on the host, as before; `BUYER_SUDO` (`sudo -S -p '' --`) in a
+    guest; none for `peer`.
+  - `IsolationProbes` takes a `tenant_password` lookup by delivered endpoint. On a
+    guest's first sudo probe it reads the password, then keeps it in a field with
+    `repr=False`. `guest()` sends the password and a newline as standard input.
+  - `guest_isolation.deal_tenant_passwords` is the module's lookup: the first deal's
+    password for its delivered endpoint, and the second deal's for the second
+    endpoint. Any other endpoint fails, naming it, before anything runs.
+  - `RealVmComputeDealDriver.tenant_password` reads the password from the deal's
+    settle status, and a failure names only the credential's fields.
+
+  The password is read when a probe first needs it, not in a stage, so every
+  isolation stage still names its prerequisites with `require_state` as 6a.3 says:
+  the delivered endpoints, which settle status has delivered by then.
+
+  Tests (unit), all passing (252 in the three files):
+  - `test_ssh_access.py`: standard input reaches the command on a retried attempt and
+    is in no argument; it is in no failure the command raises.
+  - `test_vm_guest_isolation.py`:
+    - the guest command's form, with the password on standard input, read once per
+      guest and not in the command or the probes' `repr`;
+    - a probe without sudo reads and sends no password;
+    - through the real driver over a settle-status double keyed by escrow, each
+      endpoint gets its own deal's password;
+    - an endpoint no deal delivered fails naming it, and nothing runs.
+  - `test_real_vm_lane.py`: the password is read from the deal's settle status, and
+    the second deal's from the second escrow; a missing or empty one fails without
+    naming a value.
+
+  `run test-before` at `d90458802`, of the files as first written: each new test
+  failed there, but only because the API it calls does not exist (`TypeError` or
+  `AttributeError`). Every existing test passed. No test shows the guest's real sudo
+  accepting the password; that is the next run's. Run 2, at the commit that carries
+  this note, is owed by the deployment.
+
+  The fresh-context check found, all fixed above:
+  - stages depending on 09k1 having read the passwords without naming it (the
+    passwords were first read in 09k1);
+  - doubles set on the driver after it was built, rather than passed in;
+  - an SSH test's name claiming every attempt;
+  - a stand-in driver where the real one could be used;
+  - run 1's judgement omitting O9;
+  - 7a.3 naming 7a.1 as the run that must meet D22.
+
+  It also found that design.md's Context ("What the real-host proof can reach") says
+  the tenant user has passwordless sudo, which run 1 shows is false. The fix is a
+  mechanism inside D21's "run under `sudo` in a guest" and changes no decision, so the
+  change has not returned to design. Correcting that Context sentence is left to the
+  round's triage, with the owner's word on whether it needs more than a correction.
 - [ ] 7a.3 Verification point. System: the recorded `e2e_vm_guest_isolation` run
-  meeting D22 (7a.1). Unit, library integration: the suites of whatever 7a.2 changed,
+  meeting D22 (7a.1, or a later run 7a.2 records). Unit, library integration: the suites of whatever 7a.2 changed,
   as their sections name them.
   End-to-end: `e2e_vm_guest_isolation` on the deployment's real host, in no lane; no
   lane scenario exercises it.

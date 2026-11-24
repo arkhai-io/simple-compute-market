@@ -79,6 +79,7 @@ from tests.e2e.roles.scenarios.vms.guest_isolation import (
     IsolationState,
     claim_faults,
     converged_faults,
+    deal_tenant_passwords,
     filter_faults,
     guest_to_guest_faults,
     host_service_faults,
@@ -131,8 +132,11 @@ def operator_ssh(real_vm_target):
 
 
 @pytest.fixture(scope="module")
-def probes(real_vm_target, operator_ssh, ssh, buyer_key) -> IsolationProbes:
-    return IsolationProbes(real_vm_target, operator_ssh, ssh, buyer_key)
+def probes(real_vm_target, operator_ssh, ssh, buyer_key, deal_driver, deal_state) -> IsolationProbes:
+    """The probes' routes; a guest probe gets root with the tenant password its
+    own deal delivered."""
+    return IsolationProbes(real_vm_target, operator_ssh, ssh, buyer_key,
+                           deal_tenant_passwords(deal_driver, deal_state))
 
 
 @pytest.fixture(scope="module")
