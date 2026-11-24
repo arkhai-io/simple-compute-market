@@ -2528,10 +2528,14 @@ supplies, a convention the workflow fixes, or, for the make fragment, the
 repository's `Makefile`. How a repository fills each is its own statement; this
 repository's is
 [`market-change-workflow`'s](../market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles).
-A test fails when a make target or repository path the make fragment names, the
-fragment's own targets among them, is missing from that statement
-and from the commands the repository's workflow configuration declares, or when a
-role here has no provision there, or one there no role here; the skills name none
+The roles are also structured output: `config --json` lists them as `roles`, each by
+the name this table gives it with the configuration fields that provide it, and the
+distribution's own test fails when the two differ, so a repository reads them with no
+local configuration and parses no document of the workflow's. A test fails when a
+make target or repository path the make fragment names, the fragment's own targets
+among them, is missing from that statement and from the commands the repository's
+workflow configuration declares, or when a role `roles` lists has no provision
+there, or one there no role; the skills name none
 ([Leaf skills from one source](#leaf-skills-from-one-source)). The configuration's
 own check holds the rest: a field it does not define, or a command in the wrong
 shape, is refused as the file loads. Validation's roles are evidence kinds, each with
@@ -2545,12 +2549,12 @@ a role.
 | Validation in a deployed environment: the change's services built and run as the repository deploys them | `change-validate`, `change-plan` | a kind of `validation.evidence` and its guide |
 | The end-to-end pipeline: a run whose head is the commit, its logs fetched | `change-validate`, `change-implement`, `change-merge`, `change-plan` | a `start` and `collect` kind of `validation.evidence`, keyed by commit, whose guide says where its scenarios are named |
 | CI evidence only a push produces: the workflows validation may dispatch, from a fixed list | `change-validate`, `change-implement`, `change-plan` | an `owed` kind of `validation.evidence`, keyed by commit and gathered once per owed argument, whose guide says what may be owed |
-| Removing a change's validation resources, and recording what they used, at archive cleanup | `change-archive-cleanup` | each kind's `cleanup`, run by the engine before archive cleanup's session and again by `run cleanup`, its guide saying what it writes |
-| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `change-implement`, `change-triage`, `change-merge`, `change-validate`, `change-plan` | `hooks.after-functional-change` and `hooks.pre-commit-functional`; `sandbox.writable.common`, and `writable.<step>`, for the tool state they write outside the checkout |
+| Removing a change's validation resources, and recording what they used, at archive cleanup | `change-archive-cleanup` | each kind's `cleanup` in `validation.evidence`, run by the engine before archive cleanup's session and again by `run cleanup`, its guide saying what it writes |
+| The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | `change-implement`, `change-triage`, `change-merge`, `change-validate`, `change-plan` | `hooks.after-functional-change` and `hooks.pre-commit-functional`; `sandbox.writable.common`, and `sandbox.writable.<step>`, for the tool state they write outside the checkout |
 | The packaging check before closeout | `change-implement`, `change-triage`, `change-merge`, `change-closeout`, `change-validate` | `hooks.pre-commit-functional` and `hooks.pre-archive` |
 | The closing checks a step ends with | every step that commits | `hooks.pre-commit`, after the workflow's default checks, which only `defaults.disable` turns off |
 | The change index at a known path | every step | fixed by the workflow, beside OpenSpec's tree |
-| The guidance documents every step reads | every step | `load.common` and `load.<step>`, through `config load` |
+| The guidance documents every step reads | every step | the engineering guidance beneath `guidance.engineering`, then `load.common` and `load.<step>`, through `config load` |
 | Where specifications and documentation live | every step | OpenSpec's tree, fixed; `repository.inert-paths` names what a commit there leaves to the closing checks |
 | Protected branches the guarded push refuses | every step that pushes | `repository.protected-branches` |
 | A pre-push check the guarded push runs over what it would send, where the repository provides one | every step that pushes | `hooks.pre-push` |

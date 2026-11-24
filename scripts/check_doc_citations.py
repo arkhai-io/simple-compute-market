@@ -25,7 +25,9 @@ a change before its review; once it is archived, a citation of the change's own
 unarchived path resolves against its archive directory, so the archive move
 itself is never reported. Before it is archived, a citation of a capability's
 `spec.md` that the change's own delta creates resolves, since closeout checks
-citations before the archive writes that file from the delta. A change's
+citations before the archive writes that file from the delta: the paths it creates
+are the ones the workflow's specification index check reports (`check spec-index
+<change> --json`), so the two checks agree on what a delta creates. A change's
 `reviews/` are excluded too: review records are untracked working notes, never
 part of the branch, so a citation in one is not a citation the branch makes. A
 checkout's local workflow configuration (`LOCAL_ONLY`) is never on any branch, Git
@@ -41,9 +43,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from check_spec_index import read_deltas  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
-from workflow_command import WorkflowRefused, found_change  # noqa: E402
+from workflow_command import WorkflowRefused, created_specifications, found_change  # noqa: E402
 
 #: Directories whose paths must resolve when cited.
 CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
@@ -108,14 +109,14 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     return found
 
 
-def _created_specs(directory: Path) -> set[str]:
+def _created_specs(root: Path, change: str) -> frozenset[str]:
     """Each capability's `spec.md`, as cited, that an active change's deltas write
-    when the change is archived. Only a delta that adds a requirement can write one:
-    a modification, removal, or rename needs a requirement already there. The delta
-    is read by the index check's parser, so the two checks agree on what it adds."""
-    return {f"openspec/specs/{delta.parent.name}/spec.md"
-            for delta in directory.glob("specs/*/spec.md")
-            if read_deltas(delta.read_text(encoding="utf-8", errors="ignore")).added}
+    when the change is archived, as the workflow's specification index check reports
+    them; a refusal ends the check with its reason."""
+    try:
+        return created_specifications(root, change)
+    except WorkflowRefused as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def unresolvable(
@@ -124,13 +125,13 @@ def unresolvable(
     """Every citation that is absent or points at a tombstone."""
 
     own: tuple[str, Path] | None = None
-    created: set[str] = set()
+    created: frozenset[str] = frozenset()
     if change is not None:
         found = _found(root, change)
         if found["archived"]:
             own = (f"openspec/changes/{change}/", root / found["directory"])
         else:
-            created = _created_specs(root / found["directory"])
+            created = _created_specs(root, change)
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")

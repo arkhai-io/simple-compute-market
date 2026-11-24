@@ -153,9 +153,9 @@ promotion also writes its `index.md`: an entry, with its link and summary line u
 its part and group, for each id the change's deltas add; for each requirement they
 rename, its entry's link moved to the new heading; for each they modify, its summary
 line revised where it no longer holds; and, for each requirement they remove, its id
-moved to the retired ids with where its rule went. The repository's index check
-accepts the new ids from the change's deltas, so the entries are written before the
-archive merges them.
+moved to the retired ids with where its rule went. The workflow's specification
+index check, `change-workflow check spec-index`, accepts the new ids from the
+change's deltas, so the entries are written before the archive merges them.
 
 Promote only what the change's own branch implements. A closeout commit can promote
 a section describing a subsystem the branch has never had, citing a requirement the

@@ -3,16 +3,16 @@
 only what fails.
 
 The change workflow's `pre-commit` hook runs the workflow's default checks of a
-change — the change index, its task list, the agent skills, and the strict OpenSpec
-validation — and then this repository's command for the hook, which is this one:
-comment hygiene, the change's documentation citations, the indexed capabilities'
-specifications against their indexes with the change's deltas counted, and the
-written rules the change's own work must keep — each design decision's destination,
-no history wording in the comments it adds, one version step per package it bumps,
-a reason for each import it adds inside a function, a capability index listing
-every capability, and the guidance kept layered — every guidance file tagged from
-its vocabularies, no link to a higher layer, every cited anchor a heading. Run as
-separate commands, each is a tool call that replays the
+change — the change index, its task list, the agent skills, the indexed
+capabilities' specifications against their indexes with the change's deltas
+counted, each design decision's destination, and the strict OpenSpec validation —
+and then this repository's command for the hook, which is this one: comment
+hygiene, the change's documentation citations, and the written rules the change's
+own work must keep — no history wording in the comments it adds, one version step
+per package it bumps, a reason for each import it adds inside a function, a
+capability index listing every capability, and the guidance kept layered — every
+guidance file tagged from its vocabularies, no link to a higher layer, every cited
+anchor a heading. Run as separate commands, each is a tool call that replays the
 step's whole conversation; run here, they are one call, and an answer of one line
 when everything passes. Every check runs whatever the others report, and each
 failing check's own output is printed under its name, so one call says everything
@@ -59,8 +59,6 @@ def checks(change: str, base: str) -> list[tuple[str, list[str]]]:
     return [
         ("comment hygiene", [*make, "check-comment-hygiene"]),
         ("documentation citations", [*make, "check-doc-citations", f"CHANGE={change}"]),
-        ("specification index", [*make, "check-spec-index", f"CHANGE={change}"]),
-        ("decision destinations", [*make, "check-decision-destinations", f"CHANGE={change}"]),
         ("history wording", [*make, "check-history-wording", lands_on]),
         ("version bumps", [*make, "check-version-bumps", lands_on]),
         ("local imports", [*make, "check-local-imports", lands_on]),

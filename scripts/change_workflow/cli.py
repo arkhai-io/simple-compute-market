@@ -36,8 +36,9 @@ of what is missing, or of a new attempt of one kind (`gather`), `run` and `opens
 the repository's hooks and its OpenSpec command (`hooks`), `run before|after` what
 the wrapper runs around a step's session, for a step held interactively (`around`),
 `check` the
-configuration's, index, task-list, push, skill, and round-view checks, a change's
-default checks (`check change`), a review's format check on standard input (`check
+configuration's, index, task-list, push, skill, and round-view checks, the
+specification index check (`spec_index`) and the decision destinations check
+(`decisions`), a change's default checks (`check change`), a review's format check on standard input (`check
 review`), and the graph diagram's comparison with the graph table, `hook
 post-compaction` the post-compaction hook, and `wait` the bounded wait on a
 background command's output. `check graph` is internal: it maintains the
@@ -79,9 +80,9 @@ from typing import Callable, Mapping, Sequence
 
 from . import around
 from . import clone as clones
-from . import (config, cost_report, diagram, documents, evidence, find, gather, graph, history,
-               hook, hooks, index, install, next_step, propose, push, round_view, skills,
-               tasks, wait)
+from . import (config, cost_report, decisions, diagram, documents, evidence, find, gather, graph,
+               history, hook, hooks, index, install, next_step, propose, push, round_view,
+               skills, spec_index, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
@@ -469,6 +470,16 @@ def _parser() -> argparse.ArgumentParser:
     tasks_.add_argument("change")
     checks.add_parser("push", help="whether HEAD may be pushed to its own branch")
     checks.add_parser("skills", help="every agent skill loaded from its one source")
+    spec_index_ = checks.add_parser(
+        "spec-index", help="each indexed capability's spec.md against its index.md, a "
+                           "change's deltas counted")
+    spec_index_.add_argument("change", nargs="?", default=None)
+    spec_index_.add_argument("--json", action="store_true",
+                             help="print the result, its problems, and the specification "
+                                  "paths the change's deltas create, as JSON")
+    decisions_ = checks.add_parser(
+        "decisions", help="each decision of a change's design naming its destination")
+    decisions_.add_argument("change")
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
     review_ = checks.add_parser(
@@ -735,6 +746,10 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
     if args.command == "check":
         return {"index": (index.main, None), "skills": (skills.main, None),
                 "tasks": (tasks.main, [getattr(args, "change", "")]),
+                "spec-index": (spec_index.main,
+                               [*([args.change] if getattr(args, "change", None) else []),
+                                *(["--json"] if getattr(args, "json", False) else [])]),
+                "decisions": (decisions.main, [getattr(args, "change", "")]),
                 "push": (push.main, ["check"]),
                 "round-view": (round_view.main, ["check"]),
                 "config": (config.main, ["check"]),

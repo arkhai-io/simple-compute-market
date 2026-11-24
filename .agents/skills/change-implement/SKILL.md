@@ -343,8 +343,9 @@ Run each of these, and fix what it reports:
   such as a relock, then `pre-commit-functional`, such as the packaging check
   and every suite, then `pre-commit`; otherwise `pre-commit` alone. `pre-commit`
   runs the workflow's default checks — the change index, the task list, the
-  skills, and the strict OpenSpec validation of the change — then the
-  repository's own closing checks. Each hook ends with the engine's closing line,
+  skills, the specification indexes with the change's deltas counted, each
+  decision's destination, and the strict OpenSpec validation of the change — then
+  the repository's own closing checks. Each hook ends with the engine's closing line,
   naming every command that failed with its exit status. Stage what the hooks
   rebuilt, such as a lock, with the section's edits. Before closeout the
   citations check may report only the permanent documents the change's tasks

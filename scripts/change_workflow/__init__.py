@@ -28,6 +28,11 @@ siblings by relative import:
   status and dependencies, and the check that holds it to the change directories;
 - `tasks` — the check that every task of a change's task list sits under its own
   section's heading, and the owed lines its sections hold;
+- `spec_index` — the check that each indexed capability's specification agrees with
+  its index, a change's deltas counted, and the specification paths those deltas
+  create;
+- `decisions` — the check that each decision a change's design records names its
+  permanent destination in its proposal;
 - `next_step` — the next-step computation: where a change stands, read from its
   files and its log, and the step it names;
 - `config` — the repository's workflow configuration, `.agents/workflow.toml`, read

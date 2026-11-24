@@ -865,14 +865,17 @@ Delivers `spec-index` and `decisions` as default checks, the delta paths in `che
 spec-index --json`, and `roles` in `config --json`, read by this repository's
 assumptions test (D10, D14; CW-c8lw, CW-368t, CW-ora1, MCW-5tgp). Touches
 `scripts/change_workflow/` (new `spec_index.py` and `decisions.py`, `config.py`,
-`hooks.py`, `cli.py`), `scripts/check_spec_index.py`,
-`scripts/check_decision_destinations.py`, `scripts/check_doc_citations.py`,
+`hooks.py`, `cli.py`), `check_spec_index.py` and `check_decision_destinations.py`
+under `scripts/`, which leave it, `scripts/check_doc_citations.py`,
 `scripts/check_change.py`, the `Makefile`, `scripts/tests/test_change_workflow_assumptions.py`,
 and their tests.
 
-- [ ] 6.1 The orchestrator's, on the owner's word, before the section's session:
+- [x] 6.1 The orchestrator's, on the owner's word, before the section's session:
   `make install-workflow`, so the session runs the skills section 5 rewrote.
-- [ ] 6.2 Move the specification index check and the decision destinations check into
+  Done by the orchestrator on the owner's word: `make install-workflow` ran in this
+  change's clone only, not the workspace, reinstalling the tree's wheel and writing
+  the 0.1.0 skills into the user skill directories.
+- [x] 6.2 Move the specification index check and the decision destinations check into
   the engine as `spec-index` and `decisions`, run by `pre-commit` and `check change`
   before the declared commands and turned off only by name; `make check-repository`
   stops running them, and `make check-spec-index` and `make
@@ -880,19 +883,148 @@ and their tests.
   Verify: `test_check_spec_index.py` and `test_check_decision_destinations.py` moved to
   the engine's command, `test_change_workflow_hooks.py` (six default checks, "A
   decision names no destination"), `test_check_change.py`.
-- [ ] 6.3 `check spec-index <change> --json` reports the specification paths the
+  Done: the scripts moved with `git mv` to `spec_index.py` and `decisions.py` in the
+  engine's package, each finding the change through `find` rather than the command,
+  and the subcommands `check spec-index [<change>] [--json]` and `check decisions
+  <change>`. `config.DEFAULT_CHECKS` is `index`, `tasks`, `skills`, `spec-index`,
+  `decisions`, `openspec`, so `defaults.disable` names either and `config` lists
+  each; `hooks` runs both in process. An archived change's deltas count for nothing,
+  the archive having merged them, and its design is read where the archive moved it.
+  `check_change.py` runs neither; `make check-spec-index` and `make
+  check-decision-destinations` call `$(CHANGE_WORKFLOW) check …`, so, like
+  `check-change`, they run the installed engine. The comment-hygiene exemption of
+  the design and proposal file names moved with the module. Unit,
+  `test_change_workflow_spec_index.py` and `test_change_workflow_decisions.py` (the
+  moved suites, their parsing cases unchanged, every delta case through
+  `change_deltas`): passed; library integration, the same files, through the
+  command's `main` in process over temporary checkouts — the failing and passing
+  checks, a usage error, an unknown change refused, an archived change's deltas not
+  counted, and its design read from the archive: passed. Unit,
+  `test_change_workflow_hooks.py`: `Hooks.named("pre-commit")` runs the six in order
+  and then the declared command, and `Hooks.check_change` the six alone; one
+  disabled by name is skipped; and CW-c8lw's "A decision names no destination"
+  through `Hooks.named("pre-commit")` with the engine's own decisions check, the
+  other default checks doubled through the constructor, failing on it and naming D7:
+  passed. `test_check_change.py` (seven checks, none of the two): passed;
+  `test_check_comment_hygiene.py`: passed. `make check-spec-index` and `make
+  check-decision-destinations`, run with `CHANGE_WORKFLOW=scripts/change-workflow`,
+  since the installed 0.1.0 predates both subcommands: the first fails on the
+  fourteen ids 8.2 and 10.2 index, the second passes on the change's 24 decisions.
+  `run test-before` at `d069c97bc`: `test_change_workflow_hooks.py` fails there at
+  collection, importing `decisions`, which shows less than an assertion.
+- [x] 6.3 `check spec-index <change> --json` reports the specification paths the
   change's deltas create, and `scripts/check_doc_citations.py` reads them in place of
   importing a delta reader (D10, CW-368t). Verify: `test_check_doc_citations.py`
   ("A citation check meets a specification the change creates").
-- [ ] 6.4 `config --json` lists `roles`, each role by name with the configuration
+  Done: `--json` prints `change`, `result`, `problems`, and `created`, each
+  capability's `spec.md` that does not exist and that a delta adding a requirement
+  will write, and exits as the check does, 1 when it fails, so a caller reads
+  `created` whatever the check found. `workflow_command.created_specifications`
+  runs it and reads `created`, refusing with the command's reason when it prints no
+  object; `check_doc_citations.py` imports no delta reader. Library integration,
+  `test_check_doc_citations.py` (CW-368t's scenario: the change's own citation of
+  the created `spec.md` accepted, through the command as a process; the five deltas
+  that add nothing still refused): passed. `test_workflow_command.py` (the paths read
+  while the index check fails beside them, a refusal's reason, a report with no
+  `created` refused): passed. Library integration,
+  `test_change_workflow_spec_index.py` (the created path listed, an existing
+  capability's and a removal-only delta's not, beside a failing result; a passing
+  check's object whole): passed.
+- [x] 6.4 `config --json` lists `roles`, each role by name with the configuration
   fields that provide it; the distribution's test holds the companion's roles table to
   it; `test_change_workflow_assumptions.py` reads the roles from `config --json` and the
   fragment from `change-workflow fragment`, with no local configuration (D14; CW-ora1,
   MCW-5tgp). Verify: `test_change_workflow_config.py` and
   `test_change_workflow_assumptions.py` ("The workflow adds a role").
-- [ ] 6.5 Verify the section: its suites, and `scripts/change-workflow run pre-commit
+  Done: `config.ROLES`, seventeen roles in the companion's order, each
+  `{"role", "fields"}` in `config --json`'s `roles`, a field written with a
+  placeholder (`load.<step>`) where it names a key per step. Three of the
+  companion's provisions were reworded so each names its fields in code: the
+  cleanup row names `validation.evidence`, the tests row `sandbox.writable.<step>`,
+  and the guidance row `guidance.engineering` before `load.common`; and the
+  paragraph above the table says the roles are `config --json`'s and the test reads
+  them there. Content check, `test_change_workflow_config.py`: the distribution's
+  companion's table, read under its heading alone, names each role `roles` lists in
+  its order, its provisions naming exactly that role's fields; unit, every field a
+  key of a table the configuration defines, a `<step>` key every step's: passed. Library integration, the same file: with
+  no local file, `config --json` gives `roles` in full: passed.
+  `test_change_workflow_assumptions.py` runs `scripts/change-workflow config --json`
+  and `fragment` as processes in a temporary Git checkout holding no configuration,
+  committed or local, and reads the roles and the fragment from them, no longer
+  parsing `change-workflow`'s companion: passed; unit, "The workflow adds a role"
+  (MCW-5tgp), a role given as `config --json` would list it failing the comparison,
+  naming the role: passed. `run test-before` at `d069c97bc`: its two
+  role tests fail there, `config --json` listing no `roles`.
+- [x] 6.5 Verify the section: its suites, and `scripts/change-workflow run pre-commit
   extract-change-workflow-repository`, the two checks now run by the engine.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: the section's suites together, after the last fixes —
+  `test_change_workflow_spec_index.py`, `test_change_workflow_decisions.py`,
+  `test_change_workflow_hooks.py`, `test_check_change.py`,
+  `test_check_doc_citations.py`, `test_workflow_command.py`,
+  `test_change_workflow_config.py`, `test_change_workflow_assumptions.py`,
+  `test_check_comment_hygiene.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_review.py`: passed. `scripts/change-workflow run pre-commit`:
+  `make lock` passed; `make validate-local` passed — packaging, and every suite, the
+  scripts' 3,728 passing, its tree guard holding before and after; the default
+  checks now run six: the index, tasks, skills, and decisions checks and the strict
+  OpenSpec validation passed, and the spec-index check failed on the fourteen ids of
+  the change's deltas that 8.2 and 10.2 index, as `check-repository`'s index check
+  did before it; `make check-repository`, no longer running either check, failed
+  only on one citation in this section's own handoff, of the removed script by
+  path, now its bare name; then `make check-repository` passed whole and
+  `scripts/change-workflow check change` failed on the spec-index check alone. The
+  tree `validate-local` passed differs from the commit's only in `tasks.md`.
+
+Section 6 notes (handoff):
+
+- The orchestrator reinstalls before the next session runs a step (`make
+  install-workflow` in this clone, and in the workspace when it runs the workflow):
+  the installed 0.1.0 predates `check spec-index` and `check decisions`, so until
+  then an installed engine's `run pre-commit` and `make check-change` run the four
+  older default checks, `make check-spec-index` and `make
+  check-decision-destinations` fail on an unknown subcommand, and the installed
+  skills carry the change-implement and change-closeout text before this section.
+  `scripts/change-workflow`, which every pre-commit of this session ran, has both.
+- `check spec-index --json` is structured output a repository script relies on
+  (`workflow_command.created_specifications`): section 8.3's "Interfaces are tiered"
+  should list it beside `config --json`'s fields, and "The command and its tiers"
+  the two new `check` subcommands.
+- Left for section 8: `change-workflow`'s companion still lists four default checks
+  under "The hooks", and its spec, until 8.1 applies the delta, CW-c8lw's four; the
+  companion's roles table and the paragraph above it are already as `roles` has
+  them, since the distribution's test holds the table to `config.ROLES` — a
+  promotion there that renames a role must rename it in `ROLES` too.
+- Left for section 10: MCW-c4ek still says a change's closing checks fail on a
+  decision with no destination, which holds of `run pre-commit` as a whole;
+  `market-change-workflow`'s "What each check enforces" and "The closing checks"
+  now name the two as the workflow's default checks, and its paragraph on the
+  assumptions test says the roles come from `config --json`, so 10.3 has the
+  configuration files and "The engine's own assumptions" left.
+- Outside the plan: documents this section made false are corrected —
+  `openspec/README.md`'s "The index check", the workflow guidance's closeout
+  "Promotion" paragraph, change-implement's and change-closeout's lists of what
+  `pre-commit` runs, the comment-hygiene exemption's path, and the change's own
+  proposal and section heading, which cite the removed scripts by bare name. The
+  unscoped citation check now also names the removed `check_spec_index.py` in
+  `pass-checks-at-every-commit`'s proposal, beside the stale citations other open
+  proposals already carry; that change's design is reverified against the code, so
+  its proposal is left to it.
+- Deferred: the engine reads fenced blocks three ways (`decisions` as CommonMark,
+  `spec_index` and `sections` toggling on any fence), recorded as unowned work in
+  the change index under the workflow's lesser goal.
+- The fresh-context check's findings fixed: a comment left above `Role` that
+  describes `_DEFAULT_SHOWN`; the hooks test's double set after construction, now
+  passed through `_hooks`; a spec-index test named for a citation check it does
+  not run; `git init` and docstrings implying the command ran as a process where
+  `main` runs in process; the archived-change case now through `main`; overstated
+  6.2 and 6.4 notes; the role-field check now against each table's keys; the
+  assumptions test reaching the command through `workflow_command` rather than its
+  own copy of the path; "states no role" wording; `market-change-workflow`'s
+  paragraph on the roles; a duplicate decisions test. Declined: editing
+  `pass-checks-at-every-commit`'s proposal (above); adding `check spec-index --json`
+  to the tier table now, which 8.3 promotes with the rest of "Interfaces are tiered";
+  the companion's four default checks, 8.3's with D10.
 
 ## 7. The workflow's documents self-contained, and the move's procedure
 

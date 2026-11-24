@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow import config, find, hooks, records
+from change_workflow import config, decisions, find, hooks, records
 from change_workflow.cli import main
 from change_workflow.common import SESSION_ID, StepError
 from change_workflow.graph import HOOK_STEPS, STEPS
@@ -65,7 +65,7 @@ def _change(root: Path) -> Path:
 
 
 def _hooks(root: Path, text: str, environ: dict[str, str] | None = None,
-           shell: Shell | None = None, in_process: InProcess | None = None,
+           shell: Shell | None = None, in_process: hooks.InProcess | None = None,
            echoed: list[str] | None = None) -> Hooks:
     _change(root)
     configured(root, text)
@@ -257,17 +257,17 @@ def test_a_review_on_claude_is_marked_as_the_review(tmp_path: Path) -> None:
 # pre-commit's default checks, `check change`, and `openspec`.
 
 def test_a_repository_declares_its_own_pre_commit(tmp_path: Path) -> None:
-    """CW-c8lw: the four default checks, and then `make lint`."""
+    """CW-c8lw: the six default checks, and then `make lint`."""
     shell, in_process = Shell(), InProcess()
     runner = _hooks(tmp_path, "[hooks]\npre-commit = 'make lint'\n", shell=shell,
                     in_process=in_process)
 
     assert runner.named("pre-commit", CHANGE, None, lambda: [])
 
-    assert in_process.checks == ["index", "tasks", "skills"]
+    assert in_process.checks == ["index", "tasks", "skills", "spec-index", "decisions"]
     assert shell.commands == [f"openspec validate {CHANGE} --strict", "make lint"]
     assert [i.check or i.command for i in runner.invoked] == [
-        "index", "tasks", "skills", "openspec", "make lint"]
+        "index", "tasks", "skills", "spec-index", "decisions", "openspec", "make lint"]
 
 
 def test_a_default_check_is_turned_off(tmp_path: Path) -> None:
@@ -279,7 +279,7 @@ def test_a_default_check_is_turned_off(tmp_path: Path) -> None:
 
     assert runner.named("pre-commit", CHANGE, None, lambda: [])
 
-    assert in_process.checks == ["index", "tasks"]
+    assert in_process.checks == ["index", "tasks", "spec-index", "decisions"]
     assert "[change-workflow] default check skills: disabled — no skills here" in echoed
 
 
@@ -292,6 +292,25 @@ def test_a_failing_default_check_fails_pre_commit_and_the_rest_still_run(
     assert not runner.named("pre-commit", CHANGE, None, lambda: [])
 
     assert shell.commands[-1] == "make lint"
+
+
+def test_a_decision_names_no_destination(tmp_path: Path,
+                                         capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-c8lw's scenario: the design records `### D7`, the proposal promotes no
+    `D7`, and `run pre-commit` fails on the decisions default check, naming D7. The
+    engine's own decisions check runs; the other default checks stand in."""
+    def in_process(check: str, change: str, root: Path) -> int:
+        return hooks._in_process(check, change, root) if check == "decisions" else 0
+
+    runner = _hooks(tmp_path, "", in_process=in_process)
+    directory = tmp_path / "openspec/changes" / CHANGE
+    (directory / decisions.DESIGN_FILE).write_text("# Design\n\n## Decisions\n\n### D7 — A rule\n")
+    (directory / decisions.PROPOSAL_FILE).write_text("## Why\n\n### Knowledge to promote\n\n- D1: here\n")
+
+    assert not runner.named("pre-commit", CHANGE, None, lambda: [])
+
+    assert "D7 has no bullet starting `D7`" in capsys.readouterr().out
+    assert [i.check for i in runner.invoked if i.failed] == ["decisions"]
 
 
 def test_an_archived_change_validates_every_specification(tmp_path: Path) -> None:
@@ -364,7 +383,7 @@ def test_check_change_runs_the_defaults_alone(tmp_path: Path) -> None:
 
     assert runner.check_change(CHANGE)
 
-    assert in_process.checks == ["index", "tasks", "skills"]
+    assert in_process.checks == ["index", "tasks", "skills", "spec-index", "decisions"]
     assert shell.commands == [f"openspec validate {CHANGE} --strict"]
 
 

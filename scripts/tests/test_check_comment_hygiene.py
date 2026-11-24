@@ -89,7 +89,7 @@ def test_the_design_and_proposal_constants_are_exempt_only_where_they_are_read(
         tmp_path: Path) -> None:
     root = _tree(tmp_path)
     constants = 'DESIGN_FILE = "' + DESIGN + '"\nPROPOSAL_FILE = "' + PROPOSAL + '"\n'
-    _write(root, "scripts/check_decision_destinations.py", constants)
+    _write(root, "scripts/change_workflow/decisions.py", constants)
 
     assert checker.change_history_matches(root) == []
 

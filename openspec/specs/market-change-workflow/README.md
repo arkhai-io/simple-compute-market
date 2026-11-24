@@ -283,7 +283,7 @@ that breaks it finds it before anyone reads the change.
 ### What each check enforces
 
 Each check that enforces guidance, the rule it enforces and that rule's layer, and
-where the check runs. The first four are the workflow's default checks, which its
+where the check runs. The first six are the workflow's default checks, which its
 engine runs; every other is this repository's script, even where its rule is the
 workflow's or the engineering guidance's.
 
@@ -292,11 +292,11 @@ workflow's or the engineering guidance's.
 | Change index (`change-workflow check index`; `make check-change-index`) | each row's cells, link, status, and dependencies; one row per active change ([`changes.md`, "The change index"](../../../docs/guidance/workflow/changes.md#the-change-index); [`closeout.md`, "Campaign index currency"](../../../docs/guidance/workflow/closeout.md#campaign-index-currency)) | workflow | the workflow's default checks, in every committing step's `run pre-commit` and in `make check-change` |
 | Task list (`change-workflow check tasks`; `make check-tasks`) | every numbered task sits under its own section's heading ([`change-workflow`'s companion, "The command and its tiers"](../change-workflow/README.md#the-command-and-its-tiers)) | workflow | the default checks; implementation's entry check |
 | Agent skills (`change-workflow check skills`; `make check-agent-skills`) | each skill has one source for every harness ([`change-workflow`'s CW-d8de](../change-workflow/spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness)) | workflow | the default checks; the packaging closeout part ([`openspec/README.md`, "Packaging"](../../README.md#packaging)) |
+| Specification index (`change-workflow check spec-index`; `make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, the change's deltas counted ([`openspec-documentation.md`, "A capability organized by an index"](../../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index); [`openspec/README.md`, "The index check"](../../README.md#the-index-check)) | workflow | the default checks; closeout's "Promotion" |
+| Decision destinations (`change-workflow check decisions`; `make check-decision-destinations`) | each decision has a "Knowledge to promote" bullet ([`changes.md`, "Change documentation requirements"](../../../docs/guidance/workflow/changes.md#change-documentation-requirements)) | workflow | the default checks |
 | Strict OpenSpec validation (`change-workflow openspec validate <change> --strict`) | a change's delta requirements are well formed and carry scenarios ([`openspec-documentation.md`, "Capability documentation pattern"](../../../docs/guidance/workflow/openspec-documentation.md#capability-documentation-pattern)) | workflow | the default checks; closeout's "Documentation citations", last before the archive |
 | Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, change document's name, or change directory's name in code ([`change-references.md`](../../../docs/guidance/workflow/change-references.md)), over the file types, exclusions, and exemption [The closing checks](#the-closing-checks) names | workflow; its file types and exemptions the repository's | `make check-repository`; closeout's "Comment hygiene" |
 | Documentation citations (`make check-doc-citations`) | a cited path resolves and is no tombstone ([`documentation.md`, "Citations resolve"](../../../docs/guidance/engineering/documentation.md#citations-resolve)), over the directories and documents [The closing checks](#the-closing-checks) names, but the checkout's local workflow configuration, `.agents/workflow.local.toml`, which Git ignores and no branch holds | engineering; its directories the repository's | `make check-repository`, scoped to the change; closeout's "Documentation citations" |
-| Specification index (`make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, the change's deltas counted ([`openspec-documentation.md`, "A capability organized by an index"](../../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index); [`openspec/README.md`, "The index check"](../../README.md#the-index-check)) | workflow | `make check-repository`; closeout's "Promotion" |
-| Decision destinations (`make check-decision-destinations`) | each decision has a "Knowledge to promote" bullet ([`changes.md`, "Change documentation requirements"](../../../docs/guidance/workflow/changes.md#change-documentation-requirements)) | workflow | `make check-repository` |
 | History wording (`make check-history-wording`) | a comment or docstring the change adds describes no history ([`comments.md`, "Comments describe the current system"](../../../docs/guidance/engineering/comments.md#comments-describe-the-current-system)) | engineering | `make check-repository`, against the merge-base with the landing branch |
 | Version bumps (`make check-version-bumps`) | a package's version moves at most one step from the landing branch's ([`versioning.md`, "One bump per unit of work"](../../../docs/guidance/engineering/versioning.md#one-bump-per-unit-of-work)) | engineering | `make check-repository`, against the merge-base |
 | Local imports (`make check-local-imports`) | an import added inside a function gives its reason ([`dependencies-python.md`, "Imports go at module level"](../../../docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level)) | engineering | `make check-repository`, against the merge-base; closeout's "Import placement" |
@@ -318,8 +318,10 @@ workflow's or the engineering guidance's.
 ### The closing checks
 
 Every step that commits runs `change-workflow run pre-commit <change>`: the
-workflow's default checks — the change index, the task list, the skills, and the
-strict OpenSpec validation through `scripts/openspec`, which runs the pinned
+workflow's default checks — the change index, the task list, the skills, each
+indexed capability's `spec.md` against its `index.md` with the change's deltas
+counted, each decision's destination, and the strict OpenSpec validation through
+`scripts/openspec`, which runs the pinned
 validator through `bunx`, else `npx --yes` — then this repository's `pre-commit`,
 `make check-repository` (`scripts/check_change.py`), and, before a commit changing a
 path outside the inert paths `.agents/workflow.toml` declares (`openspec/`, `docs/`,
@@ -331,13 +333,13 @@ no check runs twice and the familiar target is never partial.
 
 `make check-repository CHANGE=<change> CHANGE_BASE=<branch>`
 (`scripts/check_change.py`) prints only failures and one pass line. It runs comment
-hygiene, the change's documentation citations, and each indexed capability's
-`spec.md` against its `index.md` with the change's deltas counted (`make
-check-spec-index`), and holds six of the rules beside them (MCW-c4ek):
+hygiene and the change's documentation citations, and holds five of the rules
+beside them (MCW-c4ek); the sixth, each `### D<n>` decision under `design.md`'s
+`## Decisions` having a bullet starting `D<n>` in `proposal.md`'s "Knowledge to
+promote", `D<n>: no permanent destination — <reason>` where it has nothing to
+promote, is the workflow's default check run before it (`make
+check-decision-destinations` runs it alone):
 
-- each `### D<n>` decision under `design.md`'s `## Decisions` has a bullet starting
-  `D<n>` in `proposal.md`'s "Knowledge to promote", `D<n>: no permanent destination
-  — <reason>` where it has nothing to promote (`make check-decision-destinations`);
 - no comment or docstring line the change's diff adds in a `.py`, `.toml`, `.yml`,
   or `.yaml` file says "previously", "formerly", "used to", "no longer", "moved
   from", "was renamed", or "originally" (`make check-history-wording`);
@@ -385,7 +387,7 @@ outside `openspec/`: it fails on a change id, a section or task number, or a cha
 document's name in a `.py`, `.yml`, or `.yaml` file, and on a change directory's name
 in those and `.toml` files outside `docs/`, which holds the roadmap, and `.claude/`.
 Its one exemption is each file name's definition in the script that reads it
-(`next_step.py`'s `TASKS_FILE`, `check_decision_destinations.py`'s `DESIGN_FILE` and
+(`next_step.py`'s `TASKS_FILE`, `decisions.py`'s `DESIGN_FILE` and
 `PROPOSAL_FILE`). A comment's stable heading is in `openspec/specs` or
 `ARCHITECTURE.md`, as in:
 
@@ -552,7 +554,8 @@ workflow configuration, `.agents/workflow.toml`, or what the configuration does 
 hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a make
 target or repository path the workflow's make fragment names, its own targets among
 them, is missing from these two tables and from the
-configuration's commands, or when the two documents' roles differ. The workflow's
+configuration's commands, or when the roles the workflow lists in `config --json`
+and this repository's statement of them differ. The workflow's
 skills name none of this repository's targets or paths
 ([What the workflow's skills name of this repository](#what-the-workflows-skills-name-of-this-repository)).
 This repository declares no step hook, `before-<step>` or `after-<step>`: the engine's
@@ -568,7 +571,7 @@ around a step.
 | Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` kind's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
 | The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make validate-local`, which clears the wheelhouse, checks packaging, and runs every suite; and its `[sandbox]`, whose `writable.common` gives every step, the review included, the tool state those write outside the checkout: uv's `~/.local/share/uv`, the cluster client's `~/.kube/cache`, the cloud CLI's `~/.config/gcloud`, Docker's `~/.docker`, and npm's `~/.npm`, the cache of the OpenSpec command `scripts/openspec` runs through `npx`. The steps that fix code write the whole checkout, where they run `make test`, the scripts' suite as `make test-release-tooling` (`make test-release-tooling TESTS=*`, one failing test run alone), a project's tests as `make -C <package> test` or `uv run --directory <package> pytest`, `make lock`, `make dist`, `make init`, `make reinit`, and a project's own `make -C <package> typecheck` and `make -C <package> first-use`; `uv lock --directory <package>`, a new project's first lock; a section's local bring-up, `make -C <package> migrate`, `docker run --rm`, and `docker compose -p` under a project name of the session's own; `make build-*`, the images a lane runs, `make -C e2e-tests e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
 | The packaging check before closeout | the configuration's `pre-commit-functional` and `pre-archive`: `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
-| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `change-workflow run pre-commit`; the checks they run, each through its own target, `make check-*`, or `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index`; and `scripts/openspec`, the pinned OpenSpec CLI, run directly as `scripts/openspec validate` |
+| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks; `make check-change`, the owner's complete closing check, which runs `change-workflow run pre-commit`; the checks they run, each through its own target, `make check-*`, or `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` and `make check-decision-destinations`, each calling the workflow's default check alone; and `scripts/openspec`, the pinned OpenSpec CLI, run directly as `scripts/openspec validate` |
 | The change index at a known path | `openspec/changes/README.md`, checked in a prerequisite's proposal checkout beside this one by `make -C ../<prerequisite>-proposal check-change-index` (`make -C ../*-proposal check-change-index`) |
 | The guidance documents every step reads | the engineering guidance under `docs/guidance/engineering/`, which each checkout's local configuration points at as its template `.agents/workflow.local.template.toml` writes it; the workflow's under `docs/guidance/workflow/`, which the installed distribution serves; then `AGENTS.md`, this repository's rules under `docs/guidance/repository/`, every Markdown file beneath it, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, its closeout parts `openspec/README.md#this-repositorys-closeout-parts`; the roadmap `docs/development/ROADMAP.md`, which design loads too; and `openspec/config.yaml`. The owner's handbook, `docs/change-workflow-handbook.md`, is no guidance and no step reads it |
 | Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` and its guidance under `docs/guidance/`, the workflow's under `docs/guidance/workflow/`, the engineering guidance under `docs/guidance/engineering/`, and this repository's rules spanning its systems under `docs/guidance/repository/` |

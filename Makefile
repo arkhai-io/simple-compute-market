@@ -685,8 +685,8 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 # (openspec/README.md#the-index-check). With CHANGE=<name> that
 # change's deltas count as its archive will leave them, since closeout writes the
 # index before the archive merges them.
-check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids (CHANGE=<name> counts its deltas)
-	@python3 scripts/check_spec_index.py "$(CHANGE)"
+check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids, the change workflow's default check (CHANGE=<name> counts its deltas)
+	@$(CHANGE_WORKFLOW) check spec-index $(if $(strip $(CHANGE)),"$(CHANGE)")
 
 # Each storefront chart's values schema carries one definition generated from
 # that storefront's typed configuration models; it keeps secret-marked fields
@@ -842,14 +842,14 @@ install-workflow: ## Install the change workflow built from this tree as the `ch
 # default checks, then this repository's `check-repository`, each once. Run as the
 # engine runs it before a commit, a worktree changing a path outside the inert
 # paths runs the functional hooks first.
-check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the specification indexes, decision destinations, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@$(CHANGE_WORKFLOW) run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
-check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, the indexed capabilities' specifications, decision destinations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
-check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote" (CHANGE=<change>)
-	@python3 scripts/check_decision_destinations.py "$(CHANGE)"
+check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote", the change workflow's default check (CHANGE=<change>)
+	@$(CHANGE_WORKFLOW) check decisions "$(CHANGE)"
 
 check-history-wording: ## Fail if a comment or docstring line added since the merge-base with the branch the change lands on describes history ([CHANGE_BASE=dev])
 	@python3 scripts/check_history_wording.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")

@@ -737,6 +737,12 @@ The guidance agents load is layered, but still all of it is loaded. Each guidanc
 
 Most of this goal's end state lives outside this repository. This section tracks it until the workflow has a repository of its own. After that, this repository keeps only its adoption of the workflow: its configuration, its evidence guides and hooks, and its own layer of guidance.
 
+### Unowned work found by `extract-change-workflow-repository`
+
+| Item | Origin |
+|---|---|
+| The engine reads Markdown's fenced blocks three ways: the decision destinations check follows CommonMark's fence rules, while the specification index check and the section-name resolver toggle on any fence line, so a fence holding a shorter fence of another length reads differently to each. One parser shared by the three would settle it | `extract-change-workflow-repository`, moving the two checks into the engine |
+
 ## Independent active changes
 
 Changes with no campaign; each stands alone.

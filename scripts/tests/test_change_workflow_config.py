@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -1352,9 +1353,62 @@ def test_config_as_json_reports_a_missing_local_configuration(
     assert fields["repository.protected-branches"]["value"] == ["main"]
     assert fields["sandbox.writable.common"]["value"] == ["~/.cache/shared"]
     assert shown["workflow"] == documents.RUNNING.described()
+    assert shown["roles"] == [role.shown() for role in config.ROLES]
     assert main(["config"], root=tmp_path) == 0
     assert capsys.readouterr().out.splitlines()[1] == (
         ".agents/workflow.local.toml: no such file; every local field is missing")
+
+
+# The configuration's tables, committed and local, each with its keys.
+TABLES = {table: {*config._TABLES.get(table, ()), *config._LOCAL_TABLES.get(table, ())}
+          for table in {*config._TABLES, *config._LOCAL_TABLES}}
+_FIELD = re.compile(rf"^(?:{'|'.join(TABLES)})\.[a-z<][\w.<>-]*$")
+_CODE = re.compile(r"`([^`]+)`")
+
+
+def _companion_roles(markdown: str) -> list[tuple[str, set[str]]]:
+    """The companion's table of roles: each row's role and the configuration fields its
+    "Provided through" cell names in code."""
+    section = markdown.split("### What an adopting repository provides\n", 1)[1]
+    section = re.split(r"^#{2,4} ", section, maxsplit=1, flags=re.M)[0]
+    rows = [[cell.strip() for cell in line.strip().strip("|").split("|")]
+            for line in section.splitlines()
+            if line.startswith("| ") and not line.startswith(("| Role |", "|---"))]
+    return [(cells[0], {code for code in _CODE.findall(cells[-1]) if _FIELD.match(code)})
+            for cells in rows]
+
+
+def test_the_companions_table_of_roles_is_the_roles_config_lists() -> None:
+    """CW-ora1: the distribution's companion states each role `roles` lists, in its
+    order, by the same name, its provisions naming exactly the fields `roles` gives
+    it. Content check over the distribution's own companion."""
+    stated = _companion_roles(documents.path(documents.COMPANION).read_text("utf-8"))
+
+    assert stated == [(role.name, set(role.fields)) for role in config.ROLES]
+
+
+def test_a_roles_fields_are_the_configurations() -> None:
+    """Each field a role names is a key of a table the configuration defines, a
+    `<step>` key every step's, so a role never names a field no repository can
+    declare."""
+    def defined(field: str) -> bool:
+        table, _, rest = field.partition(".")
+        key = rest.split(".")[0]
+        keys = TABLES.get(table, set())
+        return set(config.STEPS) <= keys if key == "<step>" else key in keys
+
+    assert [field for role in config.ROLES for field in role.fields if not defined(field)] == []
+
+
+def test_the_table_of_roles_is_read_under_its_heading_alone() -> None:
+    """Only the roles table's rows are read, each provision's configuration fields
+    and none of its other code, so a role the two state differently is compared."""
+    stated = _companion_roles("### What an adopting repository provides\n\n"
+                              "| Role | Used by | Provided through |\n|---|---|---|\n"
+                              "| A new role | every step | `hooks.pre-commit` and `run` |\n"
+                              "\n#### The engine's own assumptions\n\n| Not | a | role |\n")
+
+    assert stated == [("A new role", {"hooks.pre-commit"})]
 
 
 def test_an_empty_local_configuration_reads_as_none(tmp_path: Path) -> None:

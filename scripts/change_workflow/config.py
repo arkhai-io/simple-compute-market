@@ -78,7 +78,10 @@ directory holding it, which would hide the private `/tmp` every step writes; and
 writable path for the review.
 
 `config` lists every field and how it resolved, each kind's guide among them, and
-each step's resolved scope, every path with its source; `check config` reports, and
+each step's resolved scope, every path with its source; `config --json` gives the
+same as one object, with the distribution's documents by role and each role the
+workflow leaves to an adopting repository with the fields that provide it (`ROLES`),
+neither depending on the local file; `check config` reports, and
 does not refuse, each local field the checkout lacks, and each engineering section a
 shipped skill or the workflow's guidance cites that the guidance beneath the pointer
 does not resolve (`sections`); `config load <step>` the
@@ -89,7 +92,7 @@ workflow's own guidance, which the distribution ships (`documents`), then
 Contract: openspec/specs/change-workflow/spec.md, CW-f3qk, CW-w8ne, CW-t5hz,
 CW-v2dq, CW-l7hn, CW-o6kc, CW-g4oz, CW-t3ev, CW-g1gn, CW-r5qk, CW-k7gd, CW-h3ks,
 CW-i2we, CW-n7ra, CW-ebmo, CW-zq4h, CW-w2ld, CW-r8fb, CW-h2zt, CW-f8yy, CW-4pm4,
-CW-hu0z, and CW-7x0z.
+CW-hu0z, CW-7x0z, CW-c8lw, and CW-ora1.
 """
 
 from __future__ import annotations
@@ -132,7 +135,7 @@ STEP_HOOKS = tuple(f"{when}-{step}" for step in STEPS for when in ("before", "af
 KIND_STEPS = ("review", "triage")
 # The default checks of `pre-commit`, run before its declared commands unless
 # `defaults.disable` names them.
-DEFAULT_CHECKS = ("index", "tasks", "skills", "openspec")
+DEFAULT_CHECKS = ("index", "tasks", "skills", "spec-index", "decisions", "openspec")
 # The OpenSpec command when the configuration names none.
 DEFAULT_OPENSPEC = "openspec"
 # The documents every session reads as it starts, which a step's own add to.
@@ -1136,11 +1139,67 @@ def require_for_step(configuration: Configuration, step: str, *,
 DECLARED, DEFAULT, DISABLED, ABSENT = "declared", "default", "disabled", "absent"
 # A required local field the local configuration lacks; an optional field is absent.
 MISSING = "missing"
+
+
+@dataclass(frozen=True)
+class Role:
+    """A role the workflow leaves to an adopting repository: what it does, and the
+    configuration fields that provide it, none where Git, the invocation, a
+    convention the workflow fixes, or the repository's `Makefile` does. A field
+    written with a placeholder, `load.<step>`, names that key for every step."""
+
+    name: str
+    fields: tuple[str, ...] = ()
+
+    def shown(self) -> dict[str, Any]:
+        return {"role": self.name, "fields": list(self.fields)}
+
+
+# Every role the workflow leaves to an adopting repository, in the order its
+# companion's table states them, which a repository's statement of how it fills each
+# reads from `config --json`.
+ROLES = (
+    Role("Local validation of a commit: the repository's own checks and suites against "
+         "the commit, built from it",
+         (EVIDENCE, "validation.preflight", "hooks.pre-commit-functional")),
+    Role("Validation in a deployed environment: the change's services built and run as "
+         "the repository deploys them", (EVIDENCE,)),
+    Role("The end-to-end pipeline: a run whose head is the commit, its logs fetched",
+         (EVIDENCE,)),
+    Role("CI evidence only a push produces: the workflows validation may dispatch, from a "
+         "fixed list", (EVIDENCE,)),
+    Role("Removing a change's validation resources, and recording what they used, at "
+         "archive cleanup", (EVIDENCE,)),
+    Role("The repository's tests and environments: the suites, locks, builds, and "
+         "environment refreshes a change's work runs",
+         ("hooks.after-functional-change", "hooks.pre-commit-functional",
+          f"sandbox.writable.{COMMON_WRITABLE}", "sandbox.writable.<step>")),
+    Role("The packaging check before closeout",
+         ("hooks.pre-commit-functional", "hooks.pre-archive")),
+    Role("The closing checks a step ends with", ("hooks.pre-commit", "defaults.disable")),
+    Role("The change index at a known path"),
+    Role("The guidance documents every step reads",
+         (GUIDANCE_ENGINEERING, f"load.{COMMON_DOCUMENTS}", "load.<step>")),
+    Role("Where specifications and documentation live", ("repository.inert-paths",)),
+    Role("Protected branches the guarded push refuses", ("repository.protected-branches",)),
+    Role("A pre-push check the guarded push runs over what it would send, where the "
+         "repository provides one", ("hooks.pre-push",)),
+    Role("The remote a change's branch is pushed to, its upstream's, from which the "
+         "pipeline runs"),
+    Role("The branch a change lands on, merged before closeout and reviewed against"),
+    Role("The clone's bootstrap: one command that readies a fresh clone",
+         ("hooks.post-clone",)),
+    Role("The make fragment's targets, included by the repository's `Makefile`"),
+)
+
+
 # What each default check runs, as `config` shows it.
 _DEFAULT_SHOWN = {
     "index": "change-workflow check index",
     "tasks": "change-workflow check tasks <change>",
     "skills": "change-workflow check skills",
+    "spec-index": "change-workflow check spec-index <change>",
+    "decisions": "change-workflow check decisions <change>",
     "openspec": "{openspec} validate <change> --strict, or validate --specs --strict for an "
                 "archived change",
 }
@@ -1333,7 +1392,8 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
                           "guidance": {"engineering": None if engineering is None
                                        else engineering.shown()},
                           "scopes": {step: scope.shown() for step, scope in resolved.items()},
-                          "workflow": distribution.RUNNING.described()},
+                          "workflow": distribution.RUNNING.described(),
+                          "roles": [role.shown() for role in ROLES]},
                          ensure_ascii=False))
     else:
         print("\n".join(resolution_lines(configuration, resolved, root)))

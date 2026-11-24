@@ -141,7 +141,7 @@ release's surface (CW-c2tw):
   `guidance-review`, `.agents/change-outcome.schema.json`, `docs/guidance/workflow/`,
   `openspec/specs/change-workflow/`, and `docs/change-workflow-handbook.md`: packaged
   in the first half, removed in the second.
-- `scripts/check_spec_index.py` and `scripts/check_decision_destinations.py`, which
+- `check_spec_index.py` and `check_decision_destinations.py`, under `scripts/`, which
   become engine modules; `scripts/check_doc_citations.py`, which reads delta paths
   from the engine; `scripts/check_guidance.py`, whose link-direction rule changes;
   `scripts/check_change.py` (`make check-repository`).

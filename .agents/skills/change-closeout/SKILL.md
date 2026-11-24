@@ -261,8 +261,8 @@ promotion also writes the
 index before the archive merges the deltas: an entry for each id the change's deltas
 add — its link to the requirement's heading in `spec.md` and its summary line, under
 the part and group it belongs to — and, for each requirement the deltas remove, its
-id moved to the retired ids with where its rule went. The repository's closing
-checks run the index check with the change's deltas counted, so an id a delta adds
+id moved to the retired ids with where its rule went. The workflow's default
+checks run the specification index check with the change's deltas counted, so an id a delta adds
 is accepted before the archive puts it in `spec.md`.
 
 **Guidance placement.** Read each guidance section the change added, moved, or
