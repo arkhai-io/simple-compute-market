@@ -39,6 +39,12 @@ resolved settings at startup and writes it into its process environment once,
 explicitly, rather than having the container set it. `ANSIBLE_CONFIG`, which the
 `ansible-playbook` subprocess reads itself, is such a variable.
 
+A third-party process that reads no configuration file of its own is started by a
+wrapper on the shared configuration loader. The wrapper resolves the process's
+profiles as a service resolves its own, and passes their values to it through its
+environment, never its arguments. Where the process reads configuration files of its
+own, those are preferred.
+
 ## The configuration system carries every value
 
 Every configuration value reaches a service through its configuration system: its
@@ -64,6 +70,11 @@ cluster that file is a key of a cluster secret, which the deployment's secret st
 writes; under a local container stack it is a mounted file. A setting that names an
 environment variable holding the secret is a second, weaker channel beside the one
 the deployment already writes, so a service's configuration does not name one.
+
+A production deployment's secret values should be managed externally from the chart,
+such as in a secret store, and injected into the pods using secret profiles. A local
+stack's secrets come from
+[A stack's configuration lives in committed files](#a-stacks-configuration-lives-in-committed-files).
 
 ## Trust is configured where its client reads it
 
@@ -117,12 +128,35 @@ payments.
 
 ## A stack's configuration lives in committed files
 
-Every stack a repository runs — a development stack, an end-to-end lane — takes every
-value it runs with from committed profile, overlay, values, and secret-overlay files,
-whose secret overlays hold public development values only. A deployed stack's secret
-profile or overlay is never a committed file: it is the file an operator-supplied
-secret holds. The build tooling that starts a stack chooses which configuration loads
-— the stack files, a profile, a mode — and never generates or carries a value itself.
+Every stack a repository runs, whether a development stack, an end-to-end lane or a
+local cluster, takes every non-secret value from committed profile, overlay and
+values files. Each of its secret files is one of two kinds:
+
+- **Committed public development values.** Used where the stack runs unattended from
+  a clean checkout, or where something else pins an identity derived from them, such
+  as a lane's fixed seed. They are never for a public network.
+- **A gitignored copy of a committed `.example` beside it.** Used wherever a person
+  runs the stack by hand or brings a credential of their own. The `.example` names
+  every field and says how to fill it: either a generated value and the command that
+  makes one, or a held credential and where its holder gets it. A copy is filled by
+  hand, or by a make target that only copies the `.example` and fills its generated
+  fields. The target leaves an existing copy untouched and prints no value. A
+  generated file with no fields, such as a private key, needs no `.example`: the
+  target that writes it and the committed file it pairs with name it.
+
+The compose layer reads the copies where it would read committed files, and a
+launcher refuses a missing copy, naming how to make one. A cluster gets a stack's
+secret files from a separate target at the Helm layer, which reads them and writes
+the cluster's secrets. Nothing generates a value straight into a cluster. A chart's
+committed development secret values are in a local values file, never in its
+defaults ([Helm](helm.md#a-charts-defaults-carry-no-secret-value)).
+
+A deployed stack's secret profile or overlay is never a committed file: it is the
+file an operator-supplied secret holds. The tooling that deploys the chart is
+responsible for selecting the configuration of that deployment. It should never
+carry a value itself. Configuration files should be populated by a separate step an
+operator runs before the deployment tooling runs.
+
 A value the base topology fixes stays in the base file; a deployment's own bindings
 and values are in its overlay. A base file binds no identity, configuration file, or
 secret, and gives none of them — no credential, no definition document — a committed

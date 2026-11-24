@@ -46,9 +46,15 @@ parties and the fixture that sets them). Here:
 - a party the run's profile names but cannot reach fails the setup rather than
   skipping;
 - a run on wall time — an external-topology run, or one against the local Helm
-  release — waits only for an instant the deal's Agreement fixes, such as its
-  start, and a stage needing any other instant is a blocked skip naming the
-  wall-time target; the shared stages reach both through one helper;
+  release — waits only for an instant the scenario's own data fixes, such as the
+  Agreement's start or that start plus an offset the scenario chose, or one an
+  authority recorded in a signed record as the effect of the scenario's own
+  request, such as a preemption's effective instant or the funded boundary; it
+  polls a live producer for an effect of the scenario's own request, bounded by the
+  producer's own schedule plus the run's poll bound, such as a period's earnings
+  awaited through that period's end; and a stage needing any other instant is a
+  blocked skip naming the wall-time target; the shared stages reach both through one
+  helper;
 - a run is on one time source throughout, and the session fails naming a party on
   another.
 

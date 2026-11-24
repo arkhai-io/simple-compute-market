@@ -19,7 +19,8 @@ by waiting: lane time is one frozen instant every party shares, so the stages
 set the Agreement's start before stepping delivery recovery, and an instant
 inside the first period before the buyer's stop, which a stop at the start
 itself would leave uncharged. A run on wall time reaches only an instant the
-Agreement fixes, by waiting for it, and needs no other: its clock moves on its
+Agreement fixes, or one an authority recorded as the effect of the scenario's
+own request, by waiting for it (``reach_lane_instant``): its clock moves on its
 own.
 
 A recurring purchase module declares, in order, each by subclassing it with an
@@ -42,7 +43,9 @@ empty body:
   ``Recurring09``'s balance and ``Recurring10``'s seller list.
 
 The rate servicing rows (``rate_servicing_stages.py``) share every stage up to
-``Recurring07`` and end their deals their own ways.
+``Recurring07`` and end their deals their own ways, and so do the VM live
+verification modules (``scenarios/vms/live/``), which run them against an
+external payments target on wall time.
 ``tests/unit/test_recurring_purchase_stages.py`` holds every module to its
 order.
 
@@ -89,6 +92,7 @@ from tests.e2e.roles.helpers.payments import (
     payment_flag,
     payment_setting,
 )
+from tests.e2e.roles.helpers.producer_assertions import assert_payer_stop
 
 log = logging.getLogger(__name__)
 
@@ -115,22 +119,64 @@ DELIVERY_RECOVERY = "delivery-recovery"
 #: still between sets, so a stop with no time set would fall at the start
 #: itself, where the double charges nothing of a period not yet entered.
 STOP_INTO_PERIOD_SECONDS = 60
+#: The seller's asking rate in USD/6 base units an hour, ``HOURLY_RATE``.
+HOURLY_GROSS = 1_000_000
+
+
+def _iso_period(seconds: int) -> str:
+    """``seconds`` as an ISO 8601 duration in its largest whole unit."""
+    for unit, size in (("H", 3600), ("M", 60)):
+        if seconds % size == 0:
+            return f"PT{seconds // size}{unit}"
+    return f"PT{seconds}S"
+
+
+@dataclass(frozen=True)
+class RateTerms:
+    """The per-period terms a recurring option states at the seller's hourly rate.
+
+    The lanes' are ``LANE_RATE_TERMS``, a ``PERIOD`` long; a live run states
+    its own period (``helpers/live_verification.py``), since on wall time a
+    period passes only in real time. The option reserves one period ahead, so
+    approval reserves one period's price.
+    """
+
+    period_seconds: int
+
+    @property
+    def period(self) -> str:
+        """The period as the option and the mandate write it."""
+        return _iso_period(self.period_seconds)
+
+    @property
+    def reserve_ahead_seconds(self) -> int:
+        return self.period_seconds
+
+    @property
+    def period_gross(self) -> int:
+        """One period's price in USD/6 base units, rounded down as the market's
+        rate arithmetic rounds a rate over a duration."""
+        return HOURLY_GROSS * self.period_seconds // 3600
+
+
+LANE_RATE_TERMS = RateTerms(PERIOD_SECONDS)
 
 
 def recurring_settlement(
     *, seller_account: str, delivery_deadline_seconds: int,
-    payee_notice_seconds: int | None = None,
+    payee_notice_seconds: int | None = None, terms: RateTerms = LANE_RATE_TERMS,
 ) -> dict[str, Any]:
     """The payments publication clause of a recurring option.
 
-    USD 1.00 an hour paid to ``seller_account`` per ``PERIOD``, with no setup
-    charge, so a shipped preset: the payer's stop charges its started period,
-    and the term end returns the last one. With no payee notice it is the
-    on-demand preset; ``payee_notice_seconds`` makes it the spot preset, whose
-    seller may stop with that notice, returning the period it stops in. The
-    run's dispute coverage covers ``delivery_deadline_seconds``.
+    USD 1.00 an hour paid to ``seller_account`` per ``terms``' period, with no
+    setup charge, so a shipped preset: the payer's stop charges its started
+    period, and the term end returns the last one. With no payee notice it is
+    the on-demand preset; ``payee_notice_seconds`` makes it the spot preset,
+    whose seller may stop with that notice, returning the period it stops in.
+    The run's dispute coverage covers ``delivery_deadline_seconds``.
     """
-    recurring: dict[str, Any] = {"period": PERIOD, "reserve_ahead_seconds": RESERVE_AHEAD_SECONDS}
+    recurring: dict[str, Any] = {"period": terms.period,
+                                 "reserve_ahead_seconds": terms.reserve_ahead_seconds}
     if payee_notice_seconds is not None:
         recurring["payee_notice_seconds"] = payee_notice_seconds
     return {
@@ -149,20 +195,21 @@ def recurring_settlement(
 
 def check_recurring_option(
     option: SettlementOption, *, delivery_deadline_seconds: int,
-    payee_notice_seconds: int | None = None,
+    payee_notice_seconds: int | None = None, terms: RateTerms = LANE_RATE_TERMS,
 ) -> None:
     """What the seller published for ``recurring_settlement``: one period's
-    price per ``PERIOD``, the entitlements a default buyer accepts — the
+    price per ``terms``' period, the entitlements a default buyer accepts — the
     payer's alone for on-demand, beside the seller's notice stop returning its
     period for spot — and the pool's delivery deadline."""
     params = option.settlement_params
     assert (params.get("period"), params.get("reserve_ahead_seconds")) == (
-        PERIOD, RESERVE_AHEAD_SECONDS,
+        terms.period, terms.reserve_ahead_seconds,
     ), option
     assert params.get("approval_window") == APPROVAL_WINDOW, option
     assert "setup_amount" not in params, option
     assert option.price_asset == ASSET, option
-    assert compute_rate_total(option.price_rates[0], PERIOD_SECONDS) == PERIOD_GROSS, option
+    assert compute_rate_total(option.price_rates[0],
+                              terms.period_seconds) == terms.period_gross, option
     early = option.lifecycle["early_termination"]
     entitlements = {"payer": {"notice_seconds": 0, "settles_through": "started_period"}}
     if payee_notice_seconds is not None:
@@ -212,6 +259,8 @@ class RecurringPurchaseDriver(PurchaseDriver, Protocol):
     #: The storefront loop whose cycle services the domain's committed deals:
     #: it reads their payments and carries out their recorded ends at the site.
     servicing_loop: str
+    #: The per-period terms the domain's recurring option states.
+    rate_terms: RateTerms
 
     def lifecycle_read(self, negotiation_id: str) -> LifecycleRead:
         """The storefront's lifecycle read of the deal, as its buyer reads it."""
@@ -252,18 +301,23 @@ def lane_double_run(lane_time: LaneTime | None) -> bool:
 
 
 def reach_lane_instant(lane_time: LaneTime | None, instant: int, *,
-                       fixed_by_agreement: bool) -> int:
+                       fixed_by_agreement: bool, recorded_by_authority: bool = False,
+                       bound: timedelta | None = None) -> int:
     """Bring the lane to ``instant``, or past it, and return the lane instant.
 
     An injected run sets lane time; a wall run, or one with no lane time, waits
-    only for an instant the Agreement fixes, and is a blocked skip for any
-    other.
+    only for an instant the Agreement fixes or an authority recorded as the
+    effect of the scenario's own request, within ``bound`` when one is given,
+    and is a blocked skip for any other.
     """
     if lane_time is None:
-        if not fixed_by_agreement:
+        if not (fixed_by_agreement or recorded_by_authority):
             pytest.skip(f"blocked: reaching {instant} needs lane time, and the run has none")
-        return int(wait_until(datetime.fromtimestamp(instant, timezone.utc)).timestamp())
-    return lane_time.reach(instant, fixed_by_agreement=fixed_by_agreement)
+        when = datetime.fromtimestamp(instant, timezone.utc)
+        reached = wait_until(when) if bound is None else wait_until(when, bound=bound)
+        return int(reached.timestamp())
+    return lane_time.reach(instant, fixed_by_agreement=fixed_by_agreement,
+                           recorded_by_authority=recorded_by_authority, bound=bound)
 
 
 def seller_deal(storefront_admin_client: Any, negotiation_id: str) -> DealSummary:
@@ -312,6 +366,23 @@ def begin_teardown(
         storefront_admin_client, deal_state.reserved_resource_id
     )
     return fulfillment_id
+
+
+def end_by_the_buyers_stop(purchase_cli: Any, deal_driver: RecurringPurchaseDriver,
+                           deal_state: RecurringPurchaseState) -> dict[str, Any]:
+    """The buyer's own ``end`` of its run's deal, the payer's stop the payments
+    authority accepted; what the command printed.
+
+    The input a buyer's stop gives the payments authority, sent by the shipped
+    buyer, which the lane's buyer-end stage and a live buyer's stop share.
+    """
+    run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
+    assert_market_run_succeeded(run, command=deal_driver.teardown_command)
+    ended: dict[str, Any] = json.loads(run.stdout().strip().splitlines()[-1])
+    progress = EndDeliveryProgress.model_validate(ended["progress"])
+    assert progress.mode == "normal_stop", progress
+    assert isinstance(progress.payment, Accepted), progress
+    return ended
 
 
 def approved_run_id(run_dir: Path) -> str | None:
@@ -369,13 +440,15 @@ def recurring_purchase_cleanup(
 
 class Recurring04_MandateApproved:
     def test_r04_the_buyer_approved_one_rate_part_charging_one_periods_price(
-        self, payments_config, deal_state: RecurringPurchaseState,
+        self, payments_config, deal_driver: RecurringPurchaseDriver,
+        deal_state: RecurringPurchaseState,
     ):
-        """The correlated Agreement's mandate, and what the payments double approved.
+        """The correlated Agreement's mandate, and what the payments authority approved.
 
         ``Purchase04`` correlated the run's events as one paid deal; its
-        mandate is one rate part charging one period's price per period. The
-        double's snapshot and receipt verify against the receipt keys the
+        mandate is one rate part charging one period's price per period of the
+        driver's ``rate_terms``. The authority's snapshot and receipt — the
+        lane's double's, or a live module's external target's — verify against the receipt keys the
         payments configuration trusts, bound to that Agreement and mandate;
         the receipt reserves whole periods of that price, and the payer's
         available balance fell by exactly the receipt's gross, while nothing
@@ -391,6 +464,7 @@ class Recurring04_MandateApproved:
         negotiation_id = deal_state.negotiation_id
         agreement = deal_state.agreement
         data = deal_state.payment_settlement
+        terms = deal_driver.rate_terms
 
         mandate = data.mandate.model_dump(mode="json", by_alias=True, exclude_none=True)
         assert len(mandate["parts"]) == 1, (
@@ -399,7 +473,7 @@ class Recurring04_MandateApproved:
         )
         (part,) = mandate["parts"]
         assert (part["kind"], part["asset"], part["amount"], part["period"]) == (
-            "rate", ASSET, str(PERIOD_GROSS), PERIOD,
+            "rate", ASSET, str(terms.period_gross), terms.period,
         ), part
 
         payer = str(deal_state.payer_account)
@@ -421,9 +495,9 @@ class Recurring04_MandateApproved:
         assert (receipt["from"], receipt["to"]) == (payer, payee), receipt
         assert len(receipt["parts"]) == 1, receipt["parts"]
         (reserved,) = receipt["parts"]
-        assert reserved["rate"]["period"] == PERIOD, reserved
+        assert reserved["rate"]["period"] == terms.period, reserved
         gross = int(reserved["gross"])
-        assert gross == PERIOD_GROSS * int(reserved["rate"]["periodsReserved"]) > 0, reserved
+        assert gross == terms.period_gross * int(reserved["rate"]["periodsReserved"]) > 0, reserved
 
         before = deal_state.payer_available_before
         dropped = {
@@ -440,7 +514,8 @@ class Recurring04_MandateApproved:
         )
         deal_state.receipt_gross = gross
         log.info("[r04] Run %s: Agreement %s, transaction %s: one rate part of %s %s per %s",
-                 run.run_id, negotiation_id, data.transaction_id, PERIOD_GROSS, ASSET, PERIOD)
+                 run.run_id, negotiation_id, data.transaction_id, terms.period_gross, ASSET,
+                 terms.period)
 
 
 # ===========================================================================
@@ -491,11 +566,12 @@ class Recurring06_RateStartedAfterActivation:
         One pass of the storefront loop that services the domain's deals runs
         first, so what is read follows the storefront's own servicing of a
         running rate deal as well as the delivery's drive. The lease
-        ``Stage09c`` recorded names the site's activation; the payments double
+        ``Stage09c`` recorded names the site's activation; the payments
+        authority — the lane's double, or a live module's external target —
         records the part started, and one start event, no earlier than the
         whole second of that activation, since delivery starts billing only once
-        the site has activated the deal. Lane time holds one instant from the
-        start on, so the two fall in the same second; each storefront's
+        the site has activated the deal. In a lane, lane time holds one instant
+        from the start on, so the two fall in the same second; each storefront's
         ``test_rate_delivery.py`` proves billing starts from the recorded
         activation. The lifecycle read names the committed transaction and
         shows the deal active, with no end and no filing.
@@ -509,7 +585,8 @@ class Recurring06_RateStartedAfterActivation:
         snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
                                         deal_state.settlement_id)
         (part,) = snapshot["parts"]
-        assert part.get("started") is not None, f"the double records no rate start: {part}"
+        assert part.get("started") is not None, (
+            f"the payments authority records no rate start: {part}")
         assert int(part["started"]) >= activated, (
             f"the rate part started at {part['started']}, before the site activated the "
             f"deal at {lease.get('activated_at_utc')}: {part}"
@@ -555,10 +632,11 @@ class Recurring07_AcceptedMoneyShown:
         start = datetime.fromisoformat(str(agreement["start_utc"]).replace("Z", "+00:00"))
         end = start + timedelta(seconds=int(agreement["duration_seconds"]))
         shown = run.stderr()
+        terms = deal_driver.rate_terms
         expected = (
             DISCLOSURE_TITLE,
-            f"  Accepted price: {PERIOD_GROSS} minor units of {ASSET} per_period "
-            f"({PERIOD}, {PERIOD_SECONDS} seconds)",
+            f"  Accepted price: {terms.period_gross} minor units of {ASSET} per_period "
+            f"({terms.period}, {terms.period_seconds} seconds)",
             f"  Setup once charge: 0 minor units of {ASSET}",
             f"  Initial reserve: {deal_state.receipt_gross} minor units of {ASSET};",
             f"  Maximum accepted end: {end.isoformat()}",
@@ -589,8 +667,10 @@ class Recurring08_BuyerEnds:
         The payer's stop at the payments double is accepted, then a hint makes
         the storefront read the double. The stop takes effect at once, with no
         payer notice, inside the started period, which it charges: the part is
-        stopped by the payer, charging one period's price to the payee and
-        reserving nothing more. On the hint's read the storefront records the
+        stopped by the payer, charging the started period's price to the payee
+        and reserving nothing more
+        (``producer_assertions.assert_payer_stop``). On the hint's read the
+        storefront records the
         payer's stop as the deal's end, before the delivery deadline, so it
         files no seller non-delivery: the scenario does not wait for that
         deadline. That the storefront classifies the stop an entitled one is
@@ -612,21 +692,15 @@ class Recurring08_BuyerEnds:
             lane_time.reach(int(deal_state.agreement_start.timestamp()) + STOP_INTO_PERIOD_SECONDS,
                             fixed_by_agreement=False)
         deal_state._buyer_teardown_requested = True
-        run = purchase_cli.run(deal_driver.teardown_arguments(deal_state.purchase_run.run_id))
-        assert_market_run_succeeded(run, command=deal_driver.teardown_command)
-        ended = json.loads(run.stdout().strip().splitlines()[-1])
-        progress = EndDeliveryProgress.model_validate(ended["progress"])
-        assert progress.mode == "normal_stop", progress
-        assert isinstance(progress.payment, Accepted), progress
-        deal_state.buyer_end = ended
+        deal_state.buyer_end = end_by_the_buyers_stop(purchase_cli, deal_driver, deal_state)
 
         snapshot = transaction_snapshot(payments_config, deal_state.payer_account,
                                         deal_state.settlement_id)
-        (part,) = snapshot["parts"]
-        stop = part.get("stop") or {}
-        assert (stop.get("cause"), stop.get("partialPeriod")) == ("payer", "charged"), part
-        assert part.get("reserved", "0") == "0", part
-        assert int(part["held"]) + int(part["released"]) == PERIOD_GROSS, part
+        assert len(snapshot["parts"]) == 1, snapshot["parts"]
+        terms = deal_driver.rate_terms
+        assert_payer_stop(snapshot, payer=str(deal_state.payer_account),
+                          period_price=terms.period_gross, period_seconds=terms.period_seconds)
+        stop = snapshot["parts"][0]["stop"]
 
         read = deal_driver.lifecycle_read(deal_state.negotiation_id)
         assert read.delivery.recorded_end is not None, read.delivery
@@ -649,23 +723,25 @@ class Recurring08_BuyerEnds:
 
 class Recurring09_PayerChargedOnePeriod:
     def test_r09_the_payer_paid_one_periods_price(
-        self, payments_config, deal_state: RecurringPurchaseState,
+        self, payments_config, deal_driver: RecurringPurchaseDriver,
+        deal_state: RecurringPurchaseState,
     ):
         """The started period was charged and the rest of the reservation
         returned: the payer's available balance is what ``Purchase01`` read,
         less one period's price, while nothing else spends from the account."""
         require_state(deal_state, "buyer_end", "payer_account", "payer_available_before")
         payer = str(deal_state.payer_account)
+        price = deal_driver.rate_terms.period_gross
         after = payer_available(payments_config, payer)
         before = deal_state.payer_available_before
-        expected = {**before, ASSET: before.get(ASSET, 0) - PERIOD_GROSS}
+        expected = {**before, ASSET: before.get(ASSET, 0) - price}
         assert after == expected, (
             f"payer {payer}'s available balance is {after} after the buyer's stop; it was "
-            f"{before} before the purchase, and one period costs {PERIOD_GROSS} {ASSET}"
+            f"{before} before the purchase, and one period costs {price} {ASSET}"
         )
         deal_state._payer_charged = True
         log.info("[r09] Payer %s available %s: one period's %s %s charged", payer, after,
-                 PERIOD_GROSS, ASSET)
+                 price, ASSET)
 
 
 class Recurring10_SellerListsTheDealEnded:

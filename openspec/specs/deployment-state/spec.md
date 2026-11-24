@@ -1685,6 +1685,39 @@ A static check MUST refuse `"injected"` as any party's time source in committed 
 - **WHEN** pre-review validation runs its scenarios against the local Helm release
 - **THEN** the session reads the status of the release's storefront, provisioning service and registry and finds each on wall time, and the scenarios set no time
 
+### Requirement: The VM storefront chart ships a production example offering on-demand and spot
+
+The VM storefront chart MUST ship a production example values file whose agent settles
+in `arkhai.payments.v1` in live mode, declares rate servicing for `charged` and
+`returned` with no setup charge, states a finite default listing horizon, and publishes
+an on-demand and a spot recurring clause whose payments clause sets
+`delivery_deadline_seconds` and a dispute window covering that deadline plus the
+authority's minimum filing window. The example MUST render, its
+rendered storefront configuration MUST pass the storefront's startup check, and it MUST
+set no injected time.
+
+#### Scenario: The production example is rendered
+
+- **WHEN** the chart render tests render the VM storefront chart with its production
+  example
+- **THEN** the render succeeds and the storefront's startup check accepts the rendered
+  configuration
+
+#### Scenario: The production example publishes both recurring options
+
+- **WHEN** the rendered example's configuration is loaded and its recurring clauses are
+  derived against a representative dispute authority advertisement under the example's
+  own default listing horizon
+- **THEN** an on-demand and a spot option are published, each with the clause's delivery
+  deadline, a dispute window covering it plus the authority's minimum filing window, and
+  the `charged` and `returned` treatments, and no clause is refused
+
+#### Scenario: The production example withdraws rate servicing
+
+- **WHEN** an operator removes the example's `rate_servicing` table
+- **THEN** the storefront publishes no recurring option and continues servicing the rate
+  deals it already holds
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed service stacks: core buyer registry configuration plus domain Compose and Helm manifests.

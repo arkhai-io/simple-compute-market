@@ -192,8 +192,11 @@ checks your understanding here before reading anything that rests on it. Then:
    (`docs/guidance/workflow/changes.md#defects-found-during-a-change`). Does anything give the
    change a prerequisite it could close out without?
 6. **`readiness`** — Are there related changes that must land first? Is the design
-   ready for planning? If the change already has a `tasks.md`, does it describe the
-   design as now settled, or an earlier one?
+   ready for planning? A change returned to design keeps the `tasks.md` it was
+   planned with; planning amends it after this review's triage, so a plan that does
+   not yet take in the revised decisions is no finding. Ask instead whether the
+   revision makes any section already checked wrong or due to be redone, and name
+   it, so planning reopens it rather than preserving it.
 
 ### Implementation review
 

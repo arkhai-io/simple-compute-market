@@ -1,6 +1,6 @@
 # Default values for the e2e-tests subchart.
-# This subchart is disabled by default — it is dev/CI infrastructure only
-# and should never be enabled in a production deployment.
+# The umbrella chart's defaults enable this subchart, which is dev/CI
+# infrastructure only and should never be enabled in a production deployment.
 #
 # E2E credentials are always supplied by a pre-existing Kubernetes Secret.
 # The chart values and rendered manifests never carry private signing material.

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from lane_double_controls import ControlError, Rule
+from lane_double_controls import ControlError, Rule, Ruling
 
-from mediation_lane_double.rules import RuleBook
+from mediation_lane_double.rules import RuleBook, check_ruling
 
 FILE = {"operation": "file", "filer": "payee", "kind": "delivery_end", "cause": "payee",
         "transaction": "a" * 64}
@@ -87,19 +87,43 @@ def test_install_refuses_an_existing_id_and_what_the_double_cannot_do() -> None:
     assert [view.rule.rule_id for view in book.listing().rules] == ["a"]
 
 
-@pytest.mark.parametrize("effect", [
-    {"kind": "stop", "part": 0, "at": 1_800_000_000, "partialPeriod": "prorated"},
+APPLIED = [
+    {"kind": "reverse", "part": 0, "amount": "10"},
+    {"kind": "stop", "part": 0, "at": 1_800_000_000, "partialPeriod": "returned"},
     {"kind": "penalty", "amount": "10"},
-    {"kind": "award", "part": 0, "amount": "1"},
-], ids=["stop", "penalty", "award"])
-def test_a_ruling_with_an_effect_other_than_reverse_is_refused(effect: dict) -> None:
+]
+AWARD = {"kind": "award", "part": 0, "amount": "1"}
+
+
+def _ruling(*effects: dict) -> dict:
+    return {"basis": "operator", "delivery_end": False, "close": True, "effects": list(effects)}
+
+
+@pytest.mark.parametrize("effect", APPLIED, ids=["reverse", "stop", "penalty"])
+def test_a_rule_and_a_decision_with_an_effect_the_double_applies_are_admitted(
+    effect: dict,
+) -> None:
     book = RuleBook()
 
-    with pytest.raises(ControlError) as refused:
-        book.install(_rule("a", {}, ruling={"basis": "operator", "delivery_end": False,
-                                            "close": True, "effects": [effect]}))
+    installed = book.install(_rule("a", {}, ruling=_ruling(effect)))
+    check_ruling(Ruling.model_validate(_ruling(effect)))
 
-    assert (refused.value.status, refused.value.code) == (422, "invalid_request")
+    assert installed.rule.ruling is not None
+    assert installed.rule.ruling.effects == [effect]
+    assert [view.rule.rule_id for view in book.listing().rules] == ["a"]
+
+
+def test_a_rule_or_a_decision_carrying_an_award_is_refused_and_installs_nothing() -> None:
+    book = RuleBook()
+
+    with pytest.raises(ControlError) as rule:
+        book.install(_rule("a", {}, ruling=_ruling(*APPLIED, AWARD)))
+    with pytest.raises(ControlError) as decision:
+        check_ruling(Ruling.model_validate(_ruling(AWARD)))
+
+    for refused in (rule, decision):
+        assert (refused.value.status, refused.value.code) == (422, "invalid_request")
+        assert "award" in refused.value.message
     assert book.listing().rules == []
 
 

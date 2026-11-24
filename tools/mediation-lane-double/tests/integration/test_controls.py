@@ -54,17 +54,41 @@ def test_a_rule_the_double_cannot_apply_is_refused() -> None:
     controls = Lane().controls()
     unpublished = Rule.model_validate({"rule_id": "a", "match": {},
                                        "refusal": {"status": 409, "code": "no_such_code"}})
-    penalty = Rule.model_validate({"rule_id": "b", "match": {}, "ruling": {
+    award = Rule.model_validate({"rule_id": "b", "match": {}, "ruling": {
         "basis": "operator", "delivery_end": False, "close": True,
-        "effects": [{"kind": "penalty", "amount": "10"}]}})
+        "effects": [{"kind": "award", "part": 0, "amount": "10"}]}})
     payments_match = Rule.model_validate({"rule_id": "c", "match": {"route": "events"},
                                           "unavailable": None, "refusal": {
                                               "status": 503, "code": "temporarily_unavailable"}})
 
     assert _refused(controls.install_rule, unpublished) == (422, "invalid_request")
-    assert _refused(controls.install_rule, penalty) == (422, "invalid_request")
+    assert _refused(controls.install_rule, award) == (422, "invalid_request")
     assert _refused(controls.install_rule, payments_match) == (422, "invalid_request")
     assert controls.rules().rules == []
+
+
+def test_an_operator_decision_carrying_an_award_is_refused_and_rules_nothing() -> None:
+    lane = Lane()
+    transaction = lane.approve()
+    case_ref = _file(lane, transaction)["case"]["case_ref"]
+    controls = lane.controls()
+
+    refused = _refused(controls.decide, case_ref, Ruling.model_validate({
+        "basis": "operator", "delivery_end": False, "close": True,
+        "effects": [{"kind": "reverse", "part": 0, "amount": "10"},
+                    {"kind": "award", "part": 0, "amount": "10"}]}))
+
+    assert refused == (422, "invalid_request")
+    assert controls.cases(transaction).cases[0].state == "open"
+    assert lane.events(transaction, "reverse") == []
+
+    async def read() -> list[dict]:
+        async with lane.client("buyer") as client:
+            page = await client.read_record(ReadAfter.model_validate(
+                {"agreement": agreement_hash(AGREEMENT), "after": 0}), transaction=transaction)
+            return [entry["entry"] for entry in wire(page)["entries"]]
+
+    assert [entry["kind"] for entry in run(read())] == ["filed"]
 
 
 def test_a_refusal_rule_is_answered_to_the_kit_client_and_counted() -> None:

@@ -45,6 +45,10 @@ PAYMENTS_SIGNER = Ed25519Signer(bytes([7]) * 32)
 # public test value, never for a public network.
 STRANGER = ("00000000-0000-4000-8000-0000000000e1", "mediation-double-suite-stranger-token")
 AGREEMENT = {"listing": "mediation-double-suite", "price": "1000"}
+HOUR = 3_600
+#: The price of each hour of the suite's rate part, and its end, six hours in.
+RATE_PRICE = "100"
+RATE_END = T0 + 6 * HOUR
 
 _Result = TypeVar("_Result")
 
@@ -128,6 +132,42 @@ class Lane:
         receipt = self.payments.approve(mandate)
         return receipt.receipt.transaction.root
 
+    def approve_rate(self) -> str:
+        """Approve and start, at ``T0``, an hourly rate part ending ``RATE_END``.
+
+        The payer may stop it at once with the started period charged, the payee
+        on an hour's notice with the unstarted remainder returned, and the
+        authority at once through its ``chosen`` entry, as the shipped presets
+        allow; its earnings are held a day. The transaction's id.
+        """
+
+        buyer, seller = self.account("buyer"), self.account("seller")
+        mandate = {
+            "from": buyer, "to": seller,
+            "parts": [{
+                "kind": "rate", "asset": "USD/6", "amount": RATE_PRICE, "period": "PT1H",
+                "reserveAhead": "PT2H", "hold": {"for": "P1D"},
+                "end": {"at": RATE_END, "partialPeriod": "returned"},
+                "authorities": {
+                    "stop": [
+                        {"account": buyer, "notice": "PT0S", "partialPeriod": "charged"},
+                        {"account": seller, "notice": "PT1H", "partialPeriod": "returned"},
+                        {"account": self.authority.account, "notice": "PT0S",
+                         "partialPeriod": "chosen"},
+                    ],
+                    "reverse": [seller, self.authority.account],
+                    "extend": [self.authority.account], "start": [seller],
+                },
+                "maxHoldExtension": None,
+            }],
+            "deal": agreement_hash(AGREEMENT), "fee": {"bps": 250}, "nonce": "suite-rate",
+            "expires": T0 + DAY,
+        }
+        transaction: str = self.payments.approve(mandate).receipt.transaction.root
+        self.payments.engine.submit(transaction, {
+            "account": seller, "requestId": "suite-start", "event": {"kind": "start"}})
+        return transaction
+
     def part(self, transaction: str, index: int = 0) -> dict[str, Any]:
         snapshot = self.payments.engine.snapshot(transaction).model_dump(
             mode="json", by_alias=True, exclude_unset=True)
@@ -182,6 +222,25 @@ class Failing:
         if error is not None:
             raise error
         return self.peer.submit_event(transaction, event, request_id=request_id)
+
+
+class Recording:
+    """The payments peer, recording every event the double submits, in order."""
+
+    def __init__(self, peer: Any) -> None:
+        self.peer = peer
+        self.submitted: list[tuple[str, dict[str, Any]]] = []
+
+    def get_transaction(self, transaction: str) -> Any:
+        return self.peer.get_transaction(transaction)
+
+    def submit_event(self, transaction: str, event: Mapping[str, Any], *,
+                     request_id: str) -> Any:
+        self.submitted.append((request_id, dict(event)))
+        return self.peer.submit_event(transaction, event, request_id=request_id)
+
+    def sent(self, kind: str) -> list[tuple[str, dict[str, Any]]]:
+        return [(key, event) for key, event in self.submitted if event["kind"] == kind]
 
 
 def filing(transaction: str, *, cause: str = "payee", delivered: bool = False,

@@ -887,6 +887,8 @@ def _dispatch(args: argparse.Namespace, root: Path, wrapper: Wrapper,
                                  resumes=args.resumes,
                                  waives=(_kinds(root, args.waives)
                                          if args.waives is not None else None),
+                                 commit=(git_head(root) if args.waives is not None
+                                         else None),
                                  # A branch decision is about the change whose log
                                  # holds it, which is where steps look.
                                  change=args.decided_change

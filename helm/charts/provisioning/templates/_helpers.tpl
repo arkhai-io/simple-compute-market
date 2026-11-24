@@ -60,7 +60,8 @@ Supports an optional global.imageRepository passed down from the parent chart.
 {{- end }}
 
 {{/*
-Resolve the required pre-existing Secret name for the SSH private key.
+Resolve the pre-existing Secret name for the SSH private key, which real
+provisioning requires; the Deployment mounts the key only without mockMode.
 */}}
 {{- define "provisioning.sshKeySecretName" -}}
 {{- required "provisioning.sshKey.secretName must reference a pre-existing Secret" .Values.sshKey.secretName -}}

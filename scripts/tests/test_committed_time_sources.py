@@ -157,10 +157,10 @@ def test_every_checked_file_exists_and_each_family_is_found():
     missing = [str(path.relative_to(REPO_ROOT)) for path in checked_files() if not path.exists()]
 
     assert missing == []
-    assert (
-        REPO_ROOT / "helm/charts/bare-metal-storefront/examples/production-values.yaml"
-        in chart_examples()
-    )
+    assert {
+        REPO_ROOT / "helm/charts/bare-metal-storefront/examples/production-values.yaml",
+        REPO_ROOT / "helm/charts/storefront/examples/production-values.yaml",
+    } <= set(chart_examples())
     assert {path.name for path in packaged_profiles()} >= {"config.yml", "config-seller.yml"}
 
 

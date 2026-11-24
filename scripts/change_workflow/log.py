@@ -643,7 +643,7 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     if after is not None and (isinstance(after, bool) or not isinstance(after, int)
                               or after < 0):
         raise StepError(f"a round's after is a record number; got {after!r}")
-    continued = _open_round(path) if after is None else None
+    continued = open_round(read_log(path) if path.exists() else []) if after is None else None
     if continued is not None:
         return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                    "sections": sections, "by": by,
@@ -674,10 +674,10 @@ def untriaged_owner_notes(reviews: Path, after: int) -> list[int]:
                   and not entry.with_name(entry.name[:-3] + ".triage.md").is_file())
 
 
-def _open_round(path: Path) -> Entry | None:
-    """The latest round, when it is still open: no implementation triage has
-    finished or returned since it. None otherwise."""
-    entries = read_log(path) if path.exists() else []
+def open_round(entries: Sequence[Entry]) -> Entry | None:
+    """The latest round of the log `entries`, when it is still open: no
+    implementation triage has finished or returned since it. None otherwise. A
+    round recorded now would continue it."""
     latest = next((e for e in reversed(entries) if e.get("outcome") == "round"), None)
     if latest is None or not isinstance(latest.get("after"), int):
         return None
@@ -810,7 +810,7 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
                       target: str | None = None,
                       branch: str | None = None, change: str | None = None,
                       resumes: int | None = None, waives: Sequence[str] | None = None,
-                      clock: Clock = utc_now) -> Entry:
+                      commit: str | None = None, clock: Clock = utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
@@ -846,7 +846,9 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     (`revisit_refusal`). It routes nothing: the resumed triage's outcome does.
     `waives` names the evidence kinds the owner waives for later validations, on
     the condition the decision states; it directs nothing, and validation reads it
-    through `waived_kinds`, judging whether the condition still holds.
+    through `waived_kinds`, judging whether the condition still holds. `commit`,
+    `HEAD` as the waiver is recorded, goes on its line, so a merge it follows does
+    not lapse it (`evidence.merge_lapse`).
     """
     if next_step is None and (kind, sections, target) != (None, None, None):
         raise StepError("a kind, sections, or target qualify the step a decision directs")
@@ -854,6 +856,8 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     line = decision_line(path, read_log(path), decision, reason, by=by, resolves=resolves,
                          reads=reads, directs=directed, branch=branch, change=change,
                          resumes=resumes, waives=waives)
+    if waives is not None and commit:
+        line["commit"] = commit
     return append_entry(path, line, clock)
 
 

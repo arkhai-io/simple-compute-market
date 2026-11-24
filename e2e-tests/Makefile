@@ -105,7 +105,11 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
 # the dev chain's own deployments. `e2e_vm_real_provisioning` is in no lane: it
 # provisions on a real KVM host an operator provides, which the pipeline never
-# has, and runs from the operator's machine through `test-module`. The six
+# has, and runs from the operator's machine through `test-module`;
+# `e2e_vm_live_rate_servicing` and `e2e_vm_live_dispute` are in no lane either:
+# they need external payments and, for the disputes, mediation targets, refuse
+# the lane's own doubles, and a deployment runs them through `test-module`
+# against a topology it prepared. The six
 # `e2e_vm_dispute_*` scenarios each run on a deal of their own, and each removes
 # its rules from the lane's doubles when it ends, so they need no order among
 # themselves; lane time only moves forward, and a module after the hold-passed
@@ -113,9 +117,11 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # deal by the buyer's own stop before the deal's delivery deadline;
 # `e2e_vm_rate_servicing`'s rows each end a deal of their own, lane time set
 # as far as the maximum term's Agreement end; `e2e_vm_rate_watchdog` runs the
-# shipped `market buy` in the harness's process on a deal of its own.
+# shipped `market buy` in the harness's process on a deal of its own; and
+# `e2e_vm_rate_dispute`'s two rows each file and rule a case on a rate deal of
+# their own, removing their rules from the lane's doubles when they end.
 E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring_purchase \
-              or e2e_vm_rate_servicing or e2e_vm_rate_watchdog \
+              or e2e_vm_rate_servicing or e2e_vm_rate_watchdog or e2e_vm_rate_dispute \
               or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_vm_dispute_ruled_end or e2e_vm_dispute_discount or e2e_vm_dispute_lost_filing \
               or e2e_vm_dispute_mediation_unavailable or e2e_vm_dispute_payments_hold \

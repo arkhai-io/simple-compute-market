@@ -21,8 +21,10 @@ import pytest
 from change_workflow import config, evidence
 from change_workflow.cli import main
 from change_workflow.common import SESSION_ID
-from change_workflow.gather import Gathering, merge_lapse
+from change_workflow.evidence import merge_lapse
+from change_workflow.gather import Gathering
 from change_workflow.hooks import HookError, Hooks
+from change_workflow.log import log_path, read_log
 from change_workflow.next_step import TASKS_FILE
 from change_workflow.running import invocations_directory, kept_invocations
 from change_workflow_fixtures import CHANGE, configured, evidence_kind
@@ -98,8 +100,9 @@ def _gathering(root: Path, pushed: int = 0, lapse: str | None = None,
     hooks = Hooks(root, configuration, {UNATTENDED: step},
                   echo=echoed.append if echoed is not None else lambda _: None)
     return Gathering(hooks, CHANGE, None, push=lambda: pushed,
-                     report=lambda: evidence.change_report(root, CHANGE, configuration),
-                     lapse=lambda kind: lapse)
+                     report=lambda: evidence.change_report(
+                         root, CHANGE, configuration,
+                         (lambda kind, waiver: lapse) if lapse is not None else None))
 
 
 def _reconfigured(root: Path, text: str) -> None:
@@ -393,6 +396,17 @@ def _merged(root: Path) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
+def _merged_again(root: Path) -> str:
+    """A second merge on the change's branch; its commit."""
+    _git(root, "checkout", "-q", "-b", "another")
+    (root / "src/another.py").write_text("z = 1\n", "utf-8")
+    _git(root, "add", "--all")
+    _git(root, "commit", "-q", "-m", "another")
+    _git(root, "checkout", "-q", "feat/x")
+    _git(root, "merge", "-q", "--no-ff", "-m", "merge another", "another")
+    return _git(root, "rev-parse", "HEAD")
+
+
 def test_a_merge_since_a_kind_last_ran_is_read_from_the_log(repository: Path) -> None:
     """The kind last ran at the latest validation whose run invoked it, or the latest
     validation when none did; a merge since then lapses its waiver."""
@@ -421,6 +435,77 @@ def test_a_commit_a_kind_last_ran_at_that_cannot_be_read_lapses_its_waiver(
 
     assert merge_lapse(repository, CHANGE, "helm") == (
         f"the commit helm last ran at, {'f' * 12}, cannot be read")
+
+
+def test_a_merge_the_owner_waived_after_does_not_lapse_the_waiver(repository: Path) -> None:
+    """A merge the waiver followed was the owner's to weigh: only a merge since both
+    the kind's last run and the waiver lapses it."""
+    first = _git(repository, "rev-parse", "HEAD")
+    merge = _merged(repository)
+    waiver = {"seq": 3, "by": "owner", "waives": ["helm"], "decision": "d",
+              "commit": merge}
+    _log(repository, {"seq": 1, "step": "validate", "commit": first,
+                      "invoked": [{"hook": "gather", "kind": "helm"}]},
+         {"seq": 2, "step": "validate", "commit": merge, "invoked": []}, waiver)
+
+    assert merge_lapse(repository, CHANGE, "helm", waiver) is None
+
+    later = _merged_again(repository)
+    assert merge_lapse(repository, CHANGE, "helm", waiver) == (
+        f"the merge {later[:12]} since helm last ran, at {first[:12]} and since the "
+        "owner's waiver at seq 3")
+
+
+def test_an_older_waiver_naming_no_commit_is_taken_at_the_line_before_it(
+        repository: Path) -> None:
+    first = _git(repository, "rev-parse", "HEAD")
+    merge = _merged(repository)
+    waiver = {"seq": 3, "by": "owner", "waives": ["helm"], "decision": "d"}
+    _log(repository, {"seq": 1, "step": "validate", "commit": first,
+                      "invoked": [{"hook": "gather", "kind": "helm"}]},
+         {"seq": 2, "step": "validate", "commit": merge, "invoked": []}, waiver)
+
+    assert merge_lapse(repository, CHANGE, "helm", waiver) is None
+
+
+def test_a_waiver_records_the_commit_it_was_made_at(repository: Path) -> None:
+    _waive(repository, "helm")
+
+    line = read_log(log_path(repository, CHANGE))[-1]
+
+    assert line["commit"] == _git(repository, "rev-parse", "HEAD")
+
+
+def test_evidence_reports_a_lapsed_waivers_kind_as_required(
+        repository: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A kind whose waiver a merge lapsed is missing or present as if unwaived, never
+    `waived`, its entry naming the lapsed decision and why."""
+    _log(repository, {"seq": 1, "step": "validate",
+                      "commit": _git(repository, "rev-parse", "HEAD")})
+    _waive(repository, "helm,pipeline")
+    _merged(repository)
+
+    helm = next(entry for entry in evidence.change_report(repository, CHANGE).entries
+                if entry["kind"] == "helm")
+    capsys.readouterr()
+    main(["evidence", CHANGE], root=repository)
+    shown = capsys.readouterr().out
+
+    assert helm["status"] == "missing"
+    assert helm["lapsed"]["seq"] == 2 and helm["lapsed"]["why"].startswith("the merge ")
+    assert "waived by the owner" not in shown
+    assert "the owner's waiver at seq 2 lapsed: the merge " in shown
+
+
+def test_lapsed_gathers_a_kind_still_reported_waived(repository: Path) -> None:
+    """The skill judges a waiver's condition: `--lapsed` gathers a kind whose waiver
+    no merge lapsed."""
+    _waive(repository, "helm")
+    gathering = _gathering(repository)
+
+    assert gathering.again("helm", lapsed=True)
+
+    assert "helm" in _ran(repository)
 
 
 def test_the_command_gathers_a_waived_kind_a_merge_lapsed(
@@ -546,8 +631,7 @@ def test_validation_gathers_this_repositorys_kinds(tmp_path: Path) -> None:
                   shell=lambda command, _: ran.append(command) or 0,
                   capture=lambda command, _: (ran.append(command) or 0, "1"))
     gathering = Gathering(hooks, CHANGE, None, push=lambda: 0,
-                          report=lambda: evidence.change_report(root, CHANGE, configuration),
-                          lapse=lambda: None)
+                          report=lambda: evidence.change_report(root, CHANGE, configuration))
 
     assert gathering.missing()
 

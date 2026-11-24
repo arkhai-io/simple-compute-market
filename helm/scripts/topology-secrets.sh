@@ -8,15 +8,13 @@
 # Foundry's published default mnemonic (`test test ... junk`) at the Anvil
 # account index that values.yaml, local-values.yaml, and
 # bare-metal-release-values.yaml pin the matching principal to, so anyone can
-# reproduce them and none is secret. The values not derived are committed:
-# provisioning's SSH key, the placeholder the bare-metal Compose lane mounts,
-# since mock provisioning never opens a connection; the lane doubles' lane CA,
-# from the controls project that generates it, and the payments lane double's
-# seller token, from its fixtures, which the storefronts' payments configuration
-# in local-values.yaml and bare-metal-release-values.yaml trusts and
-# authenticates with; and Bob's credential toward the mediation lane double, the
-# dispute authority release 1's registry recommends, from his Compose secret
-# overlay.
+# reproduce them and none is secret. The values not derived are committed: the
+# lane doubles' lane CA, from the controls project that generates it, and the
+# payments lane double's seller token, from its fixtures, which the storefronts'
+# payments configuration in local-values.yaml and bare-metal-release-values.yaml
+# trusts and authenticates with; and Bob's credential toward the mediation lane
+# double, the dispute authority release 1's registry recommends, from his
+# Compose secret overlay.
 #
 # Inputs:
 #   NAMESPACE                          the namespace both releases run in, created
@@ -30,8 +28,6 @@
 #   DEV_ACCOUNT_REGISTRY_ADMIN         release 1's registry administrator key (6)
 #   DEV_ACCOUNT_BARE_METAL_STOREFRONT  release 2's storefront principal and wallet (8)
 #   DEV_ACCOUNT_BARE_METAL_PROVISIONING release 2's provisioning signer (9)
-#   PROVISIONING_SSH_KEY_FILE          the file both provisioning services mount
-#                                      as their SSH key
 #   PAYMENTS_LANE_CA_FILE              the lane doubles' committed lane CA, the
 #                                      storefronts' CA bundle
 #   PAYMENTS_LANE_ENV                  the double's lane_env.py, which prints its
@@ -63,7 +59,7 @@ require() {
 require NAMESPACE DEV_MNEMONIC DEV_ACCOUNT_PROVISIONING DEV_ACCOUNT_BUYER DEV_ACCOUNT_BOB \
     DEV_ACCOUNT_REGISTRY DEV_ACCOUNT_PROVISIONING_ADMIN DEV_ACCOUNT_REGISTRY_ADMIN \
     DEV_ACCOUNT_BARE_METAL_STOREFRONT \
-    DEV_ACCOUNT_BARE_METAL_PROVISIONING PROVISIONING_SSH_KEY_FILE PAYMENTS_LANE_CA_FILE \
+    DEV_ACCOUNT_BARE_METAL_PROVISIONING PAYMENTS_LANE_CA_FILE \
     PAYMENTS_LANE_ENV BOB_COMPOSE_SECRETS_FILE STOREFRONT_CA_BUNDLE_FILE TEST_VOLUMES TEST_VOLUME_SIZE
 
 for tool in cast kubectl python3; do
@@ -72,7 +68,7 @@ for tool in cast kubectl python3; do
         exit 1
     fi
 done
-for file in PROVISIONING_SSH_KEY_FILE PAYMENTS_LANE_CA_FILE PAYMENTS_LANE_ENV BOB_COMPOSE_SECRETS_FILE; do
+for file in PAYMENTS_LANE_CA_FILE PAYMENTS_LANE_ENV BOB_COMPOSE_SECRETS_FILE; do
     if [ ! -r "${!file}" ]; then
         echo "ERROR: $file (${!file}) is not a readable file" >&2
         exit 1
@@ -214,13 +210,13 @@ echo "  arkhai-bob-runtime: [Wallet].private_key, Anvil account $DEV_ACCOUNT_BOB
 # Provisioning's secrets profile: mock provisioning needs nothing from it, so it
 # is an empty mapping. The chart mounts the profile whatever it holds, and the
 # service refuses a retired setting it states, an empty one included; the
-# scenarios register the hosts they need through the API.
+# scenarios register the hosts they need through the API. Both releases run mock
+# provisioning, which mounts no SSH key, so no Secret holds one.
 cat >"$work/config-provisioning-secrets.yml" <<EOF
 {}
 EOF
 apply arkhai-provisioning-runtime "config-provisioning-secrets.yml=$work/config-provisioning-secrets.yml"
-apply arkhai-provisioning-ssh "id_ed25519=$PROVISIONING_SSH_KEY_FILE"
-echo "  arkhai-provisioning-runtime, arkhai-provisioning-ssh: mock provisioning's (an empty profile; $PROVISIONING_SSH_KEY_FILE)"
+echo "  arkhai-provisioning-runtime: mock provisioning's (an empty profile)"
 
 # Release 1's Helm tests: the e2e-tests chart's deal test, whose
 # config-e2e-secret.yml the registry smoke test also layers for the buyer's

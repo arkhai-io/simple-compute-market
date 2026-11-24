@@ -109,12 +109,14 @@ def target_ready(
     url: str,
     *,
     ca_bundle: str | None = None,
+    proxy: str | None = None,
     get: Callable[..., Any] = httpx.get,
 ) -> bool:
     """Whether the service at `url`, a payments or mediation target, reports
     itself ready.
 
-    Environment proxies are never used: the probe asks the target itself. A CA
+    Environment proxies are never used: the probe asks the target itself, or
+    through `proxy` alone when the run names one for the target. A CA
     bundle, such as a lane's CA for its doubles, is the only trust the probe
     has, just as the service's client trusts it alone. A bundle that cannot be
     loaded leaves the target not ready, as the client could not reach it
@@ -125,7 +127,8 @@ def target_ready(
         verify: ssl.SSLContext | bool = (
             ssl.create_default_context(cafile=ca_bundle) if ca_bundle else True
         )
-        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify)
+        through = {"proxy": proxy} if proxy else {}
+        health = get(url + "/health", timeout=5.0, trust_env=False, verify=verify, **through)
         return health.status_code == 200 and health.json().get("status") == "ok"
     except (httpx.HTTPError, ValueError, OSError):
         return False
@@ -180,6 +183,21 @@ def configured_payments(
             pytest.fail(f"the lane's own payments service at {url} is not ready")
         pytest.skip(f"blocked: payments service at {url} is not ready")
     return config
+
+
+def live_payments(*, ready: Callable[[str], bool] | None = None) -> ArkhaiPaymentsConfig:
+    """The payments target of a live verification scenario, as
+    ``configured_payments`` gives it, unless it is a lane's own.
+
+    A lane-owned target (PAYMENTS.LANE_OWNED) is a payments double, which
+    yields no live evidence, so the scenario is a blocked skip naming it
+    before anything else is read.
+    """
+    if payment_flag("LANE_OWNED"):
+        target = payment_setting(_TARGET_KEY) or "(none named)"
+        pytest.skip(f"blocked: the payments target {target} is a lane's own double "
+                    "(PAYMENTS.LANE_OWNED), which yields no live evidence")
+    return configured_payments(ready=ready)
 
 
 def payer_api_key(payer: str | None) -> str:
