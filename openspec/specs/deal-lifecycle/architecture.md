@@ -517,3 +517,23 @@ not a payments response passed through. No SCM computed remedy substitutes.
   attestation and broader automatic adjudication are not implemented. Alkahest is
   used at the user's own risk; current claims remain enforceable only at the
   authorities their committed mechanisms support.
+
+## Optional same-read once accounting
+
+The lifecycle adapter port exposes `OnceAccountingReader`, `OnceAccountingRead`
+and `OnceAccountingProjection` as an optional neutral capability. Seller watch
+uses one capability read or one legacy read, never both. Payments derives its
+bounded TEST once-only accounting from the ordinary verified snapshot; full
+signed wire contents stay in the concrete adapter. A malformed capability result
+is unknown rather than a reason to retry. Public lifecycle and watch result
+shapes stay unchanged, and accounting never authorizes a return.
+
+A bounded seller assertion is retained through EvidenceSession inside the normal
+payment observation, final-stop and cursor transaction. A nested savepoint
+isolates capture-only failure; outer rollback removes all corresponding changes.
+Same-sequence identical finance preserves the first receipt despite a refreshed
+proof or observation. Changed finance adds one stable conflict marker and makes
+accounting unqualified. Private qualification requires a durable receipt whose
+semantic facts match the current observation as well as absence of a conflict
+marker, so a failed receipt or conflict insert cannot qualify it. Existing evidence retention and storefront-owned schema
+migrations remain responsible for lifetime and layout.

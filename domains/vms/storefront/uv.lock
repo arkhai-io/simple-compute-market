@@ -188,7 +188,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.29.0"
+version = "0.29.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -231,7 +231,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.29.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -418,7 +418,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -432,7 +432,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -513,7 +513,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -521,7 +521,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -567,7 +567,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-servicing"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -577,7 +577,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_servicing-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_servicing-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -896,7 +896,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.29.0"
+version = "0.29.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -988,7 +988,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.29.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = ">=0.29.1" },
     { name = "arkhai-compute", specifier = ">=0.3.0" },
     { name = "arkhai-compute-delivery", specifier = ">=0.2.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },

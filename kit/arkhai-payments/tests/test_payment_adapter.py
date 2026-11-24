@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from market_deal_lifecycle.delivery import ActivatedDeliveryRef, DeliveryEvidence
+from market_deal_lifecycle.fixtures.once_accounting import validate_once_accounting_read
 from market_deal_lifecycle.operations import OperationKeys
 from market_deal_lifecycle_contracts.models import Accepted, LifecycleCommand
 
@@ -127,4 +128,62 @@ def test_a_once_only_reverse_without_a_store_falls_back_to_the_authoritys_refusa
         assert (await adapter.submit(command(adapter, "reverse", "refund", part="0", amount="10"), keys)).status == "accepted"
         changed = await adapter.submit(command(adapter, "reverse", "refund", part="0", amount="20"), keys)
         assert changed.status == "rejected" and "request_id_reused" in changed.reason
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("reversed_once", [False, True])
+def test_once_accounting_uses_one_verified_read_and_preserves_public_read(reversed_once):
+    async def drive():
+        peer, adapter = once_only()
+        minimum_sequence = 0
+        if reversed_once:
+            keys = OperationKeys(adapter.negotiation_id, "refund")
+            result = await adapter.submit(command(adapter, "reverse", "refund", part="0", amount="10000"), keys)
+            assert result.status == "accepted"
+            minimum_sequence = 1
+        peer.observed_at += 8 * 86400
+        adapter._clock = lambda: peer.observed_at
+        before = peer.count("get_transaction")
+        read = await adapter.read_with_once_accounting(minimum_sequence=minimum_sequence, read_started_at=peer.observed_at)
+        validate_once_accounting_read(
+            read, negotiation_id=adapter.negotiation_id, commitment_ref=adapter.commitment_ref,
+            seller_account=adapter.account, minimum_sequence=minimum_sequence,
+        )
+        assert read.projection is not None
+        assert read.projection.accounting["classification"] == "ACCOUNTING_TERMINAL"
+        assert read.projection.accounting["returnAdmitted"] is False
+        assert peer.count("get_transaction") == before + 1
+        assert await adapter.read() == read.view
+        assert peer.count("get_transaction") == before + 2
+    asyncio.run(drive())
+
+
+@pytest.mark.parametrize("scope", ["held", "floor", "rate", "unverified"])
+def test_optional_accounting_refusal_does_not_add_a_read_or_claim_success(scope):
+    async def drive():
+        if scope == "rate":
+            _, _, peer, adapter, _ = approved()
+        else:
+            peer, adapter = once_only()
+            if scope != "held":
+                peer.observed_at += 8 * 86400
+            adapter._clock = lambda: peer.observed_at
+        if scope == "unverified":
+            adapter.snapshots.verify = lambda *_: False
+        before = peer.count("get_transaction")
+        read = await adapter.read_with_once_accounting(
+            minimum_sequence=128 if scope == "floor" else 0,
+            read_started_at=peer.observed_at,
+        )
+        assert peer.count("get_transaction") == before + 1
+        if scope in {"rate", "unverified"}:
+            assert read.projection is None
+        else:
+            assert read.projection is not None
+            assert read.projection.accounting["classification"] == "UNKNOWN"
+            assert read.projection.accounting["returnAdmitted"] is False
+        if scope in {"held", "rate", "floor"}:
+            assert isinstance(read.view.outcome, Accepted)
+        else:
+            assert not isinstance(read.view.outcome, Accepted)
     asyncio.run(drive())

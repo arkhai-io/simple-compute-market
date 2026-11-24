@@ -287,6 +287,55 @@ def _provide_check(repo: Path, source: str, *names: str) -> None:
     _configure(repo, checks=names or (PUBLIC_CONTENT,))
 
 
+@pytest.mark.parametrize("refuse", [False, True])
+def test_git_feeds_the_installed_hook_the_checked_named_branch(repo: Path, refuse: bool) -> None:
+    head = _git(repo, "rev-parse", "HEAD")
+    hook = repo / ".git/hooks/pre-push"
+    hook.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys\n"
+        "line = sys.stdin.read()\n"
+        "pathlib.Path('.git/observed-pre-push').write_text(line)\n"
+        "local, oid, remote, prior = line.split()\n"
+        "if not local.startswith('refs/heads/'):\n"
+        "    sys.exit('fixture requires a fully qualified local branch')\n"
+        f"sys.exit({int(refuse)})\n", "utf-8",
+    )
+    hook.chmod(0o755)
+
+    assert guard.main(["push"], root=repo) == int(refuse)
+
+    assert (repo / ".git/observed-pre-push").read_text().split() == [
+        "refs/heads/feat/change", head, "refs/heads/feat/change", "0" * 40,
+    ]
+    assert _remote_head(repo, "feat/change") == ("" if refuse else head)
+
+
+@pytest.mark.parametrize("action", ["check", "push"])
+@pytest.mark.parametrize("change", ["branch", "tip", "target", "dirty"])
+def test_configured_hook_cannot_change_the_checked_push(
+    repo: Path, capsys: pytest.CaptureFixture[str], action: str, change: str,
+) -> None:
+    _git(repo, "branch", "feat/other")
+    _git(repo, "remote", "add", "mirror", str(repo.parent / "remote.git"))
+    commands = {
+        "branch": ["git", "symbolic-ref", "HEAD", "refs/heads/feat/other"],
+        "tip": ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                "commit", "--allow-empty", "-q", "-m", "hook tip"],
+        "target": ["git", "config", "branch.feat/change.remote", "mirror"],
+    }
+    source = ("from pathlib import Path\nPath('untracked').write_text('changed')\n"
+              if change == "dirty" else
+              f"import subprocess\nsubprocess.run({commands[change]!r}, check=True)\n")
+    _provide_check(repo, source)
+
+    assert guard.main([action], root=repo) == 1
+
+    assert "changed during the pre-push hook" in capsys.readouterr().err
+    assert _remote_head(repo, "feat/change") == ""
+    assert _remote_head(repo, "feat/other") == ""
+
+
 def test_the_repository_provides_no_pre_push_check(repo: Path) -> None:
     """CW-p7kq: with no `pre-push` declared, the push goes once its own check passes."""
     head = _git(repo, "rev-parse", "HEAD")
@@ -384,7 +433,7 @@ def test_an_unattended_push_sets_no_upstream_and_is_kept_with_its_commit(repo: P
     assert _remote_head(repo, "feat/change") == head
     assert _upstream(repo) == ("", "")
     (kept,) = _kept_pushes(repo)
-    assert kept == {"hook": ATTEMPTED_PUSH, "command": "git push origin HEAD:refs/heads/feat/change",
+    assert kept == {"hook": ATTEMPTED_PUSH, "command": "git push origin refs/heads/feat/change:refs/heads/feat/change",
                     "branch": "feat/change", "remote": "origin", "commit": head,
                     "exit_status": 0, "started": kept["started"], "seconds": kept["seconds"]}
 
