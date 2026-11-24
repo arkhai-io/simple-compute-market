@@ -2,7 +2,7 @@
 tags: [engineering, testing]
 ---
 
-# System tests
+# System test scenarios
 
 How a system test — an end-to-end scenario across deployed services
 ([Test levels](test-levels.md), "System tests") — is written, and what its evidence
@@ -92,7 +92,7 @@ stages, which wait for nothing, run.
 The process running a system test cannot import a service's internals. It uses typed
 clients, explicit test controls, and the services' stage and event interfaces, the
 same no-raw-calls discipline integration tests follow
-([Integration tests](integration-tests.md)); an observability seam a system test
+([Application integration tests](integration-tests.md)); an observability seam a system test
 needs is designed as such an interface.
 
 A command-line client a system test runs is controlled on the same principles as a

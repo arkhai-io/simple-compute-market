@@ -148,8 +148,8 @@ _SUPPLIES = {ROUND_VIEW: "implementation-owner", VALIDATE: "validation",
              IMPLEMENTATION_REVIEW: "implementation"}
 # The target a validation in a round's join is given: the round's triage.
 _ROUND_TRIAGE = {"step": IMPLEMENTATION_TRIAGE.step, "kind": IMPLEMENTATION_TRIAGE.kind}
-CONVERT = "scripts/change-workflow convert {change}"
-RECORD = "scripts/change-workflow record {change} {step} --outcome '<its outcome>'"
+CONVERT = "change-workflow convert {change}"
+RECORD = "change-workflow record {change} {step} --outcome '<its outcome>'"
 
 # How the log routes the change (`Route.how`): a step's exit; the owner's direction;
 # a round started, by the line recording it; a directed validation that ran, naming

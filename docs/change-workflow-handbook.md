@@ -14,7 +14,7 @@ from one agent to another, validating the change's commits wherever a later step
 relies on them, resuming a session that stalled, and choosing which step runs next.
 
 Each step is a skill an agent harness loads, run headless or in an interactive
-session. A Python engine, `scripts/change-workflow`, starts each step, records its
+session. A Python engine, `change-workflow`, starts each step, records its
 outcome in the change's workflow log, and computes which step runs next from the
 change's files. One orchestrating session can carry a change through every step,
 stopping for you only at a design question, your reading of an implementation round,
@@ -29,6 +29,8 @@ to run a change.
 
 ## Contents
 
+- [Installing the workflow](#installing-the-workflow)
+  - [When an open change crosses to the installed workflow](#when-an-open-change-crosses-to-the-installed-workflow)
 - [Orchestrating a change](#orchestrating-a-change)
   - [Starting a change](#starting-a-change)
   - [What a change asks of you](#what-a-change-asks-of-you)
@@ -48,6 +50,59 @@ to run a change.
   - [Intervening on the state by hand](#intervening-on-the-state-by-hand)
 - [The engine](#the-engine)
 - [Customization](#customization)
+- [Moving the workflow to its own repository](#moving-the-workflow-to-its-own-repository)
+
+## Installing the workflow
+
+The workflow is one distribution, `arkhai-change-workflow`, whose command,
+`change-workflow`, carries its skills, its guidance, its specification, this
+handbook, the outcome schema, and the make fragment. One version is installed on a
+machine, and you manage it like any other tool a repository pins: each repository
+declares, in its committed `.agents/workflow.toml`, the range of versions it accepts
+(`[workflow] version = ">=0.1, <0.2"`), and every command that reads the
+configuration refuses an installed version outside it, naming the version, the
+range, and the fix. `change-workflow --version` prints the installed version.
+
+To install it, or to move to another version, install the distribution as a tool
+and then write its skills:
+
+```sh
+uv tool install arkhai-change-workflow   # from your index, a wheel file, or a tag
+change-workflow install
+```
+
+`change-workflow install` writes the version's skills into Claude Code's and Codex's
+user skill directories, each stamped with the version, and keeps a manifest of what
+it wrote there: it removes a skill a later version retired, and refuses, writing
+nothing, a skill of one of its names that it did not write. Every other command
+refuses while the installed skills are not its own version's, or one is missing,
+naming `change-workflow install`, so run it after every install or upgrade. A
+repository that builds the workflow from its own tree gives this a make target of
+its own.
+
+Run in a checkout, `install` also writes the checkout's local configuration,
+`.agents/workflow.local.toml`, where it has none: from the repository's committed
+`.agents/workflow.local.template.toml` when it has one, and otherwise as a skeleton
+naming each field you must fill. It never overwrites one. The local file holds what
+you may set differently from others on the same repository: where your engineering
+guidance is, the models each step runs on, and writable paths you add to a step's
+sandbox; which settings are local, and why, is the companion's
+[A repository's configuration](../openspec/specs/change-workflow/README.md#a-repositorys-configuration).
+Until the local file declares the engineering guidance, and for an
+unattended step its models, a step refuses to start, naming the field and `install`;
+`check config` and `config --json` report what is missing and succeed, which is how
+CI, with no local file, checks the committed configuration.
+
+### When an open change crosses to the installed workflow
+
+A branch made before its repository adopted the installed workflow still carries
+what that adoption removed — the workflow's project skill links, or its in-tree
+engine — until it merges the branch it lands on. Until then its make targets run the
+copy in its tree, and which of a project skill and the installed skill of one name a
+harness loads is that harness's rule. The adoption changes no record format, so the
+installed engine reads the change's records as they are, and nothing needs
+migrating: the change crosses when it next merges its landing branch, as every open
+change does.
 
 ## Orchestrating a change
 
@@ -204,10 +259,10 @@ the condition; under orchestration the orchestrating session records it, and
 otherwise you do:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --waives deployment --decision "waive the deployment kind of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<your words>"
+change-workflow note <change> orchestrator --by owner --waives deployment --decision "waive the deployment kind of validation for the rest of this change, while nothing it touches affects the services it deploys" --reason "<your words>"
 ```
 
-`--waives` names the kinds, which `scripts/change-workflow evidence` then reports as
+`--waives` names the kinds, which `change-workflow evidence` then reports as
 waived and the engine's gathering skips. A waived kind is gathered anyway, the record
 saying the waiver lapsed, when the commits since the last validation that ran it
 include a merge made after you waived it, which `evidence` and the gathering notice
@@ -219,7 +274,7 @@ steps take — another review, a validation before a step, a step past a guard t
 not met, a confirmed return. The orchestrating session records your direction:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
+change-workflow note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason "<why, and what it skips>"
 ```
 
 `--next` names the step, `--kind` a review's kind or the kind of review a triage
@@ -234,14 +289,14 @@ archived change.
 runs, so you can reach it mid-step; on your word it stops the run:
 
 ```text
-scripts/change-workflow stop <change> [--step <step>]
+change-workflow stop <change> [--step <step>]
 ```
 
 Name the step when validation and a review run side by side. A stop commits nothing,
 and the session records your interrupt as your decision:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "interrupt <step>" --reason "<your words>"
+change-workflow note <change> orchestrator --by owner --decision "interrupt <step>" --reason "<your words>"
 ```
 
 Then say how to recover it: resumed with your words, rerun, or resolved with
@@ -265,10 +320,10 @@ on your word:
 2. records your direction naming the triage's run:
 
    ```text
-   scripts/change-workflow note <change> orchestrator --by owner --resumes <triage-seq> --decision "revisits 04 F5" --reason "<your words>"
+   change-workflow note <change> orchestrator --by owner --resumes <triage-seq> --decision "revisits 04 F5" --reason "<your words>"
    ```
 
-3. resumes that triage with your words, `scripts/change-workflow resume <change>
+3. resumes that triage with your words, `change-workflow resume <change>
    --seq <triage-seq> --answer "<your words>"`: the triage amends its fix in a new
    commit, logs the revisit in the ledger, and names its exit again;
 4. then resolves the stopped step with `--resolves`. Resolved before the resume, the
@@ -280,7 +335,7 @@ resume spends it. Once archive cleanup has reached `done`, a revisit belongs on 
 pull request.
 
 **A refused write.** Every unattended step runs inside a sandbox that lets it write
-only its step's scope; `scripts/change-workflow config` shows each step's scope and
+only its step's scope; `change-workflow config` shows each step's scope and
 where each path came from. A write outside it fails as a
 read-only file system, or as busy for a protected file, and the run's line records
 it among its `refusals`, as it records a push the engine's `git` refused. A step that
@@ -298,7 +353,7 @@ A fresh run takes it through its target, several paths separated by `;`:
 make validate CHANGE=<change> UNATTENDED=1 WRITE='kit/site/.venv;~/.cache/some-tool'
 ```
 
-A resumed run takes it as `--write` on `scripts/change-workflow resume`. A relative
+A resumed run takes it as `--write` on `change-workflow resume`. A relative
 path is from the checkout's root, and `~` is your home directory; a path absent at
 launch is created as a directory, and a file grants its directory. The engine
 refuses, before launching anything, a pattern, a protected path or one under it —
@@ -318,7 +373,7 @@ namespaces, to confine the next run.
 
 **A prerequisite's proposal.** A design that needs another change first asks you
 about the prerequisite. On your word the orchestrating session makes its worktree,
-`scripts/change-workflow propose <change> <prerequisite>`, which puts
+`change-workflow propose <change> <prerequisite>`, which puts
 `../<prerequisite>-proposal` on a new branch `propose-<prerequisite>` from the landing
 branch, and resumes the design, which writes the prerequisite's proposal there and
 ends blocked. Committing and merging the proposal, and starting its workflow, are
@@ -359,7 +414,7 @@ again once archive cleanup has reached `done`, tell the orchestrating session, w
 records:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --next late-merge --decision "merge the landing branch after the archive" --reason "<your words>"
+change-workflow note <change> orchestrator --by owner --next late-merge --decision "merge the landing branch after the archive" --reason "<your words>"
 ```
 
 Restore a row you pruned from the change index, as archive cleanup left it, before
@@ -367,7 +422,7 @@ you direct the merge. Waiving that merge's validation is your direction to the e
 the merge named, recorded with the merge's run:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next review --kind merge --decision "the merge review without validating the merged HEAD" --reason "<your words>"
+change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next review --kind merge --decision "the merge review without validating the merged HEAD" --reason "<your words>"
 ```
 
 with `--next archive-cleanup` and no `--kind` when the merge named archive cleanup,
@@ -407,7 +462,7 @@ workspace and go on there, or move it into a clone by hand:
 format is brought to you with the conversion:
 
 ```text
-scripts/change-workflow convert <change>
+change-workflow convert <change>
 ```
 
 Run it between steps, never while one runs. Alone, it writes nothing: it shows the
@@ -458,7 +513,7 @@ builds and deploys; the repository's own workflow guidance lists them.
 **Removing a clone.** A change's records and evidence are untracked, so no merge
 carries them out of its clone. Archive cleanup, as its last act, copies them into your
 workspace, so your workspace holds the history of every cleaned-up change, and
-`scripts/change-workflow find --records <change>` finds it. Once the change has
+`change-workflow find --records <change>` finds it. Once the change has
 merged, remove its clone with `make change-clone-remove CHANGE=<change>` in your
 workspace, giving `BASE=<branch>` when the clone recorded no landing branch. It
 refuses while a run or the bootstrap is in progress in the clone; otherwise it copies
@@ -519,7 +574,7 @@ review always runs unattended, since an interactive review would record nothing.
 A step you run interactively records its own outcome as its last act:
 
 ```text
-scripts/change-workflow record <change> <step> --outcome '<the outcome, as JSON>'
+change-workflow record <change> <step> --outcome '<the outcome, as JSON>'
 ```
 
 It reads the session's id from `CLAUDE_CODE_SESSION_ID` (`printenv
@@ -670,7 +725,7 @@ diagram under "Parallel changes" draws them):
 ### A change's files
 
 A change lives in `openspec/changes/<change>/` until closeout archives it into
-`openspec/changes/archive/`, under a dated name; `scripts/change-workflow find
+`openspec/changes/archive/`, under a dated name; `change-workflow find
 <change>` prints where it is. Tracked, and so in the pull request:
 
 - `proposal.md`, `design.md`, and `tasks.md`: what the change does and why, its
@@ -687,10 +742,10 @@ Untracked, under `reviews/`, numbered in the order they were produced:
   review, the exit it chose;
 - `workflow.jsonl`: the change's workflow log, one line per step run, interactive
   run's outcome, the orchestrating session's notes, and your decisions;
-  `scripts/change-workflow log <change>` prints it;
+  `change-workflow log <change>` prints it;
 - `transcripts/`: each run's transcript and progress file.
 
-The change's row in the [change index](../openspec/changes/README.md) gives its
+The change's row in the change index, `openspec/changes/README.md`, gives its
 status and what it waits on.
 
 ### The ledger
@@ -707,7 +762,7 @@ guidance review reads them for.
 
 Change the state between steps, never while one runs. The engine is the workflow log's
 only writer: record a decision, a direction, or an interrupt with
-`scripts/change-workflow note`, as "Interventions" shows, rather than editing the log.
+`change-workflow note`, as "Interventions" shows, rather than editing the log.
 The next-step computation reads the change's files and its log, so a triage file no
 recorded outcome names reads as a triage in progress, whatever it says, and a step
 closed before it recorded is named again until it records. A change's records leave
@@ -717,10 +772,10 @@ under way into a clone" does.
 ## The engine
 
 The workflow is not only skills. A Python engine, on the standard library alone, runs
-them: one command, `scripts/change-workflow`, whose subcommands dispatch to the package
-beside it, `scripts/change_workflow/`. Everything the engine does is reached through
-that command; the make targets are thin calls of it, a convenience outside its public
-surface.
+them: one command, `change-workflow`, installed on the path, whose subcommands
+dispatch to its package, `change_workflow`. Everything the engine does is reached
+through that command; the make targets are thin calls of it, a convenience outside
+its public surface.
 
 ![The engine's parts](../openspec/specs/change-workflow/diagrams/change-workflow-engine-parts.svg)
 
@@ -767,13 +822,13 @@ session's relay beside it:
 
 ![One step's run, from its start to its logged outcome](../openspec/specs/change-workflow/diagrams/change-workflow-step-run.svg)
 
-A step starts through `scripts/change-workflow start`, which checks the change and
+A step starts through `change-workflow start`, which checks the change and
 opens its log. Unattended, the wrapper starts the harness in the step's sandbox and,
 when the run ends, checks what the run changed against what it started from and
 appends one line to the log with the run's session, model, cost, denials, refusals,
 and any check it broke, which stops the run. A run
 that ends with a question waits; your answer resumes the same session through
-`scripts/change-workflow resume`. The command's subcommands, and which another party
+`change-workflow resume`. The command's subcommands, and which another party
 may rely on, are the companion's
 [The command and its tiers](../openspec/specs/change-workflow/README.md#the-command-and-its-tiers).
 
@@ -781,25 +836,32 @@ may rely on, are the companion's
 
 A repository adopts and tunes the workflow in a few files:
 
-- **`.agents/workflow.toml`**, the repository's configuration: the protected branches
-  the guarded push refuses; the inert paths, a change to which runs only the light
-  pre-commit checks and, after the pre-closeout review, needs no new validation; the
-  repository's commands as hooks on the workflow's moments (after a step's last
-  functional change, before every commit, before a commit with a functional change,
-  before the archive, before a push, as a clone is made), and optional hooks before
-  and after each step; the OpenSpec command; validation's evidence kinds, each with
-  whether it is always required or owed by a plan's sections, the pattern its evidence
-  is found at, its commands, its cleanup, and its guide; the documents every step and
-  each step reads as it starts; the models each step and the
-  orchestrating session run on, each an ordered list of a harness, a model, and an
-  effort; what each step's sandbox writes beyond its baseline, for every step or one,
-  and what it protects beyond the engine's own; and how often a review whose draft
-  fails the format check is sent back. A
-  default check is turned off only by naming it with a reason. The engine refuses a
-  step's models naming two of one vendor.
-- **`.agents/skills/`**: each step's skill, one source every harness loads. The skills
-  name no target or path of one repository's; what they need of it comes from the
-  configuration, the guides, and the guidance.
+- **`.agents/workflow.toml`**, the repository's committed configuration: the range of
+  workflow versions it accepts, which every command reading the file checks first;
+  the protected branches the guarded push refuses; the inert paths, a change to which
+  runs only the light pre-commit checks and, after the pre-closeout review, needs no
+  new validation; the repository's commands as hooks on the workflow's moments (after
+  a step's last functional change, before every commit, before a commit with a
+  functional change, before the archive, before a push, as a clone is made), and
+  optional hooks before and after each step; the OpenSpec command; validation's
+  evidence kinds, each with whether it is always required or owed by a plan's
+  sections, the pattern its evidence is found at, its commands, its cleanup, and its
+  guide; the documents every step and each step reads as it starts; what each step's
+  sandbox writes beyond its baseline, for every step or one, and what it protects
+  beyond the engine's own; and how often a review whose draft fails the format check
+  is sent back. A default check is turned off only by naming it with a reason.
+- **`.agents/workflow.local.toml`**, each checkout's own settings, which Git ignores:
+  where the engineering guidance is; the models each step and the orchestrating
+  session run on, each an ordered list of a harness, a model, and an effort; and
+  writable paths a developer adds to a step's sandbox. `change-workflow install`
+  writes it where a checkout has none, from the repository's committed
+  `.agents/workflow.local.template.toml`. The engine refuses a step's models naming
+  two of one vendor, and a field in the wrong one of the two files.
+- **The workflow's skills**, which `change-workflow install` writes into each
+  harness's user skill directory, stamped with the installed version: the
+  distribution's, never a repository's own, so no project skill directory holds an
+  entry of their names. The skills name no target or path of one repository's; what
+  they need of it comes from the configuration, the guides, and the guidance.
 - **`.agents/evidence/`**: each evidence kind's guide, prose telling validation, and
   the steps that plan, implement, merge, clean up, or review against it, how to read
   that kind's evidence and tell its failures apart. A guide repeats nothing the
@@ -826,3 +888,103 @@ skills and the guidance change like any other file, through a change.
 
 The configuration's fields, and why each is one, are the companion's
 [A repository's configuration](../openspec/specs/change-workflow/README.md#a-repositorys-configuration).
+
+## Moving the workflow to its own repository
+
+The workflow is built from a repository that also uses it, and is lifted from there
+into a repository of its own with its history, by path, keeping every path. The
+paths lifted are what the wheel packages, the wheel's project, the command that runs
+the engine from the tree, and the workflow's own tests and fixtures:
+
+```text
+scripts/change-workflow
+scripts/change_workflow/
+scripts/change-workflow-wheel/
+.agents/change-outcome.schema.json
+.agents/skills/change-archive-cleanup/
+.agents/skills/change-closeout/
+.agents/skills/change-design/
+.agents/skills/change-implement/
+.agents/skills/change-merge/
+.agents/skills/change-orchestrate/
+.agents/skills/change-plan/
+.agents/skills/change-review/
+.agents/skills/change-triage/
+.agents/skills/change-validate/
+.agents/skills/guidance-review/
+docs/change-workflow-handbook.md
+docs/guidance/workflow/
+openspec/specs/change-workflow/spec.md
+openspec/specs/change-workflow/index.md
+openspec/specs/change-workflow/README.md
+openspec/specs/change-workflow/diagrams/
+scripts/tests/change_workflow_fixtures.py
+scripts/tests/conftest.py
+scripts/tests/test_change_clone.py
+scripts/tests/test_change_cost.py
+scripts/tests/test_change_history.py
+scripts/tests/test_change_next_step.py
+scripts/tests/test_change_workflow_around.py
+scripts/tests/test_change_workflow_citations.py
+scripts/tests/test_change_workflow_cli.py
+scripts/tests/test_change_workflow_cli_steps.py
+scripts/tests/test_change_workflow_command.py
+scripts/tests/test_change_workflow_common.py
+scripts/tests/test_change_workflow_config.py
+scripts/tests/test_change_workflow_convert.py
+scripts/tests/test_change_workflow_cost.py
+scripts/tests/test_change_workflow_decisions.py
+scripts/tests/test_change_workflow_documents.py
+scripts/tests/test_change_workflow_evidence.py
+scripts/tests/test_change_workflow_gather.py
+scripts/tests/test_change_workflow_graph.py
+scripts/tests/test_change_workflow_harness.py
+scripts/tests/test_change_workflow_hooks.py
+scripts/tests/test_change_workflow_install.py
+scripts/tests/test_change_workflow_invariants.py
+scripts/tests/test_change_workflow_log.py
+scripts/tests/test_change_workflow_outcome.py
+scripts/tests/test_change_workflow_records.py
+scripts/tests/test_change_workflow_review.py
+scripts/tests/test_change_workflow_sandbox.py
+scripts/tests/test_change_workflow_sandbox_git.py
+scripts/tests/test_change_workflow_scope.py
+scripts/tests/test_change_workflow_sections.py
+scripts/tests/test_change_workflow_spec_index.py
+scripts/tests/test_change_workflow_stream.py
+scripts/tests/test_change_workflow_subagents.py
+scripts/tests/test_change_workflow_wait.py
+scripts/tests/test_change_workflow_watch.py
+scripts/tests/test_change_workflow_wheel.py
+scripts/tests/test_change_workflow_wrapper.py
+scripts/tests/test_check_agent_skills.py
+scripts/tests/test_check_change_index.py
+scripts/tests/test_check_push_ready.py
+scripts/tests/test_check_tasks.py
+scripts/tests/test_find_change.py
+scripts/tests/test_post_compaction_context.py
+scripts/tests/test_round_view.py
+```
+
+The lift keeps the history of exactly these paths (`git filter-repo`, one `--path`
+for each line). In the new repository, the wheel's project file,
+`scripts/change-workflow-wheel/pyproject.toml`, is renamed to `pyproject.toml` at the
+root in one commit, its `force-include` table re-based on the root
+(`"../change_workflow"` becoming `"scripts/change_workflow"`, each `"../../<path>"`
+becoming `"<path>"`). The workflow's specification arrives in OpenSpec's tree at the
+path it has here, so the new repository works its own changes through the workflow
+from its first commit; its configuration, local configuration template, change index,
+root guidance, and CI are written there, and the archived changes that built the
+workflow stay in the repository they were archived in.
+
+The lifted engine keeps the paths it has here — its package under `scripts/`, its
+skills under `.agents/skills/`, and its project gathering them with a `force-include`
+table — which its first repository built under a temporary exception to the
+packaging rules. The new repository restructures itself, as its own change, into a
+project whose package holds the engine and the data it ships, so that no
+`force-include` table remains; it declares no exception of its own for that table.
+
+The new repository's own guidance carries the rule for what is local, as a rule for
+its own work: a setting of the workflow is local exactly when developers using the
+workflow on the same repository should be able to give it different values;
+otherwise it is committed.

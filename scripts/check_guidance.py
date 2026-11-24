@@ -19,9 +19,10 @@ It fails, naming the file, on a guidance file with no `tags`; on zero or several
 layer tags; on a tag that neither its layer's vocabulary table nor a lower layer's
 defines; on a vocabulary row no guidance file carries; on a malformed vocabulary or
 exception table; on an exception row citing no guidance file or naming a kind other
-than `selects` or `overrides`; and on a link from a guidance file to one tagged with
-a higher layer. A layer's vocabulary is the table under a heading "Tags" whose first
-row is that layer's tag; an exception table is the table under a heading
+than `selects` or `overrides`; on a link from a guidance file to one tagged with
+a higher layer; and on a link from the workflow's guidance to engineering guidance,
+which it names by section instead. A layer's vocabulary is the table under a
+heading "Tags" whose first row is that layer's tag; an exception table is the table under a heading
 "Exceptions to shared guidance". It also fails on a citation of a guidance file — a
 Markdown link, or a path quoted in backticks or double quotes — whose anchor names
 no heading in that file, in any Markdown file Git tracks or would track outside the
@@ -526,7 +527,9 @@ def _check_tags(guidance: Guidance) -> None:
 
 
 def _check_links(guidance: Guidance, texts: dict[str, str]) -> None:
-    """No guidance file links to one tagged with a higher layer."""
+    """No guidance file links to one tagged with a higher layer, and the workflow's
+    guidance links to no engineering guidance: it names the section it relies on,
+    wherever a user's engineering guidance keeps it."""
     for path, text in texts.items():
         layer = guidance.layer(path)
         if layer is None:
@@ -537,6 +540,11 @@ def _check_links(guidance: Guidance, texts: dict[str, str]) -> None:
                 guidance.problems.append(f"{path}:{number}: links to {target}, a guidance file "
                                          f"tagged {linked}, from a file tagged {layer}, a lower "
                                          "layer")
+            elif (layer, linked) == ("workflow", "engineering"):
+                guidance.problems.append(f"{path}:{number}: links to {target}, a guidance file "
+                                         "tagged engineering, from a file tagged workflow, which "
+                                         "names the engineering guidance's section it relies "
+                                         "on rather than linking a file")
 
 
 def _check_anchors(root: Path, files: Sequence[str], guidance: Guidance,
@@ -606,11 +614,13 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
         print(f"FAIL: {len(guidance.problems)} problem(s) in the guidance: each file carries "
               "one layer tag and tags its layer's vocabulary or a lower one's defines, every "
               "vocabulary row is carried, every table is well formed, no guidance links to a "
-              "higher layer, and every cited anchor names a heading.")
+              "higher layer nor workflow guidance to engineering guidance, and every cited "
+              "anchor names a heading.")
         return 1
     print(f"OK: {len(guidance.tags)} guidance files are tagged from their vocabularies, "
           f"{len(guidance.exceptions)} exception rows cite guidance, no guidance links to a "
-          "higher layer, and every cited anchor names a heading.")
+          "higher layer nor workflow guidance to engineering guidance, and every cited "
+          "anchor names a heading.")
     return 0
 
 

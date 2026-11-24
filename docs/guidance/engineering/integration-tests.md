@@ -2,7 +2,7 @@
 tags: [engineering, testing]
 ---
 
-# Integration tests
+# Application integration tests
 
 Rules for application integration tests, which drive a service's real application
 in process ([Test levels](test-levels.md), "Integration tests").

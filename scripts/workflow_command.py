@@ -6,8 +6,9 @@ subcommands, exit statuses, and structured outputs are what the engine keeps
 stable, while its modules may change under any of them. A script here therefore
 runs the command as a process, in the checkout it asks about, since the command
 acts on the Git repository containing its working directory, and reads only the
-structured output a program may rely on — `find --json`'s object and `clone
-where`'s path — with the command's own reason when it refuses.
+structured output a program may rely on — `find --json`'s object, `check
+spec-index --json`'s, and `clone where`'s path — with the command's own reason when
+it refuses.
 """
 
 from __future__ import annotations
@@ -59,6 +60,25 @@ def found_change(root: Path, change: str, command: Path = COMMAND) -> dict[str, 
     if not isinstance(found, dict):
         raise WorkflowRefused(f"change-workflow {' '.join(arguments)} printed no JSON object")
     return found
+
+
+def created_specifications(root: Path, change: str,
+                           command: Path = COMMAND) -> frozenset[str]:
+    """The specification paths the deltas of `change` create, as `check spec-index
+    --json` prints them in `created`. The index check's own result is not this
+    caller's concern: a failing check prints its object all the same, exiting 1,
+    while a refusal prints none, its reason on standard error."""
+    arguments = ["check", "spec-index", change, "--json"]
+    done = run(arguments, root, command)
+    try:
+        reported = json.loads(done.stdout)
+    except json.JSONDecodeError:
+        raise _refused(done, arguments) from None
+    created = reported.get("created") if isinstance(reported, dict) else None
+    if not isinstance(created, list) or not all(isinstance(path, str) for path in created):
+        raise WorkflowRefused(f"change-workflow {' '.join(arguments)} printed no `created` "
+                              "list of paths")
+    return frozenset(created)
 
 
 def clone_where(checkout: Path, change: str, command: Path = COMMAND) -> Path | None:

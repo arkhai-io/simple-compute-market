@@ -49,7 +49,7 @@ triage round fixes them. At closeout, run the repository's comment check. It
 catches change ids, section numbers, and task numbers mechanically, though not fuzzier
 violations of the two rules this part confirms — the engineering rule that comments
 describe the current system
-([Comments](../engineering/comments.md#comments-describe-the-current-system)), and the
+(the engineering guidance's section "Comments describe the current system"), and the
 workflow's rule that code names no change, task, or change document
 ([Change references](change-references.md)) — such as a comment naming the review or
 migration that introduced the code. If a check reports anything, or a comment the
@@ -62,7 +62,7 @@ reads only documentation, covers everything closeout changed.
 Confirm it; do not do it here, for the same reason as comment hygiene. During
 implementation, before the pre-closeout review, each section places the imports it
 added or touched as the import rule says
-([Imports go at module level](../engineering/dependencies-python.md#imports-go-at-module-level)),
+(the engineering guidance's section "Imports go at module level"),
 checking its own diff
 rather than every pre-existing local import in a file it touched. At closeout, check
 the imports the change added; one that should move returns the change to
@@ -75,7 +75,7 @@ Re-check the change's own accepted decisions against the workflow's placement ru
 table directly — do not defer this to an external reviewer noticing it first. Confirm
 too that each permanent document the change wrote describes the current state,
 declaratively and with no wording relative to the change
-([Permanent documents describe the current state](../engineering/documentation.md#permanent-documents-describe-the-current-state)).
+(the engineering guidance's section "Permanent documents describe the current state").
 
 ## Narrative compression
 
@@ -102,8 +102,8 @@ unchanged records that disposition explicitly rather than omitting the step. A
 change that creates, renames, supersedes, or removes a change directory reconciles
 the index's links in the same step: a link to a directory that does not exist is a
 blocking defect, as an unresolvable citation always is
-([Citations resolve](../engineering/documentation.md#citations-resolve)), not a stale
-link to fix later. The workflow's index check, `scripts/change-workflow check index`, holds each
+(the engineering guidance's section "Citations resolve"), not a stale
+link to fix later. The workflow's index check, `change-workflow check index`, holds each
 row — its cells, its link, its status, and its dependencies, each listed and not
 archived — and that every active change has exactly one (`change-workflow`'s
 CW-jyff); an archived change needs no row, since archived rows may be pruned from
@@ -153,9 +153,9 @@ promotion also writes its `index.md`: an entry, with its link and summary line u
 its part and group, for each id the change's deltas add; for each requirement they
 rename, its entry's link moved to the new heading; for each they modify, its summary
 line revised where it no longer holds; and, for each requirement they remove, its id
-moved to the retired ids with where its rule went. The repository's index check
-accepts the new ids from the change's deltas, so the entries are written before the
-archive merges them.
+moved to the retired ids with where its rule went. The workflow's specification
+index check, `change-workflow check spec-index`, accepts the new ids from the
+change's deltas, so the entries are written before the archive merges them.
 
 Promote only what the change's own branch implements. A closeout commit can promote
 a section describing a subsystem the branch has never had, citing a requirement the
@@ -185,8 +185,8 @@ touched no guidance records that.
 Run the repository's citation check, scoped to the change, after promotion, so the
 documents it wrote are there to resolve, and resolve every match: a citation whose
 target does not resolve is a blocking defect, not a stale link
-([Citations resolve](../engineering/documentation.md#citations-resolve)). Then validate the
-change strictly, `scripts/change-workflow openspec validate <change> --strict`, the
+(the engineering guidance's section "Citations resolve"). Then validate the
+change strictly, `change-workflow openspec validate <change> --strict`, the
 last check before the archive. A change with no spec deltas records that instead,
 since the validator rejects a change with none, and archives with `--skip-specs`.
 
@@ -198,11 +198,11 @@ people route around. Run it unscoped to see the repository-wide picture.
 ## Archival
 
 Archive the change as the last step, once every other part is done:
-`scripts/change-workflow openspec archive <change> -y` merges its spec deltas into
+`change-workflow openspec archive <change> -y` merges its spec deltas into
 `openspec/specs/` and moves it to `openspec/changes/archive/<date>-<change>/`; the
 change's row in the change index then links to that directory. A change whose
 `spec.md` was already edited by hand archives with `--skip-specs`, so the merge is
 not applied twice. The closeout review
 and its triage then read the archived change and the permanent documents as
 archived, and find the change by name under the archive
-(`scripts/change-workflow find <change>`).
+(`change-workflow find <change>`).

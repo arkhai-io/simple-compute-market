@@ -1,12 +1,16 @@
-"""An indexed capability's spec.md is held to its index.md."""
+"""An indexed capability's spec.md is held to its index.md: the engine's default
+check, `change_workflow.spec_index`, and `check spec-index` through the command."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from check_spec_index import capability_problems, main, problems, read_deltas, slug
+from change_workflow.cli import main
+from change_workflow.spec_index import (capability_problems, change_deltas, problems,
+                                        read_deltas, slug)
 
 CHANGE = "shape-bounds"
 SPEC = """# example-flow Specification
@@ -72,6 +76,11 @@ def _delta(root: Path, text: str, name: str = "example-flow") -> None:
     delta.write_text(text, "utf-8")
 
 
+def _problems(root: Path, change: str) -> list[str]:
+    """The problems with the named change's deltas counted."""
+    return problems(root, change_deltas(root, change))
+
+
 def test_an_index_agreeing_with_its_specification_passes(tmp_path: Path) -> None:
     _capability(tmp_path)
 
@@ -122,7 +131,7 @@ def test_an_id_only_a_changes_added_delta_holds_is_accepted_from_it(tmp_path: Pa
     _capability(tmp_path, index=index)
     _delta(tmp_path, ADDED)
 
-    assert problems(tmp_path, CHANGE) == []
+    assert _problems(tmp_path, CHANGE) == []
     # Without the change named, the id is in no specification.
     assert any("lists EF-n3w1, which neither" in problem for problem in problems(tmp_path))
     assert any("has no heading #requirement-ef-n3w1" in problem
@@ -136,7 +145,7 @@ def test_a_capability_the_change_creates_resolves_against_its_delta(tmp_path: Pa
     (capability / "index.md").write_text(INDEX, "utf-8")
     _delta(tmp_path, "## ADDED Requirements\n\n" + SPEC.split("## Requirements\n\n", 1)[1])
 
-    assert problems(tmp_path, CHANGE) == []
+    assert _problems(tmp_path, CHANGE) == []
     # Without the change named, nothing holds the ids, and spec.md is missing.
     assert any("its file spec.md does not exist" in problem for problem in problems(tmp_path))
 
@@ -159,7 +168,7 @@ def test_a_missing_spec_a_delta_adds_nothing_to_is_still_missing(tmp_path: Path,
     _delta(tmp_path, delta)
 
     assert any("its file spec.md does not exist" in problem
-               for problem in problems(tmp_path, CHANGE))
+               for problem in _problems(tmp_path, CHANGE))
 
 
 def test_a_link_to_a_heading_a_new_capabilitys_delta_lacks_does_not_resolve(
@@ -170,7 +179,7 @@ def test_a_link_to_a_heading_a_new_capabilitys_delta_lacks_does_not_resolve(
     _delta(tmp_path, "## ADDED Requirements\n\n" + SPEC.split("## Requirements\n\n", 1)[1])
 
     assert any("spec.md has no heading #not-a-heading" in problem
-               for problem in problems(tmp_path, CHANGE))
+               for problem in _problems(tmp_path, CHANGE))
 
 
 def test_a_requirement_the_changes_delta_removes_is_held_to_nothing(tmp_path: Path) -> None:
@@ -181,7 +190,7 @@ def test_a_requirement_the_changes_delta_removes_is_held_to_nothing(tmp_path: Pa
     _delta(tmp_path, "## REMOVED Requirements\n\n### Requirement: An unindexed old rule\n\n"
                      "**Reason**: rewritten.\n\n**Migration**: EF-q4ze holds it.\n")
 
-    assert problems(tmp_path, CHANGE) == []
+    assert _problems(tmp_path, CHANGE) == []
     assert any("'An unindexed old rule' begins with no id" in problem
                for problem in problems(tmp_path))
 
@@ -214,7 +223,7 @@ def test_a_renamed_and_modified_requirement_is_one_requirement(tmp_path: Path) -
     _delta(tmp_path, RENAMED + "\n## MODIFIED Requirements\n\n"
                      "### Requirement: EF-q4ze The flow stops\n\nIt MUST stop.\n")
 
-    assert problems(tmp_path, CHANGE) == []
+    assert _problems(tmp_path, CHANGE) == []
 
 
 def test_a_link_to_a_heading_the_deltas_take_away_does_not_resolve(tmp_path: Path) -> None:
@@ -223,7 +232,7 @@ def test_a_link_to_a_heading_the_deltas_take_away_does_not_resolve(tmp_path: Pat
     _delta(tmp_path, RENAMED)
 
     assert any("has no heading #requirement-ef-q4ze-the-flow-ends" in problem
-               for problem in problems(tmp_path, CHANGE))
+               for problem in _problems(tmp_path, CHANGE))
 
 
 def test_an_entry_linked_to_another_requirements_heading_is_named(tmp_path: Path) -> None:
@@ -282,7 +291,7 @@ def test_an_entry_is_held_to_its_heading_as_the_deltas_leave_it(tmp_path: Path) 
 
     assert any("EF-q4ze links to spec.md#requirement-ef-q4ze-the-flow-ends, not to its "
                "requirement's heading spec.md#requirement-ef-q4ze-the-flow-stops" in problem
-               for problem in problems(tmp_path, CHANGE))
+               for problem in _problems(tmp_path, CHANGE))
 
 
 def test_a_retired_id_written_as_its_old_link_is_retired(tmp_path: Path) -> None:
@@ -323,18 +332,81 @@ def test_a_heading_anchor_is_the_one_github_writes() -> None:
         "requirement-cw-h8vm-make-targets-are-a-convenience")
 
 
+def _with_change(root: Path) -> Path:
+    """`root` holding the change, which the command finds by name."""
+    (root / "openspec/changes" / CHANGE).mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def test_the_command_fails_naming_each_problem(tmp_path: Path,
                                                capsys: pytest.CaptureFixture[str]) -> None:
-    _capability(tmp_path, index=INDEX.replace("- [EF-q4ze]", "- see [EF-q4ze]"))
+    """Library integration: `check spec-index` through the engine's command, in
+    process, over a temporary checkout."""
+    _capability(_with_change(tmp_path),
+                index=INDEX.replace("- [EF-q4ze]", "- see [EF-q4ze]"))
 
-    assert main([""], root=tmp_path) == 1
+    assert main(["check", "spec-index"], root=tmp_path) == 1
     assert "FAIL: example-flow: index.md does not list EF-q4ze" in capsys.readouterr().out
-    assert main([CHANGE, "other"], root=tmp_path) == 2
+    assert main(["check", "spec-index", CHANGE, "other"], root=tmp_path) == 2
 
 
 def test_the_command_passes_on_agreeing_indexes(tmp_path: Path,
                                                 capsys: pytest.CaptureFixture[str]) -> None:
-    _capability(tmp_path)
+    _capability(_with_change(tmp_path))
 
-    assert main([CHANGE], root=tmp_path) == 0
+    assert main(["check", "spec-index", CHANGE], root=tmp_path) == 0
     assert capsys.readouterr().out.startswith("OK:")
+
+
+def test_a_change_the_command_does_not_find_is_refused(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _capability(_with_change(tmp_path))
+
+    assert main(["check", "spec-index", "no-such-change"], root=tmp_path) == 1
+    assert "no change 'no-such-change'" in capsys.readouterr().err
+
+
+def test_an_archived_changes_deltas_are_not_counted(tmp_path: Path,
+                                                   capsys: pytest.CaptureFixture[str]) -> None:
+    """The archive merged them, so an id only the delta holds is unknown again."""
+    _capability(tmp_path, index=INDEX.replace(
+        "\n## Retired", "- [EF-n3w1](spec.md#requirement-ef-n3w1-the-flow-pauses) — it pauses."
+                        "\n\n## Retired"))
+    _delta(tmp_path, ADDED)
+    archived = tmp_path / "openspec/changes/archive" / f"2026-11-01-{CHANGE}"
+    archived.parent.mkdir(parents=True)
+    (tmp_path / "openspec/changes" / CHANGE).rename(archived)
+
+    assert change_deltas(tmp_path, CHANGE) == {}
+    assert main(["check", "spec-index", CHANGE], root=tmp_path) == 1
+    assert "lists EF-n3w1, which neither" in capsys.readouterr().out
+
+
+def test_json_lists_the_specifications_the_deltas_create(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CW-368t: `--json` lists the specification a delta adding a requirement
+    creates, beside the result; a capability that exists already, or whose delta
+    adds nothing, is created by none."""
+    _capability(_with_change(tmp_path))
+    _delta(tmp_path, ADDED)
+    _delta(tmp_path, ADDED, name="new-flow")
+    _delta(tmp_path, "## REMOVED Requirements\n\n### Requirement: NF-a000 Gone\n",
+           name="removed-flow")
+
+    assert main(["check", "spec-index", CHANGE, "--json"], root=tmp_path) == 1
+    reported = json.loads(capsys.readouterr().out)
+
+    assert reported["change"] == CHANGE
+    assert reported["created"] == ["openspec/specs/new-flow/spec.md"]
+    # The added id is not indexed yet, so the check itself fails beside the paths.
+    assert reported["result"] == "failed"
+    assert "example-flow: index.md does not list EF-n3w1" in reported["problems"]
+
+
+def test_the_json_of_a_passing_check(tmp_path: Path,
+                                     capsys: pytest.CaptureFixture[str]) -> None:
+    _capability(_with_change(tmp_path))
+
+    assert main(["check", "spec-index", "--json"], root=tmp_path) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "change": None, "result": "passed", "problems": [], "created": []}

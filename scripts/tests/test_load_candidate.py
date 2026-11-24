@@ -71,16 +71,22 @@ class Processes:
     """The processes the load runs. The build writes the chart's package and the
     binary and labels each image built from the wheelhouse with its digest;
     `labels` overrides an image's labels, `failing` makes the first command
-    starting with it fail, and a delete answers `delete_error`, or succeeds when
-    it is None, as for a revision loaded before; removing a revision tag answers
-    `untag_error` the same way, as for a revision built before."""
+    starting with it fail. `stored` maps each (repository, package) the store holds
+    to its versions, as the listings print them; by default every package the load
+    deletes holds the revision, as for a revision loaded before. A listing of a
+    package not stored fails, as gcloud's does; a listing answers `list_error` when
+    it is set, and a delete answers `delete_error`, or succeeds when it is None;
+    removing a revision tag answers `untag_error` the same way, as for a revision
+    built before."""
 
     def __init__(self, root: Path, labels: dict[str, dict[str, str] | None] | None = None,
                  failing: tuple[str, ...] | None = None, on_build=None,
-                 delete_error: str | None = "NOT_FOUND: no such version",
+                 stored: dict[tuple[str, str], set[str]] | None = None,
+                 list_error: str | None = None, delete_error: str | None = None,
                  untag_error: str | None = "Error response from daemon: No such image") -> None:
         self.root, self.overrides, self.failing = root, labels or {}, failing
         self.on_build, self.delete_error, self.untag_error = on_build, delete_error, untag_error
+        self.stored, self.list_error = stored, list_error
         self.commands: list[list[str]] = []
         self.labels: dict[str, dict[str, str] | None] = {}
 
@@ -110,11 +116,31 @@ class Processes:
             if self.untag_error is None:
                 return subprocess.CompletedProcess(command, 0, f"Untagged: {command[-1]}", "")
             return subprocess.CompletedProcess(command, 1, "", self.untag_error)
+        if command[:4] in (["gcloud", "artifacts", "packages", "list"],
+                           ["gcloud", "artifacts", "versions", "list"]):
+            return self.listing(command)
         if command[:4] == ["gcloud", "artifacts", "versions", "delete"]:
             if self.delete_error is None:
                 return subprocess.CompletedProcess(command, 0, "", "")
             return subprocess.CompletedProcess(command, 1, "", self.delete_error)
         return subprocess.CompletedProcess(command, 0, "", "")
+
+    def listing(self, command: list[str]) -> subprocess.CompletedProcess:
+        if self.list_error is not None:
+            return subprocess.CompletedProcess(command, 1, "", self.list_error)
+        repository = _flag(command, "repository")
+        stored = self.stored if self.stored is not None else {
+            (repository, package): {REVISION} for package in ("wheelhouse", "chart", "market")}
+        prefix = f"projects/project/locations/region/repositories/{repository}/packages"
+        if command[2] == "packages":
+            names = [f"{prefix}/{package}" for repo, package in stored if repo == repository]
+            return subprocess.CompletedProcess(command, 0, "\n".join(names) + "\n", "")
+        package = _flag(command, "package")
+        if (repository, package) not in stored:
+            return subprocess.CompletedProcess(
+                command, 1, "", f'"code": 404, "message": "Requested package does not exist"')
+        names = [f"{prefix}/{package}/versions/{v}" for v in stored[(repository, package)]]
+        return subprocess.CompletedProcess(command, 0, "\n".join(names) + "\n", "")
 
     def index(self, prefix: list[str]) -> int:
         return next(i for i, command in enumerate(self.commands)
@@ -177,6 +203,37 @@ def test_the_store_receives_exactly_the_declared_wheels_one_chart_and_one_binary
         ("prefix-candidates", "chart", REVISION, str(root / CHART)),
         ("prefix-cli", "market", REVISION, str(root / ".dist" / "bin" / "market")),
     ]
+
+
+def test_a_named_candidate_store_receives_the_wheels_and_chart(root: Path) -> None:
+    """A candidate store named apart from the prefix holds the wheels and the chart; the
+    binary stays in the prefix's CLI repository."""
+    processes = Processes(root)
+
+    assert main([*ARGUMENTS, "--candidates-repository", "elsewhere"], run=processes,
+                root=root) == 0
+
+    deletes = processes.matching(["gcloud", "artifacts", "versions", "delete"])
+    assert [(_flag(c, "repository"), _flag(c, "package")) for c in deletes] == [
+        ("elsewhere", "wheelhouse"), ("elsewhere", "chart"), ("prefix-cli", "market")]
+    uploads = {(_flag(c, "repository"), _flag(c, "package"))
+               for c in processes.matching(["gcloud", "artifacts", "generic", "upload"])}
+    assert uploads == {("elsewhere", "wheelhouse"), ("elsewhere", "chart"),
+                       ("prefix-cli", "market")}
+
+
+def test_make_names_the_candidate_store_it_is_given() -> None:
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
+    printed = subprocess.run(
+        ["make", "-n", "--no-print-directory", "load-candidate", "AR_PROJECT=project",
+         "AR_LOCATION=region", "AR_CANDIDATES=elsewhere"], cwd=REPO_ROOT,
+        capture_output=True, text=True, check=True, env=environment).stdout
+    line = next(line for line in printed.replace("\\\n", " ").splitlines()
+                if "scripts/load_candidate.py" in line)
+    words = shlex.split(line)
+
+    assert dict(zip(words[2::2], words[3::2]))["--candidates-repository"] == "elsewhere"
 
 
 def test_every_declared_image_and_development_image_is_pushed_under_the_revision(
@@ -302,7 +359,7 @@ def test_a_version_check_failure_stops_the_load_before_any_build(
 
 def test_a_reload_deletes_the_revisions_stored_versions_before_uploading(root: Path) -> None:
     """A revision loaded before holds its versions, which the deletes remove."""
-    processes = Processes(root, delete_error=None)
+    processes = Processes(root)
 
     assert main(ARGUMENTS, run=processes, root=root) == 0
 
@@ -319,6 +376,42 @@ def test_a_delete_refused_for_another_reason_uploads_nothing(
     assert not processes.matching(["gcloud", "artifacts", "generic", "upload"])
     assert "cannot delete wheelhouse 0123456ab from prefix-candidates: PERMISSION_DENIED" in (
         capsys.readouterr().err)
+
+
+def test_a_first_load_deletes_nothing_and_uploads_everything(root: Path) -> None:
+    """A revision never loaded has no stored version, so nothing is deleted, whatever
+    a delete of a missing version would have answered."""
+    processes = Processes(root, stored={("prefix-cli", "market"): {"d595f0c2e"}},
+                          delete_error='"code": 5, "message": "Version was not found."')
+
+    assert main(ARGUMENTS, run=processes, root=root) == 0
+
+    assert not processes.matching(["gcloud", "artifacts", "versions", "delete"])
+    assert len(processes.matching(["gcloud", "artifacts", "generic", "upload"])) == 4
+    assert len(processes.matching(["docker", "push"])) > 0
+
+
+def test_only_the_revisions_stored_versions_are_deleted(root: Path) -> None:
+    """A package stored at other revisions keeps them; only this revision's go."""
+    processes = Processes(root, stored={("prefix-candidates", "wheelhouse"): {REVISION, "fedcba987"},
+                                        ("prefix-candidates", "chart"): {"fedcba987"},
+                                        ("prefix-cli", "market"): {REVISION}})
+
+    assert main(ARGUMENTS, run=processes, root=root) == 0
+
+    deletes = processes.matching(["gcloud", "artifacts", "versions", "delete"])
+    assert [(_flag(c, "package"), c[4]) for c in deletes] == [
+        ("wheelhouse", REVISION), ("market", REVISION)]
+
+
+def test_a_listing_that_fails_uploads_nothing(
+        root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    processes = Processes(root, list_error="PERMISSION_DENIED: no")
+
+    assert main(ARGUMENTS, run=processes, root=root) == 1
+
+    assert not processes.uploaded()
+    assert "cannot list packages in prefix-candidates: PERMISSION_DENIED" in capsys.readouterr().err
 
 
 def test_an_upload_failing_after_the_deletes_stops_the_load(root: Path) -> None:
@@ -347,5 +440,5 @@ def test_make_passes_the_load_its_destination_and_nine_character_revision() -> N
 
     assert values == {"--project": "project", "--location": "region", "--prefix": "project",
                       "--docker-registry": "region-docker.pkg.dev/project/project-docker",
-                      "--revision": revision}
+                      "--revision": revision, "--candidates-repository": "project-candidates"}
     assert len(revision) == 9

@@ -1,8 +1,9 @@
 # Release handbook
 
 For the owner who releases this repository's packages and artifacts: how a marketplace
-release goes, loading a release candidate, what the deployment does with it, running
-the lanes on its images, cutting a release, deciding a release's migration floor, the
+release goes, merging `dev` into `main` and describing the release, loading a release
+candidate, what the deployment does with it, running the lanes on its images, cutting a
+release, deciding a release's migration floor, the
 compatibility paths due to retire, the import package renames consumers meet, and diagnosing a load or a cut that fails. It
 sits beside the [operator handbook](operator-handbook.md), for whoever runs a
 deployment, and the [change workflow handbook](change-workflow-handbook.md), for
@@ -21,9 +22,11 @@ those bytes ship.
 
 ## The release
 
-1. **Change.** Work lands on `dev` and then `main`. CI builds and tests, including
-   building the wheelhouse and resolving every declared distribution against it, and
-   publishes nothing.
+1. **Change.** Work lands on `dev` and then `main`, through a release pull request that
+   describes the release to its users
+   ([The release pull request](#the-release-pull-request)). CI builds and tests,
+   including building the wheelhouse and resolving every declared distribution against
+   it, and publishes nothing.
 2. **Release candidate.** An operator loads `main`'s commit with `make load-candidate`
    ([Loading a release candidate](#loading-a-release-candidate)).
 3. **Validation and promotion.** The deployment validates the release candidate, builds
@@ -37,6 +40,50 @@ those bytes ship.
 A fault found during validation is fixed on `main`, and a later commit becomes the next
 release candidate. A release candidate that fails before production gets no branch, no
 tag and no public artifact.
+
+## The release pull request
+
+`dev` reaches `main` through one pull request per release. It comes from a branch
+`release/merge-dev-to-main-<semver>`, cut from `dev`, with `origin/main` merged into it
+and any conflict resolved there, so neither long-lived branch changes until the pull
+request merges. It merges with a merge commit, which keeps `dev`'s history on `main`.
+That merge commit is the commit loaded as the release candidate.
+
+Its description is the release's notes, written for the people who use the release:
+sellers running storefronts and buyers using `market`. It summarizes what they can
+now do since the last merge to `main`, and is built in this order:
+
+1. **The roadmap's goals.** Each goal's value statement in
+   [`ROADMAP.md`](development/ROADMAP.md) says what its delivered work is worth to a
+   user. The description is organized by goal and opens each section with that value.
+2. **The archived changes.** Every change archived since the last merge to `main` is
+   placed under the goal it serves, from its proposal's Why and What Changes.
+3. **The merged pull requests.** The pull requests merged into `dev` in that window
+   supply the line items, and their count.
+
+The description has these sections, in order:
+
+- a headline paragraph saying what the release brings since the last merge to `main`,
+  with how many pull requests and changes it delivers, followed by "It is the first
+  release where:" and its few headline features;
+- **upgrade notes and breaking changes**: what an operator or a consumer must do or
+  expect on upgrading, including each compatibility path the release first carries and
+  any migration floor it sets;
+- one section per goal with delivered work, opening with the goal's value, then grouped
+  line items, each leading with what a user can now do in one or two lines; a goal the
+  release completes is marked complete, and work that ships but is not yet switched on
+  for users says so;
+- **operations and deployment**: what changes for whoever runs a deployment;
+- **known limits**: what the release does not do or has not shown, including
+  observations its live evidence left unproven;
+- **merge notes**: how `main` was merged into the release branch and any conflict
+  resolved.
+
+Work on the repository's own change workflow, guidance and agent tooling is not a user
+feature; it is mentioned briefly under operations, if at all. Like every description
+here, it is public
+([`repository-content.md`](guidance/engineering/repository-content.md)): it names
+what a user can see, never a private deployment, host or project.
 
 ## Loading a release candidate
 
@@ -55,8 +102,9 @@ The root publishing targets, this one among them, require explicit `AR_PROJECT` 
 `AR_LOCATION`, supplied on the make command line or in the environment. `AR_PREFIX`
 defaults to `AR_PROJECT` and names the repositories: `<prefix>-docker` for images,
 `<prefix>-cli` for the binary, and `<prefix>-candidates`, the candidate store, for the
-wheels and the chart package. The candidate store is provisioned outside this
-repository. In one invocation, in this order, the load (`scripts/load_candidate.py`):
+wheels and the chart package. `AR_CANDIDATES` names another generic repository as the
+candidate store. The candidate store is provisioned outside this repository. In one
+invocation, in this order, the load (`scripts/load_candidate.py`):
 
 1. builds the wheelhouse once (`make dist`), runs `make check-release-versions` on it,
    and takes its digest (`scripts/wheelhouse_digest.py`);

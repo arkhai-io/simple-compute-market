@@ -4,11 +4,24 @@ its denials and its refusals."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
-from change_workflow.stream import Stream, transcript_denials, transcript_refusals
-from change_workflow_fixtures import (CHANGE, DENIED, SESSION, VALID, FakeClaude, clock,
-                                      event_lines, make_wrapper, two_turn_lines)
+import pytest
+
+from change_workflow.stream import (SkillsNotLoaded, Stream, transcript_denials,
+                                    transcript_refusals)
+from change_workflow_fixtures import (CHANGE, DENIED, OPUS, SESSION, VALID, FakeClaude, clock,
+                                      event_lines, make_wrapper, option, two_turn_lines)
+
+SHIPPED = frozenset({"change-design", "change-plan"})
+
+
+def _loading(skills: list[str], outcome: dict | None = None) -> list[str]:
+    """A run's lines, its `init` event listing `skills` as its harness loaded them."""
+    lines = event_lines(outcome if outcome is not None else VALID["finished"])
+    init = json.loads(lines[0])
+    return [json.dumps({**init, "skills": skills}) + "\n", *lines[1:]]
 
 
 def test_the_stream_is_kept_as_a_numbered_transcript_with_progress(tmp_path: Path) -> None:
@@ -193,3 +206,79 @@ def test_a_denial_a_result_lists_is_listed_once(tmp_path: Path) -> None:
     stream.close()
 
     assert stream.denials == [{**DENIED, "reason": "mode"}]
+
+
+def test_a_run_whose_harness_did_not_load_a_skill_is_stopped_at_its_init(
+        tmp_path: Path) -> None:
+    """CW-d8de: the stream stops a run at its `init` event when the harness did not
+    load a skill the run must load, naming it; the line is kept in the transcript,
+    and nothing after it is read."""
+    stream = Stream(tmp_path / "t.jsonl", tmp_path / "t.progress", clock, None, SHIPPED)
+    lines = _loading(["change-design", "openspec-propose"])
+
+    with pytest.raises(SkillsNotLoaded, match=r"did not load the workflow's skill change-plan,"):
+        for line in lines:
+            stream.feed(line)
+    stream.close()
+
+    assert stream.unloaded == ["change-plan"]
+    assert stream.result is None
+    assert (tmp_path / "t.jsonl").read_text("utf-8") == lines[0]
+
+
+def test_a_run_whose_harness_loaded_every_skill_goes_on(tmp_path: Path) -> None:
+    stream = Stream(tmp_path / "t.jsonl", tmp_path / "t.progress", clock, None, SHIPPED)
+
+    for line in _loading(["change-plan", "change-design", "openspec-propose"]):
+        stream.feed(line)
+    stream.close()
+
+    assert stream.unloaded == []
+    assert stream.result is not None
+
+
+def test_an_init_listing_no_skills_stops_a_run_that_must_load_them(tmp_path: Path) -> None:
+    """An `init` event with no `skills` list, or one naming skills in another form,
+    loaded none the run can name, so the run is stopped naming every one."""
+    lines = event_lines(VALID["finished"])
+    for init in ({}, {"skills": [{"name": "change-design"}]}):
+        stream = Stream(tmp_path / "t.jsonl", tmp_path / "t.progress", clock, None, SHIPPED)
+        first = json.dumps({**json.loads(lines[0]), **init}) + "\n"
+
+        with pytest.raises(SkillsNotLoaded):
+            stream.feed(first)
+        stream.close()
+
+        assert stream.unloaded == sorted(SHIPPED)
+
+
+def test_a_step_whose_harness_did_not_load_its_skills_stops_naming_them(
+        tmp_path: Path) -> None:
+    """The wrapper passes over a model whose harness did not load the installed
+    skills, as unavailable, so the step stops saying why rather than running
+    without them."""
+    claude = FakeClaude((_loading([]), 0))
+    wrapper = replace(make_wrapper(tmp_path, claude), skills=lambda: SHIPPED,
+                      home=tmp_path / "home")
+
+    line = wrapper.run("design", CHANGE)
+
+    # The run was told to load the skills of the home its scope names.
+    assert option(claude.commands[0], "--add-dir") == str(tmp_path / "home")
+
+    reason = ("Claude Code did not load the workflow's skills change-design, change-plan, "
+              "which `change-workflow install` writes into its user skill directory; the "
+              "run was stopped before its first turn")
+    assert line["outcome"] == "stopped"
+    assert line["unavailable"] == [{**OPUS.entry(), "reason": reason}]
+    assert line["reason"] == f"no model of the step is available: claude-opus-5-5: {reason}"
+
+
+def test_a_step_whose_harness_loaded_its_skills_runs(tmp_path: Path) -> None:
+    claude = FakeClaude((_loading(sorted(SHIPPED)), 0))
+    wrapper = replace(make_wrapper(tmp_path, claude), skills=lambda: SHIPPED)
+
+    line = wrapper.run("design", CHANGE)
+
+    assert line["outcome"] == "finished"
+    assert "unavailable" not in line

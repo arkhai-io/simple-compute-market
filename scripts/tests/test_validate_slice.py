@@ -1984,7 +1984,7 @@ def test_all_scenarios_reach_the_helm_part_through_the_environment(
     validate` passes none, and the Helm part's own make reads the value from the
     environment it inherits."""
     assert _make_n("validate", "HELM_ALL_SCENARIOS=1", *unattended) == (
-        'scripts/change-workflow start validate "x"'
+        'change-workflow start validate "x"'
         + (" --unattended" if unattended else ""))
     assert "--all-scenarios" in _make_n("validate-helm",
                                         environment={"HELM_ALL_SCENARIOS": "1"})

@@ -35,25 +35,25 @@ the owner, who may interrupt it or revisit a finished triage through you
 
 ## Recover from the files
 
-On every start and after compaction, read the documents `scripts/change-workflow
-config load common` prints — the repository's guidance every session reads — this
-skill, and the result contract in `scripts/change_workflow/next_step.py`. Run:
+On every start and after compaction, read the documents `change-workflow
+config load common` prints — the repository's guidance every session reads — and
+this skill, whose "Where the change is worked" and "Run the computed step" give each
+result the computation prints and what you do with it (CW-4rqr). Run:
 
 ```text
-scripts/change-workflow next <change>
-scripts/change-workflow log <change> --last 10
+change-workflow next <change>
+change-workflow log <change> --last 10
 ```
 
 The owner starts you in their workspace, and you run these there first. A change
 worked in its own clone, `<workspace>.changes/<change>/`, is computed there: the
 workspace's computation names it (`in-clone`, with its directory), and from then
 on you run the computation, the log, and every command this skill names for the
-change in the clone — `cd <clone> && scripts/change-workflow next <change>`, `cd
-<clone> && scripts/change-workflow …`, `make -C <clone> …` — since the change's
+change in the clone — `cd <clone> && change-workflow next <change>`, `cd
+<clone> && change-workflow …`, `make -C <clone> …` — since the change's
 records, log, transcripts, and step sessions are the clone's. The command acts on
 the repository containing its working directory, so it runs with the clone as that
-directory: `<clone>/scripts/change-workflow` run from the workspace would act on
-the workspace. Only
+directory: run from the workspace, it would act on the workspace. Only
 `make change-clone` and the round view run in the workspace. A change worked in
 the workspace itself, with no clone, is computed and run there throughout.
 
@@ -72,8 +72,8 @@ only when it decides no finding, answers no design question, changes no status,
 and directs no step; record the decision and evidence through `note`. Otherwise
 bring the evidence and the options to the owner in prose and wait. Never silently
 replace the computation with your own transition table: the workflow's graph is
-the table in `scripts/change_workflow/graph.py`, which the `change-workflow`
-architecture's diagram draws.
+one table in the engine's code (CW-ak1z), which the diagram of the workflow's
+companion draws (CW-66kx).
 
 ### A change not yet converted
 
@@ -85,7 +85,7 @@ steps, never while one runs, on the owner's word, run it to show what it would
 write:
 
 ```text
-scripts/change-workflow convert <change>
+change-workflow convert <change>
 ```
 
 It writes nothing yet. Relay what it shows as it shows it: the direction it
@@ -108,10 +108,10 @@ the change's log holds the owner's decision naming it. When the owner says a cha
 runs on the checked-out branch, record that once, before its next step:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --branch <branch> --change <change> --decision "runs on <branch>" --reason <the owner's reason>
+change-workflow note <change> orchestrator --by owner --branch <branch> --change <change> --decision "runs on <branch>" --reason <the owner's reason>
 ```
 
-`scripts/change-workflow log <change> --branch <branch>` lists such
+`change-workflow log <change> --branch <branch>` lists such
 lines; a step checks for one rather than stopping to ask.
 
 ## Where the change is worked
@@ -229,7 +229,7 @@ plan — with its `by`: `plan` for the plan's next round, `triage` or `owner` fo
 sections a triage's exit or the owner's direction names out of the plan's order:
 
 ```text
-scripts/change-workflow note <change> round --sections '1,2;3' --by plan
+change-workflow note <change> round --sections '1,2;3' --by plan
 ```
 
 That is one session for sections 1 and 2 and another for 3, reviewed as one
@@ -312,7 +312,7 @@ Put a
 `question` to the owner and wait. Resume the same session with the reply:
 
 ```text
-scripts/change-workflow resume <change> --seq <waiting-seq> --answer <owner-answer>
+change-workflow resume <change> --seq <waiting-seq> --answer <owner-answer>
 ```
 
 Use the waiting `seq` the computation names, never the last run in the log: a
@@ -340,7 +340,7 @@ sections out of the plan's order, and `--target <step>` — itself qualified by
 `--kind` and `--sections` — for a validation, naming what it is for:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason <the owner's words>
+change-workflow note <change> orchestrator --by owner --next validate --target closeout --decision "validate HEAD before closeout" --reason <the owner's words>
 ```
 
 You direct nothing of your own accord, and never record a step's exit on its
@@ -377,7 +377,7 @@ to commit with its own (`change-triage`, step 6). Only on the owner's word, reco
 direction to planning, naming no run:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --next plan --decision "waives another design review" --reason <the owner's reason>
+change-workflow note <change> orchestrator --by owner --next plan --decision "waives another design review" --reason <the owner's reason>
 ```
 
 Append the waiver's line to the change's
@@ -400,12 +400,12 @@ the waiver to the ledger.
 When the owner waives evidence kinds of validation for later validations — "skip
 the deployment and the end-to-end run for the rest of this change" — record their
 decision with no `--next`, naming the evidence kinds it waives, as
-`scripts/change-workflow evidence <change>` lists them, and the condition they are
+`change-workflow evidence <change>` lists them, and the condition they are
 waived on, so the gathering skips them and validation finds the decision in the log
 (`change-workflow`'s CW-e7lm):
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --waives <kind>,<kind> --decision "waive the <kind> and <kind> kinds of validation for the rest of this change, while <the condition>" --reason <the owner's words>
+change-workflow note <change> orchestrator --by owner --waives <kind>,<kind> --decision "waive the <kind> and <kind> kinds of validation for the rest of this change, while <the condition>" --reason <the owner's words>
 ```
 
 Never pass a waiver in a validation's `ARGUMENTS`: validation reads waivers only
@@ -429,7 +429,7 @@ record the waiver as the owner's direction past the guard, resolving the merge's
 run, with the owner's words:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next closeout --decision "closeout without validating the merged HEAD" --reason <the owner's words>
+change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next closeout --decision "closeout without validating the merged HEAD" --reason <the owner's words>
 ```
 
 A failed validation of the merged `HEAD` names the merge again, which repairs it;
@@ -445,7 +445,7 @@ change again" — record their direction, and pass `FROM` to `make merge` only i
 name another branch than the one the last merge recorded:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --next late-merge --decision "merge the landing branch after the archive" --reason <the owner's words>
+change-workflow note <change> orchestrator --by owner --next late-merge --decision "merge the landing branch after the archive" --reason <the owner's words>
 ```
 
 The log's writer refuses it before archive cleanup has run, or while the change
@@ -461,7 +461,7 @@ validation; a waiver of the review as well is a direction to archive cleanup, it
 reason saying it skips both:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next review --kind merge --decision "the merge review without validating the merged HEAD" --reason <the owner's words>
+change-workflow note <change> orchestrator --by owner --resolves <merge-seq> --next review --kind merge --decision "the merge review without validating the merged HEAD" --reason <the owner's words>
 ```
 
 A merge review's triage advances to archive cleanup or names another merge review;
@@ -479,7 +479,7 @@ You stay free while a step runs, so the owner can reach you mid-step
 only, stop the run, naming the step when validation and a review run side by side:
 
 ```text
-scripts/change-workflow stop <change> [--step <step>]
+change-workflow stop <change> [--step <step>]
 ```
 
 It reads the change's clone itself when the change has one. A refusal — nothing in
@@ -488,7 +488,7 @@ checks — signalled nothing: relay it. Then record the interrupt as the owner's
 decision, resolving no run:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "interrupt <step>" --reason <the owner's words>
+change-workflow note <change> orchestrator --by owner --decision "interrupt <step>" --reason <the owner's words>
 ```
 
 The run's background command then exits with its line: `stopped`, with its
@@ -511,10 +511,10 @@ any. After the triage finished, on their word, in this order:
    triage of the same reviews, or a run that is not a finished triage:
 
    ```text
-   scripts/change-workflow note <change> orchestrator --by owner --resumes <triage-seq> --decision "revisits <label>" --reason <the owner's words>
+   change-workflow note <change> orchestrator --by owner --resumes <triage-seq> --decision "revisits <label>" --reason <the owner's words>
    ```
 
-3. resume that triage with their words, `scripts/change-workflow resume <change>
+3. resume that triage with their words, `change-workflow resume <change>
    --seq <triage-seq> --answer <the owner's words>`, as its own background command,
    and relay its messages as any triage's; its outcome names its exit again and
    governs;
@@ -535,13 +535,13 @@ closed session, since run from any other session `record` would read that other
 session's id:
 
 ```text
-scripts/change-workflow record <change> <step> --session <the closed session's id> --outcome '<the outcome, as JSON>'
+change-workflow record <change> <step> --session <the closed session's id> --outcome '<the outcome, as JSON>'
 ```
 
 Never run it yourself: a step's exit is the step's, or the owner's, to record.
 
 A design that needs another change first asks for the prerequisite's worktree, a
-`question` naming it. Relay it; on the owner's word run `scripts/change-workflow
+`question` naming it. Relay it; on the owner's word run `change-workflow
 propose <change> <prerequisite>`, which makes `../<prerequisite>-proposal` on a new
 branch from the branch this change lands on, and resume the design with the owner's
 answer: its sandbox lets it write that worktree, where it writes the proposal and
@@ -551,7 +551,7 @@ proposal from that worktree, then merges that branch here before this change
 records its dependency. After the prerequisite is
 archived and merged here, propose releasing the dependency. Only on the owner's
 word remove it from this change's row, keep `in design`, run
-`scripts/change-workflow check index`, record the decision, and recompute. An absent
+`change-workflow check index`, record the decision, and recompute. An absent
 prerequisite or another external blocker goes to the owner.
 
 Between turns the owner can take over a step's session, from the checkout it ran
@@ -562,7 +562,7 @@ files and log and recompute rather than presuming the direct conversation's
 result. For `done`, open the change's pull request, report the archived change,
 and stop; the owner reviews and merges it. For a change worked in its clone, the
 engine copied its history into the workspace once archive cleanup's session
-finished, where sessions working other changes find it (`scripts/change-workflow
+finished, where sessions working other changes find it (`change-workflow
 find --records <change>`); relay the copy's result, the `history` entry among what
 the run's line invoked. Its own log line is written after that copy: at `done`,
 before reporting, run `make -C <clone> change-history CHANGE=<change>`, so the
@@ -595,7 +595,7 @@ the error — or a push the sandbox's `git` refused; a denial is a call the harn
 refused, such as its adapter's rule refusing `git push`. Run:
 
 ```text
-scripts/change-workflow denials <change> <seq>
+change-workflow denials <change> <seq>
 ```
 
 for the denials and the later calls each reports. The report reads denials alone:
@@ -626,7 +626,7 @@ trust the outcome until the owner has seen it. Take a refusal or denial you cann
 place this way to the owner.
 
 For a gap, propose the narrowest writable path that covers the refused write, read
-from the step's resolved scope in `scripts/change-workflow config --json`, and say
+from the step's resolved scope in `change-workflow config --json`, and say
 which it is: a grant for one run — `--write <path>` on a stopped run's resume, or
 `WRITE='<path>;<path>'` on a fresh run's target — or a tracked edit of the
 configuration's `[sandbox]`, which you make and commit on the owner's word
@@ -669,7 +669,7 @@ prose, showing the open sections the computation lists, and record the answer as
 that round starts:
 
 ```text
-scripts/change-workflow note <change> round --sections '1,2;3' --by owner
+change-workflow note <change> round --sections '1,2;3' --by owner
 ```
 
 For a round recorded after the fact add `--after <highest-record-before-round>`;
@@ -684,7 +684,7 @@ finished sections. The computation's `round` result says so beforehand, carrying
 `continues` and the open round's `base`; record it as named, as for any round.
 
 No step writes a protected path — the harness's settings, the workflow's
-configuration, or one the repository protects, as `scripts/change-workflow config
+configuration, or one the repository protects, as `change-workflow config
 --json` lists them — so a task the plan gives you, an edit of one, is yours: before starting the session whose sections hold it, show the owner the edit,
 and on their word make it, uncommitted, in the checkout that session runs in, for
 it to commit with its section.
@@ -726,7 +726,7 @@ names validation and the implementation review, side by side.
 
 Save the owner's answer verbatim as the next `reviews/NN-implementation-owner.md`
 in the change's directory — the clone's, for a change worked there — at the path
-`scripts/change-workflow find --next-record implementation-owner <change>` prints
+`change-workflow find --next-record implementation-owner <change>` prints
 there, never a number counted or taken from the log's `seq`, using exclusive
 creation. Save it only once every validation and review of the round has published
 its record, and ask for the path at that moment: a run still in progress takes its
@@ -774,7 +774,7 @@ The merge before closeout is a step of the graph (`merge`), not maintenance: run
 when the computation names it. Merging the branch the change lands on at any other time, or another branch whose workflow tooling the change's later rounds need, into the
 change's branch is workflow maintenance, done only on the owner's word — and, after
 the pre-closeout triage, name the merge step to the owner instead, since it
-validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase <remote> <landing>`, the landing branch as `scripts/change-workflow find --json <change>` gives it as `base`, or `workspace
+validates what it brings in and a merge of yours does not: `git -C <clone> pull --no-rebase <remote> <landing>`, the landing branch as `change-workflow find --json <change>` gives it as `base`, or `workspace
 <branch>` for another branch, then `make -C <clone> push-branch`. Make it only
 between the change's steps, never while its round view is open, and never between
 a round's sections being committed and that round's triage, so the merge never
@@ -797,7 +797,7 @@ resolve the workflow's files first, `git -C <clone> add` them, and record the
 owner's decision naming the code files left,
 
 ```text
-cd <clone> && scripts/change-workflow note <change> orchestrator --by owner --decision "an implementation run resolves the merge conflicts in <files>" --reason <the owner's words>
+cd <clone> && change-workflow note <change> orchestrator --by owner --decision "an implementation run resolves the merge conflicts in <files>" --reason <the owner's words>
 ```
 
 then run `make -C <clone> implement CHANGE=<change> UNATTENDED=1 ARGUMENTS='resolve
@@ -805,7 +805,7 @@ the merge conflicts in <files>'`, with no sections. It resolves them, runs the
 suites of the sections owning them, concludes the merge, and pushes. While the
 merge is in progress the computation names no waiting run, so a question or stop
 from that run is resumed by the `seq` on the line its target printed when it
-ended — the one run you started — after `cd <clone> && scripts/change-workflow log
+ended — the one run you started — after `cd <clone> && change-workflow log
 <change> --last 3` confirms it is still the latest. Recompute once the merge is
 concluded and pushed. A merge is the owner's intervention, so the run names an
 exit implementation does not declare and its message says where the change stood:
@@ -825,13 +825,13 @@ conclude the merge with its commit, and push it.
 
 ## Record decisions through the log's writer
 
-`reviews/workflow.jsonl` is written only through `scripts/change-workflow`: the
+`reviews/workflow.jsonl` is written only through `change-workflow`: the
 wrapper's line for each unattended run, a review's among them, `record`'s for an
 interactive one, the `round` and decision lines `note` writes, and `convert`'s. Every line it writes carries the log's format
 marker. Use:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by <owner-or-orchestrator> --decision <decision> --reason <reason>
+change-workflow note <change> orchestrator --by <owner-or-orchestrator> --decision <decision> --reason <reason>
 ```
 
 Add `--reads <seq>` for the run whose refusals and denials were read, `--resolves <seq>` only
@@ -856,7 +856,7 @@ several steps find too narrow, a computation result that contradicts the files �
 yours to report,
 since no step sees it. Write it as the change's next numbered record,
 `reviews/NN-orchestrator.md`, in the clone for a change worked there, at the path
-`scripts/change-workflow find --next-record orchestrator <change>` prints there,
+`change-workflow find --next-record orchestrator <change>` prints there,
 with an exclusive create, opening "Observations
 of the orchestrating session", each observation with the log lines or files that
 show it. The next triage reads it as it reads the owner's notes. It is never

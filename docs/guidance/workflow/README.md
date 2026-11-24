@@ -30,7 +30,7 @@ archival is closeout's last step, so the closeout review reads the archived chan
 is the engine's order, and the specification's; that narrative compression shortens
 completed task notes to final behaviour constrains the work, and is guidance. The
 division is the workflow's instance of
-[`documentation.md`, "A document holds one kind of material"](../engineering/documentation.md#a-document-holds-one-kind-of-material):
+the engineering guidance's section "A document holds one kind of material":
 the specification and its companion describe the workflow, the guidance states its
 rules for work, and the handbook holds the owner's procedures.
 
@@ -56,12 +56,15 @@ workflow's. A rule that names something only one repository has is that
 repository's.
 
 A lower layer never links to a higher one: engineering guidance links only to
-engineering guidance, workflow guidance to workflow or engineering guidance, and
-repository guidance to any. Where workflow guidance needs something a repository
-supplies — a check, a path, a document — it names it by its role ("the repository's
-citation check", "the repository's roadmap"), and the repository's guidance names
-the command or the path. Each layer is therefore self-contained: every link its
-files make resolves without a higher layer.
+engineering guidance, and repository guidance to any. Workflow guidance links only
+to workflow guidance, and names the engineering guidance it relies on by the name of
+its section — the engineering guidance's section "Citations resolve", say — wherever
+a user's engineering guidance keeps that section, which the workflow reaches through
+the checkout's engineering-guidance pointer. Where workflow guidance needs something
+a repository supplies — a check, a path, a document — it names it by its role ("the
+repository's citation check", "the repository's roadmap"), and the repository's
+guidance names the command or the path. Each layer is therefore self-contained:
+every link its files make resolves without a higher layer.
 
 Every guidance file carries YAML frontmatter whose `tags` hold exactly one layer
 tag, `engineering`, `workflow`, or `repository`, and otherwise only tags from its

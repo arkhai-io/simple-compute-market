@@ -10,8 +10,12 @@ siblings by relative import:
   the next-step computation interprets, and the steps and review kinds it declares,
   the engine's only list of either; and beside it each step's definition: its skill,
   the session it resumes, its profile, and the paths it writes;
+- `documents` — the workflow's distribution: its version, and each of its own
+  documents by role — its specification, companion, guidance, handbook, outcome
+  schema, and make fragment among them — found beside the engine, installed or in
+  the source tree, and the skills it ships;
 - `diagram` — the architecture's hand-laid diagram of the graph, held to the table
-  (`scripts/change-workflow check graph`);
+  (`change-workflow check graph`);
 - `outcome` — the outcome a step ends with, checked against its schema, and the
   records a triage's outcome names;
 - `log` — the change's workflow log, the orchestrating session's notes, and the
@@ -24,6 +28,11 @@ siblings by relative import:
   status and dependencies, and the check that holds it to the change directories;
 - `tasks` — the check that every task of a change's task list sits under its own
   section's heading, and the owed lines its sections hold;
+- `spec_index` — the check that each indexed capability's specification agrees with
+  its index, a change's deltas counted, and the specification paths those deltas
+  create;
+- `decisions` — the check that each decision a change's design records names its
+  permanent destination in its proposal;
 - `next_step` — the next-step computation: where a change stands, read from its
   files and its log, and the step it names;
 - `config` — the repository's workflow configuration, `.agents/workflow.toml`, read
@@ -79,9 +88,17 @@ siblings by relative import:
 - `push` — the guarded push of a change's own branch;
 - `wait` — blocking until a file holds a line matching a pattern, so an unattended
   step waits for a background command inside one call;
-- `skills` — the check that every agent skill is loaded from its one shared source;
+- `install` — the distribution's skills written into each harness's user skill
+  directory, stamped with its version beside a manifest of what it wrote, and a
+  checkout's local configuration where it has none; and the check that an
+  installed engine's skills are its own version's, which every other subcommand
+  makes;
+- `sections` — the guidance a skill cites by section name, and whether each name
+  heads exactly one section beneath a guidance directory;
+- `skills` — the check that every agent skill is loaded from its one source: the
+  workflow's installed, the repository's linked from its shared source;
 - `hook` — what a Claude Code session re-reads after its context is compacted;
-- `cli` — the engine's command, `scripts/change-workflow`, its subcommands
+- `cli` — the engine's command, `change-workflow`, its subcommands
   dispatched to the modules above.
 
 Beside them, `workflow.mk` is the make fragment whose targets call the command, for

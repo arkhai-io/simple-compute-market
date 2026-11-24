@@ -1,6 +1,7 @@
-"""The engine is reached as one command, `scripts/change-workflow`: it runs as an
-executable, acts on the repository containing its working directory, and is the only
-way this repository's own scripts reach the engine.
+"""The engine is reached as one command, `change-workflow`, run here from the tree as
+`scripts/change-workflow`: it runs as an executable, acts on the repository
+containing its working directory, and is the only way this repository's own scripts
+reach the engine.
 
 The command's runs start it as a process from a working directory, since what is
 proven is which repository it acts on; the import rule reads the scripts' source.
@@ -33,7 +34,8 @@ def test_the_command_acts_on_its_working_directorys_repository(tmp_path: Path) -
     inside = subprocess.run(command, cwd=SCRIPTS.parent, env=environ, capture_output=True,
                             text=True, check=False)
     assert (inside.returncode, inside.stdout) == (
-        0, "OK: every agent skill is loaded from its one shared source.\n")
+        0, "OK: every agent skill the repository commits is loaded from its one shared "
+           "source.\n")
     refused = subprocess.run(command, cwd=outside, env=environ, capture_output=True,
                              text=True, check=False)
     assert (refused.returncode, refused.stdout) == (1, "")
@@ -77,35 +79,6 @@ def test_next_gives_an_unclassified_results_reason_on_standard_error(
     plain = subprocess.run([*command, "--plain"], cwd=clone, capture_output=True,
                            text=True, check=False)
     assert (plain.returncode, plain.stderr) == (1, ran.stderr)
-
-
-def _post_compaction_hook() -> str:
-    """The command the project's settings run for the post-compaction hook."""
-    settings = json.loads((SCRIPTS.parent / ".claude/settings.json").read_text("utf-8"))
-    [entry] = [entry for entry in settings["hooks"]["SessionStart"]
-               if entry.get("matcher") == "compact"]
-    [hook] = entry["hooks"]
-    return hook["command"]
-
-
-def test_the_post_compaction_hook_describes_the_project_from_any_directory(
-        tmp_path: Path) -> None:
-    # Claude Code runs the hook from the session's working directory, which may be
-    # outside any repository or in another checkout, such as a change's clone; the
-    # hook describes the project all the same.
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    other = tmp_path / "other"
-    subprocess.run(["git", "init", "-q", "-b", "elsewhere", str(other)], check=True)
-    branch = subprocess.run(["git", "branch", "--show-current"], cwd=SCRIPTS.parent,
-                            capture_output=True, text=True, check=True).stdout.strip()
-    environ = {**os.environ, "CLAUDE_PROJECT_DIR": str(SCRIPTS.parent),
-               "GIT_CEILING_DIRECTORIES": str(tmp_path)}
-    for where in (outside, other):
-        ran = subprocess.run(["sh", "-c", _post_compaction_hook()], cwd=where, env=environ,
-                             capture_output=True, text=True, check=False)
-        assert (ran.returncode, ran.stderr) == (0, "")
-        assert f"Checked-out branch: {branch or '(detached HEAD)'}\n" in ran.stdout
 
 
 def test_the_command_has_no_python_suffix_so_nothing_imports_it() -> None:
@@ -184,3 +157,5 @@ def test_a_test_of_a_repository_script_is_the_repositorys() -> None:
 def test_an_import_of_the_engine_is_found_wherever_it_sits(source: str,
                                                            lines: list[int]) -> None:
     assert engine_imports(source) == lines
+
+

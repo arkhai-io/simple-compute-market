@@ -1,19 +1,20 @@
-#!/usr/bin/env python3
-"""Fail if a decision a change's design records names no permanent destination.
+"""The decision destinations check, `change-workflow check decisions <change>`: every
+decision a change's design records names its permanent destination.
 
 Every accepted decision is promoted to a permanent document before the change is
-complete, so the proposal's "Knowledge to promote" names where each one goes
-(`docs/guidance/workflow/changes.md`, "Change documentation requirements"). A design records its
-decisions under `### D<n>` headings in its `## Decisions` section; each must have
-a bullet in "Knowledge to promote" starting `D<n>`, which names the destination
-or says `D<n>: no permanent destination — <reason>`. A design with no such
-heading passes, reported as not checked: it records its decisions some other
-way, and this check cannot read them. Headings inside fenced code blocks are
-examples, not decisions.
+complete, so the proposal's "Knowledge to promote" names where each one goes (the
+workflow guidance's section "Change documentation requirements"). A design records
+its decisions under `### D<n>` headings in its `## Decisions` section; each must have
+a bullet in "Knowledge to promote" starting `D<n>`, which names the destination or
+says `D<n>: no permanent destination — <reason>`. A design with no such heading
+passes, reported as not checked: it records its decisions some other way, and this
+check cannot read them. Headings inside fenced code blocks are examples, not
+decisions.
 
-Run by `make check-repository`, the change workflow's `pre-commit`. Usage: `check_decision_destinations.py <change>`.
+It is one of `pre-commit`'s default checks. The change is found active or archived,
+so the check reads an archived change's design where the archive moved it.
 
-Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek.
+Contract: openspec/specs/change-workflow/spec.md, CW-c8lw.
 """
 
 from __future__ import annotations
@@ -21,12 +22,11 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import Sequence
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from .common import StepError, repository_root
+from .find import ChangeNotFound, change_directory
 
-from workflow_command import WorkflowRefused, found_change  # noqa: E402
-
-ROOT = Path(__file__).resolve().parents[1]
 DESIGN_FILE = "design.md"
 PROPOSAL_FILE = "proposal.md"
 _DECISION = re.compile(r"^### (D\d+)\b")
@@ -85,16 +85,20 @@ def promoted(proposal: str) -> set[str]:
     return {match.group(1) for line in section if (match := _BULLET.match(line))}
 
 
-def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
+    """`check decisions <change>`: 0 when each decision names its destination or the
+    design records none by heading, 1 when one names none or the change is not
+    found, 2 for a usage error."""
     args = sys.argv[1:] if argv is None else list(argv)
     if len(args) != 1 or not args[0]:
-        print("usage: check_decision_destinations.py <change>", file=sys.stderr)
+        print("usage: check decisions <change>", file=sys.stderr)
         return 2
     try:
-        directory = root / str(found_change(root, args[0])["directory"])
-    except WorkflowRefused as exc:
+        root = repository_root() if root is None else root
+        directory = change_directory(root, args[0])
+    except (ChangeNotFound, StepError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        return 1
     design, proposal = directory / DESIGN_FILE, directory / PROPOSAL_FILE
     recorded = decisions(design.read_text("utf-8")) if design.is_file() else []
     if not recorded:
@@ -113,7 +117,3 @@ def main(argv: list[str] | None = None, root: Path = ROOT) -> int:
         return 1
     print(f"OK: each of {args[0]}'s {len(recorded)} decisions names its destination.")
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

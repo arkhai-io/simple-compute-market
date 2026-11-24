@@ -1,11 +1,11 @@
 # The change workflow's convenience targets, each calling the engine's command.
 #
-# A repository's Makefile includes this file after setting its own values; every
-# default here is `?=`, so a value set before the include stands. These targets
-# and variables carry no compatibility promise: the engine's promise is its
-# command, `scripts/change-workflow`, and renaming a target or a variable here
-# changes no public interface of the engine. See
-# openspec/specs/change-workflow/spec.md.
+# A repository's Makefile includes this file after setting its own values, at the
+# path `change-workflow fragment` prints; every default here is `?=`, so a value set
+# before the include stands. These targets and variables carry
+# no compatibility promise: the engine's promise is its command, `change-workflow`,
+# and renaming a target or a variable here changes no public interface of the
+# engine. See the change workflow's specification, CW-r3ka and CW-dvz5.
 #
 # With UNATTENDED=1, a step's target runs it through the command's wrapper: a
 # headless session inside the step's sandbox, which lets it write only the step's
@@ -16,7 +16,7 @@
 # by `;`; each reaches the command as its own `--write`, single-quoted so the shell
 # passes a path's spaces and quotes as they are (a `$` is make's own, written `$$`).
 
-CHANGE_WORKFLOW ?= scripts/change-workflow
+CHANGE_WORKFLOW ?= change-workflow
 
 WRITE ?=
 # The branch a review reads the change against (REVIEW_BASE), and the branch the
@@ -112,7 +112,7 @@ check-change-index: ## Fail if the change index has a malformed row, an unresolv
 check-tasks: ## Fail if a task of a change's task list sits under another section's heading — a heading is missing or the task misplaced — or its closeout section, titled Closeout, is missing, repeated, or not its last (CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) check tasks "$(CHANGE)"
 
-check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
+check-agent-skills: ## Fail if a committed agent skill is not loaded from its one source under .agents/skills, or an installed engine's skills are not its version's
 	@$(CHANGE_WORKFLOW) check skills
 
 check-change-workflow-config: ## Fail, naming each field, unless the workflow configuration and the guides it names pass the configuration's check

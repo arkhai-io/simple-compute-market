@@ -19,12 +19,14 @@ stored wheels to the images validated, in this order:
    An image whose build installs from the wheelhouse records the label
    (a test holds every such Dockerfile to it), so an image without one was
    built from no wheelhouse;
-4. delete the revision's `wheelhouse`, `chart` and binary versions, all of
-   them, before uploading any;
+4. delete each of the revision's `wheelhouse`, `chart` and binary versions the
+   repositories' listings show stored, all of them, before uploading any;
 5. upload the declared wheels as the generic package `wheelhouse` and the chart's
-   package as `chart`, version `<revision>`, in `<prefix>-candidates`, each
-   declared binary as the package of its name in `<prefix>-cli`, and push every
-   declared image and development image as `make push-images` does.
+   package as `chart`, version `<revision>`, in the candidate store
+   (`<prefix>-candidates` unless `--candidates-repository` names another generic
+   repository), each declared binary as the package of its name in
+   `<prefix>-cli`, and push every declared image and development image as
+   `make push-images` does.
 
 A generic upload cannot replace a file its version holds, so without the deletes
 a reload would fail part-way after replacing some files. With them, the store
@@ -123,20 +125,40 @@ def built_problems(components: ReleaseComponents, root: Path, dist_dir: Path,
     return problems
 
 
+def _listed(kind: str, flags: list[str], repository: str, run: Run) -> set[str]:
+    """The last path segment of each name `gcloud artifacts <kind> list` prints."""
+    listed = run(["gcloud", "artifacts", kind, "list", *flags, "--format=value(name)"],
+                 capture_output=True, text=True)
+    if listed.returncode != 0:
+        raise LoadRefused(f"cannot list {kind} in {repository}: {listed.stderr.strip()}")
+    return {line.strip().rsplit("/", 1)[-1] for line in listed.stdout.splitlines()
+            if line.strip()}
+
+
 def delete_version(destination: Destination, repository: str, package: str, version: str,
                    run: Run) -> None:
-    """Delete a generic package version with every file it holds; one that does
-    not exist is already deleted."""
+    """Delete a generic package version with every file it holds, if it is stored.
+
+    Whether it is stored is read from the repository's listings, not from a failed
+    delete's wording: gcloud has reported a missing version as `NOT_FOUND` and as
+    a status code with no such word, and a missing package makes even a listing of
+    its versions fail."""
+    flags = destination.flags(repository)
+    if package not in _listed("packages", flags, repository, run):
+        return
+    if version not in _listed("versions", [*flags, f"--package={package}"], repository, run):
+        return
     deleted = run(["gcloud", "artifacts", "versions", "delete", version,
-                   *destination.flags(repository), f"--package={package}", "--quiet"],
+                   *flags, f"--package={package}", "--quiet"],
                   capture_output=True, text=True)
-    if deleted.returncode != 0 and "NOT_FOUND" not in deleted.stderr:
+    if deleted.returncode != 0:
         raise LoadRefused(f"cannot delete {package} {version} from {repository}: "
                           f"{deleted.stderr.strip()}")
 
 
 def load_candidate(destination: Destination, docker_registry: str, revision: str,
-                   root: Path = REPO_ROOT, run: Run = subprocess.run) -> None:
+                   root: Path = REPO_ROOT, run: Run = subprocess.run,
+                   candidates_repository: str | None = None) -> None:
     """Steps 1 to 5, raising before any delete or upload when a check refuses."""
     dist_dir = root / ".dist"
     _make(root, "dist", run)
@@ -151,7 +173,7 @@ def load_candidate(destination: Destination, docker_registry: str, revision: str
     if problems:
         raise LoadRefused("uploaded nothing:\n" + "\n".join(f"  {line}" for line in problems))
 
-    candidates = destination.repository(CANDIDATES)
+    candidates = candidates_repository or destination.repository(CANDIDATES)
     delete_version(destination, candidates, WHEELHOUSE_PACKAGE, revision, run)
     delete_version(destination, candidates, CHART_PACKAGE, revision, run)
     for binary in components.binaries:
@@ -171,10 +193,13 @@ def main(argv: list[str] | None = None, run: Run = subprocess.run,
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     for name in ("project", "location", "prefix", "docker-registry", "revision"):
         parser.add_argument(f"--{name}", required=True)
+    parser.add_argument("--candidates-repository", default=None,
+                        help="the candidate store; default <prefix>-candidates")
     args = parser.parse_args(argv)
     try:
         load_candidate(Destination(args.project, args.location, args.prefix),
-                       args.docker_registry, args.revision, root, run)
+                       args.docker_registry, args.revision, root, run,
+                       args.candidates_repository)
     except subprocess.CalledProcessError as error:
         command = " ".join(map(str, error.cmd))
         print(f"load-candidate: {command} failed with exit status {error.returncode}",

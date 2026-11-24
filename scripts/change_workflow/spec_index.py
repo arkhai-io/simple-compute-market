@@ -1,15 +1,14 @@
-#!/usr/bin/env python3
-"""Hold an indexed capability's `spec.md` to its `index.md`.
+"""The specification index check, `change-workflow check spec-index [<change>]`: an
+indexed capability's `spec.md` held to its `index.md`.
 
 A capability under `openspec/specs/` may organize its documentation by an index
-(`docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index`;
-the check itself, `openspec/README.md#the-index-check`). Its `index.md` declares the
-capability's id prefix on a line `Prefix: `CW``; lists each requirement by id, as a
-list item or table row whose first cell is a link `[CW-a8tf](spec.md#…)` followed by
-its summary line, under the parts and groups of its table of contents; and lists the
-ids it retired under `## Retired ids`, each item beginning with the id. Every
-requirement in its `spec.md` is named `### Requirement: <ID> <name>`, the id the
-prefix, a hyphen, and four characters from `[a-z0-9]`.
+(the workflow guidance's section "A capability organized by an index"). Its
+`index.md` declares the capability's id prefix on a line `Prefix: `CW``; lists each
+requirement by id, as a list item or table row whose first cell is a link
+`[CW-a8tf](spec.md#…)` followed by its summary line, under the parts and groups of
+its table of contents; and lists the ids it retired under `## Retired ids`, each item
+beginning with the id. Every requirement in its `spec.md` is named `### Requirement:
+<ID> <name>`, the id the prefix, a hyphen, and four characters from `[a-z0-9]`.
 
 The check fails, naming each, on: a requirement whose name begins with no such id;
 two requirements sharing an id; an id `index.md` omits or lists twice; a listed id
@@ -19,17 +18,26 @@ its own id's requirement heading in `spec.md`. A capability with no `index.md` i
 not checked.
 
 Closeout writes `index.md` before the archive merges the change's deltas into
-`spec.md`, so with a change named its deltas count as the archive will leave them:
-an id its deltas add or rename to is in the specification, its headings resolve,
-and a requirement its deltas remove or rename from is gone. A capability the change
-creates has no `spec.md` before the archive; when its deltas add a requirement, its
-links to `spec.md` resolve against the deltas alone.
+`spec.md`, so with an active change named its deltas count as the archive will leave
+them: an id its deltas add or rename to is in the specification, its headings
+resolve, and a requirement its deltas remove or rename from is gone. A capability the
+change creates has no `spec.md` before the archive; when its deltas add a requirement,
+its links to `spec.md` resolve against the deltas alone. An archived change's deltas
+are merged already, so none is counted.
 
-Usage: `make check-spec-index [CHANGE=<change>]`.
+It is one of `pre-commit`'s default checks, run with the change named. With
+`--json` it prints, beside the result and each problem, the specification paths the
+change's deltas create (`created`), so a repository's own checks learn them without
+reading the deltas: a capability's `spec.md` that does not exist and that a delta
+adding a requirement will write, the one operation that can create it.
+
+Contract: openspec/specs/change-workflow/spec.md, CW-c8lw and CW-368t.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import sys
 from collections import Counter
@@ -37,9 +45,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-ROOT = Path(__file__).resolve().parents[1]
+from .common import StepError, repository_root
+from .find import ChangeNotFound, change_directory, is_archived
+
 SPECS = Path("openspec/specs")
-CHANGES = Path("openspec/changes")
 INDEX = "index.md"
 SPEC = "spec.md"
 
@@ -256,31 +265,59 @@ def capability_problems(capability: Path, deltas: Deltas | None = None) -> list[
     return problems
 
 
-def problems(root: Path, change: str | None = None) -> list[str]:
-    """Every indexed capability's problems, a named change's deltas counted."""
+def change_deltas(root: Path, change: str | None) -> dict[str, Deltas]:
+    """Each capability's deltas in the named change, by capability; none without a
+    change, or for an archived one, whose deltas the archive has merged."""
+    if change is None:
+        return {}
+    directory = change_directory(root, change)
+    if is_archived(root, directory):
+        return {}
+    return {delta.parent.name: read_deltas(delta.read_text("utf-8"))
+            for delta in sorted(directory.glob(f"specs/*/{SPEC}"))}
+
+
+def problems(root: Path, deltas: dict[str, Deltas] | None = None) -> list[str]:
+    """Every indexed capability's problems, the change's `deltas` counted."""
     specs = root / SPECS
+    deltas = deltas or {}
     found = []
     for capability in sorted(path for path in specs.iterdir() if path.is_dir()) \
             if specs.is_dir() else []:
-        delta = root / CHANGES / change / "specs" / capability.name / SPEC if change else None
-        deltas = read_deltas(delta.read_text("utf-8")) if delta and delta.is_file() else None
-        found += capability_problems(capability, deltas)
+        found += capability_problems(capability, deltas.get(capability.name))
     return found
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
-    arguments = [argument for argument in (sys.argv[1:] if argv is None else argv) if argument]
-    if len(arguments) > 1:
-        print("usage: check_spec_index.py [<change>]", file=sys.stderr)
-        return 2
-    found = problems(root, arguments[0] if arguments else None)
+def created(root: Path, deltas: dict[str, Deltas]) -> list[str]:
+    """The specification paths `deltas` create, as the repository cites them: each
+    capability's `spec.md` that does not exist, where its delta adds a requirement."""
+    return [(SPECS / name / SPEC).as_posix() for name, delta in sorted(deltas.items())
+            if delta.added and not (root / SPECS / name / SPEC).is_file()]
+
+
+def main(argv: Sequence[str] | None = None, root: Path | None = None) -> int:
+    """`check spec-index [<change>] [--json]`: 0 when every indexed capability agrees
+    with its index, 1 when one does not or the change is not found."""
+    parser = argparse.ArgumentParser(prog="change-workflow check spec-index")
+    parser.add_argument("change", nargs="?", default=None)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    change = args.change or None
+    try:
+        root = repository_root() if root is None else root
+        deltas = change_deltas(root, change)
+    except (ChangeNotFound, StepError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    found = problems(root, deltas)
+    if args.json:
+        print(json.dumps({"change": change, "result": "failed" if found else "passed",
+                          "problems": found, "created": created(root, deltas)},
+                         ensure_ascii=False))
+        return 1 if found else 0
     for problem in found:
         print(f"FAIL: {problem}")
     if found:
         return 1
     print("OK: every indexed capability's spec.md agrees with its index.md")
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
