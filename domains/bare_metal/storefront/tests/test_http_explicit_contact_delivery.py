@@ -16,7 +16,7 @@ from market_identity import TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
 from test_http_introductions import (
     BUYER_SIGNER, OUTSIDER_SIGNER, SELLER_SIGNER,
-    _accept_typed, _admin, _app, _insert_contact_listing, _introductions, _runtime,
+    _accept_typed, _admin, _app, _insert_contact_listing, _introductions, _negotiate_contact, _runtime,
 )
 from loopback import serving
 
@@ -192,3 +192,80 @@ async def test_private_retries_follow_deletion_and_store_only_metadata(tmp_path,
                 assert token is None or token not in replay
                 assert conn.execute("SELECT COUNT(*) FROM contact_introductions").fetchone()[0] == 1
                 assert conn.execute("SELECT buyer_contact,seller_contact FROM contact_introductions").fetchone() == ("{}", "{}")
+
+
+@pytest.mark.parametrize("prior_state", ["accepted", "reviewed", "unknown"])
+async def test_removed_profile_policy_stops_new_delivery_and_preserves_accepted_work(tmp_path, prior_state):
+    path = str(tmp_path / "policy-rollback.db")
+    profile = {"channel": "email", "terms": "Synthetic introduction"}
+    modern = {"delivery": DELIVERY_CONFIG, "profiles": {"default": {**profile, "delivery_policy": POLICY}}}
+    legacy = {"delivery": DELIVERY_CONFIG, "profiles": {"default": profile}}
+    runtime = _runtime(path, contact=modern)
+    clauses = [SettlementPublicationClause(mechanism="contact-exchange.v1", asset="introduction",
+                                           mechanism_input={"profile": "default"})]
+    payload = await runtime.settlement_composition.publication_payload(candidate={"site_id": "site-a"}, clauses=clauses)
+    option, = payload.settlement_options
+    await _insert_contact_listing(runtime, option=option)
+    calls = []
+
+    async def unknown_send(*args):
+        calls.append(args)
+        return "needs_review", "acceptance_unknown"
+
+    def worker(current):
+        return ContactDeliveryWorker(transaction=current.contact_exchange.store.transaction,
+            prepare=current.contact_exchange.prepare_delivery, complete=current.contact_exchange.complete_delivery,
+            send=unknown_send)
+
+    with serving(_app(runtime)) as base_url:
+        negotiation, ref = await _accept_typed(base_url, option)
+        if prior_state != "accepted":
+            async with client(base_url) as transport:
+                delivery = ContactDeliveryClient(transport)
+                review_request = IntroductionReview(schema_version=2, negotiation_id=negotiation,
+                    obligation_ref=ref, finalization_id=str(uuid.uuid4()), contact_payload={"name": "Synthetic buyer"},
+                    delivery_route={"kind": "email", "address": "buyer@example.invalid"})
+                review = await delivery.review(review_request)
+                finalization = IntroductionFinalize(**review_request.model_dump(), review_token=review["review_token"],
+                    consent="exchange-contacts-and-deliver.v1")
+                if prior_state == "unknown":
+                    await delivery.finalize(finalization)
+            if prior_state == "unknown":
+                await worker(runtime).tick()
+                assert len(calls) == 2
+
+    restored = _runtime(path, contact=legacy)
+    assert restored.contact_delivery_worker is not None
+    assert restored.settlement_composition.enabled_mechanisms == ("contact-exchange.v1",)
+    with serving(_app(restored)) as base_url:
+        # The old signed option remains in durable listing state. A current
+        # seller profile no longer authorizes its explicit delivery policy.
+        with pytest.raises(StorefrontClientError) as stale:
+            await _negotiate_contact(base_url, option)
+        assert stale.value.status_code == 409
+        async with client(base_url) as transport:
+            delivery = ContactDeliveryClient(transport)
+            if prior_state == "accepted":
+                review_request = IntroductionReview(schema_version=2, negotiation_id=negotiation,
+                    obligation_ref=ref, finalization_id=str(uuid.uuid4()), contact_payload={"name": "Synthetic buyer"},
+                    delivery_route={"kind": "email", "address": "buyer@example.invalid"})
+                review = await delivery.review(review_request)
+                finalization = IntroductionFinalize(**review_request.model_dump(), review_token=review["review_token"],
+                    consent="exchange-contacts-and-deliver.v1")
+            result = await delivery.finalize(finalization)
+            assert result["finalization"]["status"] == "committed"
+            assert result["introduction"]["delivery_policy"] == POLICY
+            assert (await delivery.read_finalization(ref, review_request.finalization_id))["status"] == "committed"
+            await worker(restored).tick()
+            assert len(calls) == 2
+            assert (await delivery.read_delivery(ref))["status"] == "needs_review"
+            await worker(restored).tick()
+            assert len(calls) == 2
+        replacement = await restored.settlement_composition.publication_payload(candidate={"site_id": "site-a"}, clauses=clauses)
+        legacy_option, = replacement.settlement_options
+        assert "delivery_policy" not in legacy_option["settlement"]
+        assert legacy_option["option_id"] != option["option_id"]
+        await _insert_contact_listing(restored, option=legacy_option)
+        await _accept_typed(base_url, legacy_option)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM contact_delivery_intents WHERE obligation_ref=? AND status='needs_review' AND route IS NULL", (ref,)).fetchone()[0] == 2

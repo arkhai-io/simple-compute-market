@@ -1378,3 +1378,32 @@ async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_buil
     assert ("alkahest.chain_unreachable", "reachability") in {
         (b["code"], b["kind"]) for b in settlement["alkahest.v1"]["blockers"]
     }
+
+
+def test_contact_only_profile_rollback_keeps_startup_and_delivery_worker(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["Settlement"]["contact"] = {
+        **CONTACT_SECTION,
+        "profiles": {"default": {"channel": "email", "terms": "Synthetic introduction"}},
+    }
+    # The chart mounts private delivery settings through this secret overlay.
+    secrets = '''
+[Settlement.contact.delivery]
+schema_version = 2
+mode = "two-sided-contact"
+[Settlement.contact.delivery.seller_route]
+kind = "email"
+address = "seller-route@example.invalid"
+[Settlement.contact.delivery.smtp]
+host = "smtp.example.invalid"
+port = 587
+sender = "sender@example.invalid"
+username = "synthetic-user"
+password = "synthetic-password-never-live"
+timeout_seconds = 10
+'''
+    runtime = _configured_runtime(monkeypatch, tmp_path, document, secrets=secrets)
+    assert runtime.settlement_composition.enabled_mechanisms == ("contact-exchange.v1",)
+    assert runtime.contact_delivery_worker is not None
+    assert runtime.contact_settlement_config().profiles["default"].delivery_policy is None
+    assert "contact-delivery" in runtime.loops.step_routes()

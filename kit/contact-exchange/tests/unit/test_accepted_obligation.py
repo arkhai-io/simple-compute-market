@@ -11,6 +11,8 @@ from market_contact_exchange import (
     ContactSettlementConfig,
     create_contact_exchange_registration,
 )
+from market_contact_exchange.fixtures.delivery import POLICY
+from market_contact_exchange.settlement_config import contact_accepted_obligation_builder
 from market_core.schemas import derive_settlement_option_id
 from market_settlement_runtime import (
     SettlementConfig,
@@ -129,3 +131,28 @@ def test_builder_refuses_contact_leaked_into_the_obligation() -> None:
         registry.build_accepted_obligation(
             MECHANISM, _option(), config, role="seller", context=_context()
         )
+
+
+@pytest.mark.parametrize("profile_state", ["current", "removed", "missing"])
+def test_new_delivery_obligation_requires_current_named_profile_policy(profile_state):
+    section = ContactSettlementConfig.model_validate({
+        "enabled": True, "contact_payload": {"name": "Synthetic seller"},
+        "profiles": {} if profile_state == "missing" else {"default": {
+            "channel": "email", "terms": "Synthetic",
+            **({"delivery_policy": POLICY} if profile_state == "current" else {}),
+        }},
+    })
+    option = _option(delivery_policy=POLICY)
+    if profile_state == "current":
+        result = contact_accepted_obligation_builder(section, option, _context())
+        assert result.service_terms[MECHANISM]["delivery_policy"] == POLICY
+    else:
+        with pytest.raises(ValueError, match="current seller profile"):
+            contact_accepted_obligation_builder(section, option, _context())
+
+
+def test_unsupported_storefront_cannot_construct_new_delivery_obligation():
+    registry, config = _registry_config()
+    with pytest.raises(ValueError, match="unsupported"):
+        registry.build_accepted_obligation(MECHANISM, _option(delivery_policy=POLICY),
+                                          config, role="seller", context=_context())

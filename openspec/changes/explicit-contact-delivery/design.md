@@ -67,6 +67,18 @@ A pre-activation snapshot/clone is an alternative only before any new committed 
 unknown outcome; restoring behind accepted work would discard its fences/receipts
 and is prohibited.
 
+For a contact-only deployment, retain contact enabled and in `Settlement.priority`,
+retain the migration-aware image and existing private delivery configuration, and
+omit `delivery_policy` from the current named profile. New policy-bearing selections
+must match that profile's currently offered policy at both preview and final
+obligation construction, even while an older signed option remains listed. The
+storefront must also support explicit delivery. An option without the policy keeps
+its legacy behavior and may replace the old published option. Already accepted
+agreements use their persisted plans: review/finalization recovery and recipient
+intents keep their original policy and unknown-send fences. Configuration/startup,
+signed loopback and SQLite fixtures establish this source behavior; deployed
+configuration, republishing and actual delivery still require rollout verification.
+
 ## Validation and promotion
 
 Focused source-overlay checks use exact candidate contact/delivery/storefront

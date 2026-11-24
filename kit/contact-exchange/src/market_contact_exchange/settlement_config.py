@@ -531,6 +531,12 @@ def contact_accepted_obligation_builder(
     selected = SettlementOption.model_validate(option)
     if selected.price_rates:
         raise ValueError("contact exchange declines scalar rates")
+    if "delivery_policy" in selected.settlement_params:
+        advertised = DeliveryPolicy.model_validate(selected.settlement_params["delivery_policy"])
+        name = selected.settlement_params.get("profile")
+        profile = config.profiles.get(name) if isinstance(name, str) else None
+        if profile is None or profile.delivery_policy != advertised:
+            raise ValueError("contact delivery policy does not match the current seller profile")
     buyer = _principal_json(context.get("buyer_principal"))
     seller = _principal_json(context.get("seller_principal"))
     expiration_unix = int(context.get("expiration_unix") or 0)
@@ -640,6 +646,13 @@ def create_contact_exchange_registration(
                 raise ValueError("explicit delivery is unsupported by this storefront")
         return contact_option_builder(section, readiness, resources, role)
 
+    def supported_obligation_builder(
+        section: BaseModel, option: Any, context: Mapping[str, Any]
+    ) -> AcceptedObligationArtifacts:
+        if "delivery_policy" in settlement_option_params(option) and not explicit_delivery:
+            raise ValueError("explicit delivery is unsupported by this storefront")
+        return contact_accepted_obligation_builder(section, option, context)
+
     return MechanismRegistration(
         mechanism_id=MECHANISM,
         config_key=CONTACT_CONFIG_KEY,
@@ -651,7 +664,7 @@ def create_contact_exchange_registration(
         client_factory=contact_client_factory,
         option_builder=supported_option_builder,
         buyer_compatibility=contact_buyer_compatibility,
-        accepted_obligation_builder=contact_accepted_obligation_builder,
+        accepted_obligation_builder=supported_obligation_builder,
         command_group=command_group,
         public_detail_keys=frozenset({"channels"}),
         clause_fields=(
