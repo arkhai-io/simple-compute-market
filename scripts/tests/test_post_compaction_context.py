@@ -99,15 +99,6 @@ def test_a_malformed_configuration_is_named_and_the_session_still_told(tmp_path:
     assert "Re-read the repository's guidance" in text
 
 
-def test_this_repositorys_hook_names_its_configured_documents() -> None:
-    repository = Path(__file__).resolve().parents[2]
-
-    text = hook.context(repository)
-
-    for document in config.load(repository).documents("common", repository):
-        assert f"- {document}\n" in text
-
-
 def test_a_directory_entry_is_named_as_the_files_beneath_it(tmp_path: Path) -> None:
     """CW-l7hn's scenario "A directory entry": the hook names each file, not the
     directory."""

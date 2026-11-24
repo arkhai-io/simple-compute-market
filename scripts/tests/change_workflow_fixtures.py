@@ -377,16 +377,6 @@ def ignore_evidence(root: Path) -> Path:
     return root
 
 
-def as_installed(root: Path) -> config.Configuration:
-    """The configuration of the repository at `root` as its template's install leaves
-    it: the committed file beside `.agents/workflow.local.template.toml` as the local
-    one, whatever the checkout's own local file holds."""
-    template = root / ".agents/workflow.local.template.toml"
-    return config.check((root / config.CONFIGURATION).read_text("utf-8"),
-                        root / config.CONFIGURATION, root=root,
-                        local=template.read_text("utf-8"))
-
-
 def accepting(text: str) -> str:
     """`text`, a committed configuration, opened by the range `ACCEPTED` where it
     declares no `[workflow]` of its own."""

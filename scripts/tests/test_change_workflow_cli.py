@@ -29,7 +29,7 @@ from change_workflow.common import FORMAT, StepError
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow.review import check_review
 from change_workflow_fixtures import (ACCEPTED, CHANGE, LANDED, LOCAL_CONFIGURED, MODELS,
-                                      VALID, FakeClaude, as_installed, configured, event_lines,
+                                      VALID, FakeClaude, configured, event_lines,
                                       ignore_evidence, make_wrapper, option_rules, prompted)
 
 REPO = Path(__file__).resolve().parents[2]
@@ -771,13 +771,6 @@ def test_the_orchestrators_model_is_a_model_and_effort_and_nothing_else(
     with pytest.raises(StepError, match=problem):
         config.check(ACCEPTED, Path("workflow.toml"),
                      local=f"[models]\norchestrator = {entry}\n")
-
-
-def test_this_repositorys_orchestrator_is_opus_at_medium_effort() -> None:
-    # The orchestrating session relays and routes rather than judging: it needs a
-    # large context for a change's relayed turns, not a high effort.
-    model = as_installed(REPO).orchestrator_model()
-    assert (model.harness, model.model, model.effort) == ("claude", "claude-opus-5-5", "medium")
 
 
 # `find --json`.

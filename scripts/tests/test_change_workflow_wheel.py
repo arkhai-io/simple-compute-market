@@ -3,17 +3,23 @@ document it names: the installed `change-workflow` prints its version, refuses
 until `change-workflow install` has written its skills, and then, in a repository
 holding no copy of the workflow, names each document by role inside the installed
 distribution, and prints the installed fragment's path, which a Makefile includes.
+The paths the handbook's procedure for the move lifts are what the wheel packages,
+its project, the command that runs the engine from the tree, and the workflow's own
+tests and fixtures.
 
-The test builds the wheel with `uv build` and installs it with `uv tool install`
-into temporary tool directories, so it needs `uv`, and is skipped, saying so, where
-there is none."""
+The tests of the wheel build it with `uv build` and install it with `uv tool
+install` into temporary tool directories, so they need `uv`, and are skipped, saying
+so, where there is none."""
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 import shutil
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -25,12 +31,16 @@ ROOT = Path(__file__).resolve().parents[2]
 PROJECT = ROOT / "scripts/change-workflow-wheel"
 UV = shutil.which("uv")
 
-pytestmark = pytest.mark.skipif(UV is None, reason="uv is not installed, so the wheel "
-                                                   "cannot be built or installed")
+TESTS = ROOT / "scripts/tests"
+# The command that runs the engine from the tree, which no wheel packages.
+LAUNCHER = "scripts/change-workflow"
+MOVE_HEADING = "## Moving the workflow to its own repository"
 
 
 @pytest.fixture(scope="module")
 def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    if UV is None:
+        pytest.skip("uv is not installed, so the wheel cannot be built or installed")
     out = tmp_path_factory.mktemp("wheel")
     subprocess.run([UV, "build", "--wheel", "--out-dir", str(out), str(PROJECT)], check=True,
                    capture_output=True)
@@ -131,3 +141,54 @@ def test_the_installed_command_names_each_document_inside_the_distribution(
                                if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL",
                                               "CHANGE_WORKFLOW", "UNATTENDED")})
     assert (made.returncode, made.stdout) == (0, 'change-workflow start design "X"\n')
+
+
+# The paths the move lifts.
+
+def lifted(handbook: str) -> list[str]:
+    """The paths the handbook's procedure for the move lists: the first fenced block
+    under its heading, one path a line, a directory ending in `/`."""
+    section = handbook.split(f"\n{MOVE_HEADING}\n", 1)[1]
+    block = re.search(r"^```[a-z]*\n(.*?)^```", section, re.S | re.M)
+    assert block, "the procedure for the move lists no paths"
+    return [line.strip() for line in block[1].splitlines() if line.strip()]
+
+
+def packaged() -> set[str]:
+    """Each source the wheel's project gathers, as a path from the tree's root."""
+    project = tomllib.loads((PROJECT / "pyproject.toml").read_text("utf-8"))
+    sources = project["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    return {(PROJECT / source).resolve().relative_to(ROOT).as_posix() for source in sources}
+
+
+def _modules(source: str) -> set[str]:
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            found |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            found.add(node.module.split(".")[0])
+    return found
+
+
+def test_the_move_lifts_what_the_wheel_packages_and_the_workflows_tests() -> None:
+    """The list is exactly the wheel's sources, its project, the tree's command, and
+    the test files of the workflow's: each test or fixture importing the engine's
+    package or the workflow's fixtures is listed, and no listed one loads a script
+    of the repository's own, as only a repository's test does."""
+    listed = lifted(documents.path(documents.HANDBOOK).read_text("utf-8"))
+    paths = [path.rstrip("/") for path in listed]
+    tests = {path for path in paths if path.startswith("scripts/tests/")}
+    scripts = {path.stem for path in (ROOT / "scripts").glob("*.py")}
+    engine = {"change_workflow", "change_workflow_fixtures"}
+    importing = {path.relative_to(ROOT).as_posix() for path in TESTS.glob("*.py")
+                 if _modules(path.read_text("utf-8")) & engine}
+
+    assert len(paths) == len(set(paths))
+    assert [path for path in paths if not (ROOT / path).exists()] == []
+    assert set(paths) - tests == packaged() | {PROJECT.relative_to(ROOT).as_posix(), LAUNCHER}
+    assert importing - tests == set()
+    assert [test for test in sorted(tests)
+            if _modules((ROOT / test).read_text("utf-8")) & scripts] == []
+    assert [path for path in listed if (ROOT / path.rstrip("/")).is_dir()
+            and not path.endswith("/")] == []

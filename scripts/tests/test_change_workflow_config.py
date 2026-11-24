@@ -15,13 +15,10 @@ from change_workflow import config, documents
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.config import ConfigError
-from change_workflow.harness import Model
-from change_workflow.scope import REPOSITORY as REPOSITORY_SOURCE
 from change_workflow.scope import Scope, within
 from change_workflow_fixtures import (ACCEPTED, CHANGE, CONFIGURED, LOCAL_CONFIGURED, MODELS,
-                                      OPUS, SONNET, VALID, FakeClaude, as_installed,
-                                      configuration_checked,
-                                      configured, event_lines, evidence_kind, make_wrapper)
+                                      VALID, FakeClaude, configuration_checked, configured,
+                                      event_lines, evidence_kind, make_wrapper)
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 # The workflow's own guidance, which `config load` prints after the engineering
@@ -480,8 +477,8 @@ def test_validation_needs_one_kind_however_empty_its_table(tmp_path: Path) -> No
 def test_an_interactive_step_needs_no_models(tmp_path: Path) -> None:
     """Only an unattended run runs on the configured models; the owner's interactive
     session runs on their own."""
-    checked = config.check(CONFIGURED, Path("workflow.toml"),
-                           local='[guidance]\nengineering = { none = "none here" }\n')
+    checked = config.load(configured(
+        tmp_path, local='[guidance]\nengineering = { none = "none here" }\n'))
 
     config.require_for_step(checked, "implement")
     with pytest.raises(ConfigError, match="models.implement"):
@@ -1082,34 +1079,6 @@ def test_a_waiver_names_declared_kinds(tmp_path: Path,
     assert "does not declare: smoke" in capsys.readouterr().err
 
 
-def test_the_repositorys_own_configuration_passes_its_check(
-        capsys: pytest.CaptureFixture[str]) -> None:
-    loaded = as_installed(REPOSITORY)
-
-    assert config.load(REPOSITORY).exists
-    assert config.missing(loaded, config.PRE_COMMIT_FUNCTIONAL, config.EVIDENCE,
-                          config.PROTECTED_BRANCHES, f"models.{config.ORCHESTRATOR}",
-                          *(f"models.{step}" for step in config.STEPS)) == []
-    assert main(["check", "config"], root=REPOSITORY) == 0
-    assert "passes its check" in capsys.readouterr().out
-
-
-def test_each_step_runs_on_the_models_its_work_needs() -> None:
-    """This repository's configuration: design, triage, implementation, the merge, and
-    closeout on Opus at high effort; validation and archive cleanup on Sonnet at
-    medium; the review on Codex, then Claude."""
-    loaded = as_installed(REPOSITORY)
-
-    assert {name: loaded.step_models(name) for name in config.STEPS} == {
-        "design": (OPUS,), "plan": (OPUS,), "triage": (OPUS,), "implement": (OPUS,),
-        "merge": (OPUS,), "closeout": (OPUS,), "validate": (SONNET,),
-        "archive-cleanup": (SONNET,), "review": (Model("codex", "gpt-6-sol", "high"), OPUS)}
-
-
-def _repository_scope(step: str, home: Path) -> Scope:
-    return as_installed(REPOSITORY).scope(step, REPOSITORY, home=home)
-
-
 def _writes(found: Scope, path: Path) -> bool:
     """Whether a step of scope `found` writes the host's `path`: the private `/tmp` is
     the sandbox's own, writing no host path, though the test's home lies under the
@@ -1118,103 +1087,26 @@ def _writes(found: Scope, path: Path) -> bool:
             and not any(within(path, guarded.path) for guarded in found.protected))
 
 
-def test_design_and_planning_write_the_repositorys_documents(tmp_path: Path) -> None:
-    """MCW-s4bx's "Design edits the roadmap": the configuration gives design `docs/`,
-    and planning too, beside their baseline."""
-    roadmap = REPOSITORY / "docs/development/ROADMAP.md"
-
-    for step in ("design", "plan"):
-        found = _repository_scope(step, tmp_path / "home")
-        assert _writes(found, roadmap), step
-        assert [path.source for path in found.writable
-                if path.path == REPOSITORY / "docs"] == [REPOSITORY_SOURCE], step
-    assert not _writes(_repository_scope("archive-cleanup", tmp_path / "home"), roadmap)
-
-
-def test_every_step_writes_the_tool_state_its_suites_and_deployments_need(
-        tmp_path: Path) -> None:
-    """MCW-s4bx's "Implementation syncs an environment", "Design validates the change"
-    and "A review runs the repository's checks": uv's Pythons, and the cluster client's
-    cache, the cloud CLI's configuration, Docker's client configuration, and npm's
-    cache, which the configured OpenSpec command's `npx` writes, for every step, the
-    review included, since each lies outside the checkout; and nothing protected
-    beyond the engine's and the adapters'."""
-    home = tmp_path / "home"
-    tools = [home / ".local/share/uv/python", home / ".kube/cache", home / ".config/gcloud",
-             home / ".docker", home / ".npm/_cacache", home / ".cache/uv"]
-
-    for step in config.STEPS:
-        found = _repository_scope(step, home)
-        writes = [_writes(found, tool) for tool in tools]
-        assert writes == [True] * len(tools), step
-        assert not any(path.source == REPOSITORY_SOURCE for path in found.protected), step
-    assert config.load(REPOSITORY).sandbox_protected == ()
-
-
 def test_no_step_writes_the_configuration_or_the_harnesss_settings(tmp_path: Path) -> None:
-    """CW-z5me: no step changes what its own hooks run or what its harness loads. The
-    configuration and each adapter's settings files are read-only in every step's
-    scope, whichever harness runs it, while a step that writes the checkout writes the
-    skills beside the configuration."""
+    """CW-z5me: no step changes what its own hooks run or what its harness loads. Both
+    configuration files and each adapter's settings files are read-only in every
+    step's scope, whichever harness of its models runs it, while a step that writes
+    the checkout writes the skills beside the configuration."""
+    root = configured(tmp_path / "checkout")
     home = tmp_path / "home"
-    settings = [REPOSITORY / ".agents/workflow.toml", REPOSITORY / ".claude/settings.json",
-                REPOSITORY / ".claude/settings.local.json", home / ".claude/settings.json",
-                home / ".codex/config.toml"]
-    loaded = config.load(REPOSITORY)
+    settings = [root / ".agents/workflow.toml", root / ".agents/workflow.local.toml",
+                root / ".claude/settings.json", root / ".claude/settings.local.json",
+                home / ".claude/settings.json", home / ".codex/config.toml"]
+    loaded = config.load(root)
 
-    for step in config.STEPS:
-        for harness in (model["harness"] for model in loaded.models[step]):
-            found = loaded.scope(step, REPOSITORY, harness, home=home)
-            assert not any(_writes(found, path) for path in settings), (step, harness)
-    assert _writes(_repository_scope("implement", home),
-                   REPOSITORY / ".agents/skills/change-plan/SKILL.md")
-
-
-def test_the_repository_declares_every_hook() -> None:
-    """MCW-r4tx: this repository relocks after a functional change, runs its own
-    closing checks before every commit, clears the wheelhouse, checks packaging and
-    runs every suite before a functional commit — the local kind's own run, so it
-    leaves `local` evidence for the tree it tested — checks packaging and the
-    change's architecture rows before the archive, and runs its pre-push checks as
-    one target."""
-    loaded = config.load(REPOSITORY)
-
-    assert loaded.hook("after-functional-change") == ("make lock",)
-    assert loaded.hook("pre-commit") == (
-        "make check-repository CHANGE={change} CHANGE_BASE={base}",)
-    assert loaded.hook("pre-commit-functional") == ("make validate-local TREE={tree}",)
-    assert loaded.hook("pre-commit-functional") == loaded.kind("local").run
-    assert loaded.hook("pre-archive") == ("make check-packaging",
-                                          "make check-architecture-change CHANGE={change}")
-    assert loaded.hook("pre-push") == ("make pre-push REMOTE={remote}",)
-    assert loaded.hook("post-clone") == ("make init",)
-
-
-def test_every_table_of_the_repositorys_file_says_who_uses_it() -> None:
-    """Each table of this repository's file has a comment beside it naming the engine
-    operation or the skill that uses its fields; each evidence kind has one saying
-    what it is, under the comment naming who runs the kinds."""
-    text = (REPOSITORY / config.CONFIGURATION).read_text("utf-8")
-    lines = text.splitlines()
-    users = ("Engine", "engine", "change-")
-    assert "for change-validate: validation's evidence kinds" in text
-    for index, line in enumerate(lines):
-        if not line.startswith("["):
-            continue
-        above = []
-        for earlier in reversed(lines[:index]):
-            if not earlier.startswith("#"):
-                break
-            above.append(earlier)
-        below = []
-        for later in lines[index + 1:]:
-            if not later.startswith("#"):
-                break
-            below.append(later)
-        if line.startswith("[validation.evidence."):
-            assert below, line
-        else:
-            assert any(user in comment for comment in above + below for user in users), line
+    harnesses = {(step, model["harness"]) for step in config.STEPS
+                 for model in loaded.models[step]}
+    assert {harness for _, harness in harnesses} == {"claude", "codex"}
+    for step, harness in sorted(harnesses):
+        found = loaded.scope(step, root, harness, home=home)
+        assert not any(_writes(found, path) for path in settings), (step, harness)
+    assert _writes(loaded.scope("implement", root, home=home),
+                   root / ".agents/skills/change-plan/SKILL.md")
 
 
 # `[workflow] version`: the range of workflow versions the repository accepts.
@@ -1581,32 +1473,6 @@ def test_a_load_entry_beside_the_pointer_is_admitted(tmp_path: Path) -> None:
     _local(tmp_path, '[guidance]\nengineering = { path = "docs/guidance/engineering/" }\n')
 
     assert config.load(tmp_path).engineering is not None
-
-
-def test_this_repositorys_template_is_read_as_a_local_configuration(tmp_path: Path) -> None:
-    """MCW-iqh1: the template points at `docs/guidance/engineering/` and names a model
-    for every step and the orchestrating session; it is read whole beside this
-    repository's committed configuration."""
-    template = (REPOSITORY / ".agents/workflow.local.template.toml").read_text("utf-8")
-    committed = (REPOSITORY / config.CONFIGURATION).read_text("utf-8")
-
-    checked = config.check(committed, REPOSITORY / config.CONFIGURATION, root=REPOSITORY,
-                           local=template)
-
-    assert checked.engineering == config.Engineering(
-        entry="docs/guidance/engineering/", path=REPOSITORY / "docs/guidance/engineering")
-    assert set(checked.models) == {*config.STEPS, "orchestrator"}
-    assert config.missing(checked, *(f"models.{step}" for step in config.STEPS),
-                          config.GUIDANCE_ENGINEERING) == []
-
-
-def test_the_local_configuration_is_ignored_by_git() -> None:
-    ignored = subprocess.run(["git", "check-ignore", ".agents/workflow.local.toml"],
-                             cwd=REPOSITORY, capture_output=True, text=True)
-
-    assert ignored.stdout == ".agents/workflow.local.toml\n"
-    assert subprocess.run(["git", "check-ignore", "-q", ".agents/workflow.local.template.toml"],
-                          cwd=REPOSITORY).returncode == 1
 
 
 # The shape enforced: each key in its one file, the range and the pointer required.

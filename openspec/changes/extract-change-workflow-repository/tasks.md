@@ -1035,16 +1035,60 @@ repository's other files (D6, D7, D8, D16, D17, D18). Touches
 `docs/change-workflow-handbook.md`, and the workflow's tests and fixtures under
 `scripts/tests/`.
 
-- [ ] 7.1 The workflow's documents link only within their own set: the companion's
+- [x] 7.1 The workflow's documents link only within their own set: the companion's
   four links to `market-change-workflow` become neutral text about an adopting
   repository's own capability, and no workflow document links to this repository's
   documents (D6). Verify: a unit test over the wheel's document set,
   `test_change_workflow_citations.py`, failing on a relative link leaving it.
-- [ ] 7.2 The workflow's tests and fixtures name the files they need from the
+  Done: the companion's four links to `market-change-workflow` say that an adopting
+  repository states its own provisions, kinds, and resources; its "Current limits"
+  name the open changes that own a limit as code, with no link into this
+  repository's changes, and the limit on the two checks section 6 moved into the
+  engine went; the handbook names the change index as a path, not a link. Unit,
+  `test_change_workflow_citations.py`: every relative link of a Markdown document
+  the distribution ships — its documents by role and each skill's directory, read in
+  the tree's layout, which the lift keeps, and skipped for an installed
+  distribution — resolves to a file or directory of that set; a link leaving it, to
+  a repository document or to a directory above the set, is named with its document
+  and line, while links within it, to a heading, to a URL, and written as code are
+  not: passed. `run test-before` at `fe3690681`: the tree's check fails there.
+- [x] 7.2 The workflow's tests and fixtures name the files they need from the
   workflow's own set, and run with only the paths section 7.3 lists present (D16, D17).
   Verify: the workflow's suites run from a temporary checkout holding only those paths,
   recorded in the handoff.
-- [ ] 7.3 The handbook gains: installing the workflow and the local configuration;
+  Done: the workflow's tests that held this repository's own provisions — its
+  configuration and template, its root Makefile's targets, its settings' hook — move
+  to a repository test, `scripts/tests/test_market_change_workflow.py`, which reaches
+  the engine only through `scripts/change-workflow` (CW-r3ka): a test of the
+  configuration runs the command in a temporary checkout holding the committed file,
+  the template written as the local file, and the documents they name, so neither a
+  developer's local file nor CI's missing one is read; a test of the Makefile
+  dry-runs the root Makefile; the hook's runs the settings' command from the path,
+  as Claude Code does; the ignore rule's runs `git check-ignore`, and the table
+  comments' reads the file. What the workflow's suites keep runs on their fixtures:
+  the fragment's targets are dry-run with the fragment as the makefile, CW-z5me's
+  settings case and the interactive-models case run on a fixture configuration, and
+  the `as_installed` fixture went. Two of the moved tests are now stated from
+  `config --json`'s fields and scopes: the gathering's order is the workflow's to
+  prove on its fixture kinds, so the repository holds its kinds' declarations, and the
+  settings' protection is read from each step's first model's scope. The lifted
+  checkout: `git ls-files` of exactly the handbook's paths copied from the worktree
+  into a fresh Git repository under `~/.cache` (the sandbox's private `/tmp` hides one
+  under `/tmp` from the sandbox tests), its suites run with `uv run --no-project
+  --with pytest pytest scripts/tests`, since the lifted tree has no Makefile: 2,209
+  passed, none skipped, the sandbox tests run. Before the move of the repository's
+  tests, the same run failed 48, every one reading this repository's configuration,
+  Makefile, or settings. `test_market_change_workflow.py`, 27 cases: library
+  integration where the command runs as a process, the rest the Makefile's dry runs,
+  `git check-ignore`, and the file's text: passed; the suites the
+  move edited, after the fresh-context check's fixes, which also restored the
+  protected branches' assertion the old configuration check made —
+  `test_change_workflow_config.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_cli_steps.py`, `test_change_workflow_gather.py`,
+  `test_change_workflow_graph.py`, `test_post_compaction_context.py`,
+  `test_change_workflow_command.py` (whose import rule holds the new test, which
+  loads `workflow_command`, to importing no engine): passed.
+- [x] 7.3 The handbook gains: installing the workflow and the local configuration;
   that one version is installed per machine, managed like any tool a repository pins,
   each repository declaring its range (D7, D8, the owner's principle); when an open
   change crosses to the installed workflow (D18); and the procedure for the move —
@@ -1053,9 +1097,73 @@ repository's other files (D6, D7, D8, D16, D17, D18). Touches
   settings are local, for the workflow repository's own repository guidance (D5, D16,
   D17). Verify: the path list matches what the wheel packages plus its tests, held by
   `test_change_workflow_wheel.py`.
-- [ ] 7.4 Verify the section: its suites and `scripts/change-workflow run pre-commit
+  Done: "Installing the workflow", with "When an open change crosses to the installed
+  workflow" under it, opens the handbook; "Moving the workflow to its own repository"
+  closes it, its 67 paths in one fenced block: the engine, its command and its
+  project, the schema, the eleven skills, the handbook, the workflow's guidance, the
+  specification, index, companion, and diagrams, and `conftest.py`,
+  `change_workflow_fixtures.py`, and 44 test files. The capability's `diagrams.md`,
+  repository guidance linking this repository's documents, is not lifted. Unit,
+  `test_change_workflow_wheel.py`: the list is exactly the project's `force-include`
+  sources, its project, and `scripts/change-workflow`, beside its test files; every
+  test file importing the engine or the workflow's fixtures is listed; no listed one
+  imports a script of the repository's; every path exists, a directory written with
+  its `/`: passed. Its wheel tests now skip on a missing `uv` from their fixture, so
+  the list's test runs without it. `run test-before` at `fe3690681`: it fails there.
+- [x] 7.4 Verify the section: its suites and `scripts/change-workflow run pre-commit
   extract-change-workflow-repository`.
   End-to-end: none exercises the workflow's tooling; none owed.
+  Done: the section's suites, after the last fixes — `test_change_workflow_citations.py`,
+  `test_change_workflow_wheel.py`, `test_market_change_workflow.py`,
+  `test_change_workflow_assumptions.py`, `test_change_workflow_command.py`,
+  `test_change_workflow_config.py`, `test_change_workflow_cli.py`,
+  `test_change_workflow_cli_steps.py`, `test_change_workflow_gather.py`,
+  `test_change_workflow_graph.py`, `test_post_compaction_context.py`,
+  `test_check_doc_citations.py`: passed; the lifted checkout's 2,209 (7.2), run
+  before those fixes, which moved no test. `scripts/change-workflow run pre-commit`
+  on the staged section: `make lock` passed; `make validate-local` passed —
+  packaging, and every suite, the scripts' 3,735 passing, its tree guard holding;
+  the default checks passed but the spec-index check, failing on the fourteen ids
+  8.2 and 10.2 index; `make check-repository` passed. The tree it passed differs from
+  the commit's only in `tasks.md`.
+
+Section 7 notes (handoff):
+
+- The lifted checkout is made by copying `git ls-files` of each listed path from the
+  worktree into a fresh repository and committing it; build it outside `/tmp`, whose
+  sandbox-private copy hides it from the sandbox tests, which then fail on a missing
+  command. The lifted suites need pytest alone.
+- The move's path list is the handbook's one fenced block under "Moving the workflow
+  to its own repository", which `test_change_workflow_wheel.py` reads: a test file
+  importing `change_workflow` or `change_workflow_fixtures` must be listed, and a
+  listed one may import no script of the repository's. A new workflow test is listed
+  there; a new repository test of the workflow goes in
+  `test_market_change_workflow.py`, reaching the engine through the command.
+- `scripts/tests/conftest.py` is listed, so it is the workflow's, but every
+  repository test runs under it too and it imports the engine: section 9.3's removal
+  must leave a repository `conftest.py` that does not, keeping `scripts/` on the path.
+- Left for section 8, D6's self-containment in prose, which the link test cannot
+  see: `spec.md`'s opening ("This repository's own part of the workflow is
+  `market-change-workflow`'s") and its Evidence paragraph naming `make
+  test-release-tooling`, `test_change_workflow_assumptions.py`, and
+  `market-change-workflow`, and naming `scripts/change-workflow hook
+  post-compaction` where the settings run `change-workflow`; the companion's "In
+  this repository design, triage…" on models, now local, and "this repository
+  included" in "Current limits".
+- Outside the plan: "Current limits" no longer names the open change owning a
+  limit, the change index holding owners; the limit on the engine's layering lost a
+  claim no task of this change makes; `change-workflow convert` replaces the tree's
+  command there.
+- The fresh-context check's findings fixed: two overstated test names and their
+  docstrings (the kinds' declarations, and `config load`'s engineering guidance
+  before `load.common`); the configuration check now in the installed checkout, with
+  the protected branches' assertion the move had dropped; the moved file's
+  docstring on which tests read which checkout; the link test's fence and heading
+  cases; an unused constant; two comments crediting the fragment; the limits'
+  wrapping; the handbook restating the local-settings rule, now citing the
+  companion's "A repository's configuration", which D5 is promoted to in 8.3, the
+  move's procedure keeping the rule for the new repository's guidance as 7.3 asks.
+  Declined: none; the prose of finding 8 is left to section 8 (above).
 
 ## 8. The specification, its companion, and its diagrams current for the release
 

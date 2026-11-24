@@ -8,9 +8,10 @@ them, and the interfaces an adopting repository may rely on. Its
 follows the same parts: the process; implementation and validation; reviews and
 triage; the engine; the public surface. It explains why the workflow is shaped as it
 is. How the owner operates it is the
-[change workflow handbook](../../../docs/change-workflow-handbook.md); how this
-repository fills the roles the workflow leaves to a repository is in
-[`market-change-workflow`](../market-change-workflow/README.md).
+[change workflow handbook](../../../docs/change-workflow-handbook.md); how an
+adopting repository fills the roles the workflow leaves to it is that repository's
+own statement, kept in its own documents
+([What an adopting repository provides](#what-an-adopting-repository-provides)).
 
 A change's design and its guidance are where the repository owner's judgement
 matters: deciding what a change does, and refining the rules so later reviews find
@@ -511,8 +512,8 @@ implementation has often just run the same checks on the very tree it commits. T
 workflow fixes what every kind shares — its evidence describes the tree or commit
 under validation, and the gathering refuses a worktree whose tree is not `HEAD`'s —
 and the record names the end-to-end scenarios that exercise the change, each with its
-basis. How this repository fills the kinds is
-[`market-change-workflow`'s](../market-change-workflow/README.md#validations-evidence-kinds).
+basis. Which kinds a repository declares, and how each is filled, is that
+repository's own statement, beside its configuration.
 
 Evidence describes a Git tree, or a commit where its result depends on history. A
 kind's pattern holds exactly one of `{tree}` and `{commit}`, so the pattern declares
@@ -1987,8 +1988,8 @@ run waiting on an answer, keyed to the workspace's path, could not be resumed th
 It is worked on in the workspace, as before clones, or moved into a clone by hand.
 
 Every resource a step uses is per change, shared safely, or checked. Which resources
-those are depends on what the repository builds and deploys; this repository's are
-in [`market-change-workflow`](../market-change-workflow/README.md#every-resource-is-per-change-shared-or-checked).
+those are depends on what the repository builds and deploys, and an adopting
+repository states its own.
 The owner's workspace holds one round view at a time. Each branch edits its own index
 row, and adjacent rows may conflict at a merge, resolved there.
 
@@ -2525,9 +2526,8 @@ it does, with the skills that use it and what provides it: a field of the
 repository's configuration ([A repository's
 configuration](#a-repositorys-configuration)), a value Git or the invocation
 supplies, a convention the workflow fixes, or, for the make fragment, the
-repository's `Makefile`. How a repository fills each is its own statement; this
-repository's is
-[`market-change-workflow`'s](../market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles).
+repository's `Makefile`. How a repository fills each is its own statement, kept in
+its own documents.
 The roles are also structured output: `config --json` lists them as `roles`, each by
 the name this table gives it with the configuration fields that provide it, and the
 distribution's own test fails when the two differ, so a repository reads them with no
@@ -2601,17 +2601,14 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   workspace's computation name the owner rather than the change's clone.
 - Leaf steps other than the review run on Claude Code only, and the two adapters are
   internal: an owner supplying a harness's adapter, and Codex running writing steps,
-  are
-  [`add-workflow-harness-adapters`'](../../changes/add-workflow-harness-adapters/proposal.md).
-  A Codex review of a clone outside the directories Codex's configuration trusts ends
+  are not built. A Codex review of a clone outside the directories Codex's configuration trusts ends
   with Codex's error rather than as unavailable, and does not fall back to Claude
   Code.
 - The sandbox's guarantees hold for the runs it confines. Where `bwrap` cannot run, a
   step runs unconfined, held only by the checks after it and an adapter's command
-  rules, until the harness runs in the container
-  [`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)
-  designs. Inside the sandbox root-owned paths but `/tmp` show as the overflow uid's,
-  which that container remedies too.
+  rules, until the harness runs in a container of its own, which a hosted runner
+  would supply. Inside the sandbox root-owned paths but `/tmp` show as the overflow
+  uid's, which that container remedies too.
 - A protected path's name is not guarded, and Claude Code's writable `~/.claude`
   holds instructions, skills, and hook scripts the owner's own sessions load: a step
   writing them, or replacing a protected link by a shell rewrite, has broken its
@@ -2633,24 +2630,19 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   unresolvable conflicts are the owner's.
 - Nothing notices that the landing branch moved while the pull request is open: the
   owner directs the merge after the archive then. A poller or a trigger on pushes to
-  the landing branch is infrastructure a hosted runner would supply
-  ([`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)).
+  the landing branch is infrastructure a hosted runner would supply.
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.
-- `scripts/change-workflow convert` and the computation's detection of a
-  change not yet converted stay until every change not yet cleaned up has taken the
-  code that reads the log's format;
-  [`remove-workflow-log-conversion`](../../changes/remove-workflow-log-conversion/proposal.md)
-  removes them, and the format marker stays.
+- `change-workflow convert` and the computation's detection of a change not yet
+  converted stay until every change not yet cleaned up has taken the code that reads
+  the log's format; then they go, and the format marker stays.
 - `record` reads the session's id from `CLAUDE_CODE_SESSION_ID`, which the harness
   exports and does not document; if a release drops it, `record` refuses until it is
   given `--session`.
 - A ledger with no log carries no format: an older release reading the ledger of a
   newer change worked only through slash commands cannot tell it is newer, until the
   session's closing `record` opens the log and the log's format governs the ledger.
-- `scripts/` is outside the repository's architecture checks, so no layer or scope
-  rule governs the engine's modules; the engine's own layering is
-  [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md).
+- No layer or scope rule governs the engine's own modules.
 - The workflow's own conventions stay fixed in the engine, not in the configuration:
   the configuration's own path, the outcome schema's, each step's definition, the
   changes' directory and its `reviews/`, the change index, the `workspace` remote, and
@@ -2666,9 +2658,7 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   by their digest and its requirement conditioned on a change touching them, but a
   missing declaration would then reuse stale evidence or skip a kind silently; it
   would be reopened once a mapping from paths to suites with a check on undeclared
-  reads exists, which
-  [`test-affected-suite-selection`](../../changes/test-affected-suite-selection/proposal.md)
-  builds.
+  reads exists.
 - A repository hooks the nine steps, not each node: a review or triage of one kind,
   the merge after the archive, the round view, and `done` share their step's hooks or
   have none. Hooks keyed by node would be reopened with the first caller needing one.
@@ -2677,10 +2667,7 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   directory, which the check covers, would change the tree its evidence describes.
 - The diagrams of the engine's parts and of a step run's life draw neither the
   evidence modules nor the actions and hooks around a step, and the engine's parts
-  still label the configuration's validation entries as parts; redrawing them in
-  draw.io is
-  [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md),
-  which redraws the engine's boundary.
+  still label the configuration's validation entries as parts.
 - `[load]` lists paths and directories, and selects nothing by tag: every step reads
   every guidance file under a directory entry, and a capability's guidance with its
   specification. Which tags a session carries, how they select files, and whether the
@@ -2689,10 +2676,6 @@ holds is kept by review: a module's constant or a tool it invokes is not collect
   such a loader can promise a harness without a post-compaction hook the rule again.
   Moving the shared layers out of the repository, and how a permanent document cites
   guidance held elsewhere, are likewise unowned.
-- Decision destinations and the specification index are this repository's checks,
-  not the workflow's defaults; whether they move into the engine is
-  [`extract-change-workflow-repository`'s](../../changes/extract-change-workflow-repository/proposal.md)
-  question.
 - The graph is closed to adopters: no adopting repository may add a node or a review
   kind. Its closed vocabulary keeps a later extension additive; it would be reopened
   when an adopter, this repository included, needs a node or kind an extension point

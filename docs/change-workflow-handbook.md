@@ -29,6 +29,8 @@ to run a change.
 
 ## Contents
 
+- [Installing the workflow](#installing-the-workflow)
+  - [When an open change crosses to the installed workflow](#when-an-open-change-crosses-to-the-installed-workflow)
 - [Orchestrating a change](#orchestrating-a-change)
   - [Starting a change](#starting-a-change)
   - [What a change asks of you](#what-a-change-asks-of-you)
@@ -48,6 +50,59 @@ to run a change.
   - [Intervening on the state by hand](#intervening-on-the-state-by-hand)
 - [The engine](#the-engine)
 - [Customization](#customization)
+- [Moving the workflow to its own repository](#moving-the-workflow-to-its-own-repository)
+
+## Installing the workflow
+
+The workflow is one distribution, `arkhai-change-workflow`, whose command,
+`change-workflow`, carries its skills, its guidance, its specification, this
+handbook, the outcome schema, and the make fragment. One version is installed on a
+machine, and you manage it like any other tool a repository pins: each repository
+declares, in its committed `.agents/workflow.toml`, the range of versions it accepts
+(`[workflow] version = ">=0.1, <0.2"`), and every command that reads the
+configuration refuses an installed version outside it, naming the version, the
+range, and the fix. `change-workflow --version` prints the installed version.
+
+To install it, or to move to another version, install the distribution as a tool
+and then write its skills:
+
+```sh
+uv tool install arkhai-change-workflow   # from your index, a wheel file, or a tag
+change-workflow install
+```
+
+`change-workflow install` writes the version's skills into Claude Code's and Codex's
+user skill directories, each stamped with the version, and keeps a manifest of what
+it wrote there: it removes a skill a later version retired, and refuses, writing
+nothing, a skill of one of its names that it did not write. Every other command
+refuses while the installed skills are not its own version's, or one is missing,
+naming `change-workflow install`, so run it after every install or upgrade. A
+repository that builds the workflow from its own tree gives this a make target of
+its own.
+
+Run in a checkout, `install` also writes the checkout's local configuration,
+`.agents/workflow.local.toml`, where it has none: from the repository's committed
+`.agents/workflow.local.template.toml` when it has one, and otherwise as a skeleton
+naming each field you must fill. It never overwrites one. The local file holds what
+you may set differently from others on the same repository: where your engineering
+guidance is, the models each step runs on, and writable paths you add to a step's
+sandbox; which settings are local, and why, is the companion's
+[A repository's configuration](../openspec/specs/change-workflow/README.md#a-repositorys-configuration).
+Until the local file declares the engineering guidance, and for an
+unattended step its models, a step refuses to start, naming the field and `install`;
+`check config` and `config --json` report what is missing and succeed, which is how
+CI, with no local file, checks the committed configuration.
+
+### When an open change crosses to the installed workflow
+
+A branch made before its repository adopted the installed workflow still carries
+what that adoption removed — the workflow's project skill links, or its in-tree
+engine — until it merges the branch it lands on. Until then its make targets run the
+copy in its tree, and which of a project skill and the installed skill of one name a
+harness loads is that harness's rule. The adoption changes no record format, so the
+installed engine reads the change's records as they are, and nothing needs
+migrating: the change crosses when it next merges its landing branch, as every open
+change does.
 
 ## Orchestrating a change
 
@@ -690,7 +745,7 @@ Untracked, under `reviews/`, numbered in the order they were produced:
   `change-workflow log <change>` prints it;
 - `transcripts/`: each run's transcript and progress file.
 
-The change's row in the [change index](../openspec/changes/README.md) gives its
+The change's row in the change index, `openspec/changes/README.md`, gives its
 status and what it waits on.
 
 ### The ledger
@@ -833,3 +888,96 @@ skills and the guidance change like any other file, through a change.
 
 The configuration's fields, and why each is one, are the companion's
 [A repository's configuration](../openspec/specs/change-workflow/README.md#a-repositorys-configuration).
+
+## Moving the workflow to its own repository
+
+The workflow is built from a repository that also uses it, and is lifted from there
+into a repository of its own with its history, by path, keeping every path. The
+paths lifted are what the wheel packages, the wheel's project, the command that runs
+the engine from the tree, and the workflow's own tests and fixtures:
+
+```text
+scripts/change-workflow
+scripts/change_workflow/
+scripts/change-workflow-wheel/
+.agents/change-outcome.schema.json
+.agents/skills/change-archive-cleanup/
+.agents/skills/change-closeout/
+.agents/skills/change-design/
+.agents/skills/change-implement/
+.agents/skills/change-merge/
+.agents/skills/change-orchestrate/
+.agents/skills/change-plan/
+.agents/skills/change-review/
+.agents/skills/change-triage/
+.agents/skills/change-validate/
+.agents/skills/guidance-review/
+docs/change-workflow-handbook.md
+docs/guidance/workflow/
+openspec/specs/change-workflow/spec.md
+openspec/specs/change-workflow/index.md
+openspec/specs/change-workflow/README.md
+openspec/specs/change-workflow/diagrams/
+scripts/tests/change_workflow_fixtures.py
+scripts/tests/conftest.py
+scripts/tests/test_change_clone.py
+scripts/tests/test_change_cost.py
+scripts/tests/test_change_history.py
+scripts/tests/test_change_next_step.py
+scripts/tests/test_change_workflow_around.py
+scripts/tests/test_change_workflow_citations.py
+scripts/tests/test_change_workflow_cli.py
+scripts/tests/test_change_workflow_cli_steps.py
+scripts/tests/test_change_workflow_command.py
+scripts/tests/test_change_workflow_common.py
+scripts/tests/test_change_workflow_config.py
+scripts/tests/test_change_workflow_convert.py
+scripts/tests/test_change_workflow_cost.py
+scripts/tests/test_change_workflow_decisions.py
+scripts/tests/test_change_workflow_documents.py
+scripts/tests/test_change_workflow_evidence.py
+scripts/tests/test_change_workflow_gather.py
+scripts/tests/test_change_workflow_graph.py
+scripts/tests/test_change_workflow_harness.py
+scripts/tests/test_change_workflow_hooks.py
+scripts/tests/test_change_workflow_install.py
+scripts/tests/test_change_workflow_invariants.py
+scripts/tests/test_change_workflow_log.py
+scripts/tests/test_change_workflow_outcome.py
+scripts/tests/test_change_workflow_records.py
+scripts/tests/test_change_workflow_review.py
+scripts/tests/test_change_workflow_sandbox.py
+scripts/tests/test_change_workflow_sandbox_git.py
+scripts/tests/test_change_workflow_scope.py
+scripts/tests/test_change_workflow_sections.py
+scripts/tests/test_change_workflow_spec_index.py
+scripts/tests/test_change_workflow_stream.py
+scripts/tests/test_change_workflow_subagents.py
+scripts/tests/test_change_workflow_wait.py
+scripts/tests/test_change_workflow_watch.py
+scripts/tests/test_change_workflow_wheel.py
+scripts/tests/test_change_workflow_wrapper.py
+scripts/tests/test_check_agent_skills.py
+scripts/tests/test_check_change_index.py
+scripts/tests/test_check_push_ready.py
+scripts/tests/test_check_tasks.py
+scripts/tests/test_find_change.py
+scripts/tests/test_post_compaction_context.py
+scripts/tests/test_round_view.py
+```
+
+The lift keeps the history of exactly these paths (`git filter-repo`, one `--path`
+for each line). In the new repository, the wheel's project file,
+`scripts/change-workflow-wheel/pyproject.toml`, is renamed to `pyproject.toml` at the
+root in one commit, its `force-include` table re-based on the root
+(`"../change_workflow"` becoming `"scripts/change_workflow"`, each `"../../<path>"`
+becoming `"<path>"`). The workflow's specification arrives in OpenSpec's tree at the
+path it has here, so the new repository works its own changes through the workflow
+from its first commit; its configuration, local configuration template, change index,
+root guidance, and CI are written there, and the archived changes that built the
+workflow stay in the repository they were archived in.
+
+The new repository's own guidance carries the rule for what is local, as a rule for
+its own work: a setting of the workflow is local exactly when developers using the
+workflow on the same repository should be able to give it different values;
+otherwise it is committed.
