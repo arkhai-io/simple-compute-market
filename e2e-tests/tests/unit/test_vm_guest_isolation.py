@@ -682,20 +682,76 @@ def test_the_probe_knows_its_offer_by_its_xid_and_server():
     assert not probe.is_offer(discover, 0xA1B2C3D4, "0.0.0.0")
 
 
-def test_the_probe_counts_only_outgoing_tcp_to_the_listed_address_and_port():
-    def packet(destination: str, port: int, protocol: int = 6) -> bytes:
-        header = bytes([0x45, 0, 0, 40, 0, 0, 0, 0, 64, protocol, 0, 0, 10, 0, 0, 5])
-        return header + bytes(map(int, destination.split("."))) + (40000).to_bytes(2, "big") \
-            + port.to_bytes(2, "big") + b"\0" * 16
+def _ipv4(destination: str, port: int, protocol: int = 6) -> bytes:
+    """An IPv4 packet to DESTINATION and PORT, as a cooked packet socket reads it."""
+    header = bytes([0x45, 0, 0, 40, 0, 0, 0, 0, 64, protocol, 0, 0, 10, 0, 0, 5])
+    return header + bytes(map(int, destination.split("."))) + (40000).to_bytes(2, "big") \
+        + port.to_bytes(2, "big") + b"\0" * 16
 
-    assert probe.is_outgoing_tcp_to(packet("10.20.0.8", 80), probe.PACKET_OUTGOING, "10.20.0.8", 80)
-    assert not probe.is_outgoing_tcp_to(packet("10.20.0.8", 80), 0, "10.20.0.8", 80)
-    assert not probe.is_outgoing_tcp_to(packet("10.20.0.8", 443), probe.PACKET_OUTGOING,
+
+def test_the_probe_counts_only_outgoing_ipv4_tcp_to_the_listed_address_and_port():
+    out, ip = probe.PACKET_OUTGOING, probe.ETH_P_IP
+    assert probe.is_outgoing_tcp_to(_ipv4("10.20.0.8", 80), ip, out, "10.20.0.8", 80)
+    assert not probe.is_outgoing_tcp_to(_ipv4("10.20.0.8", 80), ip, 0, "10.20.0.8", 80)
+    assert not probe.is_outgoing_tcp_to(_ipv4("10.20.0.8", 443), ip, out, "10.20.0.8", 80)
+    assert not probe.is_outgoing_tcp_to(_ipv4("10.20.0.9", 80), ip, out, "10.20.0.8", 80)
+    assert not probe.is_outgoing_tcp_to(_ipv4("10.20.0.8", 80, protocol=17), ip, out,
                                         "10.20.0.8", 80)
-    assert not probe.is_outgoing_tcp_to(packet("10.20.0.9", 80), probe.PACKET_OUTGOING,
+    # A socket bound to every protocol also reads other frames: one whose
+    # link-layer protocol is not IPv4, whatever its bytes say, is never counted.
+    assert not probe.is_outgoing_tcp_to(_ipv4("10.20.0.8", 80), probe.ETH_P_ARP, out,
                                         "10.20.0.8", 80)
-    assert not probe.is_outgoing_tcp_to(packet("10.20.0.8", 80, protocol=17),
-                                        probe.PACKET_OUTGOING, "10.20.0.8", 80)
+
+
+class _PacketSocket:
+    """A packet socket as the egress watch uses it: what it was bound to, and
+    the frames it reads, each with its ``sockaddr_ll``, before its timeout."""
+
+    def __init__(self, frames) -> None:
+        self.frames = list(frames)
+        self.bound = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def bind(self, address):
+        self.bound = address
+
+    def settimeout(self, _seconds):
+        pass
+
+    def recvfrom(self, _size):
+        if not self.frames:
+            raise probe.socket.timeout
+        return self.frames.pop(0)
+
+
+def test_the_egress_watch_counts_sent_ipv4_frames_by_their_socket_address(monkeypatch):
+    def address(protocol, packet_type):
+        return ("eth1", protocol, packet_type, 1, b"\0" * 6)
+
+    out, received = probe.PACKET_OUTGOING, 0
+    watched = _PacketSocket([
+        (_ipv4("10.20.0.8", 80), address(probe.ETH_P_IP, out)),
+        (_ipv4("10.20.0.8", 80), address(probe.ETH_P_IP, received)),
+        (_ipv4("10.20.0.8", 80), address(probe.ETH_P_ARP, out)),
+        (_ipv4("10.20.0.9", 80), address(probe.ETH_P_IP, out)),
+        (_ipv4("10.20.0.8", 80), address(probe.ETH_P_IP, out)),
+    ])
+    monkeypatch.setattr(probe, "packet_socket", lambda: watched)
+    assert probe.watch_egress("eth1", "10.20.0.8", 80, 30) == 2
+    assert watched.bound == ("eth1", 0)
+
+
+def test_the_egress_watch_binds_every_protocol():
+    """The choice the watch rests on: Linux hands a transmitted frame only to a
+    packet socket bound to every protocol. That the kernel does so is the
+    real-host run's to show."""
+    assert probe.EGRESS_SOCKET == (probe.socket.AF_PACKET, probe.socket.SOCK_DGRAM,
+                                   probe.socket.htons(probe.ETH_P_ALL))
 
 
 def test_the_probe_reads_the_hosts_virsh_and_systemctl_output():

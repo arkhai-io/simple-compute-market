@@ -1232,6 +1232,84 @@ the run's findings name (sections 5, 6 and 6a's files).
   mechanism inside D21's "run under `sudo` in a guest" and changes no decision, so the
   change has not returned to design. Correcting that Context sentence is left to the
   round's triage, with the owner's word on whether it needs more than a correction.
+
+  **Run 2** (system, external topology): `guest-isolation-20261124T121352Z`, commit
+  `201c4c0bd`, the host re-prepared from that commit's host kit, libvirt 10.0.0. The
+  module: 3 failed, 58 passed, 1 skipped.
+  - Made: O1, O2, O3, O4, O8 and O9. O9's live restoration was observed, so live
+    filter convergence now has real-host evidence.
+  - O5 failed at 09k7 on one fault only: no packet to the listed destination on port
+    80 was seen leaving the host on its routed interface. Every other O5 check held:
+    the chain admits the listed destination and refuses the other, the refused
+    destination's drop counter rose, and the listed accept's counter rose.
+  - O6 unproven: the target's buyers reach its guests through a relay (09k8). D22
+    admits this.
+  - O7 failed at 09k10 and 09k12, the private-destination stages after the restart
+    and the reload, on the same egress fault. 09k9 and 09k11 passed: O3, O4 and both
+    jumps held after each.
+
+  Judged against D22: not met, on O5 and O7 alone, from one probe defect. Section 5's
+  handoff items, so far:
+  - the `--xml` filter parameters are shown by O2 being made;
+  - the unit's order after libvirtd and `ufw reload` running `after.init` are shown
+    by 09k9 and 09k11, both jumps first after the restart and after the reload;
+  - real `iptables-restore --noflush` flushing and refilling the chain and deleting
+    jumps by rule is not shown. `jump_faults` reads only each built-in chain's first
+    rule, so a leftover duplicate jump lower down would pass. It stays open until O7
+    is made, as this task says, or becomes a finding here.
+  **Run 2's finding: the egress watch cannot see a sent frame (6a).** The probe's
+  `egress` opened its packet socket for IPv4 alone (`ETH_P_IP`). Linux hands
+  transmitted frames only to packet sockets bound to every protocol (`ETH_P_ALL`, the
+  `ptype_all` taps); a protocol-specific one sees only received frames. The deployment
+  confirmed this on the host. During one TCP connect from the host to the listed
+  destination, an `ETH_P_IP` socket on the routed interface saw no outgoing SYN, while
+  an `ETH_P_ALL` socket saw five: the SYN and its retransmits. It also confirmed the
+  forward path is as designed:
+  - FORWARD jumps to the guest chain first;
+  - the listed accept counted 15 packets, five attempts in each of three stages;
+  - no other forward-hook table drops;
+  - forwarding is on, and the route goes via a gateway on that interface.
+
+  Fixed: the watch is `watch_egress`. It reads from `packet_socket()`, the probe's
+  module-level factory, which opens `EGRESS_SOCKET`, a cooked `AF_PACKET` socket bound
+  to `ETH_P_ALL`. `is_outgoing_tcp_to` now also takes the frame's link-layer protocol
+  from its socket address and requires IPv4. With that check, and the rest of the
+  match (outgoing, TCP, destination and port), the count stays as narrow as before
+  even though the socket now reads every frame on the device.
+  Tests in `test_vm_guest_isolation.py`, all 82 passing (unit, but for the module's
+  two pytest-subprocess static configuration tests):
+  - over a socket double put in place of `packet_socket`, the watch binds the device
+    and counts only sent IPv4 frames to the destination: not a received copy, a
+    frame whose link-layer protocol is ARP, or one to another destination. This
+    also pins which fields of the socket address it reads;
+  - `EGRESS_SOCKET` binds every protocol. That is the choice the fix rests on, not
+    the kernel's behaviour;
+  - the match refuses another port, another destination, UDP, a frame that was not
+    sent, and a non-IPv4 link-layer protocol.
+
+  `run test-before --at 201c4c0bd`, of the tests as first written: both failed
+  there, but only on the API they call (`TypeError`, `AttributeError`); the other 79
+  passed. No test shows the kernel handing the socket a sent frame. That is the
+  deployment's host observation above, for run 3 to confirm. Run 3, at the commit
+  that carries this note, is owed by the deployment.
+
+  The fresh-context check of this fix found, fixed above:
+  - this note claiming all of section 5's handoff items discharged;
+  - an IPv4 version check guarding nothing the kernel can deliver, and a test that
+    could not tell it apart;
+  - the socket passed as a keyword parameter, where a command module's seam is a
+    module-level factory;
+  - a test named for a rationale it cannot show, and claims credited to the wrong
+    test;
+  - `egress`'s docstring saying "whether" for a count.
+
+  Declined: replacing the hand-written socket double with `MagicMock`, since the
+  file's other doubles are hand-written. Also declined: dropping the socket-address
+  test as unit-testing the last code before an external boundary, since it is the
+  only test that pins the regression and the fields the watch reads. It also noted
+  that on a busy uplink the socket's buffer could overflow during the 30 seconds and
+  drop the guest's SYN. That would be a false failure, never a false pass, so it is
+  left for a run to show.
 - [ ] 7a.3 Verification point. System: the recorded `e2e_vm_guest_isolation` run
   meeting D22 (7a.1, or a later run 7a.2 records). Unit, library integration: the suites of whatever 7a.2 changed,
   as their sections name them.

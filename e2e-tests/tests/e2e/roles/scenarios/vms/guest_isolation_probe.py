@@ -40,6 +40,7 @@ CONVERGE = "/usr/local/sbin/arkhai-guest-converge"
 RESTART_SECONDS = 35
 POLICY_RERUN_SECONDS = 20
 CONVERGE_SECONDS = 60
+ETH_P_ALL = 0x0003
 ETH_P_IP = 0x0800
 ETH_P_ARP = 0x0806
 PACKET_OUTGOING = 4
@@ -493,32 +494,53 @@ def converge(_request):
 
 
 def egress(request):
-    """Whether a TCP packet to DESTINATION and PORT left the host on the
+    """How many TCP packets to DESTINATION and PORT left the host on the
     interface the host routes DESTINATION through, within SECONDS. The packet
     leaves after masquerade, so its source is the host's, not the guest's."""
     route = json.loads(run(["ip", "-j", "-4", "route", "get", request["destination"]])["stdout"] or "[]")
     device = route[0]["dev"] if route else None
     if device is None:
         return {"device": None, "seen": 0}
+    seen = watch_egress(device, request["destination"], request["port"], request.get("seconds", 15))
+    return {"device": device, "seen": seen}
+
+
+#: The egress watch's socket: cooked, and bound to every protocol, since Linux
+#: hands a transmitted frame only to packet sockets bound to ``ETH_P_ALL``; one
+#: bound to IPv4 alone sees received frames and never a sent one.
+EGRESS_SOCKET = (socket.AF_PACKET, socket.SOCK_DGRAM, socket.htons(ETH_P_ALL))
+
+
+def packet_socket():
+    """A packet socket for the egress watch, as ``EGRESS_SOCKET`` opens it."""
+    return socket.socket(*EGRESS_SOCKET)
+
+
+def watch_egress(device, destination, port, seconds):
+    """How many TCP packets to DESTINATION and PORT left on DEVICE within
+    SECONDS. The socket takes every frame, so each is matched on its direction,
+    link-layer protocol, destination and port."""
     seen = 0
-    with socket.socket(socket.AF_PACKET, socket.SOCK_DGRAM, socket.htons(ETH_P_IP)) as sock:
+    with packet_socket() as sock:
         sock.bind((device, 0))
-        deadline = time.monotonic() + request.get("seconds", 15)
+        deadline = time.monotonic() + seconds
         while (left := deadline - time.monotonic()) > 0:
             sock.settimeout(left)
             try:
                 data, address = sock.recvfrom(4096)
             except socket.timeout:
                 break
-            if is_outgoing_tcp_to(data, address[2], request["destination"], request["port"]):
+            if is_outgoing_tcp_to(data, address[1], address[2], destination, port):
                 seen += 1
-    return {"device": device, "seen": seen}
+    return seen
 
 
-def is_outgoing_tcp_to(packet, packet_type, destination, port):
-    """Whether PACKET, an IPv4 packet as a cooked packet socket reads it, left
-    this host as TCP to DESTINATION and PORT."""
-    if packet_type != PACKET_OUTGOING or len(packet) < 24 or packet[9] != socket.IPPROTO_TCP:
+def is_outgoing_tcp_to(packet, protocol, packet_type, destination, port):
+    """Whether PACKET, a frame's payload as a cooked packet socket reads it with
+    its link-layer PROTOCOL and PACKET_TYPE, left this host as IPv4 TCP to
+    DESTINATION and PORT."""
+    if (packet_type != PACKET_OUTGOING or protocol != ETH_P_IP or len(packet) < 24
+            or packet[9] != socket.IPPROTO_TCP):
         return False
     offset = (packet[0] & 0x0F) * 4
     return (packet[16:20] == socket.inet_aton(destination) and len(packet) >= offset + 4
