@@ -74,8 +74,10 @@ so no migration can learn a host's key or re-protect a value.
 
 **What the real-host proof can reach.** The e2e harness reaches the provisioning
 service through its typed clients and a delivered guest through the shared SSH
-helper, as the guest's buyer; the guest's tenant user has passwordless sudo
-(`vm-management/tasks/vm-create.yml`). Nothing offered to a test restarts a host
+helper, as the guest's buyer; the guest's tenant user has sudo through the `sudo`
+group with a generated password, which the deal delivers to the buyer in settle
+status's tenant credentials (`vm-management/tasks/vm-create.yml`; the VM storefront's
+`fulfillment_result_connection`). Nothing offered to a test restarts a host
 service, reloads its firewall, or runs host preparation: the VM operator client runs
 fixed playbooks, and host preparation is run by an operator. The bare-metal
 qualification already reaches its host through a harness-local operator route its

@@ -1392,8 +1392,13 @@ the run's findings name (sections 5, 6 and 6a's files).
 - the run's guests alone on the host (D21's precondition).
 
 Guest probes get root with the tenant password each deal delivers, so no target
-needs to change the guest's sudo. Still for the round's triage: design.md's Context
-says the tenant user has passwordless sudo, which run 1 showed is false.
+needs to change the guest's sudo.
+
+**Round 3 triage (7a handoff, edit).** design.md's Context ("What the real-host proof
+can reach") said the tenant user has passwordless sudo, which run 1 showed is false. It
+now says the tenant user has sudo through the `sudo` group with a generated password
+the deal delivers to the buyer. The owner agreed a correction is enough: no decision
+rests on the sentence.
 
 ## 8. Closeout
 
