@@ -121,7 +121,7 @@ E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring
               or e2e_vm_dispute_hold_passed \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
               or e2e_alkahest_trusted_oracle \
-              or e2e_listing_shapes or e2e_vm_introduction or e2e_buyer_rfq_discovery \
+              or e2e_listing_shapes or e2e_vm_introduction or e2e_buyer_rfq_discovery or e2e_buyer_rfq_introductions \
               or e2e_non_erc20_settlement
 # The API-credit lane's scenarios. The payment deal runs against the lane's
 # payments double.

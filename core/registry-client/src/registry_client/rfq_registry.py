@@ -1,6 +1,7 @@
 """Authority-side typed transport for a pinned registry's RFQ routes."""
 
 import re
+from dataclasses import dataclass, field
 from typing import Self, TypeVar
 
 import httpx
@@ -11,6 +12,7 @@ from market_core.rfq import (
     OfferResponse,
     ResponseVersion,
     RfqAccountClaim,
+    RfqAccountRequest,
     RfqAudience,
     RfqDetail,
     RfqInput,
@@ -24,16 +26,41 @@ from market_core.rfq import (
     RfqTarget,
     SearchRfqs,
     ShareContact,
+    rfq_route_models,
     validate_rfq_provenance,
 )
 from market_identity import Signer
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
-from registry_client.auth import RegistryClientError
+from registry_client.auth import (
+    IDENTITY_IDENTIFIER_HEADER,
+    IDENTITY_SCHEME_HEADER,
+    REQUEST_ID_HEADER,
+    ROLE_HEADER,
+    SIGNATURE_HEADER,
+    SIGNATURE_VERSION_HEADER,
+    TIMESTAMP_HEADER,
+    RegistryClientError,
+)
 from registry_client.rfq_auth import SignedRfqRequest, sign_rfq_invocation
 
 _Outcome = TypeVar("_Outcome", bound=BaseModel)
 _ErrorCode = re.compile(r"[a-z][a-z0-9_]{0,127}")
+
+
+RFQ_PROOF_HEADERS = (
+    SIGNATURE_VERSION_HEADER, IDENTITY_SCHEME_HEADER, IDENTITY_IDENTIFIER_HEADER,
+    ROLE_HEADER, REQUEST_ID_HEADER, TIMESTAMP_HEADER, SIGNATURE_HEADER,
+)
+
+
+@dataclass(frozen=True)
+class RfqRegistryReply:
+    """A registry result the account entry point can return to its client."""
+
+    status: int
+    body: JsonValue = field(repr=False)
+    proof: dict[str, str]
 
 
 class _RfqRegistryProtocol:
@@ -64,6 +91,31 @@ class _RfqRegistryProtocol:
         result = outcome.model_validate(body)
         validate_rfq_provenance(target, self._audience, result)
         return result
+
+
+    def _sign_forward(
+        self, target: RfqTarget, account: RfqAccountClaim, request: RfqAccountRequest,
+    ) -> SignedRfqRequest:
+        if request.registry != self._audience:
+            raise ValueError("invalid RFQ registry audience")
+        inputs = rfq_route_models(target.operation).inputs.model_validate(request.inputs)
+        return self._sign(target, account, inputs, request.request_id)
+
+    def _verified_reply(
+        self, target: RfqTarget, signed: SignedRfqRequest, response: httpx.Response,
+    ) -> RfqRegistryReply:
+        body = response.json()
+        if (response.status_code == 404 and SIGNATURE_HEADER not in response.headers
+                and body == {"detail": "Not Found"}):
+            # An older registry has no RFQ route and cannot sign this refusal.
+            return RfqRegistryReply(501, {"detail": "rfq_not_supported"}, {})
+        signed.verify_response(response.headers, status=response.status_code, body=body)
+        if response.status_code == 200:
+            result = rfq_route_models(target.operation).outcome.model_validate(body)
+            validate_rfq_provenance(target, self._audience, result)
+        return RfqRegistryReply(
+            response.status_code, body, {name: response.headers[name] for name in RFQ_PROOF_HEADERS},
+        )
 
 
 class RfqRegistryClient(_RfqRegistryProtocol):
@@ -97,6 +149,14 @@ class RfqRegistryClient(_RfqRegistryProtocol):
         signed = self._sign(target, account, inputs, request_id)
         response = await self._http.post(target.path, headers=signed.headers(), json=signed.body())
         return self._decode(target, signed, response, outcome)
+
+    async def forward(
+        self, target: RfqTarget, account: RfqAccountClaim, request: RfqAccountRequest,
+    ) -> RfqRegistryReply:
+        """Forward after the account entry point admits the current credential."""
+        signed = self._sign_forward(target, account, request)
+        response = await self._http.post(target.path, headers=signed.headers(), json=signed.body())
+        return self._verified_reply(target, signed, response)
 
     async def create(
         self, account: RfqAccountClaim, inputs: CreateRfq, *, request_id: str | None = None,
@@ -233,6 +293,14 @@ class SyncRfqRegistryClient(_RfqRegistryProtocol):
         signed = self._sign(target, account, inputs, request_id)
         response = self._http.post(target.path, headers=signed.headers(), json=signed.body())
         return self._decode(target, signed, response, outcome)
+
+    def forward(
+        self, target: RfqTarget, account: RfqAccountClaim, request: RfqAccountRequest,
+    ) -> RfqRegistryReply:
+        """Forward after the account entry point admits the current credential."""
+        signed = self._sign_forward(target, account, request)
+        response = self._http.post(target.path, headers=signed.headers(), json=signed.body())
+        return self._verified_reply(target, signed, response)
 
     def create(
         self, account: RfqAccountClaim, inputs: CreateRfq, *, request_id: str | None = None,

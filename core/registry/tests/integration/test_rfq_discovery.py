@@ -9,8 +9,8 @@ from pathlib import Path
 import httpx
 import injected_time
 from market_core.rfq import (
-    CloseRfq, CreateRfq, EditRfq, OfferResponse, RfqAccountClaim, RfqAudience, RfqDetail,
-    RfqMutationReceipt, RfqOperation, RfqSearchPage, RfqTarget, SearchRfqs,
+    CloseRfq, CreateRfq, EditRfq, OfferResponse, RfqAccountClaim, RfqAccountRequest, RfqAudience, RfqDetail,
+    RfqMutationReceipt, RfqOperation, RfqSearchPage, RfqSummary, RfqTarget, SearchRfqs,
 )
 from market_identity import Ed25519Signer, TrustedIdentitySet
 import pytest
@@ -417,8 +417,14 @@ async def test_open_rfq_discovery_uses_supply_visibility(registries, public_supp
         async with RfqPublicRegistryClient(
             "http://test", audience=registry.audience, transport=transport,
         ) as guest:
+            forwarded = await guest.forward(target, RfqAccountRequest(
+                registry=registry.audience, request_id="guest-forward", inputs={},
+            ))
+            assert forwarded.proof
             if public_supply:
                 read = await guest.read(created.resource_id, request_id="guest-lookup")
+                assert forwarded.status == 200
+                assert RfqSummary.model_validate(forwarded.body) == read
                 found = await guest.search(SearchRfqs(kind="compute"), request_id="guest-lookup")
                 assert read.registry == registry.audience
                 assert read.rfq_id == created.resource_id
@@ -431,6 +437,7 @@ async def test_open_rfq_discovery_uses_supply_visibility(registries, public_supp
                     assert refused.value.status_code == 404
                     assert refused.value.body == "rfq_not_found"
             else:
+                assert forwarded.status == 401
                 with pytest.raises(RegistryClientError) as unreadable:
                     await guest.read(created.resource_id, request_id="guest-lookup")
                 with pytest.raises(RegistryClientError) as unsearchable:

@@ -46,7 +46,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-buyer"
-version = "0.8.1"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
@@ -57,6 +57,7 @@ dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
+    { name = "pydantic" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -68,14 +69,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-core", specifier = ">=0.6.0" },
-    { name = "arkhai-core-registry-client", specifier = ">=0.13.0" },
+    { name = "arkhai-core", specifier = ">=0.7.0" },
+    { name = "arkhai-core-registry-client", specifier = ">=0.14.0" },
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-delivery", specifier = "==0.2.2" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.8.1" },
+    { name = "pydantic", specifier = ">=2.7" },
     { name = "rich", specifier = ">=13.7.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
@@ -92,6 +94,7 @@ dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
+    { name = "pydantic" },
 ]
 wheels = [
     { path = "arkhai_core_registry_client-0.14.0-py3-none-any.whl" },

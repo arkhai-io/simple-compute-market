@@ -338,6 +338,7 @@ class BuyerCli:
         *,
         background: bool = False,
         timeout: float = 180.0,
+        input_text: str | None = None,
     ) -> MarketRun:
         """Spawn ``market <args>``.
 
@@ -363,6 +364,8 @@ class BuyerCli:
         log.info("[buyer_cli] %s", " ".join(cmd))
 
         if background:
+            if input_text is not None:
+                raise ValueError("prompt input is supported for foreground runs")
             popen = subprocess.Popen(
                 cmd,
                 env=env,
@@ -381,6 +384,7 @@ class BuyerCli:
             cmd,
             env=env,
             capture_output=True,
+            input=input_text,
             text=True,
             timeout=timeout,
         )

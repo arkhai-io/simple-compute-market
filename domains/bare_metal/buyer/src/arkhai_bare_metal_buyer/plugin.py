@@ -6,6 +6,8 @@ from dataclasses import replace
 
 from arkhai_bare_metal import make_bare_metal_provision_terms
 from arkhai_bare_metal.domain_runtime import market_domain
+from arkhai_compute.rfq import validate_filters, validate_requirements, validate_response_quantity
+from market_core.rfq import RfqInputContract
 from market_core import (
     BUYER_IDENTITY_INJECTION_CONTRACT,
     DomainCapability,
@@ -33,6 +35,9 @@ def _buyer_market_domain() -> MarketDomainContract:
         build_provision_terms=make_bare_metal_provision_terms,
         select_policy=lambda configured: configured,
         decode_result=base.codecs.result,
+        rfq_inputs=(RfqInputContract(
+            "compute", validate_requirements, validate_filters, validate_response_quantity,
+        ),),
     )
     return replace(
         base,

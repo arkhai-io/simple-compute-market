@@ -53,6 +53,7 @@ dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
+    { name = "pydantic" },
 ]
 wheels = [
     { path = "arkhai_core_registry_client-0.14.0-py3-none-any.whl" },

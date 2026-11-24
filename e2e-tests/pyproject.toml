@@ -57,7 +57,7 @@ dependencies = [
     # The `market` app the in-process watchdog cases run through its own entry
     # (tests/e2e/roles/helpers/in_process_buyer.py); 0.8.0 first paces the
     # settlement wait on its caller's clock.
-    "arkhai-core-buyer>=0.8.0",
+    "arkhai-core-buyer>=0.9.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
@@ -65,7 +65,7 @@ dependencies = [
     # resolved from .dist alongside the other internal wheels. 0.13.0 first
     # runs every wait of `buy` on its wait clock, which the in-process
     # watchdog cases step.
-    "arkhai-vms-buyer>=0.13.0",
+    "arkhai-vms-buyer>=0.14.0",
     # The runner the in-process watchdog cases invoke the `market` app with.
     "typer>=0.12.0",
     # The API-credits schema plugin, discovered by the same `market`
@@ -155,6 +155,7 @@ markers = [
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
     "e2e_listing_shapes: A pool's stated listing shape publishes every declared quantity and is discoverable by a typed memory query; a shape stating no GPUs publishes, filters, and settles",
+    "e2e_buyer_rfq_introductions: Complete contact introduction through the buyer CLI and account authority",
     "e2e_buyer_rfq_discovery: Authenticated buyer RFQ creation, typed discovery and isolation from supply",
     "e2e_pool_declared_modes: Deployed site-authority rejection of an undeclared offering mode before reservation",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",

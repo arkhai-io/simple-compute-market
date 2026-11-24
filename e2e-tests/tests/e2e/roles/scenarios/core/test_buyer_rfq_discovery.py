@@ -6,12 +6,12 @@ from uuid import uuid4
 
 from arkhai_compute.rfq import validate_filters, validate_requirements
 from e2e_harness.settings import settings
-import httpx
 import injected_time
 from market_core.rfq import CloseRfq, CreateRfq, RfqAccountClaim, RfqAudience, SearchRfqs
 from market_identity import Ed25519Signer, Identity, TrustedIdentitySet, create_signer
 import pytest
 from registry_client import RegistryClientError, SyncRegistryClient
+from registry_client.rfq_public import SyncRfqPublicRegistryClient
 from registry_client.rfq_registry import SyncRfqRegistryClient
 
 # Matches the verification pin in the development registry profile.
@@ -40,14 +40,16 @@ def test_ordinary_account_discovers_deployed_compute_rfqs():
         assert descriptor.authority.name == registry_authority
         audience = RfqAudience(name=descriptor.authority.name, principal=descriptor.authority.principals[0])
         assert audience.principal.model_dump(mode="json") == registry_pin.model_dump(mode="json")
-        with SyncRfqRegistryClient(registry_url, signer=_FIXTURE_AUTHORITY, audience=audience) as rfqs:
-            _exercise_rfq(rfqs, supply, audience)
-    # Rejection-path check for an unsigned request the RFQ client cannot construct.
-    with httpx.Client(base_url=registry_url, timeout=30) as anonymous:
-        assert (anonymous.post("/rfqs/search", json={})).status_code == 401
+        with (
+            SyncRfqRegistryClient(registry_url, signer=_FIXTURE_AUTHORITY, audience=audience) as rfqs,
+            SyncRfqPublicRegistryClient(registry_url, audience=audience) as anonymous,
+        ):
+            _exercise_rfq(rfqs, supply, audience, anonymous)
 
 
-def _exercise_rfq(rfqs: SyncRfqRegistryClient, supply: SyncRegistryClient, audience: RfqAudience) -> None:
+def _exercise_rfq(
+    rfqs: SyncRfqRegistryClient, supply: SyncRegistryClient, audience: RfqAudience, anonymous: SyncRfqPublicRegistryClient,
+) -> None:
     buyer, browser = (RfqAccountClaim(namespace="development", subject=uuid4().hex) for _ in range(2))
     now = injected_time.now_datetime()
     region = f"rfq-test-{uuid4().hex}"
@@ -80,5 +82,7 @@ def _exercise_rfq(rfqs: SyncRfqRegistryClient, supply: SyncRegistryClient, audie
         assert detail.buyer_reference != buyer.subject
         assert not {"buyer_subject", "contact", "responses"} & detail.model_dump().keys()
         assert rfq_id not in {listing.id for listing in (supply.list_listings()).listings}
+        assert anonymous.read(rfq_id) == search.results[0]
+        assert anonymous.search(SearchRfqs(kind="compute", filters=dict(filters))).results == [search.results[0]]
     finally:
         rfqs.close(buyer, rfq_id, CloseRfq(version=created.version))

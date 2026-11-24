@@ -384,6 +384,14 @@ def _root_group_plugin(identity: str, name: str) -> MarketDomainContract:
     return _plugin(identity, register)
 
 
+def test_existing_rfq_plugin_keeps_its_registered_command_group():
+    app = build_app(domains=[_root_group_plugin("vms.compute", "rfq")])
+    result = runner.invoke(app, ["rfq", "introduce"])
+
+    assert result.exit_code == 0, result.output
+    assert "vms.compute introduce" in result.output
+
+
 def test_two_plugins_registering_one_root_command_refuse_to_start():
     with pytest.raises(DuplicateRootCommandError) as refused:
         build_app(

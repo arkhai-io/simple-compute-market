@@ -1,5 +1,6 @@
 """Market-neutral wire contracts for registry requests for quotes."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, ClassVar, Literal
@@ -15,6 +16,16 @@ RfqReference = Annotated[
     str, Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 ]
 _reference: TypeAdapter[str] = TypeAdapter(RfqReference)
+
+
+@dataclass(frozen=True)
+class RfqInputContract:
+    """The family-specific checks used by a buyer's account client."""
+
+    kind: str
+    requirements: Callable[[object], object]
+    filters: Callable[[object], object]
+    offer: Callable[[object], object]
 
 
 class RfqOperation(str, Enum):
@@ -141,6 +152,16 @@ class RfqAudience(BaseModel):
 
     name: RegistryAuthorityName
     principal: RegistryPrincipal
+
+
+class RfqAccountRequest(BaseModel):
+    """An operation submitted to the trusted account entry point."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True, hide_input_in_errors=True)
+
+    registry: RfqAudience
+    request_id: RfqReference
+    inputs: dict[str, JsonValue] = Field(repr=False)
 
 
 class RfqInvocation(BaseModel):
@@ -286,6 +307,34 @@ class ShareContact(ResponseVersion):
 class OfferResponse(ShareContact):
     offer: dict[str, JsonValue] = Field(default_factory=dict)
 
+
+
+@dataclass(frozen=True)
+class RfqRouteModels:
+    inputs: type[RfqInput]
+    outcome: type[BaseModel]
+
+
+_RFQ_MODELS = {
+    RfqOperation.CREATE: RfqRouteModels(CreateRfq, RfqMutationReceipt),
+    RfqOperation.SEARCH: RfqRouteModels(SearchRfqs, RfqSearchPage),
+    RfqOperation.READ: RfqRouteModels(RfqInput, RfqDetail),
+    RfqOperation.EDIT: RfqRouteModels(EditRfq, RfqMutationReceipt),
+    RfqOperation.CLOSE: RfqRouteModels(CloseRfq, RfqMutationReceipt),
+    RfqOperation.RESPOND: RfqRouteModels(OfferResponse, RfqMutationReceipt),
+    RfqOperation.LIST_RESPONSES: RfqRouteModels(RfqInput, RfqResponseInbox),
+    RfqOperation.READ_RESPONSE: RfqRouteModels(RfqInput, RfqResponseDetail),
+    RfqOperation.RECONFIRM: RfqRouteModels(OfferResponse, RfqMutationReceipt),
+    RfqOperation.WITHDRAW: RfqRouteModels(ResponseVersion, RfqMutationReceipt),
+    RfqOperation.DISMISS: RfqRouteModels(ResponseVersion, RfqMutationReceipt),
+    RfqOperation.SELECT: RfqRouteModels(ShareContact, RfqMutationReceipt),
+    RfqOperation.READ_INTRODUCTION: RfqRouteModels(RfqInput, RfqIntroductionDetail),
+    RfqOperation.END_INTRODUCTION: RfqRouteModels(ResponseVersion, RfqMutationReceipt),
+}
+
+
+def rfq_route_models(operation: RfqOperation) -> RfqRouteModels:
+    return _RFQ_MODELS[operation]
 
 
 def validate_rfq_provenance(target: RfqTarget, audience: RfqAudience, result: BaseModel) -> None:

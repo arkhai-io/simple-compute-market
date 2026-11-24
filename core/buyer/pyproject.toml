@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-core-buyer"
-version = "0.8.1"
+version = "0.9.0"
 license = "MIT"
 description = "Core buyer role shell and orchestration contracts"
 requires-python = ">=3.12"
@@ -9,6 +9,7 @@ dependencies = [
   "typer>=0.12.0",
   # Candidate tables + price-confirmation rendering in the scalar policy surface.
   "rich>=13.7.0",
+  "pydantic>=2.7",
   # Generic registry discovery config (registry.urls/auth/discovery_timeout)
   # comes from the shared buyer TOML loader in kit.
   "arkhai-kit-config",
@@ -20,13 +21,13 @@ dependencies = [
   # sent where they read things. No mechanism dependency comes with it.
   "arkhai-kit-delivery==0.2.2",
   # Mechanism-neutral settlement selection and plan carriers.
-  "arkhai-core>=0.6.0",
+  "arkhai-core>=0.7.0",
   # Installed mechanism registration, canonical priority, and recovery dispatch.
   "arkhai-kit-settlement-runtime>=0.8.1",
   # Canonical principals, signer injection, and v2 request/response proofs.
   "arkhai-kit-identity==0.5.0",
   # Signed registry discovery with pinned authority responses.
-  "arkhai-core-registry-client>=0.13.0",
+  "arkhai-core-registry-client>=0.14.0",
   # The process time source every instant the buyer signs, stamps or compares reads.
   "arkhai-injected-time>=0.1.0",
 ]
