@@ -368,4 +368,5 @@ __all__ = [
     "StorefrontAuth",
     "bind_response_auth",
     "bind_response_contract",
+    "negotiation_list_resource",
 ]

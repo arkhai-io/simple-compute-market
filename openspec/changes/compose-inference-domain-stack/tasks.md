@@ -2301,6 +2301,60 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
   scenario claiming more than its test asserts; and a line overstating what the
   release handbook says of the inference lane.
 
+*Merge of `dev` at `e15926cd9` (pre-closeout review 25 F1–F4), outside the
+plan's sections:* `dev` made the API-credits storefront's negotiation list and
+detail the administrator's and moved advance onto the operation the canonical
+storefront client signs. That code is the family selling library's here, so
+the merge:
+- Put the negotiation list's signed resource and the buyer filter in the
+  library (`kit/api/selling/src/arkhai_api_selling/auth.py`,
+  `negotiation_list_resource`; `route_services.py`, `NegotiationRoutes.list`),
+  and passed the administrator as the actor of `NegotiationRoutes.advance`,
+  which the negotiation service requires.
+- Bound both in the API-credits and the inference storefront's negotiations
+  controllers, so the inference storefront serves a listing's negotiations and
+  a negotiation's detail to its administrator alone; the
+  `storefront-publication` delta names it in "A storefront never authorizes
+  its administrator as a party".
+- Ported `dev`'s
+  `domains/apicredits/storefront/tests/integration/test_administrator_reach.py`
+  to the family composition and added
+  `domains/inference/storefront/tests/integration/test_administrator_reach.py`,
+  which classifies every mounted route; the inference deal harness is
+  `tests/integration/deal_parties.py` there.
+- Re-recorded the API-credits compatibility baseline for the three negotiation
+  routes (`domains/apicredits/storefront/tests/fixtures/baseline/`), with
+  `arkhai-apicredits-storefront` and `arkhai-compute-provisioning-service` one
+  step above `dev`'s versions.
+- Review 25's fixes: F1, the delta above; F2, this note and part 12.1; F3,
+  part 12.12's list; F4, `negotiation_list_resource` in its module's exports
+  and the library's test named for what it proves.
+
+Evidence, at the merge commit `1475f5290`, on an arm64 macOS host:
+- `make check-packaging` and `make check-repository` against `dev` passed.
+- Unit: `kit/api/selling`, 239 passed, the route service against a fake with
+  the negotiation service's exact signature.
+- Application integration: the inference storefront's suite, 77 passed; the
+  API-credits storefront's, 277; the API-credits service's, 64; the bare-metal
+  domain, storefront, buyer and adapter suites, 226, 694, 87 and 138.
+- `make -k test` passed but for the Linux-only IaC suites, three of `dev`'s
+  sandbox tests, and `dev`'s `e2e-tests/tests/unit/test_vm_guest_isolation.py`,
+  which imports a Linux-only socket family and so fails collection on macOS,
+  failing two lane-hold tests that collect it; the harness's other 1264 unit
+  tests passed.
+- End to end, run locally and not by the pipeline: VM 513, bare metal 249,
+  API credits 4, inference 1.
+- No validation record exists for that commit; the owner accepted these runs
+  in its place (`reviews/workflow.jsonl`, seq 15). No Helm deployment and no
+  Linux run of the IaC suites exists.
+
+Evidence, at the tree of review 25's fixes, on the same host:
+- Unit: `kit/api/selling`, 239 passed, after F4's export and renamed test.
+- `make check-packaging`, `make check-repository` against `dev`, and the
+  change's strict OpenSpec validation passed.
+- A fresh-context check of the diff found one point, fixed: this note gave no
+  run on the tree that holds F4's edits.
+
 ## 12. Closeout
 
 The parts of `docs/guidance/workflow/closeout.md`, in its order, with this
@@ -2312,7 +2366,8 @@ change to implementation.
 
 - [ ] 12.1 **Comment hygiene.** Confirm: `make check-comment-hygiene` passes,
       and the three recovered modules (5.3, 5.5, 5.6), every new root, and the
-      time routes and control the merge of `dev` added were read for
+      time routes and control and the negotiation admission the merges of `dev`
+      added were read for
       references to the withdrawn branch, the API-credits history, or this
       change. Anything found returns the change to implementation.
 - [ ] 12.2 **Import placement.** Confirm: no function-level import this
@@ -2411,8 +2466,8 @@ change to implementation.
       archive.
 - [ ] 12.12 **Archival.** `scripts/change-workflow openspec archive
       compose-inference-domain-stack -y`, merging the six deltas into
-      `openspec/specs/{api-family,inference,
-      deployment-state,test-compatibility,market-composition}/spec.md` and
+      `openspec/specs/{api-family,inference,deployment-state,
+      test-compatibility,market-composition,storefront-publication}/spec.md` and
       moving the change under `changes/archive/`; the index row then links the
       archive. Dependents are released at archive cleanup, not here.
 
@@ -2455,4 +2510,5 @@ change to implementation.
 | D20 (pre-closeout review 24 F4) — each inference party's time setting, routes and control are normative in `inference` | the `inference` capability's `spec.md` — "Each inference party's time is configured and set through its own control" |
 | D20 (pre-closeout review 24 F5) — the inference buyer is in the `market` binary; the inference lane is outside release-candidate validation until inference ships | `docs/guidance/repository/images.md` — "The `market` binary"; `docs/release-handbook.md` — "Running the lanes on a release candidate's images" (the first states the binary's domains; the second lists the lanes a candidate runs, inference not among them; no edit owed) |
 | Pre-closeout review 24 F7 — listing pages order by `created_at`, then by first write, newest first, under the `(created_at, listing_id)` cursor | the `storefront-publication` capability's `spec.md` — "Reconciliation reads every listing once" (written by the archive from the delta); the `api-family` capability's `architecture.md` — the publication paragraph (already in final state) |
+| Pre-closeout review 25 F1 — the inference storefront refuses its administrator on every party route and serves its negotiation reads to the administrator alone | the `storefront-publication` capability's `spec.md` — "A storefront never authorizes its administrator as a party" (written by the archive from the delta); `docs/development/ARCHITECTURE.md` — "The administrator's reach" (already in final state) |
 | Roadmap and index currency (closeout's "Roadmap currency" and "Campaign index currency") | `docs/development/ROADMAP.md` — Goal 9 current state and gap table; `openspec/changes/README.md` — this change's row and the Goal 9 campaign graph |

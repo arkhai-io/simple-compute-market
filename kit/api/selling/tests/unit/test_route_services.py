@@ -417,7 +417,7 @@ class _NegotiationService:
         return {"negotiation_id": neg_id, "action": action}
 
 
-async def test_negotiation_introspection_maps_the_services_refusals():
+async def test_negotiation_reads_and_advance_carry_the_filter_the_actor_and_refusals():
     error = NegotiationServiceError("listing gone")
     error.status_code = 404
     routes = NegotiationRoutes(
