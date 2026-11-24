@@ -19,8 +19,8 @@ stored wheels to the images validated, in this order:
    An image whose build installs from the wheelhouse records the label
    (a test holds every such Dockerfile to it), so an image without one was
    built from no wheelhouse;
-4. delete the revision's `wheelhouse`, `chart` and binary versions, all of
-   them, before uploading any;
+4. delete each of the revision's `wheelhouse`, `chart` and binary versions the
+   repositories' listings show stored, all of them, before uploading any;
 5. upload the declared wheels as the generic package `wheelhouse` and the chart's
    package as `chart`, version `<revision>`, in the candidate store
    (`<prefix>-candidates` unless `--candidates-repository` names another generic
@@ -125,14 +125,33 @@ def built_problems(components: ReleaseComponents, root: Path, dist_dir: Path,
     return problems
 
 
+def _listed(kind: str, flags: list[str], repository: str, run: Run) -> set[str]:
+    """The last path segment of each name `gcloud artifacts <kind> list` prints."""
+    listed = run(["gcloud", "artifacts", kind, "list", *flags, "--format=value(name)"],
+                 capture_output=True, text=True)
+    if listed.returncode != 0:
+        raise LoadRefused(f"cannot list {kind} in {repository}: {listed.stderr.strip()}")
+    return {line.strip().rsplit("/", 1)[-1] for line in listed.stdout.splitlines()
+            if line.strip()}
+
+
 def delete_version(destination: Destination, repository: str, package: str, version: str,
                    run: Run) -> None:
-    """Delete a generic package version with every file it holds; one that does
-    not exist is already deleted."""
+    """Delete a generic package version with every file it holds, if it is stored.
+
+    Whether it is stored is read from the repository's listings, not from a failed
+    delete's wording: gcloud has reported a missing version as `NOT_FOUND` and as
+    a status code with no such word, and a missing package makes even a listing of
+    its versions fail."""
+    flags = destination.flags(repository)
+    if package not in _listed("packages", flags, repository, run):
+        return
+    if version not in _listed("versions", [*flags, f"--package={package}"], repository, run):
+        return
     deleted = run(["gcloud", "artifacts", "versions", "delete", version,
-                   *destination.flags(repository), f"--package={package}", "--quiet"],
+                   *flags, f"--package={package}", "--quiet"],
                   capture_output=True, text=True)
-    if deleted.returncode != 0 and "NOT_FOUND" not in deleted.stderr:
+    if deleted.returncode != 0:
         raise LoadRefused(f"cannot delete {package} {version} from {repository}: "
                           f"{deleted.stderr.strip()}")
 
