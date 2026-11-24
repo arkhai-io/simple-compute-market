@@ -653,9 +653,12 @@ their tests.
   changed.
   End-to-end: none exercises the workflow's tooling; none owed.
   Owed by validation (ci tests.yml): the `test · test-deployment-packaging` job, run
-  under `SANDBOX_REQUIRED=1`, its log showing the wheel installed from the tree,
-  `change-workflow install` run, and the change workflow's suites passed with none of
-  the sandbox tests skipped.
+  under `SANDBOX_REQUIRED=1` with `PYTEST_ADDOPTS=-rfEs`, its log showing the wheel
+  installed from the tree, `change-workflow install` run, and the change workflow's
+  suites passed with no sandbox test skipped on the bubblewrap probe and one test
+  skipped in all: the Codex sandbox test, its skip-summary line naming
+  `scripts/tests/test_change_workflow_sandbox.py` and the reason `Codex is not
+  installed here`, since the runner has no Codex — the local kind runs it (44 F1).
   Done: the section's suites, each after its last edit — `test_change_workflow_config.py`,
   `test_change_workflow_cli_steps.py`, `test_change_workflow_cli.py`,
   `test_change_workflow_review.py`, `test_change_workflow_wheel.py`,
@@ -675,6 +678,30 @@ their tests.
 
 Section 4 notes (handoff):
 
+- Implementation review 44's triage, 44 F1: the owed job's log of validation 43 ended
+  `3745 passed, 1 skipped`, its `-q` naming no skip, so the owed "none of the sandbox
+  tests skipped" was inferred, not shown — and false: the skip is test 1,891 of the
+  job's progress line, and a local collection at this tree puts
+  `test_change_workflow_sandbox.py::test_codex_runs_in_the_reviews_scope` there, its
+  `needs_codex` skipping it on a runner with no Codex (as the closeout of
+  `sandbox-unattended-workflow-steps` found, 96 F2). The owed line above is narrowed
+  to the bubblewrap probe's tests, admitting that one skip, which the local kind runs;
+  the packaging job sets `PYTEST_ADDOPTS=-rfEs`, so its summary names each skip and
+  its reason and still lists the failures and errors (`-r` replaces pytest's default
+  `fE`, whose lines `scripts/ci_evidence.py` reads failing tests from).
+  Evidence: unit, `test_tests_workflow.py` (the new
+  `test_the_scripts_job_names_each_skipped_test`): passed; against `da2b29c1f` with
+  `change-workflow run test-before --at`: it failed there, the file's other two
+  passing. `change-workflow run pre-commit`: after-functional-change passed;
+  pre-commit-functional (`make validate-local`, tree `b80fd4e0`) passed —
+  check-packaging, and every suite, the scripts' 3,747 passing, none skipped; the
+  index, tasks, skills and decisions checks and the strict OpenSpec validation passed,
+  and `make check-repository` passed; the spec-index check failed on MCW-9k0c and
+  MCW-iqh1 alone, as D1 allows until 10.2. The fresh-context check found `-rs`
+  dropping the failure lines the CI evidence reads (fixed, `-rfEs`) and three wording
+  faults — the skip summary names a file, line and reason rather than the test, the
+  Codex test is itself bubblewrap-gated, and the YAML comment assumed one skip — all
+  fixed; nothing declined.
 - Implementation review 30's triage, 33 R1 (D25, outside the plan): from this
   section's removal of the project links, every unattended Claude Code step ran
   without the workflow's skills, since the adapter's `--setting-sources project` hides

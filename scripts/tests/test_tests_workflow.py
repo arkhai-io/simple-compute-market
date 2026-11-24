@@ -67,3 +67,24 @@ def test_the_scripts_job_installs_the_change_workflow_from_the_tree() -> None:
     assert install == ['cd "$RUNNER_TEMP" && "$bin/change-workflow" install']
     assert re.search(r"^test-deployment-packaging: test-release-tooling\b",
                      MAKEFILE.read_text(encoding="utf-8"), re.MULTILINE)
+
+
+def test_the_scripts_job_names_each_skipped_test() -> None:
+    """The job running the scripts' suites under `SANDBOX_REQUIRED=1` reports every
+    test that skips, with its reason, so its log shows which test skipped rather than
+    a bare count: a skip no gate turns into a failure, such as the Codex sandbox
+    test's where Codex is absent, is then read, not inferred. `-r` replaces pytest's
+    default summary, so it keeps `fE`, the failures and errors whose lines the CI
+    evidence reads failing tests from."""
+
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    run = next(i for i, line in enumerate(lines)
+               if line.strip() == "run: make ${{ matrix.target }}")
+    step = max(i for i in range(run) if lines[i].startswith("      - "))
+    env = [line.strip() for line in lines[step:run]]
+
+    assert lines[step].strip() == "- name: make ${{ matrix.target }}"
+    assert ("PYTEST_ADDOPTS: ${{ matrix.target == 'test-deployment-packaging' "
+            "&& '-rfEs' || '' }}") in env
+    assert ("SANDBOX_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' "
+            "&& '1' || '' }}") in env

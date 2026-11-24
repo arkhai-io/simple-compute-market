@@ -111,9 +111,12 @@ jobs:
           echo "$bin" >> "$GITHUB_PATH"
           cd "$RUNNER_TEMP" && "$bin/change-workflow" install
       # Where the script suites run, a real-gitleaks, real-Helm, real-Compose or
-      # real-bubblewrap case that would skip fails instead.
+      # real-bubblewrap case that would skip fails instead, and pytest's summary names
+      # each skip and its reason beside the failures and errors it lists by default,
+      # whose lines the CI evidence reads failing tests from.
       - name: make ${{ matrix.target }}
         env:
+          PYTEST_ADDOPTS: ${{ matrix.target == 'test-deployment-packaging' && '-rfEs' || '' }}
           GITLEAKS_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
           HELM_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
           COMPOSE_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
