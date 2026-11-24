@@ -123,7 +123,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-buyer"
-version = "0.8.0"
+version = "0.8.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -138,7 +138,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_core_buyer-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.8.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -266,7 +266,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-contact-exchange"
-version = "0.5.1"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -278,7 +278,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_contact_exchange-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_contact_exchange-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -337,7 +337,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-delivery"
-version = "0.2.2"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -345,7 +345,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_delivery-0.2.2-py3-none-any.whl" },
+    { path = "arkhai_kit_delivery-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -435,7 +435,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.13.0"
+version = "0.13.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -488,7 +488,7 @@ requires-dist = [
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.1" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.8.0" },
     { name = "arkhai-kit-config", specifier = ">=0.5.0" },
-    { name = "arkhai-kit-contact-exchange", specifier = "==0.5.1" },
+    { name = "arkhai-kit-contact-exchange", specifier = "==0.6.0" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.3.0" },
     { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.3.0" },
     { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.1.0" },

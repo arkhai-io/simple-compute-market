@@ -18,7 +18,7 @@ from market_storefront_kit import get_storefront_container
 from .runtime import BareMetalStorefrontRuntime
 from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
 
-#: The buyer routes whose answer can carry access material, by operation, each
+#: The routes whose answer can carry private material, by operation, each
 #: with the response members that hold it. Such a route's outcome is recorded
 #: without those members, and an exact retry runs the route again, which reads
 #: afresh under current admission and is refused after an end, rather than
@@ -31,6 +31,9 @@ from core_storefront.auth import AuthenticatedPrincipal, signed_response_headers
 CREDENTIAL_CAPABLE_ROUTES: Mapping[str, frozenset[str]] = MappingProxyType({
     "bare_metal_fulfillment_access": frozenset({"host", "port", "username"}),
     "bare_metal_fulfillment_status": frozenset(),
+    "introduction_start": frozenset({"counterparty_contact"}),
+    "introduction_read": frozenset({"counterparty_contact"}),
+    "introduction_review": frozenset({"review_token"}),
 })
 
 

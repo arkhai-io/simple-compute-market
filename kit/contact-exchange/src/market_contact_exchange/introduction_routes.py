@@ -54,6 +54,7 @@ class IntroductionAgreement:
     seller_principal: Identity
     introduction_package: Mapping[str, Any]
     origin: str | None = None
+    expiration_unix: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +296,22 @@ class IntroductionRouteService:
             raise IntroductionRouteError(500, "recorded response is malformed")
         return payload
 
+    async def _private_replay(
+        self, auth: AuthorizedIntroductionRequest, agreement: IntroductionAgreement
+    ) -> Mapping[str, Any] | None:
+        """Keep failed/pending request fences; reveal successes from current storage."""
+        replay = self._replay(auth)
+        if replay is None:
+            return None
+        record = await self._callbacks.load(agreement.obligation_ref)
+        if record is None:
+            raise IntroductionRouteError(409, "introduction has not been started")
+        if record.payloads_deleted_at is not None:
+            raise self._deleted(record.payloads_deleted_at)
+        return self._projection(
+            record, viewer=auth.principal, buyer_principal=agreement.buyer_principal
+        )
+
     def _projection(
         self,
         record: IntroductionRecord,
@@ -342,9 +359,11 @@ class IntroductionRouteService:
             (agreement.buyer_principal,),
             start.model_dump(mode="json"),
         )
-        replay = self._replay(auth)
+        replay = await self._private_replay(auth, agreement)
         if replay is not None:
             return replay
+        if "delivery_policy" in agreement.introduction_package:
+            raise IntroductionRouteError(409, {"code": "delivery_policy_required"})
         # A redacted record must stop the start before anything is persisted
         # or delivered.
         existing = await self._callbacks.load(agreement.obligation_ref)
@@ -446,7 +465,7 @@ class IntroductionRouteService:
             (agreement.buyer_principal, agreement.seller_principal),
             None,
         )
-        replay = self._replay(auth)
+        replay = await self._private_replay(auth, agreement)
         if replay is not None:
             return replay
         record = await self._callbacks.load(agreement.obligation_ref)

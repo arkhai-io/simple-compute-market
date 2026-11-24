@@ -28,9 +28,10 @@ from market_settlement_runtime import (
     SettlementPublicationClause,
     SettlementRole,
 )
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from .client import ContactExchangeClient
+from .delivery_contract import ContactDeliveryConfig, DeliveryPolicy
 
 MECHANISM = "contact-exchange.v1"
 CONTACT_CONFIG_KEY = "contact"
@@ -100,6 +101,22 @@ class ContactProfile(BaseModel):
     channel: str = Field(min_length=1, max_length=_MAX_CHANNEL_CHARS)
     terms: str = Field(min_length=1, max_length=_MAX_TERMS_CHARS)
 
+    delivery_policy: DeliveryPolicy | None = None
+
+    @field_validator("delivery_policy", mode="before")
+    @classmethod
+    def no_null_policy(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("omit an absent delivery policy")
+        return value
+
+    @model_serializer(mode="wrap")
+    def omit_absent_policy(self, handler: Any) -> dict[str, Any]:
+        result = handler(self)
+        if self.delivery_policy is None:
+            result.pop("delivery_policy", None)
+        return result
+
     @field_validator("channel")
     @classmethod
     def require_trimmed_channel(cls, value: str) -> str:
@@ -126,6 +143,8 @@ class ContactOrigin(BaseModel):
         repr=False,
         json_schema_extra=_NEVER_PUBLISHED,
     )
+
+    delivery: ContactDeliveryConfig | None = Field(default=None, repr=False, json_schema_extra={**_NEVER_PUBLISHED, "secret": True})
 
     @field_validator("contact_payload")
     @classmethod
@@ -164,6 +183,8 @@ class ContactSettlementConfig(BaseModel):
         default_factory=dict,
         json_schema_extra={"roles": ["seller"]},
     )
+    delivery: ContactDeliveryConfig | None = Field(default=None, repr=False, json_schema_extra={**_NEVER_PUBLISHED, "secret": True})
+
     profiles: dict[str, ContactProfile] = Field(
         default_factory=dict,
         json_schema_extra={"roles": ["seller"]},
@@ -225,6 +246,8 @@ class ContactSettlementConfig(BaseModel):
 
     @model_validator(mode="after")
     def one_contact_form(self) -> ContactSettlementConfig:
+        if self.delivery is not None and self.origins:
+            raise ValueError("configure delivery on each origin, not globally with origins")
         if self.contact_payload and self.origins:
             raise ValueError(
                 "configure contact_payload or origins, not both: contact_payload "
@@ -245,12 +268,21 @@ class ContactSettlementConfig(BaseModel):
             for key, item in payload.items()
             if item and item in published
         )
+        if _delivery_leaks_into(self, published):
+            raise ValueError("private delivery configuration must not appear in published profiles")
         if leaked:
             raise ValueError(
                 "contact payload values must not appear in published profiles: "
                 + ", ".join(leaked)
             )
         return self
+
+
+def resolve_contact_delivery(config: ContactSettlementConfig, origin: str | None) -> ContactDeliveryConfig | None:
+    if config.origins:
+        configured = config.origins.get(origin or "")
+        return configured.delivery if configured is not None else None
+    return config.delivery
 
 
 def contact_payloads(config: ContactSettlementConfig) -> tuple[dict[str, str], ...]:
@@ -261,8 +293,18 @@ def contact_payloads(config: ContactSettlementConfig) -> tuple[dict[str, str], .
     return tuple(payloads)
 
 
-def _contact_leaks_into(config: ContactSettlementConfig, public_payload: str) -> bool:
+def _delivery_leaks_into(config: ContactSettlementConfig, public_payload: str) -> bool:
+    configured = [config.delivery, *(origin.delivery for origin in config.origins.values())]
     return any(
+        value and value in public_payload
+        for delivery in configured if delivery is not None
+        for value in (delivery.seller_route.address, delivery.smtp.host, delivery.smtp.sender,
+                      delivery.smtp.username, delivery.smtp.password)
+    )
+
+
+def _contact_leaks_into(config: ContactSettlementConfig, public_payload: str) -> bool:
+    return _delivery_leaks_into(config, public_payload) or any(
         value and value in public_payload
         for payload in contact_payloads(config)
         for value in payload.values()
@@ -428,6 +470,10 @@ def contact_option_builder(
         "terms": profile.terms,
         "claimant_principal": _principal_json(resources.get("claimant_principal")),
     }
+    if profile.delivery_policy is not None:
+        if resolve_contact_delivery(config, resources.get("origin")) is None:
+            raise ValueError("explicit delivery profile requires private delivery configuration")
+        params["delivery_policy"] = profile.delivery_policy.model_dump(mode="json")
     public_payload = json.dumps(params, ensure_ascii=False, sort_keys=True)
     if _contact_leaks_into(config, public_payload):
         raise ValueError("contact payload must not reach a published option")
@@ -456,6 +502,12 @@ def contact_buyer_compatibility(
     config = ContactSettlementConfig.model_validate(section)
     if not config.enabled:
         return False
+    params = settlement_option_params(option)
+    if "delivery_policy" in params:
+        try:
+            DeliveryPolicy.model_validate(params["delivery_policy"])
+        except ValueError:
+            return False
     return (
         settlement_option_schema(option) == MECHANISM
         and settlement_option_asset(option) is None
@@ -479,6 +531,12 @@ def contact_accepted_obligation_builder(
     selected = SettlementOption.model_validate(option)
     if selected.price_rates:
         raise ValueError("contact exchange declines scalar rates")
+    if "delivery_policy" in selected.settlement_params:
+        advertised = DeliveryPolicy.model_validate(selected.settlement_params["delivery_policy"])
+        name = selected.settlement_params.get("profile")
+        profile = config.profiles.get(name) if isinstance(name, str) else None
+        if profile is None or profile.delivery_policy != advertised:
+            raise ValueError("contact delivery policy does not match the current seller profile")
     buyer = _principal_json(context.get("buyer_principal"))
     seller = _principal_json(context.get("seller_principal"))
     expiration_unix = int(context.get("expiration_unix") or 0)
@@ -502,6 +560,8 @@ def contact_accepted_obligation_builder(
         "channel": params.get("channel"),
         "terms": params.get("terms"),
     }
+    if "delivery_policy" in params:
+        introduction_package["delivery_policy"] = DeliveryPolicy.model_validate(params["delivery_policy"]).model_dump(mode="json")
     listing_id = context.get("listing_id")
     if isinstance(listing_id, str) and listing_id:
         introduction_package["listing_id"] = listing_id
@@ -566,9 +626,32 @@ def contact_billing_basis(option: SettlementOption) -> PriceBasis:
 
 
 def create_contact_exchange_registration(
-    *, command_group: Any | None = None
+    *, command_group: Any | None = None, explicit_delivery: bool = False
 ) -> MechanismRegistration:
     """Return the explicit common-contract registration for contact exchange."""
+
+    def supported_option_builder(
+        section: BaseModel,
+        readiness: MechanismReadiness,
+        resources: Mapping[str, Any],
+        role: SettlementRole,
+    ) -> dict[str, list[Any]]:
+        config = ContactSettlementConfig.model_validate(section)
+        raw = resources.get("publication_clause")
+        if raw is not None and not explicit_delivery:
+            clause = SettlementPublicationClause.model_validate(raw)
+            selected = ContactPublicationInput.model_validate(clause.mechanism_input)
+            profile = config.profiles.get(selected.profile)
+            if profile is not None and profile.delivery_policy is not None:
+                raise ValueError("explicit delivery is unsupported by this storefront")
+        return contact_option_builder(section, readiness, resources, role)
+
+    def supported_obligation_builder(
+        section: BaseModel, option: Any, context: Mapping[str, Any]
+    ) -> AcceptedObligationArtifacts:
+        if "delivery_policy" in settlement_option_params(option) and not explicit_delivery:
+            raise ValueError("explicit delivery is unsupported by this storefront")
+        return contact_accepted_obligation_builder(section, option, context)
 
     return MechanismRegistration(
         mechanism_id=MECHANISM,
@@ -579,9 +662,9 @@ def create_contact_exchange_registration(
         project_billing=contact_billing_basis,
         preflight=contact_preflight,
         client_factory=contact_client_factory,
-        option_builder=contact_option_builder,
+        option_builder=supported_option_builder,
         buyer_compatibility=contact_buyer_compatibility,
-        accepted_obligation_builder=contact_accepted_obligation_builder,
+        accepted_obligation_builder=supported_obligation_builder,
         command_group=command_group,
         public_detail_keys=frozenset({"channels"}),
         clause_fields=(

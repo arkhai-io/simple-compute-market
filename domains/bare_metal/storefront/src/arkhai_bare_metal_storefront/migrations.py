@@ -298,6 +298,39 @@ FLOOR_IDS: tuple[str, ...] = (
 )
 """Every ID the v0.3.0 release's bare-metal storefront chain recorded."""
 
+def _clear_contact_replay_material(connection: sqlite3.Connection) -> None:
+    """Retain request ownership and outcomes while retiring cached private fields."""
+    for scheme, identifier, request_id, raw in connection.execute(
+        "SELECT principal_scheme,principal_identifier,request_id,response_body "
+        "FROM auth_replay_reservations WHERE response_body IS NOT NULL"
+    ).fetchall():
+        try:
+            body = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(body, dict) or "obligation_ref" not in body:
+            continue
+        private = set()
+        if body.get("mechanism") == "contact-exchange.v1" and body.get("revealed") is True:
+            private.add("counterparty_contact")
+        if body.get("schema_version") == 2 and "finalization_id" in body:
+            private.add("review_token")
+        if not private.intersection(body):
+            continue
+        connection.execute(
+            "UPDATE auth_replay_reservations SET response_body=? "
+            "WHERE principal_scheme=? AND principal_identifier=? AND request_id=?",
+            (json.dumps({key: value for key, value in body.items() if key not in private},
+                        ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+             scheme, identifier, request_id),
+        )
+
+
+PRIVATE_CONTACT_REPLAY = Migration(
+    "bare-metal-storefront-0021-private-contact-replay", _clear_contact_replay_material
+)
+
+
 CHAIN: Chain[sqlite3.Connection] = Chain(
     service="the bare-metal storefront",
     command=MIGRATION_COMMAND,
@@ -319,6 +352,8 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         # Deal servicing's record of each successful payment observation's instant.
         Migration("bare-metal-storefront-0019-payment-observations", create_payment_observations),
         Migration("bare-metal-storefront-0020-servicing-page-position", _servicing_page_position),
+        contact_exchange_migrations.EXPLICIT_DELIVERY,
+        PRIVATE_CONTACT_REPLAY,
     ),
     floor_ids=FLOOR_IDS,
 )

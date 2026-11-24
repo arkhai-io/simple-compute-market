@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from market_contact_exchange.migrations import EXPLICIT_DELIVERY
 from floor_database import create_floor_database, floor_ids, floor_snapshot
 from market_schema_migrations import (
     CheckState,
@@ -27,6 +28,7 @@ from market_schema_migrations import (
 )
 
 from arkhai_bare_metal_storefront.migrations import (
+    PRIVATE_CONTACT_REPLAY,
     CHAIN,
     FLOOR_IDS,
     migrate_storefront_database,
@@ -144,7 +146,7 @@ def test_a_store_opened_cursor_is_tolerated_then_dropped_for_the_kits_page_posit
     report = migrate_storefront_database(path)
 
     assert report.applied == _LATER
-    assert _LATER[-1] == "bare-metal-storefront-0020-servicing-page-position"
+    assert _LATER[-1] == PRIVATE_CONTACT_REPLAY.id
     fresh = tmp_path / "fresh.db"
     migrate_storefront_database(fresh)
     assert _snapshot(path) == _snapshot(fresh)
@@ -272,3 +274,53 @@ def test_delivery_activation_marks_a_requested_delivery_dispatched_and_strips_ac
         assert "activated_at_utc" in columns
     finally:
         connection.close()
+
+
+def test_explicit_delivery_upgrade_retains_history_and_requires_aware_rollback(tmp_path):
+    base = dataclasses.replace(CHAIN, migrations=tuple(
+        migration for migration in CHAIN.migrations if migration.id not in {EXPLICIT_DELIVERY.id, PRIVATE_CONTACT_REPLAY.id}))
+    path = tmp_path / "before-explicit-delivery.db"
+    with sqlite3.connect(path) as conn:
+        migrate(base, SqliteMigrationConnection(conn))
+        conn.execute("INSERT INTO stage_events (ts,stage,event,data) VALUES ('t','kept','kept','{}')")
+    before = _recorded(path)
+    report = migrate_storefront_database(path)
+    assert report.applied == (EXPLICIT_DELIVERY.id, PRIVATE_CONTACT_REPLAY.id)
+    assert set(_recorded(path)) == {*before, EXPLICIT_DELIVERY.id, PRIVATE_CONTACT_REPLAY.id}
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM stage_events WHERE stage='kept'").fetchone()[0] == 1
+    old_reader = check_sqlite_file(base, path)
+    assert old_reader.state is CheckState.AHEAD
+    assert set(old_reader.unknown) == {EXPLICIT_DELIVERY.id, PRIVATE_CONTACT_REPLAY.id}
+    assert check_sqlite_file(CHAIN, path).compatible
+
+
+def test_private_contact_replay_migration_preserves_fences_and_other_outcomes(tmp_path):
+    path = tmp_path / "private-replay.db"
+    base = dataclasses.replace(CHAIN, migrations=CHAIN.migrations[:-1])
+    bodies = [
+        {"obligation_ref": "a" * 64, "mechanism": "contact-exchange.v1", "revealed": True,
+         "counterparty_contact": {"email": "synthetic-private@example.invalid"}},
+        {"schema_version": 2, "obligation_ref": "a" * 64, "finalization_id": "synthetic",
+         "review_token": "synthetic-private-token"},
+        {"detail": "kept failure"},
+        {"other": "unrelated outcome"},
+    ]
+    with sqlite3.connect(path) as conn:
+        migrate(base, SqliteMigrationConnection(conn))
+        for index, body in enumerate(bodies):
+            conn.execute(
+                "INSERT INTO auth_replay_reservations (principal_scheme,principal_identifier,"
+                "request_id,request_hash,response_status,response_body,created_at) "
+                "VALUES ('ed25519','synthetic',?,'kept-hash',200,?,'kept-time')",
+                (str(index), json.dumps(body)),
+            )
+    migrate_storefront_database(path)
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute("SELECT request_id,request_hash,response_status,response_body,created_at "
+                            "FROM auth_replay_reservations ORDER BY request_id").fetchall()
+    for index, row in enumerate(rows):
+        assert (row[0], row[1], row[2], row[4]) == (str(index), "kept-hash", 200, "kept-time")
+        expected = {key: value for key, value in bodies[index].items()
+                    if key not in {"counterparty_contact", "review_token"}}
+        assert json.loads(row[3]) == expected

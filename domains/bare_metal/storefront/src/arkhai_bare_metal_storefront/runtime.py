@@ -71,7 +71,7 @@ from .config import (
     load_storefront_settings,
     packaged_settings,
 )
-from .delivery import storefront_introduction_delivery
+from .delivery import explicit_contact_delivery_worker, storefront_introduction_delivery
 from .domain_runtime import get_market_domain_contract
 from .fulfillment_service import BareMetalFulfillmentService
 from .lifecycle_steps import (
@@ -290,6 +290,7 @@ class BareMetalStorefrontRuntime:
     settlement_clients: Mapping[str, Any] = field(init=False, repr=False)
     settlement_runtime: SettlementRuntime = field(init=False, repr=False)
     contact_exchange: ContactExchangeComposition = field(init=False, repr=False)
+    contact_delivery_worker: Any = field(init=False, repr=False, compare=False)
     lifecycle: BareMetalLifecycle = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -327,6 +328,7 @@ class BareMetalStorefrontRuntime:
                 deliver=self._deliver_introduction,
             ),
         )
+        object.__setattr__(self, "contact_delivery_worker", explicit_contact_delivery_worker(self))
         object.__setattr__(
             self,
             "negotiation_runtime",

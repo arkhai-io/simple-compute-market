@@ -1,0 +1,319 @@
+{
+  "fixture_notice": "Deterministic synthetic test-only signatures and contact values. Never use these signers or values on a public network.",
+  "schema_version": 1,
+  "policy": {
+    "kind": "contact-delivery.v1",
+    "mode": "two-sided-contact",
+    "channel": "email",
+    "trigger": "explicit-finalization",
+    "recipient_authority": "each-party-own-route"
+  },
+  "options": [
+    {
+      "mechanism": "contact-exchange.v1",
+      "asset": "introduction",
+      "rates": [],
+      "params": {
+        "profile": "synthetic",
+        "channel": "email",
+        "terms": "Synthetic introduction only",
+        "claimant_principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        }
+      },
+      "option_id": "70e009f29877d86bda2a16757dd0e30ee37fbbb9a35b5f00dc671ba5a4263711"
+    },
+    {
+      "mechanism": "contact-exchange.v1",
+      "asset": "introduction",
+      "rates": [],
+      "params": {
+        "profile": "synthetic",
+        "channel": "email",
+        "terms": "Synthetic introduction only",
+        "claimant_principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "delivery_policy": {
+          "kind": "contact-delivery.v1",
+          "mode": "two-sided-contact",
+          "channel": "email",
+          "trigger": "explicit-finalization",
+          "recipient_authority": "each-party-own-route"
+        }
+      },
+      "option_id": "f3a1a2e65faed4b7f55104a50f52ff909e7c9fdb8dd41900b97a3ddf6dd8c810"
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/introductions/reviews",
+      "body": {
+        "schema_version": 2,
+        "negotiation_id": "synthetic-negotiation",
+        "obligation_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "finalization_id": "12345678-1234-4234-8234-123456789abc",
+        "contact_payload": {
+          "name\ud83d\ude00": "  Synthetic \u00c9\\\n\"\ud83d\ude00  "
+        },
+        "delivery_route": {
+          "kind": "email",
+          "address": "Buyer+Route@Example.invalid"
+        }
+      },
+      "canonical_body_utf8_hex": "7b22636f6e746163745f7061796c6f6164223a7b226e616d65f09f9880223a22202053796e74686574696320c3895c5c5c6e5c22f09f98802020227d2c2264656c69766572795f726f757465223a7b2261646472657373223a2242757965722b526f757465404578616d706c652e696e76616c6964222c226b696e64223a22656d61696c227d2c2266696e616c697a6174696f6e5f6964223a2231323334353637382d313233342d343233342d383233342d313233343536373839616263222c226e65676f74696174696f6e5f6964223a2273796e7468657469632d6e65676f74696174696f6e222c226f626c69676174696f6e5f726566223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22736368656d615f76657273696f6e223a327d",
+      "signed_request": {
+        "protocol": "arkhai.market-request-signature.v2",
+        "role": "buyer",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+        },
+        "method": "POST",
+        "operation": "introduction_review",
+        "resource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "synthetic-contact-vector-0",
+        "timestamp": 1900000000,
+        "body_hash": "8067d4615d5d94748c3b77d4db77c26fccf5a416ef149761fba54ab0aa5caaf4",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "-NPnC7798rBvj5bQiM2Z3-QqzRP6373XH65VMfrbUzqnFOpIici-jG6ncKnWBJpTU4nzgEmteWzixx5116zoBg"
+        }
+      },
+      "response_body": {
+        "detail": {
+          "code": "review_invalid"
+        }
+      },
+      "signed_response": {
+        "protocol": "arkhai.market-response-signature.v2",
+        "role": "seller",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "method": "POST",
+        "operation": "introduction_review",
+        "resource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "synthetic-contact-vector-0",
+        "timestamp": 1900000000,
+        "status": 409,
+        "body_hash": "dffd6091ca4de0c3421801925b02fae7ff67dec3b03aa782fb115e066c65339a",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "xT4G0msSiJVDG64QkeU1Q81vAkkFE2fsZdf3hlNAMcuTsbfyMsa4u6DWEPvfCKm1HOB4iE89F8vsGLAqQpYqBA"
+        }
+      }
+    },
+    {
+      "path": "/api/v1/introductions",
+      "body": {
+        "schema_version": 2,
+        "negotiation_id": "synthetic-negotiation",
+        "obligation_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "finalization_id": "12345678-1234-4234-8234-123456789abc",
+        "contact_payload": {
+          "name\ud83d\ude00": "  Synthetic \u00c9\\\n\"\ud83d\ude00  "
+        },
+        "delivery_route": {
+          "kind": "email",
+          "address": "Buyer+Route@Example.invalid"
+        },
+        "review_token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "consent": "exchange-contacts-and-deliver.v1"
+      },
+      "canonical_body_utf8_hex": "7b22636f6e73656e74223a2265786368616e67652d636f6e74616374732d616e642d64656c697665722e7631222c22636f6e746163745f7061796c6f6164223a7b226e616d65f09f9880223a22202053796e74686574696320c3895c5c5c6e5c22f09f98802020227d2c2264656c69766572795f726f757465223a7b2261646472657373223a2242757965722b526f757465404578616d706c652e696e76616c6964222c226b696e64223a22656d61696c227d2c2266696e616c697a6174696f6e5f6964223a2231323334353637382d313233342d343233342d383233342d313233343536373839616263222c226e65676f74696174696f6e5f6964223a2273796e7468657469632d6e65676f74696174696f6e222c226f626c69676174696f6e5f726566223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c227265766965775f746f6b656e223a2241414141414141414141414141414141414141414141414141414141414141414141414141414141414141222c22736368656d615f76657273696f6e223a327d",
+      "signed_request": {
+        "protocol": "arkhai.market-request-signature.v2",
+        "role": "buyer",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+        },
+        "method": "POST",
+        "operation": "introduction_start",
+        "resource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "synthetic-contact-vector-1",
+        "timestamp": 1900000000,
+        "body_hash": "2ab3aa626a13984473b47443bac10f1c248343ccab81df39b3a841df6f01a5a3",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "CDqKorgfZdRSE-mTot7E3PWkXO80kavfa7V7a1uM0xxwQ-fJz9NLTl5i9lqqfG7Mnj5javqf0S1B7Zl_DFiCBA"
+        }
+      },
+      "response_body": {
+        "detail": {
+          "code": "review_invalid"
+        }
+      },
+      "signed_response": {
+        "protocol": "arkhai.market-response-signature.v2",
+        "role": "seller",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "method": "POST",
+        "operation": "introduction_start",
+        "resource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "synthetic-contact-vector-1",
+        "timestamp": 1900000000,
+        "status": 409,
+        "body_hash": "dffd6091ca4de0c3421801925b02fae7ff67dec3b03aa782fb115e066c65339a",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "YzFjVwkGRqK35rThQXnks4utJ7mo-LgoZ0Zonxdp-7MFQ1SP2swD3OOtValnQEWGYIm3bugIIfqBx0LsnAVRDg"
+        }
+      }
+    },
+    {
+      "path": "/api/v1/introductions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/finalizations/12345678-1234-4234-8234-123456789abc",
+      "body": null,
+      "canonical_body_utf8_hex": "",
+      "signed_request": {
+        "protocol": "arkhai.market-request-signature.v2",
+        "role": "buyer",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+        },
+        "method": "GET",
+        "operation": "introduction_finalization_read",
+        "resource": "introduction-finalization:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:12345678-1234-4234-8234-123456789abc",
+        "request_id": "synthetic-contact-vector-2",
+        "timestamp": 1900000000,
+        "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "Z0dtiaWPOlPW7b94P-mCdr5vY6ak4lmbtXJH1UhSoZ5X7023DsixwlfDKhOWYqJ2teKQIXjdCs7vfm34IIJWAQ"
+        }
+      },
+      "response_body": {
+        "schema_version": 2,
+        "obligation_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "finalization_id": "12345678-1234-4234-8234-123456789abc",
+        "status": "unknown"
+      },
+      "signed_response": {
+        "protocol": "arkhai.market-response-signature.v2",
+        "role": "seller",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "method": "GET",
+        "operation": "introduction_finalization_read",
+        "resource": "introduction-finalization:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:12345678-1234-4234-8234-123456789abc",
+        "request_id": "synthetic-contact-vector-2",
+        "timestamp": 1900000000,
+        "status": 200,
+        "body_hash": "b152b8fc0186c95aa2127e618cf6efe62375e4eeb8eed1c3e4a1945bf6429e96",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "-kUjV47t0kCJxT5y8bDv3WEh21bcn8L8adrRUiUw4hKZh2IX_AvLKwiNqmrfcD8nloFOIRujkZ5FdqcAIQA6AQ"
+        }
+      }
+    },
+    {
+      "path": "/api/v1/introductions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/finalizations/12345678-1234-4234-8234-123456789abc/cancel",
+      "body": {
+        "schema_version": 2,
+        "obligation_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "finalization_id": "12345678-1234-4234-8234-123456789abc",
+        "consent": "fence-unresolved-finalization.v1"
+      },
+      "canonical_body_utf8_hex": "7b22636f6e73656e74223a2266656e63652d756e7265736f6c7665642d66696e616c697a6174696f6e2e7631222c2266696e616c697a6174696f6e5f6964223a2231323334353637382d313233342d343233342d383233342d313233343536373839616263222c226f626c69676174696f6e5f726566223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c22736368656d615f76657273696f6e223a327d",
+      "signed_request": {
+        "protocol": "arkhai.market-request-signature.v2",
+        "role": "buyer",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+        },
+        "method": "POST",
+        "operation": "introduction_finalization_cancel",
+        "resource": "introduction-finalization:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:12345678-1234-4234-8234-123456789abc",
+        "request_id": "synthetic-contact-vector-3",
+        "timestamp": 1900000000,
+        "body_hash": "50d4b39010f99bae88ea8aa38e2bd722b108a9e84220643c812f546faa705293",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "QUAC2PIMv3ZVkiog3qxRiCFUjQ3x-n-vXKu6mDolP9tHe8IzshD0SXZLk5XjT37KuCah8lT2-nPW9UzZj-qoBQ"
+        }
+      },
+      "response_body": {
+        "detail": {
+          "code": "review_invalid"
+        }
+      },
+      "signed_response": {
+        "protocol": "arkhai.market-response-signature.v2",
+        "role": "seller",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "method": "POST",
+        "operation": "introduction_finalization_cancel",
+        "resource": "introduction-finalization:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:12345678-1234-4234-8234-123456789abc",
+        "request_id": "synthetic-contact-vector-3",
+        "timestamp": 1900000000,
+        "status": 409,
+        "body_hash": "dffd6091ca4de0c3421801925b02fae7ff67dec3b03aa782fb115e066c65339a",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "TxGz2uWE0vqo7JnUzFpLWT0QMfjO1CET8XYHinMHhiT8kady4s5Q4I2mXuGIW0Ez7l1HXnSlBsaN_yUX2Jo2Bg"
+        }
+      }
+    },
+    {
+      "path": "/api/v1/introductions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/delivery",
+      "body": null,
+      "canonical_body_utf8_hex": "",
+      "signed_request": {
+        "protocol": "arkhai.market-request-signature.v2",
+        "role": "buyer",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA"
+        },
+        "method": "GET",
+        "operation": "introduction_delivery_read",
+        "resource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "synthetic-contact-vector-4",
+        "timestamp": 1900000000,
+        "body_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "1uYkxltP0tw8jpE4qztEb-RZXNsx0gLi-tovBnmi8e7W3J1S2BuyU_72NSkGPvw-uXIgW2ZZMV566pAIBv0-AQ"
+        }
+      },
+      "response_body": {
+        "detail": {
+          "code": "review_invalid"
+        }
+      },
+      "signed_response": {
+        "protocol": "arkhai.market-response-signature.v2",
+        "role": "seller",
+        "principal": {
+          "scheme": "ed25519",
+          "identifier": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "method": "GET",
+        "operation": "introduction_delivery_read",
+        "resource": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_id": "synthetic-contact-vector-4",
+        "timestamp": 1900000000,
+        "status": 409,
+        "body_hash": "dffd6091ca4de0c3421801925b02fae7ff67dec3b03aa782fb115e066c65339a",
+        "proof": {
+          "scheme": "ed25519",
+          "value": "tiKh4SDYAqABPJEefXYOj8mjAXfVJGUaJ4vOJdDpmcVRdVF8G59D_oDzd1l4aKylmcO08OmQ6-0kZi-uCSy0BQ"
+        }
+      }
+    }
+  ]
+}

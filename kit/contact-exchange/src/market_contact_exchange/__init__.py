@@ -95,9 +95,13 @@ from .settlement_config import (
     validate_contact_payload,
     validate_contact_publication_input,
 )
+from .delivery_client import ContactDeliveryClient, SyncContactDeliveryClient
+from .delivery_contract import ContactDeliveryConfig, DeliveryPolicy, FinalizationCancel, IntroductionFinalize, IntroductionReview
 from .store import SQLiteIntroductionStore
 
 __all__ = [
+    "ContactDeliveryClient", "SyncContactDeliveryClient", "ContactDeliveryConfig",
+    "DeliveryPolicy", "FinalizationCancel", "IntroductionFinalize", "IntroductionReview",
     "CONTACT_CONFIG_KEY",
     "DEFAULT_RETENTION_SECONDS",
     "DEFAULT_RETENTION_SWEEP_INTERVAL_SECONDS",

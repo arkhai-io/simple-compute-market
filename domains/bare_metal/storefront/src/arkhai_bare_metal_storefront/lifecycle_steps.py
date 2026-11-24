@@ -298,11 +298,11 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
         seconds = runtime.payment_reconciliation_interval_seconds if interval is None else interval
         composed.append(_Loop(name, route, step, interval_seconds=seconds, initial_delay_seconds=seconds))
 
-    worker = runtime.settlement_worker
+    settlement_worker = runtime.settlement_worker
 
     async def settlement_servicing_step() -> Mapping[str, Any]:
         """One sweep of the settlement worker; none without one composed."""
-        processed = await worker.run_once() if worker is not None else 0
+        processed = await settlement_worker.run_once() if settlement_worker is not None else 0
         return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
 
     composed.append(
@@ -339,6 +339,12 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
                 preview=retention.preview,
             )
         )
+    contact_worker = runtime.contact_delivery_worker
+    if contact_worker is not None:
+        composed.append(_Loop(
+            "contact_delivery", "contact-delivery", contact_worker.tick,
+            interval_seconds=5, initial_delay_seconds=5,
+        ))
     return tuple(composed)
 
 

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-bare-metal-buyer"
-version = "0.9.0"
+version = "0.9.1"
 license = "MIT"
 description = "Bare-metal buyer contribution for the core Arkhai market CLI."
 requires-python = ">=3.12,<3.14"
@@ -8,11 +8,11 @@ dependencies = [
     "arkhai-bare-metal>=0.16.0",
     "arkhai-compute>=0.3.0",
     "arkhai-core>=0.6.0",
-    "arkhai-core-buyer==0.8.0",
+    "arkhai-core-buyer==0.8.1",
     "arkhai-core-registry-client==0.13.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-alkahest>=0.9.0",
-    "arkhai-kit-contact-exchange==0.5.1",
+    "arkhai-kit-contact-exchange==0.6.0",
     "arkhai-kit-arkhai-payments==0.9.0",
     "arkhai-kit-identity==0.5.0",
     "arkhai-kit-deal-lifecycle>=0.3.0",

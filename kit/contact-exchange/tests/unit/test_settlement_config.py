@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from market_contact_exchange.fixtures.delivery import DELIVERY_CONFIG, POLICY
 from market_contact_exchange import (
     ContactExchangeClient,
     ContactSettlementConfig,
@@ -443,3 +444,30 @@ async def test_publication_without_an_origin_offers_no_introduction() -> None:
         resources={"claimant_principal": _CLAIMANT, "publication_clause": _clause()},
     )
     assert built["settlement_options"] == []
+
+
+@pytest.mark.parametrize("capable", [False, True])
+async def test_explicit_delivery_publication_requires_storefront_capability(capable):
+    registry = SettlementConfigurationRegistry((
+        create_contact_exchange_registration(explicit_delivery=capable),
+    ))
+    config = registry.resolve(_seller_raw(delivery=DELIVERY_CONFIG, profiles={
+        "modern": {"channel": "email", "terms": "Synthetic", "delivery_policy": POLICY},
+        "legacy": {"channel": "email", "terms": "Synthetic"},
+    }), role="seller")
+    readiness, = await registry.ordered_readiness(config, role="seller")
+
+    def publish(profile):
+        return registry.build_option(readiness, config, role="seller", resources={
+            "claimant_principal": _CLAIMANT, "origin": "default",
+            "publication_clause": {"mechanism": "contact-exchange.v1", "asset": "introduction",
+                                   "mechanism_input": {"profile": profile}},
+        })
+
+    assert publish("legacy")["settlement_options"]
+    if capable:
+        option, = publish("modern")["settlement_options"]
+        assert option["settlement"]["delivery_policy"] == POLICY
+    else:
+        with pytest.raises(ValueError, match="unsupported"):
+            publish("modern")

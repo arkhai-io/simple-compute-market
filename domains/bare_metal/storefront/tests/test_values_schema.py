@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft7Validator
+from market_contact_exchange.fixtures.delivery import DELIVERY_CONFIG, POLICY
 from market_config.values_schema import any_case, stale_files
 from market_delivery import RESERVED_SECTION_KEYS
 
@@ -212,3 +213,12 @@ def test_the_definition_carries_no_defaults_references_or_markers() -> None:
     for node in _walk(values_schema.storefront_config_definition()):
         if isinstance(node, dict):
             assert not {"default", "$ref", "$defs", "secret", "required"} & set(node), node
+
+
+def test_contact_delivery_is_private_and_profile_policy_is_public() -> None:
+    public = {"profiles": {"default": {"channel": "email", "terms": "Synthetic", "delivery_policy": POLICY}}}
+    assert not _refusals({"Settlement": {"contact": public}})
+    for key in ("delivery", "DELIVERY", "Delivery"):
+        for delivery in (DELIVERY_CONFIG, {"smtp": {"username": "synthetic-private-user"}}, None):
+            assert _refusals({"Settlement": {"contact": {**public, key: delivery}}})
+            assert _refusals({"Settlement": {"contact": {**public, "origins": {"synthetic": {key: delivery}}}}})

@@ -65,6 +65,11 @@ from core_storefront.models.system_models import (
 )
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from market_contact_exchange.delivery_client import REVIEW_ROUTE, FINALIZATION_ROUTE, CANCEL_ROUTE, DELIVERY_ROUTE
+from market_contact_exchange.delivery_contract import (
+    FinalizationCancel, IntroductionFinalize, IntroductionReview,
+)
+
 from market_contact_exchange import (
     DELETE_INTRODUCTION_PAYLOADS_OPERATION,
     INTRODUCTION_PAYLOADS_ROUTE,
@@ -428,13 +433,59 @@ def _introduction_service(request: Request) -> Any:
     return service
 
 
+
 @router.post("/api/v1/introductions")
 async def start_introduction(
-    body: IntroductionStart,
     request: Request,
 ) -> Mapping[str, Any]:
     try:
+        raw = await request.json()
+        model = IntroductionFinalize if isinstance(raw, dict) and "schema_version" in raw else IntroductionStart
+        body = model.model_validate(raw)
         return await _introduction_service(request).start(request, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "review_invalid"}) from exc
+    except IntroductionRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+
+@router.post(REVIEW_ROUTE)
+async def review_introduction(request: Request) -> Mapping[str, Any]:
+    try:
+        body = IntroductionReview.model_validate(await request.json())
+        return await _introduction_service(request).review(request, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "review_invalid"}) from exc
+    except IntroductionRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get(FINALIZATION_ROUTE)
+async def read_introduction_finalization(obligation_ref: str, finalization_id: str, request: Request) -> Mapping[str, Any]:
+    try:
+        return await _introduction_service(request).finalization_read(request, obligation_ref, finalization_id)
+    except IntroductionRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post(CANCEL_ROUTE)
+async def cancel_introduction_finalization(obligation_ref: str, finalization_id: str, request: Request) -> Mapping[str, Any]:
+    try:
+        body = FinalizationCancel.model_validate(await request.json())
+        if (obligation_ref, finalization_id) != (body.obligation_ref, body.finalization_id):
+            raise ValueError("path mismatch")
+        return await _introduction_service(request).cancel(request, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "review_invalid"}) from exc
+    except IntroductionRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get(DELIVERY_ROUTE)
+async def read_introduction_delivery(obligation_ref: str, request: Request) -> Mapping[str, Any]:
+    try:
+        return await _introduction_service(request).delivery_read(request, obligation_ref)
     except IntroductionRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
