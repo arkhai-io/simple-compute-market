@@ -76,11 +76,11 @@ design = ["docs/development/ROADMAP.md"]
 # review, a step's own key for that step alone. Relative paths are from the
 # checkout's root; `~` is the home directory.
 # uv's managed Pythons and tools, the cluster client's cache, the cloud CLI's token
-# refresh, Docker's client configuration, and npm's cache for the OpenSpec command
-# `npx` runs: the suites, builds, checks and deployments the writing steps and
-# validation's new attempts run.
+# refresh, Docker's client configuration, npm's cache for the OpenSpec command
+# `npx` runs, and Ansible's local state the Ansible suite writes: the suites, builds,
+# checks and deployments the writing steps and validation's new attempts run.
 writable.common = ["~/.local/share/uv", "~/.kube/cache", "~/.config/gcloud", "~/.docker",
-                   "~/.npm"]
+                   "~/.npm", "~/.ansible"]
 # Design and planning keep this repository's documentation under `docs/` current.
 writable.design = ["docs/"]
 writable.plan = ["docs/"]
