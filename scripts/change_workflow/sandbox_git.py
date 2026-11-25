@@ -72,7 +72,7 @@ def refusal(arguments: Sequence[str], environ: Mapping[str, str],
     if (environ.get(UNATTENDED_RUN) and not environ.get(GUARDED_PUSH)
             and subcommand(arguments, name) == PUSH):
         return (f"git push is refused during an unattended {environ[UNATTENDED_RUN]} run: a "
-                "step pushes its change's branch through `scripts/change-workflow push`, the "
+                "step pushes its change's branch through `change-workflow push`, the "
                 "guarded push, and no other push leaves the checkout")
     return None
 

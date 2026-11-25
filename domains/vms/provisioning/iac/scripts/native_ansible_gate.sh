@@ -7,8 +7,8 @@
 #
 # `make test-provisioning-iac-native` runs it in the built provisioning image,
 # whose Ansible and collections are the ones that run these roles. It needs only
-# the standard library and PyYAML beside that Ansible, and writes nothing in this
-# tree.
+# the standard library, and the PyYAML and Jinja2 that Ansible brings, and writes
+# nothing in this tree.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -28,7 +28,10 @@ import unittest
 
 # The modules that run a shipped task through ansible-playbook. Each skips
 # without a supported Ansible and its callback; here a skip is a failure.
-NATIVE = ["test_vm_relay_roles.py", "test_host_diagnostics.py"]
+NATIVE = [
+    "test_vm_relay_roles.py", "test_host_diagnostics.py", "test_guest_policy.py",
+    "test_guest_convergence.py", "test_vm_management_contracts.py",
+]
 
 suite = unittest.TestSuite(
     unittest.defaultTestLoader.discover("tests", pattern=name, top_level_dir="tests")

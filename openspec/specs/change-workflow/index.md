@@ -151,8 +151,9 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### The command
 
-- [CW-r3ka](spec.md#requirement-cw-r3ka-the-engine-is-reached-through-one-command) — every engine operation is a `scripts/change-workflow` subcommand acting on the enclosing Git repository; never imported.
+- [CW-r3ka](spec.md#requirement-cw-r3ka-the-engine-is-reached-through-one-command) — every engine operation is a subcommand of `change-workflow`, installed on the path, acting on the enclosing Git repository; never imported.
 - [CW-h8vm](spec.md#requirement-cw-h8vm-make-targets-are-a-convenience-outside-the-surface) — the shipped make fragment is a convenience whose targets and variables carry no compatibility promise.
+- [CW-dvz5](spec.md#requirement-cw-dvz5-the-command-prints-the-installed-fragments-path) — `change-workflow fragment` prints the installed make fragment's path, for a `Makefile` to include; the fragment stays outside the promise, `fragment` public.
 
 ### Hooks
 
@@ -161,12 +162,13 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-u4pc](spec.md#requirement-cw-u4pc-the-engine-holds-which-steps-may-run-each-hook) — the engine's hook table says which step may run each hook; the unattended marker names the step, and `run` refuses others.
 - [CW-y6mj](spec.md#requirement-cw-y6mj-a-pre-commit-hook-changes-nothing) — `pre-commit`, its defaults included, reports and changes nothing, so a review may run it.
 - [CW-e1sg](spec.md#requirement-cw-e1sg-a-commits-hooks-follow-from-the-paths-it-changes) — a commit touching a path outside the inert paths runs the functional hooks before `pre-commit`; a cleanup's tracked file is committed alone.
-- [CW-c8lw](spec.md#requirement-cw-c8lw-a-hooks-default-checks-run-unless-disabled-by-name) — `pre-commit`'s default checks run before its declared commands unless `defaults.disable` names one with a reason.
+- [CW-c8lw](spec.md#requirement-cw-c8lw-a-hooks-default-checks-run-unless-disabled-by-name) — `pre-commit`'s default checks — `index`, `tasks`, `skills`, `spec-index`, `decisions`, and the strict `openspec` validation — run before its declared commands unless `defaults.disable` names one with a reason; `check change` runs them alone.
 - [CW-v2dq](spec.md#requirement-cw-v2dq-a-command-receives-its-values-through-placeholders) — a command takes the workflow's values as shell-quoted placeholders, `{tree}`, `{commit}`, `{kind}`, and `{inputs}` among them, each available only where it is defined; the machine's through the environment.
 - [CW-h3ks](spec.md#requirement-cw-h3ks-each-step-has-a-hook-before-and-after-it) — a repository may declare `before-<step>` and `after-<step>`, with no defaults; a review's runner runs a review's, and an interactive review runs none.
 - [CW-b7fl](spec.md#requirement-cw-b7fl-a-failing-hook-before-a-step-informs-its-session) — a failing `before-` hook never prevents its step's session, which reads the failure from its inputs; a hook the check refuses refuses the step.
 - [CW-a4fl](spec.md#requirement-cw-a4fl-a-failing-hook-after-a-step-resumes-its-session-once) — an `after-` hook runs after a finished outcome; on failure the session resumes once, then the run ends as a question; a failing `after-review` goes to the owner at once.
 - [CW-i9np](spec.md#requirement-cw-i9np-a-runs-inputs-reach-its-session-through-a-directory) — each run has an inputs directory, `{inputs}` to its hooks and named on its log line, holding `status.md`, hook logs, and messages the session reads in full.
+- [CW-368t](spec.md#requirement-cw-368t-the-specification-index-check-reports-what-a-changes-deltas-create) — `check spec-index <change> --json` reports, beside its result, the specification paths the change's deltas create, so a repository's own checks need not read the deltas.
 
 ### The orchestrating session
 
@@ -210,6 +212,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-k6qa](spec.md#requirement-cw-k6qa-a-step-started-through-the-command-opens-the-log) — `start` creates the log and marks its format before any step runs; nothing routes on that line.
 - [CW-lyr4](spec.md#requirement-cw-lyr4-every-line-appended-to-the-log-carries-its-format) — every appended line carries the format, and appending to a log with a newer line is refused.
 - [CW-qj77](spec.md#requirement-cw-qj77-records-of-an-older-format-are-brought-to-the-owner-with-the-conversion) — older-format records, or records without a log, go to the owner with `convert`, never read as current.
+- [CW-d867](spec.md#requirement-cw-d867-each-log-line-records-the-workflow-version) — every appended line carries `workflow`, the engine's version; informational, routing nothing and moving no format.
 
 ### The conversion
 
@@ -248,7 +251,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 - [CW-x3pf](spec.md#requirement-cw-x3pf-the-engine-launches-each-unattended-step-inside-its-sandbox) — the engine starts every unattended step's harness inside an OS sandbox it owns, bubblewrap on Linux, leaving the network, the environment but `TMPDIR`, and reads but the host's `/tmp` as they are, and ending it with the wrapper.
 - [CW-m8wq](spec.md#requirement-cw-m8wq-each-step-writes-only-its-scope) — each step writes only its scope, with a private `/tmp`, its adapter's state, `~/.cache`, and the repository's additions; the review writes nothing it reviews; a file or pattern entry mounts each match's directory.
-- [CW-r6kd](spec.md#requirement-cw-r6kd-no-step-writes-the-protected-paths) — the configuration, `.git/config`, the engine's `git`, and the adapter's and repository's protected paths are mounted read-only where their links lead, created first when absent, and never granted; their names are not guarded.
+- [CW-r6kd](spec.md#requirement-cw-r6kd-no-step-writes-the-protected-paths) — the committed and local configuration, `.git/config`, the engine's `git`, the installed distribution, the user skill directories, and the adapter's and repository's protected paths are mounted read-only where their links lead, created first when absent, and never granted; their names are not guarded.
 - [CW-v5ny](spec.md#requirement-cw-v5ny-where-the-sandbox-cannot-run-a-step-runs-unconfined-and-says-so) — where the probe fails, a step runs unconfined, warned and recorded as `unconfined: true`, the owner told, held only by the checks after it.
 - [CW-w3oa](spec.md#requirement-cw-w3oa-a-runs-refusals-come-from-its-own-events) — the adapter reads the sandbox's refused writes from the run's events, and the wrapper records them, and the pushes the sandbox's `git` refused, as `refusals`; a step treats such an error as outside its scope.
 - [CW-t6mb](spec.md#requirement-cw-t6mb-a-harnesss-adapter-states-what-the-engine-needs-of-it) — each harness's adapter states its launch inside the sandbox, its state and protected paths, its reading of refusals and denials, its steps, and its command rules; the engine reaches a harness only through it.
@@ -300,9 +303,10 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ### Skills from one source
 
-- [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — each skill has one source every harness loads; no per-harness copies, and every harness entry resolves.
+- [CW-d8de](spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness) — the workflow's skills are the installed distribution's, loaded from each harness's user skill directory with no project entry of their names, an unattended Claude Code run whose harness did not load one stopped before its first turn; a repository's own skill has one source every harness loads, and `check skills` holds both.
 - [CW-s7rq](spec.md#requirement-cw-s7rq-a-skill-restates-guidance-no-stricter-than-its-source) — a skill restates guidance briefly where its step applies it, citing it and never stricter; a stricter need amends the guidance.
-- [CW-n8tr](spec.md#requirement-cw-n8tr-the-workflows-skills-name-no-repositorys-targets-or-paths) — a target or path a workflow skill names is the workflow's own or an owned exemption, or a test fails naming the skill.
+- [CW-n8tr](spec.md#requirement-cw-n8tr-the-workflows-skills-name-no-repositorys-targets-or-paths) — a target or path a workflow skill names is the workflow's own or an owned exemption, or a test fails naming the skill; a skill cites guidance by section name and the specification by id.
+- [CW-1rhd](spec.md#requirement-cw-1rhd-installed-skills-carry-the-engines-version) — `install` writes each harness's user skills stamped with the version and a manifest of what it wrote; every other subcommand of an installed engine refuses stale or missing skills, naming `install`.
 
 ## 5. The public surface
 
@@ -310,19 +314,22 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 - [CW-5qne](spec.md#requirement-cw-5qne-the-engines-interfaces-are-tiered) — interfaces are public, provisional, or internal; subcommands, outputs, and skill names default public; report prose promises nothing.
 - [CW-m7fk](spec.md#requirement-cw-m7fk-the-commands-exit-statuses-fall-in-three-categories) — every subcommand exits 0 on success, 1 on refusal or failed check, 2 on usage error.
+- [CW-5kl9](spec.md#requirement-cw-5kl9-the-workflow-ships-as-one-versioned-distribution) — the engine, skills, guidance, specification, handbook, schema, and fragment ship as one distribution of one version, which `--version` prints.
+- [CW-lm42](spec.md#requirement-cw-lm42-the-workflows-own-documents-are-found-beside-the-engine) — the engine finds its own documents in its distribution, `config --json` naming each by role; skills cite its guidance by section and its specification by id, and its test fails on one it lacks.
 
 ### Compatibility
 
 - [CW-c2tw](spec.md#requirement-cw-c2tw-compatibility-is-judged-by-semantic-versioning) — public-interface changes are versioned semantically, and a workflow proposal names each public interface it changes.
 - [CW-9fbu](spec.md#requirement-cw-9fbu-the-graphs-vocabulary-is-closed) — node names, review kinds, and target shape are closed; unknown ones are reported by name, never routed on.
+- [CW-f8yy](spec.md#requirement-cw-f8yy-a-repository-declares-the-workflow-versions-it-accepts) — the committed `[workflow] version` holds comma-separated version specifiers over release numbers, read before the rest; every subcommand reading the configuration refuses an installed version outside it, but `install` and `--version`.
 
 ### A repository's configuration
 
-- [CW-f3qk](spec.md#requirement-cw-f3qk-one-configuration-file-states-what-the-workflow-assumes) — one file, `.agents/workflow.toml`, states the commands, documents, and values the workflow assumes; nothing Git or the invocation supplies.
+- [CW-f3qk](spec.md#requirement-cw-f3qk-one-configuration-file-states-what-the-workflow-assumes) — the committed `.agents/workflow.toml` and the checkout's local `.agents/workflow.local.toml` state the commands, documents, and values the workflow assumes; nothing Git or the invocation supplies.
 - [CW-w8ne](spec.md#requirement-cw-w8ne-the-configuration-is-checked-whenever-it-is-read) — every reader checks the whole file, refusing an unknown key, a wrong type, or an unavailable placeholder by name.
 - [CW-t5hz](spec.md#requirement-cw-t5hz-a-missing-required-field-refuses-only-the-steps-that-need-it) — a missing required field refuses only the steps needing it, before launch; an explicit empty value is declared.
 - [CW-n7ra](spec.md#requirement-cw-n7ra-the-repositorys-inert-paths) — the repository's inert paths name what validation would prove nothing about; with none declared, `openspec/` and every Markdown file, and an empty declaration makes none inert.
-- [CW-l7hn](spec.md#requirement-cw-l7hn-a-steps-documents-to-load-come-from-the-configuration) — a step loads `load.common` and `load.<step>` through `config load`, an entry ending in `/` expanding to its Markdown files and refused when it yields none; the post-compaction hook re-reads `load.common`.
+- [CW-l7hn](spec.md#requirement-cw-l7hn-a-steps-documents-to-load-come-from-the-configuration) — a step loads the engineering guidance beneath the pointer, the installed workflow guidance, then `load.common` and `load.<step>`, through `config load`, an entry ending in `/` expanding to its Markdown files and refused when it yields none; the post-compaction hook re-reads `config load common`.
 - [CW-i2we](spec.md#requirement-cw-i2we-the-openspec-cli-runs-through-the-configured-command) — the OpenSpec validation and archive run through `openspec.command`, or `openspec` on the path.
 - [CW-h2zt](spec.md#requirement-cw-h2zt-a-repository-extends-a-steps-scope-in-its-configuration) — `[sandbox]` adds writable paths per step or for every step, the review taking only those outside its checkout, and protected paths; the check refuses a writable path at or under a protected one, as written or where its links lead.
 - [CW-o6kc](spec.md#requirement-cw-o6kc-the-configurations-resolution-is-listed) — `config` lists how every field resolved, each evidence kind's guide among them, and each step's resolved scope with each path's source; `config --json` the same as structured output.
@@ -331,19 +338,24 @@ meaningful order; [`README.md`](README.md) is the readable description.
 - [CW-g2rs](spec.md#requirement-cw-g2rs-a-guide-restates-nothing-the-configuration-holds) — an evidence kind's guide restates none of its configuration entry, held by review.
 - [CW-k7gd](spec.md#requirement-cw-k7gd-an-evidence-kind-has-a-guide-the-steps-read) — each kind names a non-empty guide the steps handling it read; a kind without one is refused by every reader.
 - [CW-c5nt](spec.md#requirement-cw-c5nt-a-skill-names-a-contradiction-it-notices-and-follows-its-own-text) — a guide or message may add to or narrow a skill; a skill names a contradiction it notices and follows its own text.
+- [CW-sv3u](spec.md#requirement-cw-sv3u-the-installer-writes-a-checkouts-local-configuration) — run in a checkout with none, `install` writes the local configuration from the repository's template, or a skeleton naming each required field; it never overwrites one, an empty file counting as none.
+- [CW-4pm4](spec.md#requirement-cw-4pm4-settings-developers-may-vary-live-in-the-local-configuration) — the engineering pointer, the models, and added writable paths live in the gitignored local file, each key in one file but added writable paths; with none, a step refuses while `check config` and `config --json` report and succeed.
 
 ### The repository's guidance
 
 - [CW-g7lt](spec.md#requirement-cw-g7lt-every-guidance-file-carries-one-layer-tag) — every guidance file carries one layer tag, engineering, workflow, or repository, and other tags from its layer's vocabulary or a lower one's.
-- [CW-d2rw](spec.md#requirement-cw-d2rw-guidance-never-links-to-a-higher-layer) — a guidance file never links to one tagged with a higher layer.
+- [CW-d2rw](spec.md#requirement-cw-d2rw-guidance-never-links-to-a-higher-layer) — a guidance file never links to one tagged with a higher layer; workflow guidance names the engineering guidance it relies on by section name, never by path.
 - [CW-p9sa](spec.md#requirement-cw-p9sa-guidance-sits-beside-the-system-it-pertains-to) — repository guidance for one system sits beside its specification, spanning several in the cross-system documents; closeout checks placement.
 - [CW-x4ex](spec.md#requirement-cw-x4ex-exceptions-to-shared-guidance-are-declared-beside-what-they-apply-to) — an exception to shared guidance is a `selects` or `overrides` row beside its component, or in the root guidance when it spans systems.
 - [CW-n6dm](spec.md#requirement-cw-n6dm-directories-carry-no-meaning-to-the-workflow) — a guidance file's layer and tags come from its frontmatter, never its directory.
 - [CW-r8cg](spec.md#requirement-cw-r8cg-a-step-reads-the-guidance-beside-a-capability) — every other Markdown file in a capability's directory is its guidance, read wherever its specification and companion are.
+- [CW-hu0z](spec.md#requirement-cw-hu0z-the-engineering-guidance-is-reached-through-a-pointer) — the local `[guidance] engineering` names a directory or `none` with a reason; `config load` prints its Markdown files first, and a `load` entry overlapping it is refused.
+- [CW-7x0z](spec.md#requirement-cw-7x0z-skills-cite-engineering-guidance-by-section-name) — skills cite engineering guidance by section name, never a file; `check config` reports a cited name heading no section, or several, and refuses neither.
 
 ### What an adopting repository provides
 
 - [CW-m4ps](spec.md#requirement-cw-m4ps-an-adopting-repository-provides-the-workflows-roles) — the workflow describes each configuration field and each role outside it; a test fails on a target or path the make fragment names that both the statement and the configuration omit.
+- [CW-ora1](spec.md#requirement-cw-ora1-the-workflows-roles-are-structured-output) — `config --json` lists `roles`, each with the fields that provide it; the distribution's test holds the companion's table of roles to it.
 
 ## Retired ids
 

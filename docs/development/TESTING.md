@@ -249,10 +249,34 @@ whose `now` is lane time and whose sleeps park at a gate a stage releases one
 interval at a time, which paces every wait `buy` makes. The factories are
 replaced in the harness's process, so nothing test-only ships with the CLI.
 
-The rate rows and the watchdog cases are Compose-lane evidence against the lane
-doubles, labelled lane-double evidence, never live evidence: they set injected
-lane time and call the payments double's controls, so off a Compose lane's
-injected lane time and doubles they are blocked skips.
+The recurring purchase's buyer end and the rate rows' endings assert on the
+payments snapshot through one assertion per output in
+`e2e-tests/tests/e2e/roles/helpers/producer_assertions.py`, which names the fields
+it compares exactly, by relation, or not at all; the
+[live verification](#live-verification) scenarios share them.
+
+The VM lane also runs a dispute on a running rate deal, `e2e_vm_rate_dispute`, two
+modules under `e2e-tests/tests/e2e/roles/scenarios/vms/rate_dispute/`, each on a
+rate deal of its own sharing the recurring purchase's stages through its accepted
+money, with lane time a minute into the second period so the first period's
+earnings are held. In the seller's filing the storefront's administrator ends
+delivery as a failure, and the storefront files `delivery_end` as the payee; a
+mediation-double rule rules it as the dispute authority documents a mechanical
+ruling — a delivery end, a `stop` returning its period, whose reversal of the
+earnings since the end follows it, and the premature-stop `penalty`, with no
+`reverse` of its own. In the buyer's contested case the buyer files through the
+mediation kit's dispute adapter in the harness, the storefront contests, and an
+operator decision rules a `stop` returning its period and a `reverse`. Each reads
+the dispute authority's signed record and the payments snapshot and asserts on
+both through its row's assertion in the same module, and shows the storefront
+recording the authority's stop as an end classified `ruling` with no filing of its
+own, the payer's returns, the teardown and, once the case closes, the seller's
+list reading the deal `ended` with no open extension.
+
+The rate rows, the watchdog cases and the rate-deal disputes are Compose-lane
+evidence against the lane doubles, labelled lane-double evidence, never live
+evidence: they set injected lane time and call the doubles' controls, so off a
+Compose lane's injected lane time and doubles they are blocked skips.
 `e2e-tests/tests/unit/test_recurring_purchase_stages.py` holds the recurring
 purchases, the rate rows and the watchdog modules to their stage orders, and a
 row setting lane time past its part's first reservation to reserving first.
@@ -537,12 +561,55 @@ that holds it (`admin_credential_setting: seller.admin_credential`). A run whose
 profile has no `lane_time` section, a hosted target's, reads no status and has no
 lane time. A stage reaches an instant through `LaneTime.reach`: an injected run
 sets lane time there; a wall run — the real-provisioning lane, a run against hosted
-authorities, or the local Helm release — waits only for an instant the deal's
-Agreement fixes (`reach_agreement_instant` in `compute_deal_stages.py`), and a stage
-needing any other instant is a blocked skip naming the wall-time target, or that
-the run has no lane time where its profile names none. The
+authorities, or the local Helm release — waits, bounded, only for an instant the
+scenario's own data fixes, such as the Agreement's start or that start plus an
+offset the scenario chose (`reach_agreement_instant` in `compute_deal_stages.py`,
+and `reach_lane_instant` in `recurring_purchase_stages.py` with
+`fixed_by_agreement`), as the live buyer's stop waits a minute into its deal's
+first period, or for one an authority recorded, in a signed record the stage read,
+as the effect of the scenario's own request (`recorded_by_authority`), such as a
+preemption's effective instant or the funded boundary. A wall run also polls a live
+producer for an effect of the scenario's own request, bounded by the producer's own
+schedule plus the run's poll bound, as the live dispute scenarios wait for the
+payments authority to hold the first period's earnings through that period's end
+and the poll bound after it. A stage needing any other instant is a blocked skip
+naming the wall-time target, or that the run has no lane time where its profile
+names none. The
 hold-passed dispute module is the one that sets lane time days ahead, past a once
 part's hold.
+
+#### Live verification
+
+The live verification scenarios are external-topology scenarios in the live
+verification form
+([`system-tests.md`, "Locally verifiable and external-topology scenarios"](../guidance/engineering/system-tests.md#locally-verifiable-and-external-topology-scenarios)):
+each extends a lane row, runs its shared stages against a hosted authority on wall
+time until the input its lane twin gives the double, gives the live authority that
+input through the same client code, polls the authority's signed output, bounded,
+and asserts on it through the lane twin's shared assertion in
+`e2e-tests/tests/e2e/roles/helpers/producer_assertions.py`; a different output fails
+the observation, and no stage runs after it. VM's are `e2e_vm_live_rate_servicing`,
+twins of the recurring purchase's buyer end and the rate rows — the buyer's stop,
+funds running out, a spot preemption and the term end — and `e2e_vm_live_dispute`,
+twins of the rate-deal disputes — the seller's filing and the buyer's contested
+case, whose ruling only a topology's ruling policy makes. They run on mock
+provisioning, since they prove the payment and dispute authorities, not delivery.
+
+Their markers are in no lane: the pipeline proves their lane twins, and a deployment
+runs them through `make -C e2e-tests test-module` against a topology it prepares.
+Each module's topology requirements are prose beside its description in
+[`e2e-tests/README.md`, "Live verification"](../../e2e-tests/README.md#live-verification),
+naming no infrastructure: what it proves, its provisioning mode, the authorities and
+their modes, its accounts and starting balances, any ruling policy, the run settings
+it reads, and the cleanup and balance reset its caller owes between runs. A mode
+gets a scenario of its own only where it makes the authority run different code, so
+the payments service's live and test payout delays share one. A requirement the
+harness can read is checked before a module buys anything, and one only the deal
+shows where the deal shows it; each unmet requirement is a blocked skip naming it,
+leaving the observations needing it unproven. Each module labels its evidence live
+with its provenance, and the deployment records a sanitized summary per observation
+— made, failed or unproven — with raw logs and records kept in its own storage; a
+change's summary is under `docs/attachments/<change>/`.
 
 #### Release-image mode
 
@@ -619,6 +686,11 @@ relay identifier. Unknown or foreign fields fail by name; version 1 is refused
 with conversion instructions. A relayed run requires an enabled relay with a
 configured token and active grant key before taking holds or registering supply.
 The target contains no private key or relay secret.
+A VM host may state its management SSH public key, which the lane registers as
+the host's pin; without it the host must already hold a pin, and the lane
+refuses one with neither before declaring capacity, naming the field. It never
+captures the key a host presents
+([test-compatibility architecture](../../openspec/specs/test-compatibility/architecture.md#ordinary-arkhai-purchase-evidence)).
 Without the profile every stage skips naming it, and nothing is written to the
 stack.
 
@@ -683,6 +755,23 @@ refusal, ordinary expiry/release, closed access and released/quarantined relay
 holdings require a configured real host. The module belongs to no pipeline lane;
 without its target it skips before any holds or supply writes. Unit and mock
 pipeline results do not substitute for this physical qualification.
+
+`e2e_vm_guest_isolation`
+(`e2e-tests/tests/e2e/roles/scenarios/vms/test_vm_guest_isolation.py`), also in
+no lane, proves VM guest isolation on the same VM target. It subclasses
+`e2e_vm_real_provisioning`'s stages and fixtures, so it makes the same two deals
+and shares their recovery and teardown, and adds fourteen stages while both
+guests run and the first holds its heartbeat. Its guest probes run in each guest
+as its buyer; its host-side stages restart libvirtd, reload UFW, read the guest
+policy's counters, plant the first guest unconverged and run the host kit's
+convergence command through an operator route the target's optional
+`guest_isolation` section names, skipping naming it without one. It reports each
+of its observations, O1 to O9, as made, failed or unproven through the
+qualification modules' helper
+([test-compatibility, "The real-host proof of guest isolation"](../../openspec/specs/test-compatibility/architecture.md#the-real-host-proof-of-guest-isolation)).
+Its unit tests run its judgements over sample host output and pytest over the
+module, collected and blocked without a target; no lane runs its probes against a
+real kernel.
 
 The real-provisioning modules and the qualification modules below share the
 target's resource and adopt its sole compatible open listing, retaining closed
@@ -819,7 +908,11 @@ failed check fails lane setup by name before any scenario.
 **The lanes' mediation target.** Every lane also runs the mediation double,
 `tools/mediation-lane-double`, at `https://mediation-double:8443` under the same
 lane CA: it reproduces the dispute authority's API mechanics and rules a case
-only when a rule says so
+only when a rule or operator decision says so, then executes the ruling's effects
+at the payments double — a `reverse`; a `stop` through the part's `chosen` entry
+as its own account, followed, when the stop's time has passed, by its reversal of
+the earnings since; and a `penalty` as reversals of what the parts still hold —
+and refuses an `award`
 ([test-compatibility, "The in-lane mediation double"](../../openspec/specs/test-compatibility/architecture.md#the-in-lane-mediation-double);
 its [README](../../tools/mediation-lane-double/README.md) states its deviation
 from its producer). The lanes' registries recommend its identity, which sellers and

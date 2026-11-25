@@ -334,6 +334,24 @@ def test_a_write_inside_the_scope_succeeds_and_one_outside_fails(checkout: Path)
 
 
 @needs_bwrap
+def test_an_implementation_run_edits_the_local_configuration(checkout: Path) -> None:
+    """CW-r6kd's "An implementation run edits the configuration", for the local file:
+    the write fails, as it does for the committed one, and a local file absent at
+    launch is created empty and read-only, so the run cannot write one either."""
+    (checkout / ".agents/workflow.local.toml").write_text("[models]\n", "utf-8")
+    found = _scope("implement", checkout)
+
+    written = _run(found, "echo y > .agents/workflow.local.toml", checkout)
+
+    assert "Read-only file system" in written.stderr
+    assert (checkout / ".agents/workflow.local.toml").read_text("utf-8") == "[models]\n"
+    (checkout / ".agents/workflow.local.toml").unlink()
+    created = _run(found, "echo y > .agents/workflow.local.toml", checkout)
+    assert created.returncode != 0
+    assert (checkout / ".agents/workflow.local.toml").read_text("utf-8") == ""
+
+
+@needs_bwrap
 def test_a_protected_file_cannot_be_written_or_replaced(checkout: Path) -> None:
     found = _scope("implement", checkout)
 
@@ -476,6 +494,36 @@ def test_codex_runs_in_the_reviews_scope(checkout: Path) -> None:
     assert state.returncode == 0, state.stderr
     assert "Read-only file system" in configuration.stderr
     assert (home / ".codex/config.toml").read_text("utf-8") == ""
+
+
+@needs_bwrap
+def test_a_step_edits_an_installed_skill_or_the_installed_engine(checkout: Path) -> None:
+    """CW-r6kd's "A step edits an installed skill" and "A step edits the installed
+    engine": inside Claude Code's writable `~/.claude`, its user skill directory stays
+    read-only, and the engine's installed package, beneath a writable path the
+    repository grants, stays read-only too."""
+    home = checkout.parent / "home"
+    skill = home / ".claude/skills/change-design/SKILL.md"
+    package = home / ".local/share/uv/tools/arkhai-change-workflow/site/change_workflow"
+    for path in (skill, package / "cli.py"):
+        path.parent.mkdir(parents=True)
+        path.write_text("x\n", "utf-8")
+    adapter = adapters.ADAPTERS["claude"]
+    found = scope.resolve("implement", checkout, inert_paths=INERT, home=home,
+                          adapter_writable=adapter.state, adapter_protected=adapter.protected,
+                          writable=("~/.local/share/uv",), installed=(str(package),))
+
+    state = _run(found, f"echo x > {home}/.claude/history.jsonl", checkout)
+    edited = _run(found, f"echo y > {skill}", checkout)
+    added = _run(found, f"mkdir {home}/.claude/skills/change-extra", checkout)
+    engine = _run(found, f"echo y > {package}/cli.py", checkout)
+    cache = _run(found, f"echo x > {home}/.local/share/uv/entry", checkout)
+
+    assert (state.returncode, cache.returncode) == (0, 0), (state.stderr, cache.stderr)
+    for refused in (edited, added, engine):
+        assert refused.returncode != 0
+        assert "Read-only file system" in refused.stderr
+    assert skill.read_text("utf-8") == (package / "cli.py").read_text("utf-8") == "x\n"
 
 
 @needs_bwrap

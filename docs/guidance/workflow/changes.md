@@ -53,6 +53,15 @@ the current branch is not working that change: the edit lands with the current
 change. A prerequisite — a change this one must wait for — is proposed apart, since
 it must land first (`change-workflow`'s CW-dtpz).
 
+## A change cuts no release
+
+Creating a release is independent of any change. A change neither cuts nor names a
+release, and declares nothing in production: production is what the repository's
+latest release carries. A change's documents describe the system as it stands, and
+what it ships is in production once a release carries it. A change whose acceptance
+seems to need a release, such as a validated release candidate, states what it ships
+instead and leaves the release to whoever creates releases.
+
 ## Open questions and prescribed tasks
 
 An item may not appear under a change's `## Open questions` while a non-decision
@@ -95,7 +104,7 @@ an unowned gap where no change owns its area
 proportion, not a rule that changes stay narrow, and growth that unifies behaviour
 the architecture wants shared, composed from one component rather than handled
 differently in two places
-([Composition from one component](../engineering/implementation.md#composition-from-one-component)),
+(the engineering guidance's section "Composition from one component"),
 is not scope creep. A defect fixed outside the stated
 scope is recorded where the change's reviewers will see it: in the task notes, or in
 the triage record.

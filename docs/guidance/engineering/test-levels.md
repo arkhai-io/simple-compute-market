@@ -42,7 +42,7 @@ test doubles it at the point the codebase's own code wraps that boundary, not de
 Integration takes three forms, each named by what it runs:
 
 - **Application integration** drives the running application in process, through
-  its typed client ([Integration tests](integration-tests.md)).
+  its typed client ([Application integration tests](integration-tests.md)).
 - **Library integration** drives a library's public API against the real storage it
   owns — a real embedded database, say — with collaborators it does not own
   injected, and no application. A library has no application, so this is what
@@ -74,7 +74,7 @@ check that writes state belongs in an integration test instead.
 
 **What they cover:** cross-service contracts — scenarios that need two or more
 services to interact over the network to produce a meaningful result
-([System tests](system-tests.md)).
+([System test scenarios](system-tests.md)).
 
 **What they do not cover:** anything already covered by the three levels above.
 These tests are expensive to run and brittle to maintain; they are minimal in count

@@ -117,6 +117,8 @@ if step.get("host_key"):
         lines.append(f"{name} ssh-ed25519 {step['host_key']}")
         known.write_text("\\n".join(lines) + "\\n")
 
+if step.get("echo_stdin"):
+    sys.stdout.write(sys.stdin.read())
 sys.stdout.write(step.get("stdout", ""))
 sys.stderr.write(step.get("stderr", ""))
 sys.exit(step.get("rc", 0))
@@ -273,6 +275,28 @@ def test_a_connection_that_never_succeeds_fails_at_the_bound(
         session.run(ENDPOINT, session.new_key("buyer"), "true")
     assert clock.now >= 60
     assert len(fake_ssh.calls()) == 60 // RETRY_INTERVAL_SECONDS + 1
+
+
+def test_standard_input_reaches_the_command_on_a_retried_attempt_and_is_in_no_argument(
+    session: SshSession, fake_ssh
+):
+    fake_ssh.plan(
+        {"rc": 255, "stderr": "Connection refused"},
+        {"host_key": HOST_KEY, "echo_stdin": True},
+    )
+    assert session.run(ENDPOINT, session.new_key("buyer"), "cat", stdin="example-secret\n") == \
+        "example-secret\n"
+    calls = fake_ssh.calls()
+    assert len(calls) == 2
+    assert not any("example-secret" in argument for argv in calls for argument in argv)
+
+
+def test_standard_input_is_in_no_failure_the_command_raises(session: SshSession, fake_ssh):
+    fake_ssh.plan({"host_key": HOST_KEY, "rc": 1, "stderr": "sudo: 1 incorrect password attempt"})
+    with pytest.raises(SshAccessError) as failed:
+        session.run(ENDPOINT, session.new_key("buyer"), "sudo -S true", stdin="example-secret\n")
+    assert "incorrect password" in str(failed.value)
+    assert "example-secret" not in str(failed.value)
 
 
 def test_a_failing_command_is_not_retried(session: SshSession, fake_ssh):

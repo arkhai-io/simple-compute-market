@@ -54,7 +54,7 @@ subject. `ARCHITECTURE.md` is a current-state cross-system map. It should link t
 
 A capability organized by an index
 ([`openspec-documentation.md`, "A capability organized by an index"](../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index))
-is held to its index by `make check-spec-index [CHANGE=<change>]` (`scripts/check_spec_index.py`), which `make check-change` runs with the change named. It fails in a capability with an `index.md`, naming each, on: an `index.md` that declares no prefix, which leaves nothing else in that capability checked; a requirement whose name begins with no id; two requirements sharing an id; an id `index.md` omits or lists twice; a listed id in neither `spec.md` nor the named change's own deltas; a retired id in use; a link in `index.md` that does not resolve; and an entry whose link is not to its own id's heading in `spec.md`. With a change named, its deltas count as the archive will leave them, so closeout can write `index.md` before the archive merges a requirement into `spec.md`. A capability with no `index.md` is not checked.
+is held to its index by the change workflow's default check `spec-index`, which every step's `run pre-commit` and `make check-change` run with the change named, and `make check-spec-index [CHANGE=<change>]` runs alone (`change-workflow check spec-index`). It fails in a capability with an `index.md`, naming each, on: an `index.md` that declares no prefix, which leaves nothing else in that capability checked; a requirement whose name begins with no id; two requirements sharing an id; an id `index.md` omits or lists twice; a listed id in neither `spec.md` nor the named change's own deltas; a retired id in use; a link in `index.md` that does not resolve; and an entry whose link is not to its own id's heading in `spec.md`. With a change named, its deltas count as the archive will leave them, so closeout can write `index.md` before the archive merges a requirement into `spec.md`. A capability with no `index.md` is not checked.
 
 ## This repository's closeout parts
 
@@ -70,7 +70,7 @@ The workflow's parts name the checks they run by role. Here they are:
 | Part | Check |
 |---|---|
 | Comment hygiene | `make check-comment-hygiene` |
-| Campaign index currency | `make check-change-index`, which runs the workflow's `scripts/change-workflow check index` |
+| Campaign index currency | `make check-change-index`, which runs the workflow's `change-workflow check index` |
 | Promotion | the index check, `make check-spec-index CHANGE=<change-name>` ([above](#the-index-check)) |
 | Guidance placement | the guidance check, `make check-guidance` |
 | Documentation citations | `make check-doc-citations CHANGE=<change-name>` |

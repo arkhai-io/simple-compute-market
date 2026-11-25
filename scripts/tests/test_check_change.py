@@ -14,11 +14,11 @@ from check_change import checks, main, run_checks
 
 CHANGE = "shape-bounds"
 # The workflow's default checks — the change index, the task list, the agent skills,
-# and the OpenSpec validation — are the `pre-commit` hook's, run before this
-# repository's command, so none is here.
-NAMES = ["comment hygiene", "documentation citations", "specification index",
-         "decision destinations", "history wording", "version bumps", "local imports",
-         "capability index", "guidance"]
+# the specification indexes, the decisions' destinations, and the OpenSpec
+# validation — are the `pre-commit` hook's, run before this repository's command, so
+# none is here.
+NAMES = ["comment hygiene", "documentation citations", "history wording", "version bumps",
+         "local imports", "capability index", "guidance"]
 
 
 def _checkout(tmp_path: Path) -> Path:
@@ -62,9 +62,6 @@ def test_every_check_passing_prints_one_line(tmp_path: Path) -> None:
     assert runner.commands == [
         ["make", "--no-print-directory", "check-comment-hygiene"],
         ["make", "--no-print-directory", "check-doc-citations", f"CHANGE={CHANGE}"],
-        # The change named, so its deltas count as the archive will leave them.
-        ["make", "--no-print-directory", "check-spec-index", f"CHANGE={CHANGE}"],
-        ["make", "--no-print-directory", "check-decision-destinations", f"CHANGE={CHANGE}"],
         ["make", "--no-print-directory", "check-history-wording", "CHANGE_BASE=dev"],
         ["make", "--no-print-directory", "check-version-bumps", "CHANGE_BASE=dev"],
         ["make", "--no-print-directory", "check-local-imports", "CHANGE_BASE=dev"],
@@ -82,7 +79,7 @@ def test_the_diff_checks_read_the_branch_the_clone_recorded(tmp_path: Path) -> N
     run_checks(CHANGE, root=_change(tmp_path, lands_on="release"), runner=runner,
                echo=lambda _: None)
 
-    assert [command[-1] for command in runner.commands[4:7]] == ["CHANGE_BASE=release"] * 3
+    assert [command[-1] for command in runner.commands[2:5]] == ["CHANGE_BASE=release"] * 3
 
 
 def test_a_base_given_overrides_the_recorded_one(tmp_path: Path) -> None:
@@ -91,7 +88,7 @@ def test_a_base_given_overrides_the_recorded_one(tmp_path: Path) -> None:
     run_checks(CHANGE, root=_change(tmp_path, lands_on="dev"), runner=runner,
                echo=lambda _: None, base="main")
 
-    assert [command[-1] for command in runner.commands[4:7]] == ["CHANGE_BASE=main"] * 3
+    assert [command[-1] for command in runner.commands[2:5]] == ["CHANGE_BASE=main"] * 3
 
 
 def test_a_change_with_no_base_recorded_or_given_is_refused(tmp_path: Path) -> None:

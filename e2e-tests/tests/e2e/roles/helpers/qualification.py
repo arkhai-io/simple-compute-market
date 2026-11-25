@@ -17,8 +17,9 @@ Two parts, neither tied to a domain:
 - **Per-observation outcome.** A qualification module makes several of the
   runbook's observations
   (``docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes``),
-  and a pytest run that passes with a skipped stage has not run every check an
-  observation requires. So a qualification module names its observations
+  a live verification module (``scenarios/vms/live/``) the one its lane twin's
+  input yields, and a pytest run that passes with a skipped stage has not run
+  every check an observation requires. So such a module names its observations
   (``OBSERVATIONS``, or ``CYCLE_OBSERVATIONS`` for a module run once per
   cycle), each of its stages requires them unless its class declares its own
   (``stage_observations``), and once the module's last stage has reported, the
@@ -257,6 +258,8 @@ class RegistrationSnapshot:
     quarantined: tuple[QuarantinedPort, ...] = ()
     #: The relay's ports with an unreleased owner.
     active_ports: tuple[int, ...] = ()
+    #: The target hosts' management SSH pins, compared without logging key material.
+    host_pins: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 def _utc(moment: datetime) -> datetime:
@@ -311,6 +314,10 @@ def registration_faults(
                               ("listings", before.listings, after.listings)):
         if was != now_is:
             faults.append(f"{name}: {kind} changed from {was} to {now_is}")
+    if before.host_pins != after.host_pins:
+        faults.append(f"{name}: management SSH pins changed")
+    if any(not pins for _, pins in after.host_pins):
+        faults.append(f"{name}: management SSH host is unpinned after reapplying")
     kept = {port.lease_id: port for port in after.quarantined}
     for port in before.quarantined:
         if port.grant_expires_at <= now:
@@ -332,8 +339,9 @@ def registration_faults(
 # Per-observation outcome
 # ===========================================================================
 
-#: The class attribute a qualification stage declares the observations
-#: requiring it by: the runbook's observation numbers, as strings.
+#: The class attribute a stage declares the observations requiring it by: a
+#: qualification stage's are the runbook's observation numbers, as strings; a
+#: live verification stage's are named, as its module's ``OBSERVATIONS`` are.
 OBSERVATIONS_ATTRIBUTE = "observations"
 
 StageOutcome = Literal["passed", "failed", "skipped"]

@@ -1,4 +1,4 @@
-"""Running the repository's hooks: `scripts/change-workflow run <hook> <change>`.
+"""Running the repository's hooks: `change-workflow run <hook> <change>`.
 
 A hook is one command or a list (`config`). Each command has its placeholders filled,
 each value shell-quoted, and runs with `sh -c` from the repository's root, without
@@ -24,7 +24,8 @@ outside the repository's inert paths, it runs `after-functional-change`, then
 held to the hook table, so a step that may not make a functional change is refused
 one, and a functional commit with no `pre-commit-functional` declared is refused,
 naming the field. `pre-commit`'s default checks — the change index, the task list,
-the agent skills, and the strict OpenSpec validation of the change, or of every
+the agent skills, the specification indexes with the change's deltas counted, each
+decision's destination, and the strict OpenSpec validation of the change, or of every
 specification for an archived change — run before its declared commands, each
 skipped only when `defaults.disable` names it; `check change <change>` runs them
 alone. A `pre-commit`, its defaults included, only reports, so a review may run it
@@ -64,7 +65,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import index, skills, tasks
+from . import decisions, index, skills, spec_index, tasks
 from .common import SESSION_ID, UNATTENDED_RUN, Clock, Entry, StepError, utc_now
 from .config import (COMMIT, DEFAULT_CHECKS, PRE_COMMIT_FUNCTIONAL, TREE, Configuration, fill,
                      placeholders, require)
@@ -149,6 +150,10 @@ def _in_process(check: str, change: str, root: Path) -> int:
             return index.main(root)
         if check == "skills":
             return skills.main(root)
+        if check == "spec-index":
+            return spec_index.main([change], root=root)
+        if check == "decisions":
+            return decisions.main([change], root=root)
         return tasks.main([change], root=root)
     except OSError as exc:
         print(f"ERROR: the {check} check could not read what it checks: {exc}",

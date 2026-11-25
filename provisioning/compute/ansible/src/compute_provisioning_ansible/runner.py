@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -257,9 +258,10 @@ class InventoryTarget:
     ssh_key_type: str
     ssh_key_value: str = field(repr=False)
     public_port: int | None = None
+    host_keys: tuple[str, ...] = ()
 
 
-def inventory_target(host: ExecutionHost) -> InventoryTarget:
+def inventory_target(host: ExecutionHost, *, include_host_keys: bool = True) -> InventoryTarget:
     """What the runner needs from a host reached over an ``ssh`` connection."""
     connection = host.connection
     if connection.kind != SSH_CONNECTION_KIND:
@@ -267,7 +269,7 @@ def inventory_target(host: ExecutionHost) -> InventoryTarget:
             f"host {host.host_id!r} has a {connection.kind!r} connection; "
             "an Ansible job reaches its host over ssh"
         )
-    ssh = SshConnectionCodec.parse(connection)
+    ssh = SshConnectionCodec.parse(connection, include_host_keys=include_host_keys)
     private_key = connection.protected.get(PRIVATE_KEY)
     if ssh.key_path is not None:
         key_type, key_value = "path", ssh.key_path
@@ -284,12 +286,13 @@ def inventory_target(host: ExecutionHost) -> InventoryTarget:
         ssh_key_type=key_type,
         ssh_key_value=key_value,
         public_port=ssh.public_port,
+        host_keys=tuple(ssh.host_keys or ()),
     )
 
 
 @dataclass
 class MaterializedInventory:
-    """A rendered inventory and the decrypted key files it references.
+    """A rendered inventory and the key files and host pins it references.
 
     The key files hold plaintext private keys, so this object owns their
     lifetime: ``cleanup()`` removes the inventory and every key file, and it is
@@ -299,9 +302,10 @@ class MaterializedInventory:
 
     path: Path
     key_paths: list[Path] = field(default_factory=list)
+    known_hosts_paths: list[Path] = field(default_factory=list)
 
     def cleanup(self) -> None:
-        for leftover in (*self.key_paths, self.path):
+        for leftover in (*self.key_paths, *self.known_hosts_paths, self.path):
             try:
                 leftover.unlink(missing_ok=True)
             except OSError as exc:
@@ -552,6 +556,11 @@ class AnsibleRunner:
     # Inventory rendering
     # ------------------------------------------------------------------
 
+    def validate_authentication_key(self, target: InventoryTarget) -> None:
+        """Check that an embedded identity can be read without writing it to a file."""
+        if target.ssh_key_type == "embedded":
+            self._ssh_codec.decrypt_private_key(target.ssh_key_value, host_id=target.host_id)
+
     def write_inventory(self, hosts: list, *, group: str) -> "MaterializedInventory":
         """Write a temporary Ansible INI inventory for ``InventoryTarget``s.
 
@@ -573,7 +582,26 @@ class AnsibleRunner:
         inventory = MaterializedInventory(path=directory / f"inventory_{nonce}.ini")
         try:
             lines = [f"[{group}]"]
-            for host in hosts:
+            for index, host in enumerate(hosts):
+                if re.search(r"[^a-zA-Z0-9.:%_-]", host.ssh_host):
+                    raise ValueError(f"host {host.host_id!r} has an invalid SSH endpoint")
+                endpoint = f"[{host.ssh_host}]:{host.ssh_port}"
+                pins_path = directory / f"known_hosts_{nonce}_{index}"
+                inventory.known_hosts_paths.append(pins_path)
+                _write_owner_only(
+                    pins_path,
+                    "".join(f"{endpoint} {key}\n" for key in getattr(host, "host_keys", ())),
+                )
+                # A multiplexed connection could skip host-key verification.
+                ssh_args = "-F /dev/null -C -o ControlMaster=no -o ControlPath=none"
+                # Use the same explicit alias at every port, including 22.
+                strict_args = shlex.join((
+                    "-o", f"HostKeyAlias={endpoint}",
+                    "-o", f"UserKnownHostsFile={pins_path}",
+                    "-o", "GlobalKnownHostsFile=/dev/null",
+                    "-o", "StrictHostKeyChecking=yes",
+                    "-o", "UpdateHostKeys=no",
+                ))
                 if host.ssh_key_type == "path":
                     key_ref = host.ssh_key_value
                 else:
@@ -608,6 +636,10 @@ class AnsibleRunner:
                     f"  ansible_port={host.ssh_port}"
                     f"  ansible_user={host.ssh_user}"
                     f"  ansible_ssh_private_key_file={key_ref}"
+                    "  ansible_connection=ssh"
+                    "  ansible_host_key_checking=true"
+                    f"  ansible_ssh_args={shlex.quote(ssh_args)}"
+                    f"  ansible_ssh_common_args={shlex.quote(strict_args)}"
                 )
             inventory.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         except BaseException:

@@ -94,7 +94,7 @@ class TestProvisioningSmoke:
         log.info("Registered hosts: %d", len(data.hosts))
 
     @pytest.mark.provisioning_readonly
-    def test_connectivity_check_on_first_host_if_available(
+    def test_connectivity_check_on_a_read_only_target_if_available(
         self, provisioning_settings: dict, seller_settings: dict
     ):
         """If any hosts are registered, connectivity returns a structured result."""
@@ -102,6 +102,10 @@ class TestProvisioningSmoke:
             hosts = client.list_hosts().hosts
             if not hosts:
                 pytest.skip("No hosts registered - skipping connectivity check")
+            if not client.get_system_status().execution.mocked:
+                hosts = [host for host in hosts if host.connection.public.get("host_keys")]
+                if not hosts:
+                    pytest.skip("No pinned host for a read-only connectivity check")
             first = hosts[0].host_id
             data = client.check_connectivity(first)
         assert isinstance(data.reachable, bool), f"Missing reachable field: {data}"

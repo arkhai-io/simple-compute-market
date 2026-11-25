@@ -25,9 +25,14 @@ a change before its review; once it is archived, a citation of the change's own
 unarchived path resolves against its archive directory, so the archive move
 itself is never reported. Before it is archived, a citation of a capability's
 `spec.md` that the change's own delta creates resolves, since closeout checks
-citations before the archive writes that file from the delta. A change's
+citations before the archive writes that file from the delta: the paths it creates
+are the ones the workflow's specification index check reports (`check spec-index
+<change> --json`), so the two checks agree on what a delta creates. A change's
 `reviews/` are excluded too: review records are untracked working notes, never
-part of the branch, so a citation in one is not a citation the branch makes.
+part of the branch, so a citation in one is not a citation the branch makes. A
+checkout's local workflow configuration (`LOCAL_ONLY`) is never on any branch, Git
+ignoring it, so a citation of it names a file each checkout holds for itself, and
+its absence is no unresolved citation.
 """
 
 from __future__ import annotations
@@ -38,9 +43,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from check_spec_index import read_deltas  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
-from workflow_command import WorkflowRefused, found_change  # noqa: E402
+from workflow_command import WorkflowRefused, created_specifications, found_change  # noqa: E402
 
 #: Directories whose paths must resolve when cited.
 CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
@@ -48,6 +52,9 @@ CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
 #: Suffixes worth checking. A citation without one is usually a directory or
 #: prose, and directories are checked separately below.
 CITED_SUFFIXES = ("py", "md", "toml", "yml", "yaml", "json", "sh", "mk")
+
+#: The files each checkout keeps for itself, which Git ignores and no branch holds.
+LOCAL_ONLY = frozenset({".agents/workflow.local.toml"})
 
 #: A path-looking run inside a document. The lookarounds keep it from biting
 #: off the tail of a longer identifier, and the non-greedy body stops at the
@@ -102,14 +109,14 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     return found
 
 
-def _created_specs(directory: Path) -> set[str]:
+def _created_specs(root: Path, change: str) -> frozenset[str]:
     """Each capability's `spec.md`, as cited, that an active change's deltas write
-    when the change is archived. Only a delta that adds a requirement can write one:
-    a modification, removal, or rename needs a requirement already there. The delta
-    is read by the index check's parser, so the two checks agree on what it adds."""
-    return {f"openspec/specs/{delta.parent.name}/spec.md"
-            for delta in directory.glob("specs/*/spec.md")
-            if read_deltas(delta.read_text(encoding="utf-8", errors="ignore")).added}
+    when the change is archived, as the workflow's specification index check reports
+    them; a refusal ends the check with its reason."""
+    try:
+        return created_specifications(root, change)
+    except WorkflowRefused as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def unresolvable(
@@ -118,13 +125,13 @@ def unresolvable(
     """Every citation that is absent or points at a tombstone."""
 
     own: tuple[str, Path] | None = None
-    created: set[str] = set()
+    created: frozenset[str] = frozenset()
     if change is not None:
         found = _found(root, change)
         if found["archived"]:
             own = (f"openspec/changes/{change}/", root / found["directory"])
         else:
-            created = _created_specs(root / found["directory"])
+            created = _created_specs(root, change)
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")
@@ -133,7 +140,7 @@ def unresolvable(
             if own and cited.startswith(own[0]):
                 target = own[1] / cited[len(own[0]):]
             if not target.exists():
-                if cited not in created:
+                if cited not in created and cited not in LOCAL_ONLY:
                     problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):
                 problems.append(("tombstone", cited, document.as_posix()))

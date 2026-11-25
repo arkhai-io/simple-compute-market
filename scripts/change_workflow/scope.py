@@ -7,10 +7,13 @@ starts, from four sources:
 - the engine: the step's baseline (`graph.STEP_DEFINITIONS`), design's holding each
   prerequisite's proposal worktree registered in its checkout (CW-k8dn), and the
   paths protected
-  in every scope (`PROTECTED`) — the workflow's configuration, so no step changes
-  what its own hooks run; Git's configuration, which says where Git finds its hooks;
-  and the system's two Git executables, so no step replaces the Git its pushes go
-  through (CW-r6kd, CW-j4cs);
+  in every scope (`PROTECTED`) — the workflow's configuration and the checkout's
+  local configuration, so no step changes what its own hooks run or which models
+  later steps run on; Git's configuration, which says where Git finds its hooks;
+  the system's two Git executables, so no step replaces the Git its pushes go
+  through; and the engine's own installed distribution, found from where the
+  engine runs, so no step changes the engine every later step runs (`installed`)
+  (CW-r6kd, CW-j4cs);
 - the adapter of the harness that runs the step: the state its harness writes and the
   settings files it loads, which the caller passes in (`adapters`);
 - the repository: its configuration's `[sandbox]`, `writable.common` for every step,
@@ -56,6 +59,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from . import documents
 from .common import StepError
 from .graph import INERT_PATHS, PROPOSAL_SUFFIX, PROPOSALS, STEP_DEFINITIONS, TEMPORARY
 from .records import inert, is_pattern
@@ -66,7 +70,11 @@ ENGINE, ADAPTER, REPOSITORY, GRANT = "engine", "adapter", "repository", "grant"
 # in Git's exec path, which Git puts first on `PATH` for its scripted commands.
 GIT_EXECUTABLES = ("/usr/bin/git", "/usr/lib/git-core/git")
 # The paths no step writes, whatever its scope.
-PROTECTED = (".agents/workflow.toml", ".git/config", *GIT_EXECUTABLES)
+PROTECTED = (".agents/workflow.toml", ".agents/workflow.local.toml", ".git/config",
+             *GIT_EXECUTABLES)
+# The engine's installed package and metadata, as absolute paths; none where the
+# engine runs from its source tree, which a step edits.
+INSTALLED = tuple(str(path) for path in documents.RUNNING.installed_paths())
 # Where every step's private temporary directory sits inside its sandbox.
 PRIVATE_TEMPORARY = Path("/tmp")
 _GIT = ".git"
@@ -309,17 +317,19 @@ def resolve(step: str, root: Path, *, inert_paths: Sequence[str],
             writable: Sequence[str] = (), protected: Sequence[str] = (),
             adapter_writable: Sequence[str] = (), adapter_files: Sequence[str] = (),
             adapter_protected: Sequence[str] = (), grants: Sequence[str] = (),
-            home: Path | None = None) -> Scope:
+            home: Path | None = None, installed: Sequence[str] = INSTALLED) -> Scope:
     """The scope of one run of `step` in the checkout at `root`, as absolute paths:
     its baseline, its temporary entry the private `/tmp`; the adapter's state — its
     directories, and its files mounted alone — and protected paths; the repository's
     writable paths for the step and its protected ones; and the run's grants, each
     grant refused before anything launches where the scope cannot hold it
     (`granted`). `inert_paths` are the repository's,
-    which closeout's baseline names."""
+    which closeout's baseline names; `installed` the engine's installed
+    distribution, which the engine protects with its own paths."""
     definition = STEP_DEFINITIONS[step]
     checkout = _Checkout(root, Path.home() if home is None else home)
-    sources = ((ENGINE, PROTECTED), (ADAPTER, adapter_protected), (REPOSITORY, protected))
+    sources = ((ENGINE, (*PROTECTED, *installed)), (ADAPTER, adapter_protected),
+               (REPOSITORY, protected))
     guarded = _unique([ScopedPath(path, source, entry) for source, entries in sources
                        for entry in entries for path in checkout.paths(entry)])
     paths: list[ScopedPath] = []

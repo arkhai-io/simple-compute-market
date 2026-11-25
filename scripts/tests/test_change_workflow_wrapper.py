@@ -24,7 +24,8 @@ from change_workflow.log import log_path, note_orchestrator, read_log, record_ou
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
 from change_workflow.running import Run, Terminated, live_runs, recorded_run, runs_directory
 from change_workflow.wrapper import Wrapper, triage_kind, validation_target
-from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT, MODELS,
+from change_workflow_fixtures import (CHANGE, COMMIT, CONFIGURED, LANDED, LIMIT,
+                                      LOCAL_CONFIGURED, MODELS,
                                       NETWORK, OPUS, SESSION, VALID, FakeClaude, clock,
                                       configured,
                                       event_lines, failed_run, make_wrapper, needs_bwrap,
@@ -616,7 +617,7 @@ def test_a_steps_first_model_is_available(tmp_path: Path) -> None:
     """CW-ebmo: the step's models are the configuration's, in order; the first
     available runs, and the line names it and its effort."""
     claude = FakeClaude((event_lines(VALID["finished"]), 0))
-    configured(tmp_path, CONFIGURED.replace(
+    configured(tmp_path, local=LOCAL_CONFIGURED.replace(
         'validate = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]',
         'validate = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]'))
 
@@ -629,7 +630,7 @@ def test_a_steps_first_model_is_available(tmp_path: Path) -> None:
 
 def test_a_step_with_no_models_configured_is_refused_naming_the_field(tmp_path: Path) -> None:
     claude = FakeClaude()
-    configured(tmp_path, CONFIGURED.replace(MODELS, ""))
+    configured(tmp_path, local=LOCAL_CONFIGURED.replace(MODELS, ""))
 
     with pytest.raises(StepError, match="models.design"):
         make_wrapper(tmp_path, claude).run("design", CHANGE)

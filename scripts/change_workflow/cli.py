@@ -1,5 +1,5 @@
-"""The engine's command, `scripts/change-workflow`: each subcommand dispatched to the
-module that does its work.
+"""The engine's command, `change-workflow`: each subcommand dispatched to the module
+that does its work.
 
 `start` starts a step: without `--unattended` it opens the interactive Claude Code
 session of the step's skill; with it, it runs the step through the wrapper inside
@@ -36,8 +36,9 @@ of what is missing, or of a new attempt of one kind (`gather`), `run` and `opens
 the repository's hooks and its OpenSpec command (`hooks`), `run before|after` what
 the wrapper runs around a step's session, for a step held interactively (`around`),
 `check` the
-configuration's, index, task-list, push, skill, and round-view checks, a change's
-default checks (`check change`), a review's format check on standard input (`check
+configuration's, index, task-list, push, skill, and round-view checks, the
+specification index check (`spec_index`) and the decision destinations check
+(`decisions`), a change's default checks (`check change`), a review's format check on standard input (`check
 review`), and the graph diagram's comparison with the graph table, `hook
 post-compaction` the post-compaction hook, and `wait` the bounded wait on a
 background command's output. `check graph` is internal: it maintains the
@@ -45,8 +46,18 @@ engine's own diagram, and no repository or runner relies on it.
 
 Before a step starts, `start` checks the configuration whole and refuses a step
 whose required fields are absent, naming them, before anything is launched or
-logged (`config.require_for_step`): an unattended run also needs its step's models,
-and the orchestrating session its own.
+logged (`config.require_for_step`): every session needs the engineering-guidance
+pointer, an unattended run also its step's models, and the orchestrating session its
+own; a missing local field names `change-workflow install`, which writes the local
+configuration where the checkout has none.
+
+`install` writes the distribution's skills into each supported harness's user skill
+directory and, in a checkout, its local configuration where it has none (`install`).
+Every other subcommand of an installed engine first refuses while the installed
+skills are not its own version's, naming what and `change-workflow install`; neither
+`install` nor `--version` reads the configuration, so neither is refused for the
+range either. `fragment` prints the path of the distribution's make fragment, for a
+repository's `Makefile` to include; it reads no configuration.
 
 The repository is found once, from the working directory, and every subcommand acts
 on it. Every exit status is one of three: 0 for success; 1 for a refusal or a failed
@@ -69,8 +80,9 @@ from typing import Callable, Mapping, Sequence
 
 from . import around
 from . import clone as clones
-from . import (config, cost_report, diagram, evidence, find, gather, graph, history, hook,
-               hooks, index, next_step, propose, push, round_view, skills, tasks, wait)
+from . import (config, cost_report, decisions, diagram, documents, evidence, find, gather, graph,
+               history, hook, hooks, index, install, next_step, propose, push, round_view,
+               skills, spec_index, tasks, wait)
 from .clone import clone_of
 from .common import ORCHESTRATOR, SESSION_ID, UNATTENDED_RUN, StepError, repository_root
 from .convert import convert_change
@@ -194,6 +206,10 @@ def section_words(text: str) -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="change-workflow", description=DESCRIPTION)
+    # Printed as the arguments are parsed, before any repository is looked for or
+    # configuration read, so it answers outside a repository.
+    parser.add_argument("--version", action="version", version=documents.version(),
+                        help="print the workflow's version")
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser(
         "start", help="start a step: an interactive session, or with --unattended a run "
@@ -454,6 +470,16 @@ def _parser() -> argparse.ArgumentParser:
     tasks_.add_argument("change")
     checks.add_parser("push", help="whether HEAD may be pushed to its own branch")
     checks.add_parser("skills", help="every agent skill loaded from its one source")
+    spec_index_ = checks.add_parser(
+        "spec-index", help="each indexed capability's spec.md against its index.md, a "
+                           "change's deltas counted")
+    spec_index_.add_argument("change", nargs="?", default=None)
+    spec_index_.add_argument("--json", action="store_true",
+                             help="print the result, its problems, and the specification "
+                                  "paths the change's deltas create, as JSON")
+    decisions_ = checks.add_parser(
+        "decisions", help="each decision of a change's design naming its destination")
+    decisions_.add_argument("change")
     checks.add_parser("round-view", help="fail while a round view is open")
     checks.add_parser("graph", help="where the graph's diagram departs from the graph table")
     review_ = checks.add_parser(
@@ -465,6 +491,13 @@ def _parser() -> argparse.ArgumentParser:
     waiting.add_argument("file", type=Path)
     waiting.add_argument("pattern")
     waiting.add_argument("--timeout", type=float, default=wait.DEFAULT_TIMEOUT_S)
+    commands.add_parser(
+        "fragment", help="print the path of the installed make fragment, for a Makefile's "
+                         "include")
+    commands.add_parser(
+        "install", help="write the workflow's skills into each supported harness's user "
+                        "skill directory, and, in a checkout, its local configuration where "
+                        "it has none")
     hook_ = commands.add_parser("hook", help="run a harness hook")
     harness_hooks = hook_.add_subparsers(dest="hook", required=True)
     harness_hooks.add_parser("post-compaction",
@@ -625,11 +658,15 @@ class _Usage(Exception):
 
 def main(argv: Sequence[str] | None = None, root: Path | None = None,
          wrapper: Wrapper | None = None, environ: Mapping[str, str] = os.environ,
-         launch: Launch = _launch, send: Callable[[int, int], None] = os.kill) -> int:
+         launch: Launch = _launch, send: Callable[[int, int], None] = os.kill,
+         distribution: documents.Distribution = documents.RUNNING,
+         home: Path | None = None) -> int:
     given = list(sys.argv[1:] if argv is None else argv)
+    home = Path.home() if home is None else home
     if given[:1] == ["openspec"]:
         # Every argument is OpenSpec's, flags included, so none is parsed here.
         try:
+            install.require_installed(distribution, home)
             root = repository_root() if root is None else root
             return hooks.run_openspec(config.load(root), given[1:], root)
         except StepError as exc:
@@ -640,8 +677,14 @@ def main(argv: Sequence[str] | None = None, root: Path | None = None,
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 2
+    if args.command == "install":
+        return install.main(home=home, distribution=distribution, directory=root)
     try:
+        install.require_installed(distribution, home)
         root = repository_root() if root is None else root
+        if args.command == "fragment":
+            print(distribution.path(documents.FRAGMENT))
+            return 0
         return _dispatch(args, root, wrapper or Wrapper(root=root), environ, launch, send)
     except _Usage as exc:
         parser.print_usage(sys.stderr)
@@ -703,6 +746,10 @@ def delegated(args: argparse.Namespace) -> Delegated | None:
     if args.command == "check":
         return {"index": (index.main, None), "skills": (skills.main, None),
                 "tasks": (tasks.main, [getattr(args, "change", "")]),
+                "spec-index": (spec_index.main,
+                               [*([args.change] if getattr(args, "change", None) else []),
+                                *(["--json"] if getattr(args, "json", False) else [])]),
+                "decisions": (decisions.main, [getattr(args, "change", "")]),
                 "push": (push.main, ["check"]),
                 "round-view": (round_view.main, ["check"]),
                 "config": (config.main, ["check"]),
@@ -754,7 +801,8 @@ def _around(args: argparse.Namespace, root: Path, environ: Mapping[str, str],
 
 
 def _graph(root: Path) -> int:
-    """The diagram's comparison with the graph table, on the repository's own diagram."""
+    """The diagram's comparison with the graph table, on the distribution's own
+    diagram."""
     return diagram.main(root=root)
 
 

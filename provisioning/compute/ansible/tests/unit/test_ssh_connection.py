@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from base64 import b64encode
+
 import pytest
 from compute_provisioning.hosts import (
     ConnectionCodec,
@@ -29,8 +31,8 @@ _PEM = "-----BEGIN OPENSSH PRIVATE KEY-----\nmaterial\n-----END OPENSSH PRIVATE 
 def test_the_codec_satisfies_the_host_authority_protocol() -> None:
     codec: ConnectionCodec = SshConnectionCodec(_KEY)
 
-    assert (codec.kind, codec.version) == ("ssh", 2)
-    assert SSH_CONNECTION_VERSION == SshConnectionCodec.version == 2
+    assert (codec.kind, codec.version) == ("ssh", 3)
+    assert SSH_CONNECTION_VERSION == SshConnectionCodec.version == 3
 
 
 def test_a_connections_address_is_the_host_the_service_connects_to() -> None:
@@ -170,7 +172,7 @@ def test_an_invalid_connection_is_refused(public, secrets) -> None:
 def test_a_stored_envelope_in_another_scheme_is_refused() -> None:
     envelope = ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={"ssh_host": "10.0.0.1"},
         protected={"private_key": ProtectedValue(scheme="sealed-box-v1", ciphertext="x")},
     )
@@ -199,12 +201,12 @@ _STORED_WITHOUT_PUBLIC_PORT = {
 }
 
 
-def test_a_connection_stating_no_public_port_is_stored_at_version_2_without_the_key() -> None:
+def test_a_connection_stating_no_public_port_is_stored_at_version_3_without_the_key() -> None:
     codec = SshConnectionCodec(_KEY)
-    stored = ConnectionEnvelope(kind="ssh", version=2, public=_STORED_WITHOUT_PUBLIC_PORT)
+    stored = ConnectionEnvelope(kind="ssh", version=3, public=_STORED_WITHOUT_PUBLIC_PORT)
 
     built = codec.build(_PATH_KEY, {})
-    assert (built.version, dict(built.public)) == (2, _STORED_WITHOUT_PUBLIC_PORT)
+    assert (built.version, dict(built.public)) == (3, _STORED_WITHOUT_PUBLIC_PORT)
     assert dict(codec.validate(stored).public) == _STORED_WITHOUT_PUBLIC_PORT
     assert SshConnectionCodec.parse(stored).public_port is None
 
@@ -212,7 +214,7 @@ def test_a_connection_stating_no_public_port_is_stored_at_version_2_without_the_
 def test_a_null_public_port_is_stored_as_absent() -> None:
     envelope = SshConnectionCodec(_KEY).build({**_PATH_KEY, "public_port": None}, {})
 
-    assert envelope.version == 2
+    assert envelope.version == 3
     assert dict(envelope.public) == _STORED_WITHOUT_PUBLIC_PORT
 
 
@@ -248,49 +250,76 @@ def test_a_malformed_public_port_is_refused(port) -> None:
 
 
 @pytest.mark.parametrize("port", [None, 22], ids=["no port", "a port"])
-def test_every_operator_submission_is_at_version_2(port) -> None:
+def test_every_operator_submission_is_at_version_3(port) -> None:
     submission = ssh_connection(**_PATH_KEY, public_port=port)
 
-    assert submission.version == 2
+    assert submission.version == 3
     assert ("public_port" in submission.public) is (port is not None)
 
 
 @pytest.mark.parametrize(
     "kind,version",
-    [("ssh", 1), ("ssh", 3), ("other", 2)],
-    ids=["the retired version 1", "a later version", "another kind"],
+    [("ssh", 2), ("ssh", 4), ("other", 3)],
+    ids=["the retired version 2", "a later version", "another kind"],
 )
 def test_a_stored_connection_at_another_kind_or_version_is_refused(kind, version) -> None:
     stored = ConnectionEnvelope(kind=kind, version=version, public=_STORED_WITHOUT_PUBLIC_PORT)
 
-    with pytest.raises(ValueError, match="not an ssh connection at version 2.*re-register"):
+    with pytest.raises(ValueError, match="not an ssh connection at version 3.*re-register"):
         SshConnectionCodec.parse(stored)
-    with pytest.raises(ValueError, match="not an ssh connection at version 2"):
+    with pytest.raises(ValueError, match="not an ssh connection at version 3"):
         SshConnectionCodec(_KEY).validate(stored)
 
 
-# A host stored at version 1 with a protected key, as the service stored it
-# before it served version 2; built directly, since nothing registers version 1.
+# A host stored at version 2 with a protected key, as the service stored it
+# before it served version 3; built directly, since nothing registers version 2.
 _LEGACY = ConnectionEnvelope(
     kind="ssh",
-    version=1,
+    version=2,
     public={"ssh_host": "10.0.0.1", "public_host": None, "ssh_port": 22, "ssh_user": "root", "key_path": None},
     protected={"private_key": ProtectedValue(scheme=FERNET_SCHEME, ciphertext="opaque-ciphertext")},
 )
 
 
-def test_a_version_1_host_re_registered_at_version_2_keeps_its_protected_key() -> None:
+def test_a_version_2_host_re_registered_at_version_3_keeps_its_protected_key() -> None:
     codecs = ConnectionCodecs([SshConnectionCodec(_KEY)])
 
-    upgraded = codecs.build("ssh", 2, {"ssh_host": "10.0.0.1"}, {}, previous=_LEGACY)
+    upgraded = codecs.build("ssh", 3, {"ssh_host": "10.0.0.1"}, {}, previous=_LEGACY)
 
-    assert upgraded.version == 2
+    assert upgraded.version == 3
     assert upgraded.protected["private_key"] == _LEGACY.protected["private_key"]
     assert "public_port" not in upgraded.public
 
 
-def test_a_version_1_submission_is_refused_naming_the_served_version() -> None:
+def test_a_version_2_submission_is_refused_naming_the_served_version() -> None:
     codecs = ConnectionCodecs([SshConnectionCodec(_KEY)])
 
-    with pytest.raises(ValueError, match="'ssh' is at version 2, not 1"):
-        codecs.build("ssh", 1, _PATH_KEY, {})
+    with pytest.raises(ValueError, match="'ssh' is at version 3, not 2"):
+        codecs.build("ssh", 2, _PATH_KEY, {})
+
+
+@pytest.mark.parametrize("keys", [[], ["ssh-ed25519 invalid"], ["unknown-type YWJj"]])
+def test_invalid_host_pins_are_refused(keys) -> None:
+    with pytest.raises(ValueError, match="host_keys"):
+        SshConnectionCodec().build({**_PATH_KEY, "host_keys": keys}, {})
+
+
+def test_host_pin_is_canonical_and_survives_a_route_change() -> None:
+    codec = SshConnectionCodec()
+    # Synthetic SSH public blobs for parsing only, never for network use.
+    def fixture_key(byte: bytes) -> str:
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + byte * 32
+        return "ssh-ed25519 " + b64encode(blob).decode("ascii")
+
+    first, second = fixture_key(b"a"), fixture_key(b"b")
+    key_type, encoded = first.split()
+    with pytest.raises(ValueError, match="host_keys"):
+        codec.build({**_PATH_KEY, "host_keys": [f"{key_type} !{encoded}"]}, {})
+    submission = ssh_connection(**_PATH_KEY, host_keys=[first + " comment"])
+    stored = codec.build(submission.public, submission.secrets)
+    assert stored.public["host_keys"] == [first]
+    moved = codec.build({**_PATH_KEY, "ssh_port": 2222}, {}, previous=stored)
+    assert moved.public["host_keys"] == [first]
+    assert moved.public["ssh_port"] == 2222
+    updated = codec.build({**_PATH_KEY, "host_keys": [second]}, {}, previous=moved)
+    assert updated.public["host_keys"] == [second]

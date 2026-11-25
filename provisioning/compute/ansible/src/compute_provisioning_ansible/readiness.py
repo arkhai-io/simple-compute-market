@@ -32,14 +32,10 @@ from .runner import inventory_target
 
 #: The component's name in system status.
 ANSIBLE_COMPONENT = "ansible"
-#: The kind and schema version of the component's detail. At version 2 an
-#: embedded key's ``exists`` says whether it decrypts under the configured key,
-#: and a host whose stored connection execution refuses has no ``ssh_keys``
-#: entry. This distribution produces only version 2; a version-1 detail reports
-#: embedded keys present without trying them, so a reader of version 1 refuses
-#: version 2.
+#: The status detail reports pending adoption separately from missing pins
+#: and reports whether an embedded authentication key decrypts.
 ANSIBLE_READINESS_KIND = "compute_provisioning.ansible.readiness"
-ANSIBLE_READINESS_SCHEMA_VERSION = 2
+ANSIBLE_READINESS_SCHEMA_VERSION = 3
 
 
 class FileInfo(BaseModel):
@@ -105,6 +101,7 @@ class AnsibleReadinessDetail(BaseModel):
     )
     playbooks: list[AnsiblePlaybookInfo] = Field(default_factory=list)
     ssh_keys: list[SshKeyInfo] = Field(default_factory=list)
+    hosts_pending_key_adoption: list[str] = Field(default_factory=list)
     host_registry_readable: bool = Field(
         description="False when the registered hosts could not be listed",
     )
@@ -131,8 +128,8 @@ def ansible_readiness_component(
     - when any Ansible executor is real, Ansible is on ``PATH``, every real
       executor's playbook exists, and every enabled ``ssh`` host can be
       executed against: execution does not refuse its stored connection, the
-      key file it names exists, and the protected key it holds decrypts. A
-      host's offering mode is its pool's, which this component does not see, so
+      authentication key is available, and the host states a pin or is pending
+      adoption. A pending host appears in the detail. A host's offering mode is its pool's, which this component does not see, so
       a host's problem counts once any executor is real.
 
     Mocked executors need neither Ansible, nor playbooks, nor keys; a key file
@@ -168,7 +165,8 @@ def ansible_readiness_component(
     except Exception:
         hosts = []
         readable = False
-    report = collect_ssh_keys_from_hosts(hosts, ssh_codec)
+    real = any(not playbook.mocked for playbook in playbooks)
+    report = collect_ssh_keys_from_hosts(hosts, ssh_codec, check_pins=real)
     ssh_keys = report.ssh_keys
     reasons = _not_ready_reasons(
         version=version,
@@ -181,6 +179,7 @@ def ansible_readiness_component(
         ansible_version=version,
         playbooks=playbooks,
         ssh_keys=ssh_keys,
+        hosts_pending_key_adoption=report.hosts_pending_key_adoption,
         host_registry_readable=readable,
         not_ready_reasons=reasons,
     )
@@ -257,10 +256,11 @@ class HostKeyReport:
 
     ssh_keys: list[SshKeyInfo] = field(default_factory=list)
     host_reasons: list[str] = field(default_factory=list)
+    hosts_pending_key_adoption: list[str] = field(default_factory=list)
 
 
 def collect_ssh_keys_from_hosts(
-    hosts: Iterable[ExecutionHost], ssh_codec: SshConnectionCodec
+    hosts: Iterable[ExecutionHost], ssh_codec: SshConnectionCodec, *, check_pins: bool = False
 ) -> HostKeyReport:
     """One ``SshKeyInfo`` per key reference among the hosts, read as execution
     reads them.
@@ -279,11 +279,12 @@ def collect_ssh_keys_from_hosts(
     path_to_hosts: dict[str, list[str]] = {}
     embedded: list[tuple[str, bool]] = []
     host_reasons: list[str] = []
+    pending: list[str] = []
     for host in hosts:
         if host.connection.kind != SSH_CONNECTION_KIND:
             continue
         try:
-            target = inventory_target(host)
+            target = inventory_target(host, include_host_keys=check_pins)
         except ValueError as exc:
             refusal = str(exc)
             # A refusal naming no key already names the host; one for a version
@@ -292,6 +293,15 @@ def collect_ssh_keys_from_hosts(
                 refusal = f"host {host.host_id!r} cannot be executed against: {refusal}"
             host_reasons.append(refusal)
             continue
+        if check_pins and not target.host_keys:
+            if host.host_key_adoption_pending:
+                pending.append(host.host_id)
+            else:
+                host_reasons.append(
+                    f"host {host.host_id!r} at [{target.ssh_host}]:{target.ssh_port} "
+                    "has no pinned SSH host key. Verify the fingerprint independently "
+                    "and capture or state the host key."
+                )
         if target.ssh_key_type == "path":
             path_to_hosts.setdefault(target.ssh_key_value, []).append(host.host_id)
             continue
@@ -330,7 +340,9 @@ def collect_ssh_keys_from_hosts(
                 referenced_by=[host_id],
             )
         )
-    return HostKeyReport(ssh_keys=results, host_reasons=host_reasons)
+    return HostKeyReport(
+        ssh_keys=results, host_reasons=host_reasons, hosts_pending_key_adoption=sorted(pending)
+    )
 
 
 __all__ = [

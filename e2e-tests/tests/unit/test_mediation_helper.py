@@ -4,27 +4,38 @@ A run naming no mediation target has its case stages blocked and its buyers
 written without a dispute credential. Once a target is named, a missing setting
 fails rather than hiding a broken configuration behind a skip, and an unready
 target blocks the stages unless it is the lane's own (LANE_OWNED), which fails
-them, naming it. The buyer's credential names its token's variable, and the
-harness hands the token over under it. Every value below is a development
+them, naming it. A live verification scenario refuses a lane-owned target
+with a blocked skip naming it, and fails a run stating no buyer token; an
+Agreement pinning another authority than the run's target is named with both.
+The buyer's credential names its token's variable, and the harness hands the
+token over under it. A target reached through MEDIATION.PROXY_URL is probed and
+read through that proxy alone, and the buyer processes receive it as their
+HTTPS_PROXY with loopback excluded. Every value below is a development
 fixture, never used on any network.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
+import ssl
 import tomllib
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_arkhai_mediation.records import RecordVerificationError
 from market_deal_lifecycle.configuration import AuthorityIdentity, dispute_config
 
 from tests.e2e.roles.helpers import mediation
 
 Failed = pytest.fail.Exception
 Skipped = pytest.skip.Exception
+# The lanes' public development CA, a real bundle the transport can load.
+_LANE_CA = Path(__file__).resolve().parents[3] / "tools/lane-double-controls/tls/lane-ca.pem"
 
 # The lanes' mediation double's identity and tokens, public development values.
 _EXTERNAL = {
@@ -148,6 +159,44 @@ def test_a_ready_target_is_read_without_a_trailing_slash(configure) -> None:
     )
 
 
+@pytest.mark.parametrize("lane_owned", [True, "true"])
+def test_a_live_scenario_refuses_a_lane_owned_target_before_reading_anything(
+        configure, lane_owned) -> None:
+    configure(**{**_LANE_OWNED, "LANE_OWNED": lane_owned})
+    with pytest.raises(Skipped, match=(
+            r"blocked: the mediation target https://mediation-double:8443/ is a lane's own "
+            r"double \(MEDIATION.LANE_OWNED\), which yields no live evidence")):
+        mediation.live_mediation(ready=_never_asked)
+
+
+def test_a_live_scenario_takes_an_external_target(configure) -> None:
+    configure(**_EXTERNAL)
+    target = mediation.live_mediation(ready=_ready)
+    assert (target.service_url, target.lane_owned, target.buyer_api_key) == (
+        "https://mediation-double:8443", False, _EXTERNAL["BUYER_API_KEY"])
+
+
+def test_a_live_scenario_with_no_target_or_an_unready_one_is_blocked(configure) -> None:
+    configure()
+    with pytest.raises(Skipped, match="blocked: MEDIATION.SERVICE_URL not configured"):
+        mediation.live_mediation(ready=_never_asked)
+    configure(**_EXTERNAL)
+    with pytest.raises(Skipped, match="blocked: mediation service at .* is not ready"):
+        mediation.live_mediation(ready=_unready)
+
+
+def test_a_live_scenario_with_no_buyer_token_fails_naming_it(configure) -> None:
+    configure(**{key: value for key, value in _EXTERNAL.items() if key != "BUYER_API_KEY"})
+    try:
+        mediation.live_mediation(ready=_ready)
+    except (Skipped, Failed) as raised:
+        outcome: BaseException = raised
+    else:
+        raise AssertionError("live_mediation neither skipped nor failed")
+    assert isinstance(outcome, Failed)
+    assert "MEDIATION.BUYER_API_KEY not configured" in str(outcome)
+
+
 def test_the_buyer_credential_binds_the_authority_and_resolves_the_handed_token(configure) -> None:
     """The buyer's own loader reads the written credential as bound to the
     target's identity, trusting the CA bundle, and resolves its token from the
@@ -213,6 +262,75 @@ def test_the_buyer_files_the_delivery_end_claim_through_the_adapter(tmp_path) ->
     assert outcome.filing.parts
 
 
+def _read(peer: MediationContractFake, *, page_size: int) -> list[dict[str, Any]]:
+    request = peer.data["filing"]["request"]
+    return mediation.read_record(
+        _peer_target(peer), negotiation_id="negotiation-fixture",
+        transaction=request["transaction"], agreement=request["agreement"],
+        page_size=page_size, transport=peer.transport(),
+    )
+
+
+def test_an_agreement_pinning_the_runs_authority_differs_in_nothing() -> None:
+    peer = MediationContractFake()
+    agreement = peer.data["filing"]["request"]["agreement"]
+
+    assert mediation.pinned_authority_difference(_peer_target(peer), agreement) is None
+
+
+def test_an_agreement_pinning_another_authority_is_named_with_both_identities() -> None:
+    peer = MediationContractFake()
+    agreement = peer.data["filing"]["request"]["agreement"]
+    target = dataclasses.replace(_peer_target(peer),
+                                 account="00000000-0000-4000-8000-0000000000d9")
+
+    difference = mediation.pinned_authority_difference(target, agreement)
+
+    assert difference is not None
+    assert peer.authority["account"] in difference
+    assert "00000000-0000-4000-8000-0000000000d9" in difference
+
+
+def test_an_agreement_naming_no_dispute_authority_fails_rather_than_differs() -> None:
+    """No dispute terms is the market's failure, never a topology's other
+    authority, so it fails rather than reading as a difference to skip on."""
+    peer = MediationContractFake()
+    agreement = peer.data["filing"]["request"]["agreement"]
+    unpinned = {**agreement, "settlement": {**agreement["settlement"], "lifecycle": None}}
+
+    with pytest.raises(AssertionError, match="names no dispute authority"):
+        mediation.pinned_authority_difference(_peer_target(peer), unpinned)
+
+
+def test_the_record_is_read_whole_page_by_page_as_the_buyer(tmp_path) -> None:
+    """A filed case an operator ruled and closed: three signed entries, read as
+    the buyer in pages of two, verified and returned as their JSON in sequence."""
+    peer = MediationContractFake()
+    outcome = _file(peer, tmp_path, peer.transport())
+    peer.decide(outcome.filing.case_ref, [])
+    peer.requests.clear()
+
+    entries = _read(peer, page_size=2)
+
+    assert entries == [signed["entry"] for signed in peer.entries]
+    assert [entry["kind"] for entry in entries] == ["filed", "ruled", "closed"]
+    reads = [request for request in peer.requests if request.url.path == "/record"]
+    assert [(request.url.params["after"], request.url.params["limit"]) for request in reads] == [
+        ("0", "2"), ("2", "2"),
+    ]
+    assert {request.headers["authorization"] for request in reads} == {"Bearer fixture-payer"}
+
+
+def test_an_entry_failing_its_signature_is_refused(tmp_path) -> None:
+    peer = MediationContractFake()
+    outcome = _file(peer, tmp_path, peer.transport())
+    peer.decide(outcome.filing.case_ref, [])
+    peer.entries[1]["entry"]["basis"] = "payee_filed"
+
+    with pytest.raises(RecordVerificationError):
+        _read(peer, page_size=1000)
+
+
 def test_an_unreachable_authority_leaves_the_buyer_s_filing_unknown(tmp_path) -> None:
     peer = MediationContractFake()
 
@@ -223,3 +341,92 @@ def test_an_unreachable_authority_leaves_the_buyer_s_filing_unknown(tmp_path) ->
 
     assert outcome.status == "unknown", outcome
     assert peer.cases == {}
+
+
+_PROXIED = {**_EXTERNAL, "SERVICE_URL": "https://dispute-authority.topology.svc.cluster.local",
+            "PROXY_URL": " http://127.0.0.1:18443 ", "CA_BUNDLE_PATH": str(_LANE_CA)}
+
+
+def test_a_target_named_with_a_proxy_is_probed_through_it(configure, monkeypatch) -> None:
+    asked: list[tuple[str, dict[str, Any]]] = []
+
+    def probe(url: str, **kwargs: Any) -> bool:
+        asked.append((url, kwargs))
+        return True
+
+    monkeypatch.setattr(mediation, "target_ready", probe)
+    configure(**_PROXIED)
+    target = mediation.configured_mediation()
+    assert target.proxy_url == "http://127.0.0.1:18443"
+    assert target.service_url == _PROXIED["SERVICE_URL"]
+    assert asked == [(_PROXIED["SERVICE_URL"],
+                      {"ca_bundle": str(_LANE_CA), "proxy": "http://127.0.0.1:18443"})]
+
+
+def test_the_buyer_processes_reach_a_proxied_target_through_it_and_loopback_directly(
+        configure) -> None:
+    configure(**_PROXIED)
+    target = mediation.configured_mediation(ready=_ready)
+    assert mediation.buyer_mediation_environment(target) == {
+        "MEDIATION_BUYER_API_KEY": _EXTERNAL["BUYER_API_KEY"],
+        "HTTPS_PROXY": "http://127.0.0.1:18443", "https_proxy": "http://127.0.0.1:18443",
+        "NO_PROXY": "127.0.0.1,localhost,::1", "no_proxy": "127.0.0.1,localhost,::1",
+    }
+    configure(**_EXTERNAL)
+    direct = mediation.configured_mediation(ready=_ready)
+    assert mediation.buyer_mediation_environment(direct) == {
+        "MEDIATION_BUYER_API_KEY": _EXTERNAL["BUYER_API_KEY"]}
+
+
+def test_the_harness_client_goes_through_the_proxy_trusting_the_bundle_alone(configure) -> None:
+    configure(**_PROXIED)
+    target = mediation.configured_mediation(ready=_ready)
+    transport = mediation.target_transport(target)
+    assert isinstance(transport, httpx.AsyncHTTPTransport)
+    pool = transport._pool  # httpx exposes no public view of a transport's proxy.
+    assert type(pool).__name__ == "AsyncHTTPProxy"
+    assert pool._proxy_url.host == b"127.0.0.1" and pool._proxy_url.port == 18443
+    lane_ca = ssl.create_default_context(cafile=str(_LANE_CA)).get_ca_certs()
+    assert pool._ssl_context.get_ca_certs() == lane_ca and lane_ca
+
+
+def test_a_test_transport_or_no_proxy_leaves_the_client_its_own(configure) -> None:
+    configure(**_PROXIED)
+    proxied = mediation.configured_mediation(ready=_ready)
+    given = httpx.MockTransport(lambda request: httpx.Response(200))
+    assert mediation.target_transport(proxied, given) is given
+    configure(**_EXTERNAL)
+    assert mediation.target_transport(mediation.configured_mediation(ready=_ready)) is None
+
+
+def test_an_unready_proxied_target_is_named_with_its_proxy(configure) -> None:
+    configure(**_PROXIED)
+    outcome = _outcome(ready=_unready)
+    assert isinstance(outcome, Skipped)
+    assert (f"blocked: mediation service at {_PROXIED['SERVICE_URL']} through "
+            "http://127.0.0.1:18443 is not ready") in str(outcome)
+
+
+def test_the_buyer_s_filing_and_record_reads_go_through_the_proxy(tmp_path, monkeypatch) -> None:
+    """Both of the harness's mediation clients take the proxied transport; the
+    fake authority then answers in its place."""
+    peer = MediationContractFake()
+    given: list[object] = []
+    real = mediation.MediationClient
+
+    def recording(*args: Any, transport: object = None, **kwargs: Any) -> Any:
+        given.append(transport)
+        return real(*args, transport=peer.transport(), **kwargs)
+
+    monkeypatch.setattr(mediation, "MediationClient", recording)
+    target = dataclasses.replace(_peer_target(peer), proxy_url="http://127.0.0.1:18443")
+    request = peer.data["filing"]["request"]
+    outcome = mediation.file_as_buyer(
+        target, negotiation_id="negotiation-fixture", transaction=request["transaction"],
+        agreement=request["agreement"], store=tmp_path, ended_at=_ENDED_AT,
+    )
+    peer.decide(outcome.filing.case_ref, [])
+    mediation.read_record(target, negotiation_id="negotiation-fixture",
+                          transaction=request["transaction"], agreement=request["agreement"])
+    assert len(given) == 2
+    assert all(isinstance(transport, httpx.AsyncHTTPTransport) for transport in given)

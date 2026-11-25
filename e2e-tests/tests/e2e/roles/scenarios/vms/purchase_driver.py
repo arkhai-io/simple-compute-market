@@ -11,7 +11,8 @@ records as it ends. ``VmPurchaseDriver`` is the lane's, over
 ``arkhai.payments.v1`` settlement. The lease view is the canonical deal's,
 which finds a VM hold by its negotiation whatever the settlement mechanism.
 ``VmRecurringPurchaseDriver`` is the lane's recurring purchase, whose listing's
-one settlement is a recurring option, on-demand or spot, and
+one settlement is a recurring option, on-demand or spot,
+``VmLiveRatePurchaseDriver`` that purchase under a live run's own terms, and
 ``VmRateWatchdogDriver`` that purchase opting into the buyer's watchdog.
 """
 
@@ -44,6 +45,8 @@ from tests.e2e.roles.helpers.payments import (
 )
 from tests.e2e.roles.helpers.rate_watchdog_stages import WATCHDOG_OPT_IN
 from tests.e2e.roles.helpers.recurring_purchase_stages import (
+    LANE_RATE_TERMS,
+    RateTerms,
     check_recurring_option,
     recurring_settlement,
 )
@@ -271,6 +274,8 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
     servicing_loop = "deal-servicing"
     #: The seller's notice a spot option states; none for on-demand.
     payee_notice_seconds: int | None = None
+    #: The option's per-period terms: the lanes' unless a live run states its own.
+    rate_terms: RateTerms = LANE_RATE_TERMS
 
     def listing_settlement(self) -> dict[str, Any]:
         """The listing's one settlement: a recurring option, on-demand or spot,
@@ -279,6 +284,7 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
             seller_account=self.seller_account,
             delivery_deadline_seconds=delivery_deadline_seconds(),
             payee_notice_seconds=self.payee_notice_seconds,
+            terms=self.rate_terms,
         )
 
     def check_purchase_option(self, listing: Any, option: SettlementOption) -> None:
@@ -286,7 +292,8 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
         # The listing states the recurring payments settlement alone.
         assert len(listing.settlement_options) == 1, listing.settlement_options
         check_recurring_option(option, delivery_deadline_seconds=delivery_deadline_seconds(),
-                               payee_notice_seconds=self.payee_notice_seconds)
+                               payee_notice_seconds=self.payee_notice_seconds,
+                               terms=self.rate_terms)
 
     def read_arguments(self, run_id: str) -> list[str]:
         return ["delivery", "--from", run_id]
@@ -298,6 +305,22 @@ class VmRecurringPurchaseDriver(VmPurchaseDriver):
             ) as peer:
                 return await peer.read(negotiation_id)
         return asyncio.run(read())
+
+
+@dataclass(kw_only=True)
+class VmLiveRatePurchaseDriver(VmRecurringPurchaseDriver):
+    """VM's ``RecurringPurchaseDriver`` for a live verification scenario: the
+    lane's recurring purchase under the run's own per-period terms, its
+    ``market buy`` asking for the run's term rather than the lanes' hour."""
+
+    #: The Agreement's duration the buyer asks for, in whole seconds.
+    term_seconds: int
+
+    def buy_arguments(self, listing_id: str, option_id: str) -> list[str]:
+        arguments = super().buy_arguments(listing_id, option_id)
+        at = arguments.index("--duration-hours")
+        arguments[at:at + 2] = ["--duration-seconds", str(self.term_seconds)]
+        return arguments
 
 
 def _ssh_endpoint(connection_details: Any) -> tuple[str, int]:

@@ -2,7 +2,7 @@
 tags: [engineering, testing]
 ---
 
-# System tests
+# System test scenarios
 
 How a system test — an end-to-end scenario across deployed services
 ([Test levels](test-levels.md), "System tests") — is written, and what its evidence
@@ -29,9 +29,15 @@ establish ordering even when it passes. So a scenario:
 - waits only on a request it made, or on an effect its own request caused, bounded —
   an event its request emits, or a message it sends off the request path — or, in
   a run on the wall clock (see "Time a test does not control"), for an instant the
-  scenario's own data fixes, then advances what acts on that instant explicitly;
-  where one service reads another's state live, it reads the effect once after its
-  step rather than polling for it;
+  scenario's own data fixes or a producer recorded as the effect of the scenario's
+  own request, then advances what acts on that instant explicitly; where one
+  service reads another's state live, it reads the effect once after its step
+  rather than polling for it;
+- where a live producer acts on the scenario's request on a schedule of its own,
+  which no control steps, polls the producer's public read for that effect,
+  bounded, and fails at the bound: the bound is the producer's own schedule — the
+  end of the period it settles, say — plus the poll's allowance, never an open wait
+  for the system to settle;
 - reaches an instant by setting the time every participant perceives, together,
   never by waiting and never by moving one participant alone: once the clocks of
   two participants that exchange signed or timestamped messages disagree by more
@@ -58,8 +64,11 @@ first of these that applies:
 - below those, move the record's time into the past and step the loop that acts on
   it;
 - otherwise the run uses the wall clock throughout: it waits only for an instant
-  the scenario's own data fixes, and a stage needing any other instant skips,
-  naming the instant it needed and the component whose time it could not set.
+  the scenario's own data fixes, such as a record's start plus an offset the
+  scenario chose, or one the component recorded, in a record it signs, as the
+  effect of the scenario's own request, and a stage needing any other instant
+  skips, naming the instant it needed and the component whose time it could not
+  set.
 
 A proxy rewriting the times in a component's responses is none of these: it
 changes only what the component reports, never when it acts, and cannot rewrite a
@@ -83,7 +92,7 @@ stages, which wait for nothing, run.
 The process running a system test cannot import a service's internals. It uses typed
 clients, explicit test controls, and the services' stage and event interfaces, the
 same no-raw-calls discipline integration tests follow
-([Integration tests](integration-tests.md)); an observability seam a system test
+([Application integration tests](integration-tests.md)); an observability seam a system test
 needs is designed as such an interface.
 
 A command-line client a system test runs is controlled on the same principles as a
@@ -114,6 +123,39 @@ same stack. Setup or teardown that needs knowledge the repository lacks — fund
 account at a provider's sandbox, providing the hosts — is the deployment's, and no
 scenario performs it. An absent target is a skip naming what is missing, and a stage
 whose input the target does not name skips naming that field.
+
+An extending scenario takes one of two forms. The *complete* form runs the shared
+stages to the scenario's end. The *live verification* form verifies the interactions
+between the repository's services and the external systems that the locally
+verifiable scenarios could not exercise, and need test nothing else: it gives the
+live producer the inputs its locally verifiable twin gave the producer's double,
+produced by the repository's own client code, checks that the producer emits the
+outputs the twin expected, and runs none of the twin's stages after that output. The
+comparison is one assertion the two scenarios share, stating which output fields it
+compares exactly, which by relation, and which it ignores, so the double and the
+live producer are held to one expectation. An output that differs fails the
+observation, never skips it. The live verification form complements the complete
+form; it does not replace it.
+
+A live scenario's modes follow what it proves. One proving a payment provider runs
+with its hosts mocked, since a real host adds cost and failure modes to a claim that
+does not rest on it, and states that mode among its requirements. A mode earns a
+scenario of its own only where it makes the external party run different code: a
+provider whose payout delay differs between its live and test modes applies one code
+path to two values, so one scenario serves both.
+
+A person's decision — an operator's ruling, a manual approval — reaches a live
+scenario only through a policy the topology applies, or through the scenario itself
+where the producer's public client offers that action. A policy watcher deciding as
+the person would is a double for that person.
+
+Each external-topology scenario states what a topology must provide for it, naming
+no infrastructure: what it proves, its modes, the external services it needs and in
+which mode, its accounts and their starting balances, any policy a person's decision
+needs, the settings it reads, and the cleanup and balance reset its caller owes
+between runs. The deployment prepares a topology meeting those requirements and runs
+the scenarios against it. A requirement the topology does not meet leaves the
+observations needing it unproven, naming the requirement, never passed.
 
 Evidence from an external-topology run is supplied by whoever deploys the topology.
 The scenarios assert, and log the identifiers each stage reads; the deployment's

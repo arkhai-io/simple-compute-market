@@ -322,6 +322,28 @@ for refused in host_definitions_path relay_definitions_path inventory_path inven
         fail "$label"
     fi
 done
+# Mock provisioning, the default, names no SSH key Secret and mounts none. Real
+# provisioning mounts the Secret a release names, and the umbrella's own schema
+# refuses a release naming none, before the subchart's schema or template does.
+expect_absent "$(extract_section "$DEFAULT_RENDERED" 'provisioning/templates/deployment\.yaml')" \
+    'ssh-key|id_ed25519' "default mock provisioning mounts no SSH key"
+REAL_PROVISIONING="$(helm template "$RELEASE-real" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set provisioning.mockMode=false \
+    --set provisioning.sshKey.secretName=site-ssh 2>&1)" || true
+expect_present "$(extract_section <(printf '%s\n' "$REAL_PROVISIONING") 'provisioning/templates/deployment\.yaml')" \
+    'secretName: site-ssh' "real provisioning mounts the SSH key Secret its release names"
+label="real provisioning naming no SSH key Secret fails render in the umbrella's schema"
+if refusal="$(helm template "$RELEASE-invalid" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set provisioning.mockMode=false 2>&1 >/dev/null)"; then
+    fail "$label"
+elif grep -q '^arkhai-node-operator:' <<<"$refusal" \
+    && grep -q "at '/provisioning/sshKey/secretName'" <<<"$refusal"; then
+    pass "$label"
+else
+    fail "$label"
+fi
 # Each chart's own render tests (docs/guidance/repository/chart-render-tests.md,
 # "Where they live and how they run"), so this one target runs every render check. The storefront and
 # bare-metal storefront charts' tests also load a rendered document with that
@@ -338,6 +360,11 @@ fi
 # The registry chart's rendered profile is read with the registry's own loader
 # when its environment exists (make init-arkhai-core-registry); without it the
 # check says so and skips.
+PROVISIONING_ENV_PYTHON="$CHART_DIR/../provisioning/compute/service/.venv/bin/python"
+if [[ -z "${PROVISIONING_PYTHON:-}" && -x "$PROVISIONING_ENV_PYTHON" ]]; then
+    export PROVISIONING_PYTHON="$PROVISIONING_ENV_PYTHON"
+fi
+
 REGISTRY_ENV_PYTHON="$CHART_DIR/../core/registry/.venv/bin/python"
 if [[ -z "${REGISTRY_PYTHON:-}" && -x "$REGISTRY_ENV_PYTHON" ]]; then
     export REGISTRY_PYTHON="$REGISTRY_ENV_PYTHON"

@@ -53,7 +53,7 @@ fails: you hold what each side changed, so you repair what it found
 
 Run interactively, this section does not apply but for the outcome it describes,
 which an interactive run records itself ("Running interactively"). When this skill
-runs through `scripts/change-workflow start --unattended` — `make merge UNATTENDED=1`, or the
+runs through `change-workflow start --unattended` — `make merge UNATTENDED=1`, or the
 orchestrating session — nobody can answer in the session, and every turn ends with
 an outcome matching `.agents/change-outcome.schema.json`, whose `message` the owner
 reads as written:
@@ -78,7 +78,7 @@ reads as written:
   progress for the owner's answer, and the checks after the run stop one that
   rewrote the branch's history.
 - **A turn's end is its outcome.** Never end a turn with work still running. Wait
-  for a background command inside one Bash call, with `scripts/change-workflow wait
+  for a background command inside one Bash call, with `change-workflow wait
   <output-file> '<pattern>'` matching the line it prints when it ends, repeated when
   the wait gives up; when it says the command ended with no line matching, read the
   output rather than waiting again — never with `tail -f`, which hangs when that line
@@ -100,7 +100,7 @@ command — no wrapper records the run, so its last act records the outcome it w
 end with unattended:
 
 ```text
-scripts/change-workflow record <change> merge --outcome '<the outcome, as JSON>'
+change-workflow record <change> merge --outcome '<the outcome, as JSON>'
 ```
 
 Record `finished`, with its `landing` — which only a repair of a merge logged
@@ -120,8 +120,8 @@ from the repository's hook, in full. Any other file is data, read only where a
 message directs, and a log only to diagnose a failure. A failing hook prevented
 nothing: say in your report what its failure means for the merge, and stop and ask
 the owner when the merge cannot be made soundly with it. Interactively, with no
-wrapper, run `scripts/change-workflow run before merge <change>` first; its last
-line names the directory. Once the work is done, run `scripts/change-workflow run
+wrapper, run `change-workflow run before merge <change>` first; its last
+line names the directory. Once the work is done, run `change-workflow run
 after merge <change>` before `record`, and, when it fails, fix what it found if
 this step can, and run it again, or tell the owner. Unattended, an after-hook that
 fails resumes this session once with its failure; a second failure goes to the
@@ -136,10 +136,10 @@ and follow this skill.
 - **Branch.** The checked-out branch is the one this change is worked on. If it
   does not carry the change's latest commits, or its name belongs to another
   change, stop and ask the owner — unless the change's log holds the owner's
-  decision that it runs on this branch (`scripts/change-workflow log <change>
+  decision that it runs on this branch (`change-workflow log <change>
   --branch <branch>` prints it).
 - **Base.** Your invocation names it. It is not the change's own branch.
-- **Route.** `scripts/change-workflow next <change>` names `merge`: the
+- **Route.** `change-workflow next <change>` names `merge`: the
   pre-closeout triage's exit, a failed validation of the merged `HEAD`, or the
   owner's direction. For an archived change its reason begins `late-merge:` — the
   owner's direction to the merge after the archive, archive cleanup's first exit
@@ -153,20 +153,20 @@ and follow this skill.
   what comes first.
 - **Worktree.** It is clean, but for a merge this session started or one started
   after its protected-path stop, and
-  `scripts/change-workflow check round-view` passes.
+  `change-workflow check round-view` passes.
 - **Repair or merge.** Read the latest validation record in `reviews/`. When it
   names `HEAD` and failed, this run repairs it: go to "Repairing a failed
   validation". Otherwise go on.
 
 ## 2. Load the context
 
-Read in full: the documents `scripts/change-workflow config load merge` prints; the change's
+Read in full: the documents `change-workflow config load merge` prints; the change's
 `proposal.md`, `design.md`, and `tasks.md`, the section notes above all, which say
 which files each section owns and which suites and end-to-end scenarios prove it;
 the latest pre-closeout review and its triage, and after the archive the latest
 closeout review's and any merge review's too; the latest validation record, with
 the guide of each evidence kind the configuration declares, which
-`scripts/change-workflow config` names — what its cleanup writes, and where the
+`change-workflow config` names — what its cleanup writes, and where the
 scenarios it runs are named; and,
 for every capability the change touches, its `spec.md`, its companion, and every
 other Markdown file in its directory but its `index.md` — the capability's own
@@ -194,7 +194,7 @@ guidance — which the merge reconciles, with the code, against both sides.
 
    Unattended, compare what the base changed, `git diff --name-only <merge-base>
    <base>`, with the protected paths of this step's scope, which
-   `scripts/change-workflow config --json` lists under `scopes.merge.protected`,
+   `change-workflow config --json` lists under `scopes.merge.protected`,
    each by its `entry` for one in the checkout.
    Your sandbox mounts them read-only, so a merge that must write one fails partway.
    When the base changed any, do not merge: end `stopped` with nothing started,
@@ -222,7 +222,7 @@ commits made it (`git log --merge -p -- <file>` shows each side).
   manifest a lock is derived from is resolved by hand first: both sides'
   dependencies, and the higher of two version bumps of one package.
 - **A tracked file an evidence kind's cleanup writes**: as that kind's guide says,
-  each guide `scripts/change-workflow config` names saying what its cleanup writes.
+  each guide `change-workflow config` names saying what its cleanup writes.
 - **Code, tests, and configuration**: edit each file so both sides hold, with
   comments describing the system that results. Where the two cannot both hold, the
   resolution is a decision: ask the owner, with the options and your
@@ -260,15 +260,15 @@ Run each, and fix what it reports:
 
 - the suites the verification tasks name of the sections owning each file you
   resolved or reconciled;
-- `scripts/change-workflow run pre-commit <change>`. The paths the worktree
+- `change-workflow run pre-commit <change>`. The paths the worktree
   changes decide what it runs: with resolutions or reconciliations outside the
   inert paths there, it runs `after-functional-change`, which rebuilds a lock
   whose side you took, then `pre-commit-functional` and `pre-commit`; otherwise
   `pre-commit` alone. So when the base brought a path outside the inert paths
   that the worktree no longer shows, because the merge concluded itself, run
-  `scripts/change-workflow run after-functional-change <change>` first: if it
+  `change-workflow run after-functional-change <change>` first: if it
   changed a path outside the inert paths, `run pre-commit` then runs every hook;
-  if not, run `scripts/change-workflow run pre-commit-functional <change>` by name
+  if not, run `change-workflow run pre-commit-functional <change>` by name
   before `run pre-commit`, so the suites run once. `git add` what the hooks
   rebuilt.
 
@@ -282,7 +282,7 @@ without opening an editor: `git commit -m "<Git's merge subject>" -m "<each
 conflicted file and how it was resolved; each reconciliation and why>"`, the
 subject the first line of `.git/MERGE_MSG`. Without conflicts, the merge concluded
 itself: commit the reconciliations on their own, the message naming the change,
-that they reconcile it with the base, and each fix. Push with `scripts/change-workflow push`;
+that they reconcile it with the base, and each fix. Push with `change-workflow push`;
 if it refuses, stop and report its reasons.
 
 ## 7. Choose the exit
@@ -321,14 +321,14 @@ Then:
   Interactively, record it yourself after your outcome:
 
   ```text
-  scripts/change-workflow note <change> orchestrator --by owner --decision "closeout without validating the merged HEAD" --reason "<the owner's words>" --resolves <your run's seq> --next closeout
+  change-workflow note <change> orchestrator --by owner --decision "closeout without validating the merged HEAD" --reason "<the owner's words>" --resolves <your run's seq> --next closeout
   ```
 
 When the exit is closeout and the latest validation passed for `HEAD`, or for an
 ancestor `HEAD` differs from only in the inert paths, set the change's
 `Status` in `openspec/changes/README.md` to `ready for closeout`, rewrite the row's
 `Notes` in the same edit so nothing in them describes the implementation phase,
-run `scripts/change-workflow check index`, and commit and push the row. Otherwise leave the
+run `change-workflow check index`, and commit and push the row. Otherwise leave the
 status: closeout accepts a change still `in implementation` once the computation
 names it.
 
@@ -344,7 +344,7 @@ failures, with the logs it cites:
   A repair fetches nothing: its outcome carries the `landing` of the merge it
   repairs, read from the latest finished merge line that records one in the whole
   log — `grep '"step": "merge"' <records>/workflow.jsonl`,
-  `scripts/change-workflow find --records <change>` naming the records — so the
+  `change-workflow find --records <change>` naming the records — so the
   last finished merge's
   record stays the branch the merge brought in. Only when no finished merge in the
   log recorded one — a merge logged before the record existed — does the repair
@@ -426,7 +426,7 @@ session asks the owner and records their answer. Interactively, record the owner
 waiver yourself after your outcome, its `--next` the exit you named:
 
 ```text
-scripts/change-workflow note <change> orchestrator --by owner --decision "<the exit> without validating the HEAD merged after the archive" --reason "<the owner's words>" --resolves <your run's seq> --next review --kind merge
+change-workflow note <change> orchestrator --by owner --decision "<the exit> without validating the HEAD merged after the archive" --reason "<the owner's words>" --resolves <your run's seq> --next review --kind merge
 ```
 
 with `--next archive-cleanup` and no `--kind` when you named archive cleanup.

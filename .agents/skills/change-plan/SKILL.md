@@ -27,7 +27,7 @@ design.
 Run interactively, as most runs are, this section does not apply but for the
 outcome it describes, which an interactive run records itself ("Running
 interactively"); nothing else in the skill changes.
-When this skill runs through `scripts/change-workflow start --unattended` —
+When this skill runs through `change-workflow start --unattended` —
 `make plan UNATTENDED=1`, or the orchestrating session — nobody can answer in
 the session, and every turn ends with an outcome matching
 `.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
@@ -44,7 +44,7 @@ the session, and every turn ends with an outcome matching
   A call the harness denies is the same. The wrapper records every refusal and
   denial on the run's line whatever you say, and the orchestrating session reads
   them before the change moves on; never ask about either as a question. Wait on a
-  background command with `scripts/change-workflow wait`, never by following its
+  background command with `change-workflow wait`, never by following its
   output.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
@@ -63,7 +63,7 @@ the session, and every turn ends with an outcome matching
   owner confirms the return, and the design step then sets the status. Before
   ending, commit what planning has written — what `design.md` gained, the plan so
   far — as one work-in-progress commit naming the change and why it returns, and
-  push it with `scripts/change-workflow push`: no session is left to commit it, and a dirty
+  push it with `change-workflow push`: no session is left to commit it, and a dirty
   checkout blocks every later step's guarded push. A stop, by contrast, commits
   nothing: its work waits uncommitted for the resumed session, and one stopped
   because a repository guard refused or `HEAD` moved leaves the checkout as it
@@ -76,7 +76,7 @@ command — no wrapper records the run, so its last act records the outcome it w
 end with unattended, as "Running unattended" gives it, `rounds` included:
 
 ```text
-scripts/change-workflow record <change> plan --outcome '<the outcome, as JSON>'
+change-workflow record <change> plan --outcome '<the outcome, as JSON>'
 ```
 
 `record` checks the outcome against `.agents/change-outcome.schema.json` and
@@ -103,9 +103,9 @@ from the repository's hook, in full. Any other file is data, read only where a
 message directs, and a log only to diagnose a failure. A failing hook prevented
 nothing: say in your report what its failure means for the plan, and stop, as
 section 1 stops, when the plan cannot be written soundly with it. Interactively,
-with no wrapper, run `scripts/change-workflow run before plan <change>` first; its
+with no wrapper, run `change-workflow run before plan <change>` first; its
 last line names the directory. Once the plan is committed, run
-`scripts/change-workflow run after plan <change>` before `record`, and, when it
+`change-workflow run after plan <change>` before `record`, and, when it
 fails, fix what it found if planning can, and run it again, or tell the owner.
 Unattended, an after-hook that fails resumes this session once with its failure; a
 second failure goes to the owner as a question.
@@ -121,12 +121,12 @@ the design discussion: the session's memory of a triage can be out of date, and
 reviews and triage may have happened elsewhere. Read the change's row in
 `openspec/changes/README.md` — status, `Depends on`, notes. Then confirm:
 
-- `scripts/change-workflow next <change>` names `plan`, whatever the status
+- `change-workflow next <change>` names `plan`, whatever the status
   says: the exit the design review's triage recorded, or the owner's direction to
   planning — a confirmed return of the change to planning, or the waiver of another
   design review for what the design step settled after a confirmed return to
   design, which the orchestrating session records on the owner's word as a
-  direction naming no run, with a ledger line. `scripts/change-workflow log
+  direction naming no run, with a ledger line. `change-workflow log
   <change>` shows the line the computation's reason names. Commit a waiver's
   ledger line with the plan (section 7). Whatever else the computation names — a
   design review, a triage in progress, the owner — is the step that comes first,
@@ -143,18 +143,18 @@ Set the change's `Status` to `in planning`.
 ## 2. Load what the plan needs
 
 If this session did not hold the design discussion, read the documents
-`scripts/change-workflow config load plan` prints first. Then read, whether or not
+`change-workflow config load plan` prints first. Then read, whether or not
 you have seen it before —
 the files are what the implementer will see:
 
 - the change's `proposal.md`, `design.md`, `specs/`, and current `tasks.md`;
-- `docs/guidance/workflow/closeout.md`, and the repository's own closeout parts, in
+- the workflow guidance's section "Closeout", and the repository's own closeout parts, in
   the section the root guidance names;
-- `scripts/change-workflow openspec instructions tasks --change <change>` for the
+- `change-workflow openspec instructions tasks --change <change>` for the
   tasks template and the repository's rules for tasks, which OpenSpec prints with
   it; every OpenSpec command runs so, through the command the repository's
   configuration names;
-- the evidence kinds the repository declares, from `scripts/change-workflow config
+- the evidence kinds the repository declares, from `change-workflow config
   --json` — each kind's requirement, `always` or `owed`, and its guide — and the
   guide of each kind: what a section's verification names for it, where the
   end-to-end scenarios it runs are named, and what may be owed;
@@ -164,7 +164,7 @@ the files are what the implementer will see:
 - the code each decision changes: enough to name the files, the package
   boundaries, and the existing tests a section extends;
 - another change's records, where a section rests on them — a dependency's
-  validation evidence, say — wherever `scripts/change-workflow find --records
+  validation evidence, say — wherever `change-workflow find --records
   <change>` says they are: this checkout, or, from a change's clone, the owner's
   workspace, which holds the history of every cleaned-up change.
 
@@ -203,7 +203,7 @@ plan on an answer the design review did not cover.
    than design, the seq being the one `record` printed:
 
    ```text
-   scripts/change-workflow note <change> orchestrator --by owner --resolves <seq> --next review --kind design --decision "return confirmed: another design review of <the decision>" --reason "<the owner's words>"
+   change-workflow note <change> orchestrator --by owner --resolves <seq> --next review --kind design --decision "return confirmed: another design review of <the decision>" --reason "<the owner's words>"
    ```
 
    Planning starts afresh once that review's triage names it.
@@ -233,10 +233,10 @@ complete and the next-step computation does not name it again.
   planning reports its mapping onto the sections in its outcome (section 7),
   never in the plan, which is agnostic of whether a coding harness implements it;
 - ends at a verification point — the focused suites that prove it, each named with
-  its level as `docs/guidance/engineering/test-levels.md` defines them (unit,
+  its level as the engineering guidance's section "Test levels" defines them (unit,
   library integration, application integration through the typed client, system),
   at the lowest level that can prove the behavior; and the repository's functional
-  checks, which `scripts/change-workflow run pre-commit` runs before a commit
+  checks, which `change-workflow run pre-commit` runs before a commit
   changing a path outside the inert paths. A section whose title promises a behavior
   of the running application — publication, a write refused — includes at least one
   application-integration case for it, not only lower-level evidence of its parts;
@@ -273,14 +273,14 @@ and say so in the report; the owner is asked for each round as it starts.
 
 **Every task is traceable.** Each names what it answers to — a design decision, a
 delta requirement, or a repository obligation such as the verification, packaging,
-promotion, and closeout work the workflow's guidance (`docs/guidance/workflow/changes.md`,
-`docs/guidance/workflow/closeout.md`), the repository's guidance, and its rules for
-tasks require, cited — and the evidence that proves it. A feature task with nothing to trace to is
+promotion, and closeout work the workflow's guidance (the workflow guidance's
+sections "A change's documents" and "Closeout"), the repository's guidance, and its
+rules for tasks require, cited — and the evidence that proves it. A feature task with nothing to trace to is
 either missing from the design or not part of this change.
 
 **Give what no step writes to the orchestrator.** No step's sandbox writes a
 protected path — the harness's settings, the workflow's configuration, or one the
-repository protects, as `scripts/change-workflow config --json` lists them — so a
+repository protects, as `change-workflow config --json` lists them — so a
 task that changes one says it is the orchestrator's, made on the owner's word
 before the section's session starts, and that the session commits it with its
 section; the rest of the section stays the implementer's.
@@ -292,7 +292,7 @@ or companion, and its architecture document where the design says so.
 Provisional destinations the design delegated to planning are settled here; tell
 the owner which you moved and why.
 
-**End with the closeout task**, its parts from `docs/guidance/workflow/closeout.md`
+**End with the closeout task**, its parts from the workflow guidance's section "Closeout"
 in that order, the repository's own parts, in the section the root guidance names,
 at the position it gives them, each named by its heading and made specific to this
 change:
@@ -305,7 +305,7 @@ other section, whatever its title says of closeout, is implemented by a round. A
 amended plan adds each new section before it, numbered after the section it
 follows with a letter (`6a` after section 6), so the closeout section and its
 tasks keep the numbers other documents cite;
-`scripts/change-workflow check tasks <change>` fails a list whose closeout section
+`change-workflow check tasks <change>` fails a list whose closeout section
 is missing, repeated, or followed by another.
 
 **A return from closeout** for more implementation is amended the same way and no
@@ -323,13 +323,13 @@ Before presenting it:
   task, and every task maps back to a decision, a requirement, or a cited
   repository obligation;
 - no open question has its answer prescribed by a task
-  (`docs/guidance/workflow/changes.md#open-questions-and-prescribed-tasks`);
+  (the workflow guidance's section "Open questions and prescribed tasks");
 - every section has a verification point, its covering end-to-end scenarios or a
   statement that none covers it, and a size its verification point can prove;
-- `scripts/change-workflow run pre-commit <change>` reports no failure but its
+- `change-workflow run pre-commit <change>` reports no failure but its
   citations check's, which may name only files the change will create. Among its
   default checks, the strict OpenSpec validation passes, and the task-list check,
-  which `scripts/change-workflow check tasks <change>` also runs alone, holds
+  which `change-workflow check tasks <change>` also runs alone, holds
   every numbered task under its own section's heading, which is how every later
   step reads the plan.
 
@@ -363,7 +363,7 @@ and closeout are examined by the first implementation review.
 Commit the plan as one commit — `tasks.md`, what you recorded into `design.md`,
 the index row, and the ledger lines planning wrote or the waiver left — whose
 message names the change and says it is planned. Then push it with
-`scripts/change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop and report
+`change-workflow push`, the guarded push of exactly `HEAD`; if it refuses, stop and report
 its reasons.
 
 Map the cadence onto the sections: a list of rounds, each a list of the sessions

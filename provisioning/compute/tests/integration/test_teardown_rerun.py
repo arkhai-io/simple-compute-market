@@ -80,6 +80,11 @@ class _Executor:
     async def execute(self, run):
         if self.mode == "refuse":
             raise ValueError("refused before the start: the host key cannot be decrypted")
+        if self.mode == "host_key_refusal":
+            return JobFailure(error=ProvisioningErrorEnvelope(
+                code="host_key_refused", message="host 'h1' has no pinned SSH host key",
+                retryable=False,
+            ))
         run.report_starting()
         self.started += 1
         if self.mode == "fail":
@@ -158,6 +163,7 @@ class _World:
         table.register("vm", "make", self.executor)
         table.register("vm", "unmake", self.executor)
         table.freeze()
+        self.execution_hosts = {"h1": _HOST}
         self.engine = JobEngine(
             self.factory, executors=table, host_lookup={"h1": _HOST}.get,
             retry_policy=_RETRIES,
@@ -329,6 +335,32 @@ async def test_a_teardown_that_never_started_waits_then_runs_again(tmp_path, sou
     assert metadata["create_job_id"] == world.record().provider_metadata["create_job_id"]
     assert world.engine.get_job(_rerun_job_id(1)).params == world.engine.get_job(first).params
     assert world.progress().progress is ReleaseProgress.TEARING_DOWN
+
+
+@pytest.mark.asyncio
+async def test_a_teardown_refused_for_host_identity_can_rerun_after_repair(
+    tmp_path, source,
+) -> None:
+    world = _World(tmp_path)
+    finished = source.now()
+    await world.created(_State.active.value)
+    await world.orchestrator.begin_fulfillment_teardown(_FULFILLMENT)
+    world.executor.mode = "host_key_refusal"
+    first = await world.dispatch()
+    await world.run_queued()
+    job = world.engine.get_job(first)
+    assert job.execution_started_at is None
+    assert "no pinned SSH host key" in job.error
+    assert await world.poll() is ProviderOperationState.failed
+
+    world.executor.mode = "succeed"
+    source.set(finished + 60)
+    world.requeue()
+    rerun = await world.dispatch()
+    assert rerun == _rerun_job_id(1)
+    assert world.teardown_keys() == ["r-1:teardown", "r-1:teardown:rerun-1"]
+    await world.run_queued()
+    assert world.engine.get_job(rerun).status == "succeeded"
 
 
 @pytest.mark.asyncio

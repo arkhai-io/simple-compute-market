@@ -261,6 +261,10 @@ def _registration(provisioning_client: Any, site_capacity: Any, target: VmHost |
                               for listing in listings)),
         quarantined=quarantined,
         active_ports=active,
+        host_pins=tuple(sorted(
+            (host.host_id, tuple(sorted(host.connection.public.get("host_keys") or ())))
+            for host in hosts if host.host_id == target.host_id
+        )),
     )
 
 

@@ -11,6 +11,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+from base64 import b64encode
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -45,7 +47,7 @@ def _host(**protected) -> ExecutionHost:
     public = {"ssh_host": "10.0.0.1", "ssh_port": 2201, "ssh_user": "ops", "public_host": None}
     public["key_path"] = None if protected else "/keys/id"
     return ExecutionHost(
-        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=2, public=public, protected=protected)
+        "kvm1", "default", ConnectionEnvelope(kind="ssh", version=3, public=public, protected=protected)
     )
 
 
@@ -81,8 +83,8 @@ def test_an_embedded_key_is_decrypted_only_into_an_owner_only_file() -> None:
 def test_cleanup_removes_the_inventory_and_every_key_and_can_repeat() -> None:
     runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(_KEY))
     inventory = runner.write_inventory([_embedded(), _embedded("kvm2")], group="nodes")
-    written = [inventory.path, *inventory.key_paths]
-    assert len(written) == 3 and all(path.exists() for path in written)
+    written = [inventory.path, *inventory.key_paths, *inventory.known_hosts_paths]
+    assert len(written) == 5 and all(path.exists() for path in written)
 
     inventory.cleanup()
     inventory.cleanup()
@@ -103,6 +105,25 @@ def test_a_key_that_cannot_be_decrypted_leaves_nothing_behind(tmp_path, monkeypa
     assert list(tmp_path.iterdir()) == []
 
 
+def test_the_inventory_has_an_owner_only_host_pin_at_the_exact_endpoint():
+    # Deterministic test-only key; never a public-network identity.
+    blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"p" * 32
+    pin = "ssh-ed25519 " + b64encode(blob).decode("ascii")
+    target = replace(_embedded(), host_keys=(pin,))
+    runner = AnsibleRunner(SimpleNamespace(), ssh_codec=SshConnectionCodec(_KEY))
+    with runner.write_inventory([target], group="nodes") as inventory:
+        (known_hosts,) = inventory.known_hosts_paths
+        assert known_hosts.read_text() == f"[10.0.0.1]:2201 {pin}\n"
+        assert stat.S_IMODE(known_hosts.stat().st_mode) == 0o400
+        variables = inventory.path.read_text()
+        assert "ansible_host_key_checking=true" in variables
+        assert f"UserKnownHostsFile={known_hosts}" in variables
+        assert "GlobalKnownHostsFile=/dev/null" in variables
+        assert "StrictHostKeyChecking=yes" in variables
+        assert "ControlPath=none" in variables
+    assert not known_hosts.exists()
+
+
 def test_a_key_file_is_never_readable_by_others(tmp_path, monkeypatch) -> None:
     """The key file is created owner-only rather than restricted after writing."""
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
@@ -119,7 +140,7 @@ def test_a_key_file_is_never_readable_by_others(tmp_path, monkeypatch) -> None:
     with runner.write_inventory([_embedded()], group="nodes"):
         pass
 
-    assert created == [0o600]
+    assert created == [0o600, 0o600]
 
 
 def test_a_key_path_is_referenced_not_read() -> None:
@@ -140,7 +161,7 @@ def test_a_host_stored_at_version_1_never_reaches_an_inventory() -> None:
     legacy = ExecutionHost(
         "kvm1", "default", ConnectionEnvelope(kind="ssh", version=1, public=stored.public)
     )
-    with pytest.raises(ValueError, match="re-register the host at version 2"):
+    with pytest.raises(ValueError, match="re-register the host at version 3"):
         inventory_target(legacy)
 
 
@@ -148,7 +169,7 @@ def test_a_tenant_facing_route_is_carried_into_the_rendered_inventory() -> None:
     """``public_host=`` and ``public_port=`` render as host variables when the
     connection states them, and neither renders when it does not."""
     public = {**_host().connection.public, "public_host": "192.0.2.10", "public_port": 2222}
-    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=2, public=public))
+    routed = ExecutionHost("kvm1", "default", ConnectionEnvelope(kind="ssh", version=3, public=public))
     runner = AnsibleRunner(SimpleNamespace())
 
     target = inventory_target(routed)

@@ -12,6 +12,10 @@ import pytest
 
 import check_public_content as checker
 
+# The change workflow versions the test's workflow configuration accepts, which every
+# command reading the configuration checks first.
+ACCEPTED = '[workflow]\nversion = ">=0.1"\n'
+
 
 @pytest.fixture
 def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -63,7 +67,7 @@ def branch(repo: Path, tmp_path: Path) -> Path:
     script.write_text(Path(checker.__file__).read_text('utf-8'), 'utf-8')
     (repo / '.agents').mkdir()
     (repo / '.agents/workflow.toml').write_text(
-        '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
+        ACCEPTED + '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
         f'pre-push = "{shlex.quote(sys.executable)} scripts/{script.name} --pre-push '
         '{remote}"\n', 'utf-8')
     with (repo / '.git/info/exclude').open('a', encoding='utf-8') as exclude:

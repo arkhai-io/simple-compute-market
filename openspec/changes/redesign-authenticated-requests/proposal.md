@@ -3,10 +3,10 @@
 Every authority that accepts version 2 authenticated requests keeps replay state,
 and none of them ever removes any of it:
 
-- the storefront (`core_storefront`'s `auth_replay_reservations`) and the registry
-  (`publisher_replay_reservations`) keep a reservation per request *and* the full
+- the storefront (`core_storefront`'s `auth_replay_reservations`), the registry
+  (`publisher_replay_reservations`) and the provisioning service
+  (`provisioning_replay_reservations`) keep a reservation per request *and* the full
   response body, durably and indefinitely;
-- the provisioning service keeps durable reservations indefinitely;
 - the site middleware's default store keeps reservations in memory for the life of
   the process.
 
@@ -14,6 +14,13 @@ Two consequences follow, and neither is local to one route.
 
 **Unbounded growth.** Every authenticated request adds a row that is never deleted.
 State grows with total traffic, not with anything the system is doing now.
+
+It has been observed (2026-11-24). Before its upgrade to marketplace 0.4.0, a
+provisioning service running in mock mode behind a long-running bare-metal seller held
+a 508 MB database, of which `provisioning_replay_reservations` was 401 MB and that
+table's index 107 MB. On its 1 GiB volume this left too little free space for a
+consistent snapshot beside the database, so the pre-upgrade backup refused until the
+snapshot was written elsewhere.
 
 **Indefinite retention of whatever a response carried.** The storefront records the
 body of every authenticated response, reads included. An introduction reveal or read

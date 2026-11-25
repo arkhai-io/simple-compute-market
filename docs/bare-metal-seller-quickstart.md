@@ -52,18 +52,29 @@ hosts:
     pool_id: whole-host-california
     connection:
       kind: ssh
-      version: 2
+      version: 3
       public:
         ssh_host: 10.0.0.25
         ssh_user: ubuntu
         public_host: 203.0.113.25
         public_port: 22
         key_path: /home/appuser/.ssh/id_ed25519
+        host_keys:
+          - ssh-ed25519 <base64 of the machine's public host key>
 ```
 
 The addresses are documentation values; use your own. `key_path` is the
 provisioning SSH key's path inside the container, where your overlay mounts the
-site's key (below); the document never carries a key.
+site's key (below); the document never carries a key. `host_keys` is the
+machine's pin: its OpenSSH public keys, each its type and base64 without a
+comment, read from the machine's console or your provider rather than over the
+network. The provisioning service checks the machine against it before every
+job and refuses one presenting another key, or with no pin, before the job
+starts. You may leave `host_keys` out and capture the key once the service
+runs, after comparing the fingerprint the machine presents with the one it
+shows you (the operator handbook's
+["Capturing and rotating a host key"](operator-handbook.md#capturing-and-rotating-a-host-key));
+no job runs against it until it is pinned.
 
 The provisioning service reconciles the document at startup whenever it
 changes, after the pool document. List only execution hosts. Each entry declares
@@ -125,8 +136,9 @@ against registered hosts, never against the file. A host's `public_host` and
 machine, each falling back to the connection's own address and port when the
 entry states none. For a relay-backed pool, the buyer receives the leased relay
 endpoint instead. The provisioning service's own route stays `ssh_host` and
-`ssh_port`. Every host is stored as an `ssh` connection at version 2; a host
-stored at version 1 runs nothing until it is submitted again at version 2.
+`ssh_port`. Every host is stored as an `ssh` connection at version 3; a host
+stored at an earlier version runs nothing until it is submitted again at
+version 3, or the upgrade's migration rewrites it.
 
 The Ansible INI inventory remains Ansible's own host list for preparing hosts,
 and the input of `POST /api/v1/hosts/import`, which registers hosts from it on a

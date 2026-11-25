@@ -1064,7 +1064,7 @@
           --features smm=on \
           --tpm none \
           --os-variant {{ vm_os_variant }} \
-          --network network=default,model=virtio \
+          {{ lookup('template', 'guest-interface-args.j2') | trim }} \
           --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
           --hostdev {{ vm_gpu_device }}{% if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %},romfile={{ vm_gpu_rom_file }}{% endif %} \
           {% if gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE' %}--hostdev {{ gpu_audio_device.stdout }} \{% endif %}
@@ -1291,7 +1291,7 @@
       --disk path=/var/lib/libvirt/images/{{ vm_name }}-init.iso,device=cdrom \
       --vcpus {{ vm_vcpus }} \
       --os-variant {{ vm_os_variant }} \
-      --network network=default,model=virtio \
+      {{ lookup('template', 'guest-interface-args.j2') | trim }} \
       --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
       --graphics none \
       --console pty,target_type=serial \
@@ -1411,7 +1411,7 @@
           --features smm=on \
           --tpm none \
           --os-variant {{ vm_os_variant }} \
-          --network network=default,model=virtio \
+          {{ lookup('template', 'guest-interface-args.j2') | trim }} \
           --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
           --hostdev {{ vm_gpu_device }}{% if vm_gpu_rom_file is defined and vm_gpu_rom_file != '' %},romfile={{ vm_gpu_rom_file }}{% endif %} \
           {% if gpu_audio_device is defined and gpu_audio_device.stdout is defined and gpu_audio_device.stdout != 'NO_AUDIO_DEVICE' %}--hostdev {{ gpu_audio_device.stdout }} \{% endif %}
@@ -1637,7 +1637,7 @@
       --disk path=/var/lib/libvirt/images/{{ vm_name }}.qcow2,format=qcow2 \
       --vcpus {{ vm_vcpus }} \
       --os-variant {{ vm_os_variant }} \
-      --network network=default,model=virtio \
+      {{ lookup('template', 'guest-interface-args.j2') | trim }} \
       --channel unix,target_type=virtio,name=org.qemu.guest_agent.0 \
       --graphics none \
       --console pty,target_type=serial \
@@ -1939,9 +1939,16 @@
     # so it carries no guest marker and no guest teardown removes it.
     iptables -t nat -A POSTROUTING -s 192.168.122.0/24 -o $EXT_INTERFACE -j MASQUERADE
     
-    # Allow forwarding for this specific connection
-    iptables -I FORWARD 1 -p tcp -d {{ vm_ip }} --dport 22 -m comment --comment "$MARKER" -j ACCEPT
-    iptables -I FORWARD 1 -p tcp -s {{ vm_ip }} --sport 22 -m comment --comment "$MARKER" -j ACCEPT
+    # Allow forwarding for this specific connection. These rules are inserted
+    # first in FORWARD, ahead of the jump to the host kit guest policy until
+    # that jump is next re-installed, so neither may match a packet a guest
+    # originates: the inbound accept admits only connections arriving from
+    # outside the guest bridge, never one from another guest through the
+    # gateway, and the reply accept only packets of a connection already
+    # established, never a new connection a guest opens from its port 22.
+    # (No apostrophe in these comments: Ansible splits this script on quotes.)
+    iptables -I FORWARD 1 ! -i virbr0 -p tcp -d {{ vm_ip }} --dport 22 -m comment --comment "$MARKER" -j ACCEPT
+    iptables -I FORWARD 1 -p tcp -s {{ vm_ip }} --sport 22 -m conntrack --ctstate ESTABLISHED -m comment --comment "$MARKER" -j ACCEPT
     
     echo "Port forwarding configured: External port {{ external_ssh_port }} -> VM {{ vm_ip }}:22"
   when:

@@ -3,22 +3,26 @@ own; every one its make fragment names is one this repository says it provides; 
 each role the workflow asks of an adopting repository has a provision here.
 
 A skill is shared by every repository that adopts the workflow, so it names no
-repository's target or path (CW-n8tr): only the workflow's own — its guidance and the
-engineering guidance it rests on, OpenSpec's tree as the workflow knows it, the
-engine's command and package and the outcome schema it reads, and the make fragment's
+repository's target or path (CW-n8tr): only the workflow's own — OpenSpec's tree as
+the workflow knows it, the outcome schema the engine reads, and the make fragment's
 targets — or one this repository's table of exemptions lists, each owned by the open
-change that removes it. What a repository does not hold in common reaches a skill
+change that removes it. It cites the workflow's guidance and the engineering
+guidance by section name, never by a file's path or name (CW-7x0z), and the engine
+through its command, `change-workflow`. What a repository does not hold in common reaches a skill
 through its configuration and its guides, never through the skill's text.
 
-The make fragment is this repository's. The roles are stated twice: in
-`change-workflow`'s `README.md`, what any adopting repository provides, and in
-`market-change-workflow`'s, how this one provides each. This repository provides
-them in two places: its workflow configuration,
-`.agents/workflow.toml`, whose hooks' and evidence kinds' commands are provisions as
-they stand, and its statement of what the configuration does not hold. This test reads
-the configuration's commands and the two documents' tables, never the engine's
-modules: whether the table of the engine's own assumptions is complete is review's to
-judge, and the engine checks the configuration itself whenever it reads it.
+The roles are the workflow's, stated as structured output: `config --json` lists
+them as `roles`, and the make fragment is the distribution's, at the path `fragment`
+prints. This test reads both through the workflow's command, in a checkout holding no
+configuration, so it needs no local configuration and parses no document of the
+workflow's. This repository says how it provides each role in
+`market-change-workflow`'s `README.md`, and provides them in two places: its workflow
+configuration, `.agents/workflow.toml`, whose hooks' and evidence kinds' commands are
+provisions as they stand, and its statement of what the configuration does not hold.
+This test reads the configuration's commands and that statement's tables, never the
+engine's modules: whether the table of the engine's own assumptions is complete is
+review's to judge, and the engine checks the configuration itself whenever it reads
+it.
 
 A name is collected from code, never from prose: a skill's code spans and fenced
 blocks, and the fragment's text and the targets it defines. A make target is the
@@ -34,32 +38,28 @@ provision names provides only itself.
 from __future__ import annotations
 
 import functools
+import json
 import re
 import subprocess
+import tempfile
 import tomllib
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+
+import workflow_command
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS = ROOT / ".agents/skills"
 # The workflow's skills: one per step, and the guidance review, which no step runs.
 # The `openspec-*` skills beside them are OpenSpec's own, not the workflow's.
 WORKFLOW_SKILLS = ("change-*/SKILL.md", "guidance-review/SKILL.md")
-FRAGMENT = ROOT / "scripts/change_workflow/workflow.mk"
-ROLES = ROOT / "openspec/specs/change-workflow/README.md"
 PROVISIONS = ROOT / "openspec/specs/market-change-workflow/README.md"
 CONFIGURATION = ROOT / ".agents/workflow.toml"
-ROLES_HEADING = "What an adopting repository provides"
 PROVISIONS_HEADING = "How this repository provides the workflow's roles"
 GUIDANCE_ROLE = "The guidance documents every step reads"
 EXEMPTIONS_HEADING = "What the workflow's skills name of this repository"
 
-# The guidance a skill may cite: the workflow's, and the engineering guidance below it,
-# which the workflow's guidance links and so needs wherever the workflow goes. A file's
-# frontmatter states its layer, wherever it sits (CW-n6dm).
-GUIDANCE = ("docs/guidance/workflow/", "docs/guidance/engineering/")
-GUIDANCE_LAYERS = frozenset({"workflow", "engineering"})
 # OpenSpec's two trees as the workflow knows them: a change or a capability named by a
 # placeholder, never by its name, beside the change index and the archive.
 OPENSPEC = ("openspec/changes/", "openspec/specs/")
@@ -68,11 +68,10 @@ ARCHIVE = "archive"
 # What the workflow keeps in the archive beside the changes: the guidance reviews'
 # period ledger.
 ARCHIVE_FILES = frozenset({"guidance-reviews.jsonl"})
-# The engine's command and package, and the outcome schema it checks every step's last
-# turn against.
-ENGINE = frozenset({"scripts/change-workflow", ".agents/change-outcome.schema.json"})
-ENGINE_PACKAGE = "scripts/change_workflow/"
-_LAYER = re.compile(r"^tags:\s*\[([^\]]*)\]", re.M)
+# The outcome schema the engine checks every step's last turn against. The engine's
+# command is `change-workflow` on the path, which names no path of the repository's,
+# and a skill cites the engine's behaviour by requirement id, never its package.
+ENGINE = frozenset({".agents/change-outcome.schema.json"})
 
 # An inline code span, of one backtick or more, which may wrap across lines.
 _SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -90,6 +89,30 @@ class Root:
 
     directories: frozenset[str]
     files: frozenset[str]
+
+
+def _workflow(*arguments: str) -> str:
+    """What the workflow's command prints, run in a checkout of its own holding no
+    configuration, committed or local: the roles and the fragment are the
+    distribution's, whatever a repository configures."""
+    with tempfile.TemporaryDirectory() as checkout:
+        subprocess.run(["git", "init", "-q", checkout], check=True)
+        done = workflow_command.run(arguments, Path(checkout))
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+@functools.cache
+def workflow_roles() -> tuple[str, ...]:
+    """Each role the workflow leaves to an adopting repository, by name, as `config
+    --json` lists them."""
+    return tuple(role["role"] for role in json.loads(_workflow("config", "--json"))["roles"])
+
+
+@functools.cache
+def fragment() -> Path:
+    """The distribution's make fragment, at the path `fragment` prints."""
+    return Path(_workflow("fragment").strip())
 
 
 @functools.cache
@@ -184,22 +207,9 @@ def skill_names(root: Root, skills: Path = SKILLS) -> dict[str, set[str]]:
                                        for path in skills.glob(pattern))], root)
 
 
-def fragment_targets(fragment: Path = FRAGMENT) -> frozenset[str]:
-    """The targets the make fragment defines."""
-    return frozenset(rule["target"] for rule in _RULE.finditer(fragment.read_text("utf-8")))
-
-
-def _guidance(path: str) -> bool:
-    """A guidance directory, or a file whose frontmatter's layer is the workflow's or
-    the engineering guidance's."""
-    if path in GUIDANCE:
-        return True
-    if not path.startswith("docs/guidance/") or not path.endswith(".md"):
-        return False
-    document = ROOT / path
-    layer = _LAYER.search(document.read_text("utf-8")) if document.is_file() else None
-    return layer is not None and bool(
-        {tag.strip() for tag in layer[1].split(",")} & GUIDANCE_LAYERS)
+def fragment_targets(path: Path) -> frozenset[str]:
+    """The targets the make fragment at `path` defines."""
+    return frozenset(rule["target"] for rule in _RULE.finditer(path.read_text("utf-8")))
 
 
 def _openspec(path: str) -> bool:
@@ -226,8 +236,7 @@ def workflows_own(name: str, targets: frozenset[str]) -> bool:
     if name.startswith("make "):
         words = name.split()
         return words[-1] in targets and (len(words) == 2 or "<" in words[2])
-    return (name in ENGINE or name.startswith(ENGINE_PACKAGE) or _guidance(name)
-            or _openspec(name))
+    return name in ENGINE or _openspec(name)
 
 
 def exemptions(markdown: str) -> dict[str, str]:
@@ -251,13 +260,13 @@ def not_the_workflows(where: dict[str, set[str]], targets: frozenset[str],
             if not workflows_own(name, targets) and name not in exempted]
 
 
-def collected(root: Root, fragment: Path = FRAGMENT) -> dict[str, set[str]]:
-    """Every make target and repository path the fragment names, the targets it defines
-    among them, each with where it is named."""
-    text = fragment.read_text("utf-8")
-    where = _named([(_shown(fragment), text.splitlines())], root)
-    for target in fragment_targets(fragment):
-        where[f"make {target}"].add(_shown(fragment))
+def collected(root: Root, path: Path) -> dict[str, set[str]]:
+    """Every make target and repository path the fragment at `path` names, the
+    targets it defines among them, each with where it is named."""
+    text = path.read_text("utf-8")
+    where = _named([(_shown(path), text.splitlines())], root)
+    for target in fragment_targets(path):
+        where[f"make {target}"].add(_shown(path))
     return where
 
 
@@ -293,7 +302,7 @@ def _tables(text: str) -> list[list[list[str]]]:
 
 
 def roles(markdown: str, heading: str) -> list[str]:
-    """The roles a document states under `heading`: its first table's first cells."""
+    """The roles a statement gives under `heading`: its first table's first cells."""
     tables = _tables(section(markdown, heading))
     return [row[0] for row in tables[0]] if tables else []
 
@@ -359,15 +368,15 @@ def unlisted(where: dict[str, set[str]], listed: set[str],
             if not (name.endswith(".md") and name.startswith(directories))]
 
 
-def role_problems(general: str, here: str) -> list[str]:
-    """Each role the workflow states that this repository provides no way to fill,
-    and each provision for a role the workflow does not state."""
-    stated, provided_for = roles(general, ROLES_HEADING), roles(here, PROVISIONS_HEADING)
+def role_problems(stated: tuple[str, ...], here: str) -> list[str]:
+    """Each role the workflow lists that this repository provides no way to fill,
+    and each provision for a role the workflow does not list."""
+    provided_for = roles(here, PROVISIONS_HEADING)
     if not stated:
-        return ["the workflow states no role"]
+        return ["the workflow lists no role"]
     return ([f"no provision for the role {role!r}" for role in stated
              if role not in provided_for]
-            + [f"a provision for {role!r}, which the workflow states no role for"
+            + [f"a provision for {role!r}, which the workflow lists no role for"
                for role in provided_for if role not in stated])
 
 
@@ -379,7 +388,7 @@ def listed_here(root: Root) -> set[str]:
 
 
 def test_every_target_and_path_a_skill_names_is_the_workflows_own() -> None:
-    foreign = not_the_workflows(skill_names(tracked_root()), fragment_targets(),
+    foreign = not_the_workflows(skill_names(tracked_root()), fragment_targets(fragment()),
                                 exemptions(PROVISIONS.read_text("utf-8")))
 
     assert not foreign, "a workflow skill names a target or path that is not the " \
@@ -401,7 +410,7 @@ def test_every_exemption_is_named_by_a_skill_and_owned_by_an_open_change() -> No
 def test_every_target_and_path_the_fragment_names_is_provided_here() -> None:
     root = tracked_root()
 
-    missing = unlisted(collected(root), listed_here(root),
+    missing = unlisted(collected(root, fragment()), listed_here(root),
                        guidance_directories(PROVISIONS.read_text("utf-8"),
                                             PROVISIONS_HEADING, root))
 
@@ -410,9 +419,16 @@ def test_every_target_and_path_the_fragment_names_is_provided_here() -> None:
 
 
 def test_each_role_has_a_provision_and_each_provision_a_role() -> None:
-    problems = role_problems(ROLES.read_text("utf-8"), PROVISIONS.read_text("utf-8"))
+    problems = role_problems(workflow_roles(), PROVISIONS.read_text("utf-8"))
 
     assert not problems, "\n".join(problems)
+
+
+def test_the_roles_and_the_fragment_are_the_distributions() -> None:
+    """Library integration: the workflow's command, run as a process in a checkout
+    with no configuration, lists its roles and prints its fragment's path."""
+    assert len(workflow_roles()) == len(set(workflow_roles())) > 0
+    assert fragment().name == "workflow.mk" and fragment().is_file()
 
 
 # The collection itself, on texts and trees of the test's own.
@@ -495,14 +511,12 @@ def test_a_skill_may_name_the_workflows_own_targets_and_paths(tmp_path: Path) ->
     where = _skill(tmp_path, (
         "Run `make validate CHANGE=<change>`, `make -C <clone> validate`, and "
         "`make -C ../<x>-proposal check-change-index`; read "
-        "`docs/guidance/workflow/closeout.md#archival`, `docs/guidance/engineering/comments.md`, "
         "`openspec/changes/README.md`, `openspec/changes/archive/<date>-<change>/`, "
         "`openspec/changes/archive/guidance-reviews.jsonl`, and "
-        "`openspec/specs/<capability>/spec.md`; run `scripts/change-workflow next <change>`, "
-        "as `scripts/change_workflow/next_step.py` computes it; match "
-        "`.agents/change-outcome.schema.json`.\n"))
+        "`openspec/specs/<capability>/spec.md`; run `change-workflow next <change>`; "
+        "match `.agents/change-outcome.schema.json`.\n"))
 
-    assert {"make validate", "make -C <clone> validate", "scripts/change-workflow",
+    assert {"make validate", "make -C <clone> validate",
             "openspec/specs/<capability>/spec.md"} <= set(where)
     assert not_the_workflows(where, FRAGMENT_OF_TEST, {}) == []
 
@@ -525,6 +539,43 @@ def test_a_skill_naming_a_repositorys_paths_is_named(tmp_path: Path) -> None:
         "openspec/README.md", "openspec/changes/archive/2026-01-01-x/notes.md",
         "openspec/changes/some-change/notes.md", "openspec/specs/README.md",
         "openspec/specs/change-workflow/spec.md"]
+
+
+def test_a_skill_names_an_engineering_guidance_file(tmp_path: Path) -> None:
+    """CW-n8tr's "A skill names an engineering guidance file": a skill cites the
+    engineering guidance and the workflow's by section name, so a path into either
+    fails, naming it, as does the engine's package."""
+    where = _skill(tmp_path, (
+        "Read `docs/guidance/engineering/test-levels.md`, "
+        "`docs/guidance/workflow/closeout.md#archival`, and `docs/guidance/engineering/`, "
+        "as `scripts/change_workflow/next_step.py` computes it.\n"))
+
+    assert _shown_names(not_the_workflows(where, FRAGMENT_OF_TEST, {})) == [
+        "docs/guidance/engineering/", "docs/guidance/engineering/test-levels.md",
+        "docs/guidance/workflow/closeout.md", "scripts/change_workflow/next_step.py"]
+
+
+def test_no_skill_names_a_guidance_file_by_its_name() -> None:
+    """CW-7x0z: a skill cites guidance by section name, never by a file's name, which
+    holds a user's guidance to this repository's files: no code span of a workflow
+    skill is the bare name of a guidance file, its anchor or none."""
+    guidance = {path.name for path in (ROOT / "docs/guidance").rglob("*.md")} - {"README.md"}
+    named = [f"{path.parent.name}: {span}"
+             for path in sorted(path for pattern in WORKFLOW_SKILLS
+                                for path in SKILLS.glob(pattern))
+             for match in _SPAN.finditer(path.read_text("utf-8"))
+             if (span := " ".join(match[2].split())).split("#")[0] in guidance]
+
+    assert named == []
+
+
+def test_a_skill_naming_the_in_tree_command_is_named(tmp_path: Path) -> None:
+    """A skill calls the installed command, `change-workflow`, never a copy of the
+    engine a repository's tree holds."""
+    where = _skill(tmp_path, "Run `scripts/change-workflow next <change>`.\n")
+
+    assert _shown_names(not_the_workflows(where, FRAGMENT_OF_TEST, {})) == [
+        "scripts/change-workflow"]
 
 
 def test_an_exempted_name_is_admitted(tmp_path: Path) -> None:
@@ -608,12 +659,13 @@ cleanup = ["make -C helm teardown CHANGE={change}"]
         "make check-uv-version", "make validate-helm", "make -C helm teardown"}
 
 
-def test_a_role_with_no_provision_is_named() -> None:
-    general = "## What an adopting repository provides\n\n| Role | Used by |\n|---|---|\n" \
-              "| A role | design |\n| Another role | plan |\n"
+def test_the_workflow_adds_a_role() -> None:
+    """MCW-5tgp's "The workflow adds a role", as a unit of the comparison: a role the
+    workflow lists, given here as `config --json` would list it, that this
+    repository's statement does not name fails it, naming the role."""
     here = "## How this repository provides the workflow's roles\n\n| Role | Provided by |\n" \
            "|---|---|\n| A role | `make x` |\n| A third role | `make y` |\n"
 
-    assert role_problems(general, here) == [
+    assert role_problems(("A role", "Another role"), here) == [
         "no provision for the role 'Another role'",
-        "a provision for 'A third role', which the workflow states no role for"]
+        "a provision for 'A third role', which the workflow lists no role for"]

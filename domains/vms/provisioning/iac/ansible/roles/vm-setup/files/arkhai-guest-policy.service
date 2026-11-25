@@ -1,0 +1,18 @@
+# Keeps the VM guest policy's chains installed and their jumps first in INPUT
+# and FORWARD, iptables' and ip6tables': at boot, after the saved rules, UFW
+# and libvirt have installed theirs, and again each time libvirtd starts, since
+# libvirt re-adds its rules then. WantedBy libvirtd enqueues this unit with every start of libvirtd, a
+# restart and a socket activation after an idle exit included, and After runs
+# it once libvirtd has started. It keeps no active state (no RemainAfterExit),
+# so each of those starts runs it again rather than finding it already active.
+# UFW's start and reload run the same script from /etc/ufw/after.init.
+[Unit]
+Description=VM guest policy chains, first in INPUT and FORWARD
+After=network.target iptables-restore.service netfilter-persistent.service ufw.service libvirtd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/arkhai-guest-policy
+
+[Install]
+WantedBy=multi-user.target libvirtd.service

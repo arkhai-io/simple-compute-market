@@ -488,7 +488,7 @@ The buyer is normally a pure HTTP client. The registry is a shared discovery ser
 | Lease expiry and physical release | Provisioning lifecycle plus fulfillment convergence | Lease lifecycle owns the release decision; fulfillment convergence owns teardown dispatch/recovery — see "Release" and "Recovery workers" |
 | Escrow claims and obligation journal | Settlement-runtime and Alkahest kit | Domain codecs and fulfillment policy |
 | Payment transactions, ledger, hold release/extensions, fees and cash movement | External Arkhai payments service | SCM derives mandates and verifies receipt/snapshot records, not provider state |
-| Cases, rulings and their payment effects | Agreement's independent dispute authority | Its own interface, credential, errors and policy; SCM files/appends/observes, never decides/applies a case |
+| Cases, rulings and their payment effects | Agreement's independent dispute authority | Its own interface, credential, errors and policy; SCM files/appends/observes, never decides/applies a case. SCM's interface to it ends where its public client ends — filing, appends, the respondent listing and record reads — and SCM depends on no endpoint that client lacks, such as the authority's private operator API; an operator's ruling, and the interaction between mediation and payments, are qualified by the payments service's own live tests |
 | Attributed delivery ends and admission | Storefront end service | One earliest final request and transactional revision/CAS; not a financial-end ledger |
 | Seller delivery authorization | Selected domain settlement stage | Revalidates authoritative source evidence; local materialization and buyer progress are not authority |
 | API keys, credit balances, grants, and consumption | API-credits service | Receives operator-authenticated neutral issuance intent, not raw settlement evidence or a mechanism allowlist |
@@ -732,6 +732,31 @@ A marketplace principal is the complete canonical `{scheme, identifier}` credent
 Authenticated service-to-service calls use the scheme-neutral version 2 request and response proofs in both directions. The caller binds its role, complete principal, semantic operation and resource, request identity, timestamp, and canonical body digest; the authority reserves the replay identity before dispatch. The response or callback is likewise signed and verified against the exact public service principal and role pinned for that connection before its payload is trusted. Trust therefore comes from operator-configured public principals and authority bindings, never from an address or principal asserted inside the payload, an administrator token, or access to either side's signer credential.
 
 Each signed hop checks the signer's timestamp against the verifier's own instant within a skew, 300 s almost everywhere, in both directions, so the two parties on a hop must agree on time within it. A timestamp is a claim checked within a tolerance, never an order between two parties. Every signer and verifier therefore reads its timestamps and its freshness reference from its process's one time source ([injected time](../../openspec/specs/injected-time/architecture.md#one-source-per-process)). In an end-to-end lane every party — the storefronts, the provisioning service and the site it hosts, the registries, the API-credits service and the site ledger it hosts, the sample app's metering middleware, both lane doubles, the chain, the buyer and the harness's own signing clients — runs on one lane time the scenario sets, so moving time keeps every hop within the skew: a party moved alone would break every signed exchange with a party that did not move ([lane time](../../openspec/specs/test-compatibility/architecture.md#lane-time-and-the-doubles-controls)). The skew stays a security parameter no configuration widens. One operation alone is exempt from request freshness: the time-setting operation of a signed administrator surface, present only on an instance configured for injected time, whose signature, principal, operation and request-id reservation are verified as every request's ([`marketplace-identity`](../../openspec/specs/marketplace-identity/spec.md)).
+
+### The administrator's reach
+
+The administrator is the operator of the service it calls, and what it may reach
+follows from what that service holds. On a route that acts on resources the
+operator owns, the administrator is admitted beside any role the route names:
+every route of the provisioning service and of a site authority is such a route,
+since hosts, leases, capacity and the ledger are all the operator's, and a role
+that can administer the whole authority but not one named route only obstructs
+the person holding it. On a route whose authorization binds the caller to a deal
+as a party — a buyer's negotiation and settlement routes, a seller acting as
+counterparty, a service peer's callback — the administrator is never authorized
+as that party. It acts there only through administrator operations, which record
+it as the administrator, so a party's history holds only what that party sent. A
+storefront's own records of its deals, such as bare-metal lease-ready evidence,
+are the storefront operator's, and its administrator reads them.
+
+Each service states its form in its specification and holds it with a test: the
+provisioning service refuses, when it assembles its route table, a route that does
+not admit `admin`; `kit/site` admits `admin` on every site contract without
+enumerating it; each storefront refuses an administrator's request on its party
+routes and admits it on its administrator routes. How an administrator
+authenticates is separate from what it reaches: the registry's administrator
+presents a bearer key, and the API-credits service accepts a shared administrator
+key when signing is not configured.
 
 ### Terms
 

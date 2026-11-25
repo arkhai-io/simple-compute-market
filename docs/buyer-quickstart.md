@@ -235,6 +235,82 @@ market settlement alkahest escrow reclaim --escrow-uid <escrow_uid>
 market settlement alkahest chain check
 ```
 
+## 7. On-demand and spot
+
+A seller paid through Arkhai payments may offer a VM by the period. An on-demand
+option runs until you stop it, your balance runs out, or the agreed term ends; a
+spot option may also be stopped by the seller, after a notice. Either is paid
+period by period from your payer account's prepaid balance at the payments service.
+
+```bash
+market buy \
+  --resource 'gpu_model=H200 gpu_count>=1' \
+  --settlement 'mechanism=arkhai.payments.v1 arkhai_payments.billing_kind=per_period early_termination.payee=false' \
+  --duration-hours 24 \
+  --yes
+```
+
+`early_termination.payee=true` selects spot instead. `--duration-hours` is the
+longest the deal may run; omit it and the seller resolves that bound at the agreed
+start. Before negotiating, `buy` shows the option's class, price per period, initial
+reserve, delivery deadline, each party's stop and its notice, the treatment of a
+part-used period at each stop, the premature-stop penalty, and the dispute authority
+and window.
+
+**Default refusals.** A default buyer refuses an option lacking any of four
+protections. Each is waived alone, for one run:
+
+| Refused | Waiver |
+|---|---|
+| No delivery deadline | `--allow-no-delivery-deadline` |
+| An on-demand option with no positive premature-stop penalty | `--allow-no-penalty` |
+| A seller's stop that does not return the period it falls in, charging or prorating it | `--allow-charged-preemption` |
+| A term end that does not return the period it falls in, charging or prorating it | `--allow-charged-term-end` |
+
+`--allow-unprotected-terms` waives all four. No waiver admits an option the payments
+mechanism or your accepted dispute authorities refuse. When no option is left and
+those checks refused any, `buy` prints each distinct reason they gave after "No
+listings matched" and exits 2. The default refusals are not printed: a buy whose
+options they alone ruled out prints only "No listings matched" and exits 0, and the
+table above is what to weigh a waiver against.
+
+**Funding.** Approval reserves the initial reserve from your balance; when the
+balance cannot cover it the payments service refuses the approval
+(`insufficient_funds`) and nothing is bought. While the deal runs, the payments
+service keeps reserving ahead from your balance. A top-up at the payments service
+before the funded boundary keeps the deal running. Once the balance cannot reserve
+the next period, the deal stops for good: a top-up cannot revive it, and you open a
+new deal. `market delivery --from <run_id>` reads the deal, its funded boundary
+(`funded_through`) among it, and after such a stop carries a `funding_stop` message
+saying so.
+
+**Ending.** `market end --from <run_id>` stops billing at the payment authority under
+the agreed notice and keeps service until the stop takes effect;
+`--end-now-regardless` gives the service up at once, and files the surrender as a
+case (below). `market buy --watchdog` stays in
+the foreground once the deal is available, probing whether the VM's SSH endpoint
+accepts connections every `--watchdog-interval` seconds, and sends that stop after
+`--watchdog-threshold` consecutive failed probes. Its bound is conditional: only
+while the command runs, the endpoint's loss is detected within at most interval ×
+threshold + probe timeout; the authority's acknowledgement and any notice come after
+that, and billing continues until the stop lands.
+
+**The premature-stop penalty.** A seller ending a deal it has no right to end — any
+on-demand deal, or a spot deal without its notice — owes the option's premature-stop
+penalty, which every on-demand option a default buyer accepts states and a spot
+option may. The penalty is collectible only from the seller's earnings the payments
+service still holds: what the deal has earned and not yet paid out, after refunds.
+In its first period, with no setup charge, that is nothing. It is a ceiling, not a
+guaranteed payment.
+
+**Disputes.** The remedy for a deal gone wrong is a case at the deal's dispute
+authority, which the option names and the accepted Agreement fixes. A case filed
+within the dispute window can hold the money it protects at the payments service;
+money already paid out is not recovered. `market end --end-now-regardless` files one
+case for you: the surrender it makes, at the instant the seller's signed receipt
+records, where the Agreement names a dispute authority. `market` files no other case
+on a running deal: file it through the dispute authority's own interface.
+
 
 ## Common pitfalls
 

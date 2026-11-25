@@ -14,6 +14,8 @@ from compute_provisioning_contracts import (
     HostCreate,
     HostDefinitionsImportRequest,
     HostDefinitionsImportResponse,
+    HostKeyCaptureRequest,
+    HostKeyCaptureResponse,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -30,6 +32,7 @@ def _service() -> HostRouteService:
     return HostRouteService(
         _container_module.resolved_host_authority,
         _container_module.resolved_connectivity_probes,
+        _container_module.resolved_host_key_probes,
     )
 
 
@@ -109,3 +112,13 @@ def disable_host(host: str, service: HostRouteService = Depends(_service)) -> Ho
 async def check_connectivity(host: str, service: HostRouteService = Depends(_service)) -> ConnectivityResult:
     """Probe the host's connection by its kind: 200 with ``reachable`` either way, 404 if unknown."""
     return await routed_async(lambda: service.check_connectivity(host))
+
+@router.post(
+    "/{host}/host-keys/capture",
+    response_model=HostKeyCaptureResponse,
+    summary="Verify and capture a host's SSH key",
+)
+async def capture_host_key(
+    host: str, body: HostKeyCaptureRequest, service: HostRouteService = Depends(_service),
+) -> HostKeyCaptureResponse:
+    return await routed_async(lambda: service.capture_host_key(host, body))

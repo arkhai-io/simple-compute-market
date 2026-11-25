@@ -47,7 +47,7 @@ _HOST = ExecutionHost(
     pool_id="gpu-pool",
     connection=ConnectionEnvelope(
         kind="ssh",
-        version=2,
+        version=3,
         public={"ssh_host": "192.0.2.1", "ssh_port": 22, "ssh_user": "root"},
     ),
 )

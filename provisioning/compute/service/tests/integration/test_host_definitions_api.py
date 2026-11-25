@@ -14,12 +14,14 @@ a buyer holds, seeded as a port-lease row as the pool-move tests seed it.
 
 from __future__ import annotations
 
+from base64 import b64encode
 from collections.abc import AsyncIterator
 
 import httpx
 import pytest
 import pytest_asyncio
 import yaml
+from sqlalchemy import event
 from compute_provisioning_ansible import ssh_connection
 from compute_provisioning_client import ComputeProvisioningAuthenticationError, ComputeProvisioningClient
 from compute_provisioning_contracts import SIGNATURE_HEADER, HostCreate, HostUpdate
@@ -68,7 +70,7 @@ def _entry(host_id: str, *, pool_id: str | None = None, ssh_host: str = "10.0.0.
     entry.update(fields)
     entry["connection"] = {
         "kind": "ssh",
-        "version": 2,
+        "version": 3,
         "public": {"ssh_host": ssh_host, "ssh_user": "ubuntu", "key_path": "/keys/id"},
     }
     return entry
@@ -242,6 +244,37 @@ async def test_the_export_answers_yaml(client_and_queue, recorded):
     assert isinstance(yaml.safe_load(exported)["hosts"], list)
     status, content_type = transport.responses[-1]
     assert (status, content_type.split(";")[0]) == (200, "application/yaml")
+
+
+async def test_export_includes_the_host_pin_and_an_import_may_omit_it(client_and_queue, session_factory):
+    clients, _ = client_and_queue
+    # Synthetic SSH public blob for parsing only, never for network use.
+    blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"a" * 32
+    pin = "ssh-ed25519 " + b64encode(blob).decode("ascii")
+    entry = _entry("pinned")
+    entry["connection"]["public"]["host_keys"] = [pin + " comment"]
+    imported = await clients.family.import_host_definitions(_document(entry))
+    assert imported.applied and imported.diff.created == ["pinned"]
+
+    exported = yaml.safe_load(await clients.family.export_hosts())["hosts"]
+    (host,) = [row for row in exported if row["host_id"] == "pinned"]
+    assert host["connection"]["public"].pop("host_keys") == [pin]
+    writes = []
+
+    def observe(_connection, _cursor, statement, *_args):
+        if statement.lower().startswith(("insert into hosts", "update hosts", "delete from hosts")):
+            writes.append(statement)
+
+    engine = session_factory.kw["bind"]
+    event.listen(engine, "before_cursor_execute", observe)
+    try:
+        reimported = await clients.family.import_host_definitions(_document(host))
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+
+    assert writes == []
+    assert reimported.applied and reimported.diff.unchanged == ["pinned"]
+    assert (await clients.family.get_host("pinned")).connection.public["host_keys"] == [pin]
 
 
 async def test_an_unedited_export_imports_as_every_host_unchanged(client_and_queue):

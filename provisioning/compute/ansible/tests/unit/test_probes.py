@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import tempfile
+from base64 import b64encode
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,8 +15,25 @@ from market_config import encrypt_secret
 
 from compute_provisioning_ansible import ProtectedKeyUnreadableError, SshConnectionCodec
 from compute_provisioning_contracts import ConnectivityResult
+from compute_provisioning_ansible.host_keys import HostKeyObservation, key_fingerprint
 from compute_provisioning_ansible.probes import PROBE_INVENTORY_GROUP, probe_connectivity
 from compute_provisioning_ansible.runner import AnsibleRunner
+
+
+# Deterministic SSH wire fixture, never a public-network identity.
+_BLOB = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"p" * 32
+_PIN = "ssh-ed25519 " + b64encode(_BLOB).decode("ascii")
+
+
+@pytest.fixture(autouse=True)
+def known_ssh(monkeypatch):
+    async def observe(target, *, pins, timeout_seconds):
+        endpoint = f"[{target.ssh_host}]:{target.ssh_port}"
+        return HostKeyObservation(
+            endpoint, key_fingerprint(_PIN),
+            pins is None or _PIN in pins, key=_PIN if pins is None else None,
+        )
+    monkeypatch.setattr("compute_provisioning_ansible.probes.observe_host_key", observe)
 
 
 class _ProbingRunner(AnsibleRunner):
@@ -43,7 +62,7 @@ async def test_a_probe_pings_the_registered_host_and_leaves_nothing_behind():
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.0.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", encrypt_secret("PEM", key))},
         ),
@@ -53,6 +72,10 @@ async def test_a_probe_pings_the_registered_host_and_leaves_nothing_behind():
     result = await probe_connectivity(runner, host)
 
     assert (result.host, result.reachable) == ("node-1", True)
+    assert result.host_key is not None
+    assert result.host_key.presented == key_fingerprint(_PIN)
+    assert not result.host_key.pinned
+    assert "host_keys" not in host.connection.public
     assert runner.seen["group line"] == f"[{PROBE_INVENTORY_GROUP}]"
     assert runner.seen["key existed"]
     assert not runner.seen["key"].exists()
@@ -63,6 +86,11 @@ async def test_a_host_whose_key_cannot_be_decrypted_is_answered_unreachable(tmp_
     """No ping runs, and the detail is the codec's message naming the host.
     Both keys are generated for this test and protect nothing real."""
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    async def unexpected(*args, **kwargs):
+        pytest.fail("the unreadable authentication key should fail before SSH")
+
+    monkeypatch.setattr("compute_provisioning_ansible.probes.observe_host_key", unexpected)
     configured, other = Fernet.generate_key().decode(), Fernet.generate_key().decode()
     ciphertext = encrypt_secret("PEM", other)
     host = ExecutionHost(
@@ -70,7 +98,7 @@ async def test_a_host_whose_key_cannot_be_decrypted_is_answered_unreachable(tmp_
         pool_id="default",
         connection=ConnectionEnvelope(
             kind="ssh",
-            version=2,
+            version=3,
             public={"ssh_host": "10.0.0.1", "ssh_port": 22, "ssh_user": "ops", "key_path": None},
             protected={"private_key": ProtectedValue("fernet-v1", ciphertext)},
         ),
@@ -86,3 +114,82 @@ async def test_a_host_whose_key_cannot_be_decrypted_is_answered_unreachable(tmp_
     assert ciphertext not in result.detail
     assert runner.seen == {}
     assert list(tmp_path.iterdir()) == []
+
+async def test_pinned_connectivity_reports_a_match_without_changing_the_registered_pin(tmp_path):
+    path = tmp_path / "id_fixture"
+    path.touch()
+    host = ExecutionHost(
+        "node-1", "default", SshConnectionCodec().build(
+            {"ssh_host": "192.0.2.10", "key_path": str(path), "host_keys": [_PIN]}, {}
+        )
+    )
+    result = await probe_connectivity(_ProbingRunner(""), host)
+
+    assert result.reachable
+    assert result.host_key is not None
+    assert result.host_key.pinned and result.host_key.matched
+    assert result.host_key.pinned_fingerprints == [key_fingerprint(_PIN)]
+
+
+async def test_a_timeout_gives_an_explicit_null_host_key(monkeypatch, tmp_path):
+    async def timeout(target, *, pins, timeout_seconds):
+        return HostKeyObservation(
+            f"[{target.ssh_host}]:{target.ssh_port}", None, False,
+            reason="The SSH check timed out.",
+        )
+
+    monkeypatch.setattr("compute_provisioning_ansible.probes.observe_host_key", timeout)
+    key_path = tmp_path / "fixture-key"
+    host = ExecutionHost(
+        "node-1", "default",
+        SshConnectionCodec().build({"ssh_host": "192.0.2.10", "key_path": str(key_path)}, {}),
+    )
+    runner = _ProbingRunner("")
+
+    result = await probe_connectivity(runner, host)
+
+    assert not result.reachable and result.model_dump()["host_key"] is None
+    assert "The SSH check timed out." in result.detail
+    assert runner.seen == {}
+
+
+@pytest.mark.parametrize("wins", [True, False])
+async def test_pending_probe_uses_the_pin_committed_by_the_registry(monkeypatch, tmp_path, wins):
+    committed_key = _PIN if wins else "ssh-ed25519 " + b64encode(
+        _BLOB[:-32] + b"q" * 32
+    ).decode("ascii")
+    public = {"ssh_host": "192.0.2.10", "key_path": str(tmp_path / "id_fixture")}
+    codec = SshConnectionCodec()
+    host = ExecutionHost(
+        "node-1", "default", codec.build(public, {}), host_key_adoption_pending=True
+    )
+    committed = replace(
+        host,
+        connection=codec.build({**public, "host_keys": [committed_key]}, {}),
+        host_key_adoption_pending=False,
+    )
+    checks = []
+    adoptions = []
+
+    async def observe(target, *, pins, timeout_seconds):
+        checks.append(pins)
+        return HostKeyObservation(
+            f"[{target.ssh_host}]:{target.ssh_port}", key_fingerprint(_PIN),
+            pins is None or _PIN in pins, key=_PIN if pins is None else None,
+        )
+
+    def adopt(observed: ExecutionHost, key: str) -> ExecutionHost:
+        adoptions.append((observed, key))
+        return committed
+
+    monkeypatch.setattr("compute_provisioning_ansible.probes.observe_host_key", observe)
+    runner = _ProbingRunner("")
+    result = await probe_connectivity(runner, host, adopt_host_key=adopt)
+
+    assert adoptions == [(host, _PIN)]
+    assert result.host_key is not None
+    assert result.host_key.pinned and result.host_key.matched is wins
+    assert result.host_key.pinned_fingerprints == [key_fingerprint(committed_key)]
+    assert result.reachable is wins
+    assert checks == ([None, (_PIN,)] if wins else [None])
+    assert bool(runner.seen) is wins
