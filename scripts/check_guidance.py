@@ -3,8 +3,8 @@
 
 Guidance divides into three layers — engineering, the change workflow's, and this
 repository's — and a lower layer never links to a higher one
-(docs/guidance/workflow/README.md, "The layers of guidance"). This check holds every
-guidance file to that model.
+(`arkhai-change-workflow`'s guidance, "The layers of guidance"). This check holds
+every guidance file to that model.
 
 The guidance set is found by place before any frontmatter is read, so a guide that
 forgot its tags fails rather than escaping: every Markdown file under
@@ -14,6 +14,15 @@ forgot its tags fails rather than escaping: every Markdown file under
 Markdown file outside `openspec/changes/` whose frontmatter carries `tags`; and the
 documents `AGENTS.md`'s layer table (its `Layer | Guidance` table) names. No layer is
 read from a directory: a file's frontmatter alone states its layer and tags.
+
+The workflow's layer is the installed workflow's own guidance, outside the tree:
+the check reads its vocabulary, and the tags its files carry, from the directory the
+installed command names as `config --json`'s `workflow.guidance`, run through
+`workflow_command`. None of its files is a member of this repository's set, so the
+rules on members do not reach them; a frontmatter or vocabulary table there that
+cannot be read is still reported, since the layer cannot be read without it. Without
+the command the check fails, saying the workflow is needed: it is run as part of the
+workflow's `pre-commit`.
 
 It fails, naming the file, on a guidance file with no `tags`; on zero or several
 layer tags; on a tag that neither its layer's vocabulary table nor a lower layer's
@@ -38,8 +47,8 @@ Run by `make check-repository`, the change workflow's `pre-commit`. Usage:
 `check_guidance.py [--list [--tag <tag>] | --list-exceptions]`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek; the rules it
-checks are openspec/specs/change-workflow/spec.md's CW-g7lt, CW-d2rw, CW-x4ex,
-CW-n6dm, and CW-r8cg.
+checks are `arkhai-change-workflow`'s CW-g7lt, CW-d2rw, CW-x4ex, CW-n6dm, and
+CW-r8cg.
 """
 
 from __future__ import annotations
@@ -55,11 +64,16 @@ from pathlib import Path
 from typing import Callable, Iterator, Sequence
 from urllib.parse import unquote
 
+from workflow_command import WorkflowRefused, installed_guidance
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # The layers, lowest first: a file may carry a tag of its own layer's vocabulary or a
 # lower one's, and may link to guidance of its own layer or a lower one.
 LAYERS = ("engineering", "workflow", "repository")
+# The layer held outside the tree, as the installed workflow's guidance; its row of
+# the layer table names no path here.
+INSTALLED = "workflow"
 SHARED = "docs/guidance/"
 SPECS = "openspec/specs/"
 CHANGES = "openspec/changes/"
@@ -333,6 +347,8 @@ class Guidance:
     vocabularies: dict[str, tuple[str, dict[str, str]]] = field(default_factory=dict)
     # Each exception row: its file, its kind, its shared rule, and what it does here.
     exceptions: list[tuple[str, str, str, str]] = field(default_factory=list)
+    # The tags the installed layer's own files carry, which carry its vocabulary's rows.
+    installed_tags: set[str] = field(default_factory=set)
     problems: list[str] = field(default_factory=list)
 
     def layer(self, path: str) -> str | None:
@@ -357,7 +373,7 @@ def _layer_table_documents(root: Path, files: Sequence[str],
         if row is None or not in_table:
             in_table = row is not None and tuple(row) == LAYER_TABLE
             continue
-        if len(row) != len(LAYER_TABLE) or _DELIMITER.match(row[1]):
+        if len(row) != len(LAYER_TABLE) or _DELIMITER.match(row[1]) or row[0] == INSTALLED:
             continue
         for target in _LINK.findall(row[1]) or re.findall(r"`([^`]+)`", row[1]):
             path = _resolve(ENTRY, unquote(target.partition("#")[0]))
@@ -464,9 +480,26 @@ def _exceptions(path: str, number: int, table: Table | None, guidance: Guidance,
         guidance.exceptions.append((path, kind, rule, here))
 
 
-def read_guidance(root: Path, files: Sequence[str]) -> tuple[Guidance, dict[str, str]]:
-    """The guidance set as read, and each guidance file's text."""
+def _read_installed(installed: Path, guidance: Guidance) -> None:
+    """Read the installed layer's vocabulary, and the tags its files carry, from its
+    directory into `guidance`, its files named by their paths there."""
+    for path in sorted(installed.rglob("*.md")):
+        text = path.read_text("utf-8")
+        try:
+            guidance.installed_tags.update(frontmatter_tags(text) or ())
+        except FrontmatterError as exc:
+            guidance.problems.append(f"{path}: {exc}")
+        for number, table in tables_under(text, TAGS_HEADING):
+            _vocabulary(str(path), number, table, guidance)
+
+
+def read_guidance(root: Path, files: Sequence[str],
+                  installed: Path | None = None) -> tuple[Guidance, dict[str, str]]:
+    """The guidance set as read, and each guidance file's text, with the installed
+    layer's vocabulary read from `installed` where it is given."""
     guidance = Guidance()
+    if installed is not None:
+        _read_installed(installed, guidance)
     members = guidance_set(root, files, guidance.problems)
     texts = {path: (root / path).read_text("utf-8") for path in members}
     for path in members:
@@ -490,7 +523,7 @@ def read_guidance(root: Path, files: Sequence[str]) -> tuple[Guidance, dict[str,
 def _check_tags(guidance: Guidance) -> None:
     """Each file's layer tag and other tags against the vocabularies, and each
     vocabulary row against the tags carried."""
-    carried: set[str] = set()
+    carried: set[str] = set(guidance.installed_tags)
     for path, tags in guidance.tags.items():
         if tags is None:
             continue
@@ -571,9 +604,10 @@ def _check_anchors(root: Path, files: Sequence[str], guidance: Guidance,
                                          f"heading of {target} has that anchor")
 
 
-def check(root: Path, files: Sequence[str]) -> Guidance:
-    """The guidance as read, every problem found recorded on it."""
-    guidance, texts = read_guidance(root, files)
+def check(root: Path, files: Sequence[str], installed: Path | None = None) -> Guidance:
+    """The guidance as read, with the installed layer's vocabulary from `installed`
+    where it is given, every problem found recorded on it."""
+    guidance, texts = read_guidance(root, files, installed)
     _check_tags(guidance)
     _check_links(guidance, texts)
     _check_anchors(root, files, guidance, texts)
@@ -583,7 +617,8 @@ def check(root: Path, files: Sequence[str]) -> Guidance:
 
 
 def main(argv: Sequence[str] | None = None, root: Path = ROOT,
-         lister: Lister = repository_files) -> int:
+         lister: Lister = repository_files,
+         workflow_guidance: Callable[[Path], Path] = installed_guidance) -> int:
     parser = argparse.ArgumentParser(prog="check_guidance.py", description=__doc__.split(
         "\n\n")[0])
     listing = parser.add_mutually_exclusive_group()
@@ -607,7 +642,13 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
         for path, kind, rule, here in guidance.exceptions:
             print(f"{path}: {kind}: {rule} — {here}")
         return 0
-    guidance = check(root, files)
+    try:
+        installed = workflow_guidance(root)
+    except WorkflowRefused as exc:
+        print(f"FAIL: the guidance's {INSTALLED} layer is the installed change workflow's, "
+              f"`arkhai-change-workflow`, which this check needs installed: {exc}")
+        return 1
+    guidance = check(root, files, installed)
     if guidance.problems:
         print("\n".join(guidance.problems))
         print()

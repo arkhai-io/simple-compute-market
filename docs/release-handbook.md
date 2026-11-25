@@ -2,17 +2,18 @@
 
 For the owner who releases this repository's packages and artifacts: how a marketplace
 release goes, merging `dev` into `main` and describing the release, loading a release
-candidate, what the deployment does with it, running the lanes on its images, cutting a
-release, deciding a release's migration floor, the
-compatibility paths due to retire, the import package renames consumers meet, and diagnosing a load or a cut that fails. It
-sits beside the [operator handbook](operator-handbook.md), for whoever runs a
-deployment, and the [change workflow handbook](change-workflow-handbook.md), for
-operating the workflow. What a change must satisfy for its packages to release — what a
-release comprises, the published set, their names and dependencies, how a release is
-recorded, and how a version changes — is the repository's guidance:
+candidate, what the deployment does with it, running the lanes on its images, cutting
+a release, deciding a release's migration floor, the compatibility paths due to
+retire, the import package renames consumers meet, and diagnosing a load or a cut that
+fails. It sits beside the [operator handbook](operator-handbook.md), for whoever runs
+a deployment, and the installed change workflow's handbook,
+`arkhai-change-workflow`'s, for operating the workflow. What a change must satisfy for
+its packages to release — what a release comprises, the published set, their names and
+dependencies, how a release is recorded, and how a version changes — is the
+repository's guidance:
 [`published-packages.md`](guidance/repository/published-packages.md) and
-[`package-versions.md`](guidance/repository/package-versions.md). The terms used here —
-release candidate, marketplace release, release component, candidate store — are
+[`package-versions.md`](guidance/repository/package-versions.md). The terms used here
+— release candidate, marketplace release, release component, candidate store — are
 [`ARCHITECTURE.md`, "Terms"](development/ARCHITECTURE.md#terms).
 
 This repository's continuous integration publishes nothing: merging to `dev` or `main`
@@ -79,7 +80,8 @@ The description has these sections, in order:
 - **merge notes**: how `main` was merged into the release branch and any conflict
   resolved.
 
-Work on the repository's own change workflow, guidance and agent tooling is not a user
+Work on how the repository adopts the change workflow, on its guidance, and on agent
+tooling is not a user
 feature; it is mentioned briefly under operations, if at all. Like every description
 here, it is public
 ([`repository-content.md`](guidance/engineering/repository-content.md)): it names
@@ -274,9 +276,9 @@ released in` for every row it is the first to carry.
 
 | Compatibility path | First released in | Retires in | What retiring removes | A deployment still holding the old form |
 |---|---|---|---|---|
-| Adoption of hosts registered before host keys were pinned | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
-| Convergence of guests created before guest isolation | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
-| Removal of the per-port guest rules hosts were prepared with before the guest policy | — | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
+| Adoption of hosts registered before host keys were pinned | 0.4.0 | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
+| Convergence of guests created before guest isolation | 0.4.0 | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
+| Removal of the per-port guest rules hosts were prepared with before the guest policy | 0.4.0 | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
 
 ## Import package renames
 

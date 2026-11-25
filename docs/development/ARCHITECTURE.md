@@ -18,7 +18,7 @@ tags: [repository, architecture]
 | [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
 | [Deployment topology](#deployment-topology) | Local and deployed structure, and who operates it |
-| [Build, packaging, and initialization](#build-packaging-and-initialization) | The build flow from internal wheels to images, and the migration baseline |
+| [Build, packaging, and initialization](#build-packaging-and-initialization) | The build flow from internal wheels to images, the migration baseline, and how the repository adopts the change workflow |
 | [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
 | [Operator lifecycle controls](#operator-lifecycle-controls) | The storefront loop controller and the trading pause |
 | [Testing strategy](#testing-strategy) | Where the tests are described; see `TESTING.md` |
@@ -1203,6 +1203,34 @@ capability architecture companions define quiesce, ownership and bootstrap
 boundaries.
 
 See the [deployment and state specification](../../openspec/specs/deployment-state/spec.md).
+
+### The change workflow
+
+This repository's changes are worked through the change workflow, an external tool it
+names only as its distribution, `arkhai-change-workflow`, as it names any tool it
+installs. One version of the workflow is installed per machine, and the committed
+configuration, [`.agents/workflow.toml`](../../.agents/workflow.toml), declares the
+versions this repository accepts in `[workflow] version`; the installed command refuses
+outside that range. What a developer may set differently — the pointer to this
+repository's engineering guidance and the models each step runs — sits in each
+checkout's gitignored local configuration, written from
+[`.agents/workflow.local.template.toml`](../../.agents/workflow.local.template.toml).
+
+The workflow is how this repository is changed, not part of how it is validated: a
+machine without it builds, tests, and releases the repository. Continuous integration
+installs no workflow and no suite needs it. The `Makefile` includes the workflow's
+make fragment only where `change-workflow` is on the path, so its own build, test, and
+release targets work without it, and only the checks the workflow's steps run reach
+its command.
+
+This repository keeps no test of its configuration or wiring of the workflow. The
+workflow verifies what it requires of every adopter, and the engine checks both
+configuration files whenever it reads them; this repository's statement of how it
+provides each role the workflow leaves to a repository is held complete by review when
+a change edits the range, the configuration, the statement, or a make target the
+statement names. That statement, and the rest of how this repository runs the
+workflow, are the [`market-change-workflow`](../../openspec/specs/market-change-workflow/README.md)
+capability ([specification](../../openspec/specs/market-change-workflow/spec.md)).
 
 ## Recovery workers
 

@@ -13,11 +13,8 @@ installs it editable. This check rejects:
   script, or CI workflow.
 
 A virtual project (`[tool.uv] package = false`) builds no wheel, so the wheel
-rule does not reach it. Nor does the wheel target's rule reach a project an
-exception of AGENTS.md's "Exceptions to shared guidance" admits (`ADMITTED`), each
-named with its row; every other rule still does. Dockerfiles are not scanned for
-editability: an image installs its project's own wheel, which is not an editable
-install.
+rule does not reach it. Dockerfiles are not scanned for editability: an image
+installs its project's own wheel, which is not an editable install.
 
 Rules: docs/guidance/engineering/packaging-python.md, with packaging-uv.md and
 packaging-hatchling.md beside it.
@@ -35,13 +32,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SKIPPED_DIRS = {".venv", "node_modules", "openspec", ".git"}
 _PACKAGE = re.compile(r"src/([A-Za-z_][A-Za-z0-9_]*)")
 _EDITABLE_OFF = re.compile(r"UV_NO_EDITABLE|--no-editable|\bno_editable\b")
-# The projects whose wheel target departs from the layout under an exception of
-# AGENTS.md, each with the row that admits it.
-ADMITTED = {
-    Path("scripts/change-workflow-wheel"):
-        'AGENTS.md, "Exceptions to shared guidance": the change workflow\'s wheel gathers '
-        "its engine and documents where the tree keeps them",
-}
 
 
 def _files(root: Path, pattern: str) -> list[Path]:
@@ -71,8 +61,6 @@ def pyproject_problems(pyproject: Path, root: Path) -> list[str]:
     backend = declared.get("build-system", {}).get("build-backend", "")
     if not backend.startswith("hatchling"):
         problems.append(f"{where}: builds with {backend or 'no backend'}; use hatchling")
-        return problems
-    if where in ADMITTED:
         return problems
     build = tool.get("hatch", {}).get("build", {})
     target = build.get("targets", {}).get("wheel", {})

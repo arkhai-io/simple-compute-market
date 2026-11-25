@@ -74,8 +74,8 @@ watched while it runs, then a summary, which it also writes as `summary.json`
 beside the logs: the evidence the kind's pattern matches. A step's result is
 `passed`, `failed`, or `warning`; a warning does not fail the part.
 
-Contract: openspec/specs/change-workflow/spec.md, CW-a7dw, CW-af15, CW-zkhs, and
-CW-t3ev; openspec/specs/market-change-workflow/spec.md, MCW-r4tx, MCW-v3tf, MCW-qeja,
+Contract: `arkhai-change-workflow`'s CW-a7dw, CW-af15, CW-zkhs, and CW-t3ev;
+openspec/specs/market-change-workflow/spec.md, MCW-r4tx, MCW-v3tf, MCW-qeja,
 MCW-8h0r, MCW-2lzw, MCW-fnuh, MCW-a0hu, MCW-notv, MCW-7bia, MCW-epkd, and MCW-7ts3.
 """
 

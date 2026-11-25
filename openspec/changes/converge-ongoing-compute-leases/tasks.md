@@ -256,7 +256,7 @@ Perform in order; a required code repair returns to implementation and review.
       that change's delta carries them.
 - [ ] 5.10 Documentation citations: run
       `make check-doc-citations CHANGE=converge-ongoing-compute-leases`, resolve all
-      citations, then `scripts/change-workflow openspec validate
+      citations, then `change-workflow openspec validate
       converge-ongoing-compute-leases --strict`. Run
       `make check-change CHANGE=converge-ongoing-compute-leases` before archival.
 - [ ] 5.11 Archival: only after every preceding task passes, run

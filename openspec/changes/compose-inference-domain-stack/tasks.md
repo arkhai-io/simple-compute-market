@@ -2205,8 +2205,9 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
   `test_the_sweep_closes_an_unheld_inference_listing_and_leaves_an_api_credit_one`.
 - Unit: `make -C e2e-tests test-unit`, 905 passed, 1 skipped;
   `make test-release-tooling`, 2939 passed, 1 failed
-  (`scripts/tests/test_change_clone.py::test_the_bootstrap_failed`, "No child
-  processes", which fails on this host before these fixes too).
+  (the change workflow's clone bootstrap test, "No child processes", which
+  failed on this host before these fixes too; the workflow's tests have since
+  left this repository).
 - End to end: `e2e_inference_deal` passed against the lane's stack with both
   doubles, under `docker,payments-lane,inference-lane`, each image running its
   migrate command before serving. A local run, not the pipeline.
@@ -2375,7 +2376,7 @@ Evidence, at this fix's tree, on an arm64 macOS host:
 
 ## 12. Closeout
 
-The parts of `docs/guidance/workflow/closeout.md`, in its order, with this
+The parts of the change workflow's closeout guidance, in its order, with this
 repository's own two — packaging and the end-to-end pipeline
 (`openspec/README.md`, "This repository's closeout parts") — after campaign
 index currency and before promotion; each is specific to this change. Closeout
@@ -2396,7 +2397,7 @@ change to implementation.
       One that should move returns the change to implementation.
 - [ ] 12.3 **Documentation compliance.** Re-check every decision in the
       promotion record below against the placement tables
-      (`docs/guidance/workflow/openspec-documentation.md`,
+      (the change workflow's OpenSpec documentation guidance and
       `openspec/README.md#documentation-placement`): normative behaviour in
       the owning `spec.md` (written by the archive from the six deltas),
       rationale and limits in the companions, repository-wide topology in

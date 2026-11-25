@@ -75,7 +75,7 @@ clears `skip_specs`.
 
 The root `Makefile` or the change workflow's make fragment, the development
 environment or a pinned container image, every `diagrams/*.svg` under `docs/` and
-`openspec/`, and possibly `scripts/tests/test_change_workflow_graph.py`. No runtime
+`openspec/`, and possibly `arkhai-change-workflow`'s test of its graph diagram. No runtime
 behaviour changes. Should design place the target in the change workflow's make
 fragment, the target is a new public interface of the workflow engine, added
 compatibly; design names it, and any other engine interface it changes, with its

@@ -14,12 +14,19 @@ scope sits beside the check.
 
 ## The change workflow
 
-This repository works its changes through the change workflow. What the workflow
-does is `change-workflow`'s specification and companion
-([`openspec/specs/change-workflow/`](openspec/specs/change-workflow/README.md)); how
-the owner operates it is the
-[change workflow handbook](docs/change-workflow-handbook.md). Its skills are under
-`.agents/skills/`, and its configuration is `.agents/workflow.toml`.
+This repository works its changes through the change workflow, the installed
+distribution `arkhai-change-workflow`, whose `change-workflow` command carries its
+skills, its guidance, its specification and companion, and its handbook. What the
+workflow does is `change-workflow`'s specification and companion, and how the owner
+operates it is its handbook, each named by `change-workflow config --json`'s
+`workflow` fields. This repository's committed configuration,
+`.agents/workflow.toml`, declares the workflow versions it accepts (`[workflow]
+version`), and each checkout's local configuration, `.agents/workflow.local.toml`,
+which Git ignores, is written from `.agents/workflow.local.template.toml`. Install the
+workflow to drive a change; setting it up is its handbook's. The repository builds,
+tests, and releases without it; only the checks the workflow's steps run, `make
+check-repository` among them, need it, and the `Makefile` has the workflow's targets
+only where it is installed.
 
 ## What every session reads
 
@@ -33,7 +40,7 @@ points at, the workflow's guidance the installed distribution ships, then
 |---|---|
 | `AGENTS.md` | This entry |
 | [`docs/guidance/engineering/`](docs/guidance/engineering/README.md) | Every Markdown file beneath it: the engineering guidance |
-| [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) | Every Markdown file beneath it: the change workflow's guidance |
+| The installed workflow's guidance, which `change-workflow config load` prints | The change workflow's guidance |
 | [`docs/guidance/repository/`](docs/guidance/repository/README.md) | Every Markdown file beneath it: this repository's rules spanning its systems |
 | [`openspec/README.md`](openspec/README.md) | This repository's OpenSpec guide: where each document goes, its closeout parts and their checks |
 | [`docs/development/ARCHITECTURE.md`](docs/development/ARCHITECTURE.md) | The description of the system: its shape, package layers, authorities, vocabulary, and flows |
@@ -47,23 +54,23 @@ every other Markdown file in its directory under `openspec/specs/` but its
 ## Where the guidance lives
 
 The guidance has three layers — engineering, the change workflow's, and this
-repository's — as
-[`docs/guidance/workflow/README.md`, "The layers of guidance"](docs/guidance/workflow/README.md#the-layers-of-guidance)
-defines them. Each layer's directory under `docs/guidance/` has a README describing
-the layer, how its files are organized, and its tag table; its files sit beside it,
-each named by its subject and carrying its tags in its frontmatter. This repository's
-guidance is this file, `openspec/README.md`, the rules spanning its systems under
-`docs/guidance/repository/`, the description documents under `docs/development/`,
-and, beside each capability, the guidance files in its directory under
-`openspec/specs/` other than its `spec.md`, its companion, and its `index.md`. What
-the owner or an operator does is in the handbooks, outside the guidance: the
-[operator handbook](docs/operator-handbook.md), the
-[release handbook](docs/release-handbook.md), and the change workflow handbook.
+repository's — as `arkhai-change-workflow`'s guidance, "The layers of guidance",
+defines them. Each layer's directory has a README describing the layer, how its files
+are organized, and its tag table — the engineering and repository layers' under
+`docs/guidance/`, the workflow's in the installed distribution; its files sit beside
+it, each named by its subject and carrying its tags in its frontmatter. This
+repository's guidance is this file, `openspec/README.md`, the rules spanning its
+systems under `docs/guidance/repository/`, the description documents under
+`docs/development/`, and, beside each capability, the guidance files in its directory
+under `openspec/specs/` other than its `spec.md`, its companion, and its `index.md`.
+What the owner or an operator does is in the handbooks, outside the guidance: the
+[operator handbook](docs/operator-handbook.md), the [release
+handbook](docs/release-handbook.md), and the installed workflow's handbook.
 
 | Layer | Guidance |
 |---|---|
 | engineering | [`docs/guidance/engineering/`](docs/guidance/engineering/README.md) |
-| workflow | [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) |
+| workflow | The installed `arkhai-change-workflow`'s guidance, the directory `change-workflow config --json` names as `workflow.guidance` |
 | repository | `AGENTS.md` |
 | repository | [`docs/guidance/repository/`](docs/guidance/repository/README.md) |
 | repository | [`openspec/README.md`](openspec/README.md) |
@@ -101,7 +108,6 @@ rule is no exception: it is deferred work, recorded where "Deferred work" below 
 |---|---|---|---|
 | [`repository-content.md`, "In a public repository"](docs/guidance/engineering/repository-content.md#in-a-public-repository) | selects | This repository is public, its local development configuration included, which is public by design | It is published openly, and what enters it stays readable after a later edit removes it |
 | [`configuration.md`, "Secrets travel in a secret profile or overlay file"](docs/guidance/engineering/configuration.md#secrets-travel-in-a-secret-profile-or-overlay-file) | overrides | The storefronts and the provisioning service take their signing credential, `ARKHAI_IDENTITY_CREDENTIAL`, from an environment variable sourced from a Secret; the registries read theirs from a mounted file their profile names, as the rule asks | The [identity specification](openspec/specs/marketplace-identity/spec.md) keeps the credential from the configuration loader |
-| [`packaging-python.md`, "One import package per distribution"](docs/guidance/engineering/packaging-python.md#one-import-package-per-distribution), ["Nothing remaps the package"](docs/guidance/engineering/packaging-python.md#nothing-remaps-the-package), and ["Data files live inside the package"](docs/guidance/engineering/packaging-python.md#data-files-live-inside-the-package); [`packaging-hatchling.md`, "The wheel target names the one package"](docs/guidance/engineering/packaging-hatchling.md#the-wheel-target-names-the-one-package) | overrides | One project, `scripts/change-workflow-wheel/`, builds the change workflow's wheel, `arkhai-change-workflow`, from the engine at `scripts/change_workflow/` and the workflow's documents where they sit — its skills under `.agents/skills/`, its outcome schema, guidance, handbook, and specification — each gathered into the package's data by `force-include`; `make check-project-layout` admits that project alone, naming this row. It lasts until this repository installs the workflow's release from the workflow's own repository, which removes the engine, the project, and this row together | The workflow's specification stays in OpenSpec's tree and its other documents where its changes edit them, so the workflow's repository can be lifted from this tree by path; restructuring code that is about to leave the repository is not worth its cost |
 | [`documentation.md`, "Citations resolve"](docs/guidance/engineering/documentation.md#citations-resolve) | overrides | One cited path need not exist on the branch: the change workflow's local configuration, `.agents/workflow.local.toml`, which Git ignores; `make check-doc-citations` admits that path alone (`LOCAL_ONLY` in `scripts/check_doc_citations.py`) | The file is each checkout's own by design, written from the committed `.agents/workflow.local.template.toml`, so no branch holds it, and the documents describing it must still name where it is |
 | [`repository-content.md`, "In a public repository"](docs/guidance/engineering/repository-content.md#in-a-public-repository), its run artifacts | overrides | One run artifact is admitted: a marketplace release's bill of materials, committed at the cut as `manifests/release-bom.cdx.json` on its release branch ([`ARCHITECTURE.md`, "The bill of materials"](docs/development/ARCHITECTURE.md#the-bill-of-materials)). It holds content identities only — versions, digests, the source revision and the public repository link — and names no registry host, project or path, and `make check-release-record` refuses any field or URL its layout does not admit ([`published-packages.md`, "The release record"](docs/guidance/repository/published-packages.md#the-release-record)) | A release is recorded in the repository it was built from, and the record is enforced to hold nothing the public case refuses rather than promised to |
 
@@ -112,10 +118,9 @@ rule is no exception: it is deferred work, recorded where "Deferred work" below 
 What enters a repository follows
 [`repository-content.md`](docs/guidance/engineering/repository-content.md), whose
 public case this repository selects ("Exceptions to shared guidance" above); a
-change's documents are as public as its code
-([`docs/guidance/workflow/changes.md`](docs/guidance/workflow/changes.md#a-changes-documents-are-as-public-as-its-code)).
-Some work here is paired with work in separate private repositories. That pairing
-never appears here.
+change's documents are as public as its code (`arkhai-change-workflow`'s guidance, "A
+change's documents are as public as its code"). Some work here is paired with work in
+separate private repositories. That pairing never appears here.
 
 The public-content checks and the secret scan run in the repository's Git hooks, the
 guarded push, and CI
@@ -125,15 +130,14 @@ identifier.
 
 ### Deferred work
 
-Deferred work goes where
-[`working-model.md`, "Deferred work"](docs/guidance/workflow/working-model.md#deferred-work)
-says: here, an unowned gap is a row in `openspec/changes/README.md` or the roadmap.
+Deferred work goes where `arkhai-change-workflow`'s guidance, "Deferred work", says:
+here, an unowned gap is a row in `openspec/changes/README.md` or the roadmap.
 This repository does not use GitHub Issues for its own work; the issue-discovery
 harness files its own issues (`docs/development/ISSUE_DISCOVERY.md`).
 
 ### Domain docs
 
-Terms live where [`docs/guidance/workflow/terms.md`](docs/guidance/workflow/terms.md)
+Terms live where `arkhai-change-workflow`'s guidance, "Where terms live",
 says, and follow [`docs/guidance/engineering/terms.md`](docs/guidance/engineering/terms.md).
 Here the market's cross-subsystem terms live in
 [`docs/development/ARCHITECTURE.md`, "Shared vocabulary and identities"](docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities),

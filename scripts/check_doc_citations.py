@@ -5,9 +5,9 @@ A document's citations resolve (docs/guidance/engineering/documentation.md,
 `scripts/`, `e2e-tests/` and `.agents/` path a document cites, on the branch
 (openspec/specs/market-change-workflow/README.md, "The closing checks"), and an
 unresolvable citation is a blocking defect rather than a stale link.
-`.agents/` holds the shared skills and the files they cite, such as the outcome
-schema; the harness skill directories mirror it through links, so it alone is
-checked.
+`.agents/` holds the skills this repository keeps, its workflow configuration, and
+the evidence kinds' guides; the harness skill directories mirror its skills through
+links, so it alone is checked.
 
 The existence test this replaces could not fail on a rename-to-tombstone,
 which is the most likely broken citation in a renaming change: a tombstoned

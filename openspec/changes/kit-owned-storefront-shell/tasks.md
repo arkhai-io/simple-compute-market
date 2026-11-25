@@ -4,7 +4,7 @@ Design phase; not planned. Planning begins with the questions in `design.md`, in
 placement need recorded from `bare-metal-listing-shapes`, then
 an inventory and drift comparison of the three shell copies on the pattern
 `kit-storefront-composition-seam` established, and ends with the closeout task
-defined in `docs/guidance/workflow/closeout.md`, with this repository's parts in
+defined in `arkhai-change-workflow`'s guidance, "Closeout", with this repository's parts in
 `openspec/README.md#this-repositorys-closeout-parts`.
 
 The deal-control route services `bare-metal-mock-provisioned-deal` builds are out of

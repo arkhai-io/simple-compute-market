@@ -47,33 +47,21 @@ def test_the_matrix_is_make_tests_targets() -> None:
     assert _matrix_targets() == _make_test_targets()
 
 
-def test_the_scripts_job_installs_the_change_workflow_from_the_tree() -> None:
-    """The job running the scripts' suites, `test-deployment-packaging` through
-    `test-release-tooling`, installs the change workflow built from the tree — its
-    command and its skills — before it runs them, writing no local configuration into
-    the checkout, whose committed configuration CI checks alone."""
+def test_no_step_installs_the_change_workflow() -> None:
+    """The workflow is how this repository is changed, not part of how it is
+    validated, so no job installs it: a suite that needed it would fail here rather
+    than pass where a developer has it installed."""
 
-    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
-    tool = next(i for i, line in enumerate(lines)
-                if line.strip() == "uv tool install --force scripts/change-workflow-wheel")
-    step = max(i for i in range(tool) if lines[i].startswith("      - "))
-    end = next(i for i in range(tool, len(lines)) if lines[i].startswith("      - "))
-    run = next(i for i, line in enumerate(lines)
-               if line.strip() == "run: make ${{ matrix.target }}")
+    text = WORKFLOW.read_text(encoding="utf-8")
 
-    assert lines[step].strip() == "- if: matrix.target == 'test-deployment-packaging'"
-    assert step < tool < end <= run
-    install = [line.strip() for line in lines[tool:end] if "change-workflow\" install" in line]
-    assert install == ['cd "$RUNNER_TEMP" && "$bin/change-workflow" install']
-    assert re.search(r"^test-deployment-packaging: test-release-tooling\b",
-                     MAKEFILE.read_text(encoding="utf-8"), re.MULTILINE)
+    # The distribution, `arkhai-change-workflow`, and its command alike.
+    assert "change-workflow" not in text
 
 
 def test_the_scripts_job_names_each_skipped_test() -> None:
-    """The job running the scripts' suites under `SANDBOX_REQUIRED=1` reports every
-    test that skips, with its reason, so its log shows which test skipped rather than
-    a bare count: a skip no gate turns into a failure, such as the Codex sandbox
-    test's where Codex is absent, is then read, not inferred. `-r` replaces pytest's
+    """The job running the scripts' suites reports every test that skips, with its
+    reason, so its log shows which test skipped rather than a bare count: a skip no
+    gate turns into a failure is then read, not inferred. `-r` replaces pytest's
     default summary, so it keeps `fE`, the failures and errors whose lines the CI
     evidence reads failing tests from."""
 
@@ -86,5 +74,4 @@ def test_the_scripts_job_names_each_skipped_test() -> None:
     assert lines[step].strip() == "- name: make ${{ matrix.target }}"
     assert ("PYTEST_ADDOPTS: ${{ matrix.target == 'test-deployment-packaging' "
             "&& '-rfEs' || '' }}") in env
-    assert ("SANDBOX_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' "
-            "&& '1' || '' }}") in env
+    assert not any(line.startswith("SANDBOX_REQUIRED:") for line in env)
