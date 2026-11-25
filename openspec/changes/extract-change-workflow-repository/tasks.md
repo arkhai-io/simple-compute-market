@@ -21,13 +21,14 @@ CW-lm42, CW-d867). Touches `scripts/change-workflow-wheel/` (new),
 `log.py`, a new `documents.py`), `scripts/check_project_layout.py`, `AGENTS.md`, and
 their tests.
 
-- [x] 1.1 Write the wheel's project, `scripts/change-workflow-wheel/pyproject.toml`:
+- [x] 1.1 Write the wheel's project, `change-workflow-wheel/pyproject.toml`:
   distribution `arkhai-change-workflow`, version `0.1.0`, MIT, Hatchling, the
   `change-workflow` console entry point on `change_workflow.cli:main`, the package
   `scripts/change_workflow/`, and, as package data under it, the eleven workflow skills
   (`.agents/skills/change-*`, `.agents/skills/guidance-review`), `docs/guidance/workflow/`,
   `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`, `diagrams/`),
-  `docs/change-workflow-handbook.md`, `.agents/change-outcome.schema.json`, and
+  the handbook and the outcome schema (`change-workflow-handbook.md` under `docs/`,
+  `change-outcome.schema.json` under `.agents/`), and
   `workflow.mk` (D8, D9). First prove that Hatchling builds it with these sources
   outside the project's directory (`uv build --wheel scripts/change-workflow-wheel`)
   and that the wheel lists every file; if it cannot, stop the section and report it,
@@ -37,14 +38,14 @@ their tests.
   each document under `change_workflow/data/`); `only-include` and `sources` refuse a
   path outside the project (`must be relative`), so `force-include` is the form.
   `__pycache__` is left out without an exclude. The wheel's file list is in the
-  section's notes. `openspec/specs/change-workflow/diagrams.md`, the capability's own
-  guidance, is not among the four documents the task names, and does not ship.
-- [x] 1.2 Add `scripts/change_workflow/documents.py`: each document by its role
+  section's notes. The capability's `diagrams.md` under
+  `openspec/specs/change-workflow/`, its own guidance, is not among the four documents the task names, and does not ship.
+- [x] 1.2 Add `change_workflow/documents.py`: each document by its role
   (`specification`, `index`, `companion`, `diagrams`, `guidance`, `handbook`, `schema`,
   `fragment`, and the skills), found through `importlib.resources` when installed and
   at its tree path when the package runs from `scripts/` (D6, CW-lm42). Route
   `outcome.SCHEMA` and `diagram.DIAGRAMS` through it. Verify: unit tests for both
-  modes, `scripts/tests/test_change_workflow_documents.py` (new).
+  modes, `test_change_workflow_documents.py` (new).
   Done: `documents.Distribution(package)` is installed when the package holds `data/`,
   which the tree's never does; `path(role)`, `documents()`, `skills()` (the tree's
   `change-*` and `guidance-review` beside OpenSpec's skills, or the package's every
@@ -99,7 +100,7 @@ their tests.
 - [x] 1.6 Verify the section: build the wheel, install it into a temporary tool
   directory with `uv tool install`, and run the installed `change-workflow --version`
   and `config --json` in a temporary repository, each named document existing — a
-  library integration test, `scripts/tests/test_change_workflow_wheel.py` (new),
+  library integration test, `test_change_workflow_wheel.py` (new),
   skipped with its reason where `uv` is absent; plus the section's suites and `scripts/change-workflow run pre-commit
   extract-change-workflow-repository`.
   End-to-end: none exercises the workflow's tooling; none owed.
@@ -118,7 +119,7 @@ their tests.
   well: `check-spec-index` (the delta's twelve added ids are not in `index.md` until
   section 8 writes them) and `check-doc-citations` (the change's documents cite
   `.agents/workflow.local.template.toml` and `.agents/workflow.local.toml`, which
-  section 2 creates and ignores, and `scripts/tests/test_change_workflow_install.py`
+  section 2 creates and ignores, and `test_change_workflow_install.py`
   and `test_change_workflow_citations.py`, which sections 3 and 5
   create). Correction: the index check names fourteen ids, the `market-change-workflow`
   delta's two among them, which 10.2 indexes; the citation of a test file a later
@@ -129,7 +130,7 @@ Section 1 notes (handoff):
 - The wheel's file list, as `uv build --wheel scripts/change-workflow-wheel` builds
   it: `change_workflow/` with its 43 modules and `workflow.mk`; under
   `change_workflow/data/`: `change-outcome.schema.json`,
-  `docs/change-workflow-handbook.md`, `docs/guidance/workflow/` (its seven files),
+  `change-workflow-handbook.md`, `docs/guidance/workflow/` (its seven files),
   `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`, and
   `diagrams/` with its four `.drawio` sources and four SVGs), each at its tree path so
   its relative links resolve installed (30 F2, below), and `skills/` (the eleven
@@ -150,7 +151,7 @@ Section 1 notes (handoff):
   `documents.skills()`'s rule, and the wheel test fails until its line is added.
 - The modules cite CW-5kl9, CW-lm42, and CW-d867, which only the change's delta holds
   until section 8 applies it to `spec.md`; the preliminary merge waits for section 8.
-- Outside the plan: `scripts/tests/test_change_next_step.py` held a comment
+- Outside the plan: `test_change_next_step.py` held a comment
   `make check-comment-hygiene` refuses at the plan's commit ("Section 3 joins…"),
   reworded to name the sections by ordinal.
 - The fresh-context check's findings fixed: a comment naming a range check that did
@@ -285,7 +286,7 @@ and their tests.
   tests among them); the default checks and strict OpenSpec validation passed; `make
   check-repository` failed only on the two checks that fail at the plan's commit:
   `check-spec-index` (section 8's index entries) and `check-doc-citations`, now
-  naming only `scripts/tests/test_change_workflow_install.py` and
+  naming only `test_change_workflow_install.py` and
   `test_change_workflow_citations.py`, which sections 3 and 5 create.
 
 Section 2 notes (handoff):
@@ -364,7 +365,7 @@ their tests.
   where none exists, from `.agents/workflow.local.template.toml` when present and
   otherwise as a skeleton naming each required local field, never overwriting one
   (D8, CW-1rhd, CW-sv3u). Verify: library integration tests under a temporary `HOME`,
-  `scripts/tests/test_change_workflow_install.py` (new), every scenario of CW-1rhd and
+  `test_change_workflow_install.py` (new), every scenario of CW-1rhd and
   CW-sv3u.
   Done: `install.py`; the stamp is `.change-workflow-version` in each installed
   skill's directory and the manifest `.change-workflow-manifest.json` in each user
@@ -500,7 +501,7 @@ runs the workflow installed from the tree (D4, D5, D7, D8, D11, D15, D18; CW-r3k
 CW-f8yy, CW-4pm4, CW-hu0z, CW-dvz5, CW-d8de). Touches `.agents/workflow.toml`,
 `.claude/settings.json`, `.claude/skills/`, `.codex/skills/`, the eleven workflow
 skills, `scripts/change_workflow/` (`config.py`, `cli.py`, `workflow.mk`), the
-`Makefile`, `.github/workflows/tests.yml`, `docs/change-workflow-handbook.md`, and
+`Makefile`, `.github/workflows/tests.yml`, `change-workflow-handbook.md`, and
 their tests.
 
 - [x] 4.1 The orchestrator's, on the owner's word, before the section's session: edit
@@ -578,8 +579,8 @@ their tests.
   needs a repository and installed skills of its version. The fragment's
   `CHANGE_WORKFLOW ?= change-workflow`, its header naming the installed command and
   CW-r3ka and CW-dvz5 rather than a tree path. The root `Makefile` keeps
-  `include scripts/change_workflow/workflow.mk`; `make install-workflow` runs `uv tool
-  install --force --reinstall scripts/change-workflow-wheel` — `--reinstall`, since an
+  its `include` of the fragment, `workflow.mk` under `scripts/change_workflow/`;
+  `make install-workflow` runs `uv tool install --force --reinstall scripts/change-workflow-wheel` — `--reinstall`, since an
   edit of the engine or a skill keeps the version, and uv would otherwise keep the
   build it has — then `change-workflow install`; `check-change` calls
   `$(CHANGE_WORKFLOW)`, so it runs the installed engine like the fragment's targets.
@@ -652,13 +653,16 @@ their tests.
   reinstalls (`make install-workflow`) before the next session, since the skills
   changed.
   End-to-end: none exercises the workflow's tooling; none owed.
-  Owed by validation (ci tests.yml): the `test · test-deployment-packaging` job, run
-  under `SANDBOX_REQUIRED=1` with `PYTEST_ADDOPTS=-rfEs`, its log showing the wheel
-  installed from the tree, `change-workflow install` run, and the change workflow's
+  Shown by validation (ci tests.yml) until section 9 removed the job's install, by
+  validations 49 (`58b902685`) and 51 (`3b663fc5d`): the
+  `test · test-deployment-packaging` job, run under `SANDBOX_REQUIRED=1` with
+  `PYTEST_ADDOPTS=-rfEs`, its log showing the wheel installed from the tree,
+  `change-workflow install` run, and the change workflow's
   suites passed with no sandbox test skipped on the bubblewrap probe and one test
   skipped in all: the Codex sandbox test, its skip-summary line naming
-  `scripts/tests/test_change_workflow_sandbox.py` and the reason `Codex is not
+  `test_change_workflow_sandbox.py` and the reason `Codex is not
   installed here`, since the runner has no Codex — the local kind runs it (44 F1).
+  Section 9's owed line (9.8) is the job's current observation (69 F1).
   Done: the section's suites, each after its last edit — `test_change_workflow_config.py`,
   `test_change_workflow_cli_steps.py`, `test_change_workflow_cli.py`,
   `test_change_workflow_review.py`, `test_change_workflow_wheel.py`,
@@ -755,7 +759,7 @@ Section 4 notes (handoff):
   `scripts/change-workflow` in three scenarios, normative text section 10 amends with
   that capability's delta; `change-workflow`'s specification, companion, and index
   name it throughout, section 8's; the orchestrating skill cites
-  `scripts/change_workflow/next_step.py` and `graph.py`, which section 5's citations
+  `change_workflow/next_step.py` and `graph.py`, which section 5's citations
   by requirement id replace; and the handbook's procedure for installing is 7.3's.
 - The repository's own suites `test_check_secrets.py`, `test_check_public_content.py`,
   and `test_validate_parallel.py` write the range into their configurations as a
@@ -777,7 +781,7 @@ section name, the workflow's guidance by section, and its specification by id, w
 (D4, D6; CW-7x0z, CW-n8tr, CW-d2rw). Touches the eleven workflow skills,
 `docs/guidance/workflow/*.md`, `docs/guidance/engineering/` (`integration-tests.md`,
 `system-tests.md`, `contract-fixtures.md`, `test-levels.md`, `testing-python.md`)
-and every citation of the renamed headings, `scripts/change_workflow/config.py`,
+and every citation of the renamed headings, `change_workflow/config.py`,
 `scripts/check_guidance.py`, and their tests.
 
 - [x] 5.1 Make the three repeated headings unique — "Integration tests", "System
@@ -894,7 +898,7 @@ Section 5 notes (handoff):
   same way and ships with the skills; the triage may keep it or narrow it to the
   letter.
 - Outside the plan: the orchestrating skill no longer cites
-  `scripts/change_workflow/next_step.py` for the computation's result, which no
+  `change_workflow/next_step.py` for the computation's result, which no
   requirement words; it cites its own sections that route on each result. If the
   result's shape is to be a public interface, the specification would need it, which
   is section 8's or a later change's to decide. The workflow guidance's README
@@ -918,7 +922,7 @@ assumptions test (D10, D14; CW-c8lw, CW-368t, CW-ora1, MCW-5tgp). Touches
 `scripts/change_workflow/` (new `spec_index.py` and `decisions.py`, `config.py`,
 `hooks.py`, `cli.py`), `check_spec_index.py` and `check_decision_destinations.py`
 under `scripts/`, which leave it, `scripts/check_doc_citations.py`,
-`scripts/check_change.py`, the `Makefile`, `scripts/tests/test_change_workflow_assumptions.py`,
+`scripts/check_change.py`, the `Makefile`, `test_change_workflow_assumptions.py`,
 and their tests.
 
 - [x] 6.1 The orchestrator's, on the owner's word, before the section's session:
@@ -1082,8 +1086,9 @@ Section 6 notes (handoff):
 Delivers documents the coordinator can lift whole, the handbook's procedures for
 installing, crossing, and the move, and the workflow's tests runnable without this
 repository's other files (D6, D7, D8, D16, D17, D18). Touches
-`openspec/specs/change-workflow/README.md`, `docs/guidance/workflow/*.md`,
-`docs/change-workflow-handbook.md`, and the workflow's tests and fixtures under
+the capability's companion (`README.md` under `openspec/specs/change-workflow/`),
+`docs/guidance/workflow/*.md`,
+`change-workflow-handbook.md`, and the workflow's tests and fixtures under
 `scripts/tests/`.
 
 - [x] 7.1 The workflow's documents link only within their own set: the companion's
@@ -1109,7 +1114,7 @@ repository's other files (D6, D7, D8, D16, D17, D18). Touches
   recorded in the handoff.
   Done: the workflow's tests that held this repository's own provisions — its
   configuration and template, its root Makefile's targets, its settings' hook — move
-  to a repository test, `scripts/tests/test_market_change_workflow.py`, which reaches
+  to a repository test, `test_market_change_workflow.py`, which reaches
   the engine only through `scripts/change-workflow` (CW-r3ka): a test of the
   configuration runs the command in a temporary checkout holding the committed file,
   the template written as the local file, and the documents they name, so neither a
@@ -1251,8 +1256,8 @@ Touches `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`,
   among them; no id retired. `make check-spec-index
   CHANGE=extract-change-workflow-repository`, through the tree's engine: fails only
   on MCW-9k0c and MCW-iqh1, which 10.2 indexes; `change-workflow`'s entries pass.
-- [x] 8.3 Promote to the companion, `openspec/specs/change-workflow/README.md`, each
-  destination the proposal's knowledge to promote names there, before the release is
+- [x] 8.3 Promote to the companion, `README.md` under
+  `openspec/specs/change-workflow/`, each destination the proposal's knowledge to promote names there, before the release is
   cut (D23): "The public surface" (D1, D7), "The repository's guidance is layered"
   (D3, D4, and the principles that the workflow relies on sections and that users
   bring their own engineering guidance), "A repository's configuration" (D4, D5, D6,
@@ -1446,10 +1451,10 @@ exceptions table, `openspec/specs/README.md`, and `openspec/changes/README.md`; 
 removes every path the handbook's procedure for the move lists (`scripts/change-workflow`,
 `scripts/change_workflow/`, `scripts/change-workflow-wheel/`, the workflow's tests and
 fixtures under `scripts/tests/`, `.agents/skills/change-*`,
-`.agents/skills/guidance-review`, `.agents/change-outcome.schema.json`,
-`docs/guidance/workflow/`, `openspec/specs/change-workflow/`, and
-`docs/change-workflow-handbook.md`), `scripts/tests/test_change_workflow_assumptions.py`,
-`scripts/tests/test_market_change_workflow.py`, and the six moved changes' directories
+`.agents/skills/guidance-review`, the outcome schema under `.agents/`,
+`docs/guidance/workflow/`, `openspec/specs/change-workflow/`, and the handbook under
+`docs/`), `test_change_workflow_assumptions.py` and
+`test_market_change_workflow.py` under `scripts/tests/`, and the six moved changes' directories
 under `openspec/changes/`. The workflow is reached throughout as the installed
 `change-workflow`; nothing here names the workflow's repository or links to it (D2, D6).
 
@@ -1521,8 +1526,8 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   `scripts/change_workflow/`. `scripts/workflow_command.py`'s `COMMAND` becomes the
   installed `change-workflow` on the path, its docstring following, and
   `scripts/tests/test_workflow_command.py` keeps its stand-in command. Delete
-  `scripts/tests/test_change_workflow_assumptions.py` and
-  `scripts/tests/test_market_change_workflow.py` (D14). Drop `change-workflow`'s row
+  `test_change_workflow_assumptions.py` and
+  `test_market_change_workflow.py` (D14). Drop `change-workflow`'s row
   from `openspec/specs/README.md` (MCW-9k0c). Verify: `make check-capability-index`,
   `make check-comment-hygiene`, and `test_workflow_command.py` (unit).
   Done: the procedure's 66 paths (its list, read in the tree's handbook before it went)
@@ -1700,11 +1705,11 @@ Section 9 notes (handoff):
 - `scripts/tests/conftest.py` names the step's marker, `CHANGE_WORKFLOW_UNATTENDED`,
   literally: the fragment names it, but no interface promises it. A release renaming
   it fails loudly — a test's push refused inside a step — rather than silently.
-- The citations check scoped to this change fails on 23 paths section 9 removed, all
+- The citations check scoped to this change failed on 23 paths section 9 removed, all
   cited by this change's own `design.md`, `proposal.md`, and earlier task notes:
-  completed tasks are not rewritten, so they stand until closeout's narrative
-  compression (11.4) and its citations task (11.11). Until then every `pre-commit`
-  of this change fails on them, beside the `spec-index` check's three
+  completed tasks are not rewritten, so they stood until round 2's triage rewrote
+  them (69 F2, in section 10's notes); until then every `pre-commit` of this
+  change failed on them, beside the `spec-index` check's three
   `market-change-workflow` ids 10.2 indexes.
 - For section 10: `AGENTS.md`'s "What every session reads" still links
   `docs/guidance/workflow/`, and its layer table's workflow row is prose this section
@@ -1734,7 +1739,7 @@ Delivers every document of this repository citing the workflow in prose by its
 distribution, requirement id, and section, and its own capability amended by hand (D6,
 D14, D23, D26; MCW-5tgp, MCW-9k0c, MCW-iqh1, MCW-w7nb). Touches the documents outside
 the archive that cite `openspec/specs/change-workflow/`, `docs/guidance/workflow/`,
-`docs/change-workflow-handbook.md`, `.agents/skills/change-*`, or
+the handbook under `docs/`, `.agents/skills/change-*`, or
 `scripts/change-workflow` (`AGENTS.md`, `openspec/README.md`,
 `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, the capabilities'
 documents, the repository guidance, `.agents/evidence/`, and the docstrings and
@@ -1839,8 +1844,8 @@ comments of this repository's scripts), and `openspec/specs/market-change-workfl
   ids now indexed), decisions, and the strict OpenSpec validation; `check-repository`
   passed six of its seven checks and failed the citations scoped to this change on
   the 23 paths section 9 removed that this change's own design, proposal, and earlier
-  task notes cite, which closeout rewrites (notes). `make check-guidance`: 97 files,
-  passed. The tree committed differs from the one `validate-local` ran on only in
+  task notes then cited, which round 2's triage rewrote (notes). `make
+  check-guidance`: 97 files, passed. The tree committed differs from the one `validate-local` ran on only in
   this file.
   End-to-end: none exercises the workflow's tooling; none owed.
 
@@ -1869,13 +1874,12 @@ Section 10 notes (handoff):
   the workflow's: the change index's row citing the native Ansible gate's shell script, and
   `renewable-compute-lease-deadlines`' design citing an archived change's review,
   which is untracked. Left as found.
-- This change's own `design.md`, `proposal.md`, and earlier task notes still cite the
+- This change's own `design.md`, `proposal.md`, and earlier task notes cited the
   23 paths section 9 removed, so `make check-doc-citations
-  CHANGE=extract-change-workflow-repository` and the `check-repository` hook fail on
-  them alone until closeout: the scoped check finds an archived change too, so
-  archiving does not clear them, and closeout's narrative compression (11.4) and its
-  citations part (11.11) rewrite them; design and proposal citations of what moved
-  can name it in prose as this section did elsewhere.
+  CHANGE=extract-change-workflow-repository` and the `check-repository` hook failed
+  on them alone at this section's commit; the scoped check finds an archived change
+  too, so archiving would not have cleared them. Round 2's triage rewrote them (69
+  F2, its note below).
 - `test_check_guidance.py`'s fixtures still build a checkout whose workflow layer sits
   under `docs/guidance/workflow/`: they test the check's generic handling of a
   workflow-tagged file in a tree, not this repository's layout, and stay.
@@ -1885,6 +1889,28 @@ Section 10 notes (handoff):
   citations, and `record-capacity` reach its command; and `AGENTS.md` said nothing
   else needs it. Both now say the builds, suites, and releases work, and those checks
   reach the command.
+- Implementation review 69's triage, 69 F1: section 4's owed CI line (4.6) asked the
+  packaging job to show the workflow installed from the tree, which section 9 removed,
+  while 9.8's owed line asks for the opposite; validation 70 judged 4.6's superseded.
+  4.6's line now reads "Shown by validation … by validations 49 and 51", naming the
+  commits that showed it, and no longer opens "Owed by validation", so `change-workflow
+  evidence` lists `tests.yml` as owed by section 9 alone (checked).
+- Implementation review 69's triage, 69 F2: the 23 citations of paths section 9
+  removed, in this change's `design.md`, `proposal.md`, and earlier task notes, are
+  rewritten so no path the tree lacks is cited: each names the file without its root
+  directory, or says where it lay ("under `docs/`") or what it was ("the handbook"),
+  its meaning unchanged; the notes above that said the scoped check fails until
+  closeout now say it was rewritten here. 9.8's task text ("the citations of removed
+  documents section 10 rewrites") and the dated verification lines are left as they
+  were written. Evidence: `make check-doc-citations
+  CHANGE=extract-change-workflow-repository`: every cited path resolves; `change-workflow
+  run pre-commit extract-change-workflow-repository` (documents only, so the default
+  checks and `check-repository`): every default check passed, and `check-repository`
+  passed all seven checks, citations included. The fresh-context check of the diff
+  against `adbf6d463` found no hunk outside the two fixes, and found two notes left in
+  the present tense, a self-contradicting sentence, references to a note not yet
+  written (this one), and four lists where dropping a root lost a file's location; all
+  fixed. Declined: rewording 9.8's planned task text, which records the plan.
 
 ## 11. Closeout
 

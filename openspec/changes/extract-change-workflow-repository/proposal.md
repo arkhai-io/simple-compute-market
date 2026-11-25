@@ -148,8 +148,8 @@ release's surface (CW-c2tw):
 
 - `scripts/change-workflow`, `scripts/change_workflow/` with `workflow.mk`, the
   workflow's tests and fixtures under `scripts/tests/`, `.agents/skills/change-*` and
-  `guidance-review`, `.agents/change-outcome.schema.json`, `docs/guidance/workflow/`,
-  `openspec/specs/change-workflow/`, and `docs/change-workflow-handbook.md`: packaged
+  `guidance-review`, the outcome schema under `.agents/`, `docs/guidance/workflow/`,
+  `openspec/specs/change-workflow/`, and the owner's handbook under `docs/`: packaged
   in the first half, removed in the second.
 - `check_spec_index.py` and `check_decision_destinations.py`, under `scripts/`, which
   become engine modules; `scripts/check_doc_citations.py`, which reads delta paths
@@ -166,8 +166,8 @@ release's surface (CW-c2tw):
 - About 95 permanent documents citing the workflow's specification or guidance,
   `AGENTS.md` and `openspec/README.md` among them; the citation check fails on any
   reference left behind.
-- `scripts/tests/test_change_workflow_assumptions.py` and
-  `scripts/tests/test_market_change_workflow.py`, deleted in the second half (D14).
+- `test_change_workflow_assumptions.py` and `test_market_change_workflow.py`, under
+  `scripts/tests/`, deleted in the second half (D14).
 - `.github/workflows/tests.yml` and `scripts/tests/test_tests_workflow.py`: the
   workflow's install, bubblewrap, and `SANDBOX_REQUIRED` go in the second half (D26).
 - The `Makefile`'s `validate-local`, `validate-ci`, `validate-helm`, `run-ci`,
@@ -200,7 +200,7 @@ release's surface (CW-c2tw):
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
-`AGENTS.md`, `docs/change-workflow-handbook.md`, `openspec/README.md`, and the lesser
+`AGENTS.md`, the workflow's handbook, `openspec/README.md`, and the lesser
 goal's section of `openspec/changes/README.md` change with it.
 
 The lesser goal's gap "The workflow is not a separately versioned distribution" is

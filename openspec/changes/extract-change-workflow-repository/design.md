@@ -21,12 +21,12 @@ released it, this repository adopts the release and removes its copy.
     remains: the change lookup and the skills check are its `find` and `skills`
     modules.
   - Eleven skills: the ten `change-*` skills and `guidance-review`.
-  - The outcome schema, `.agents/change-outcome.schema.json`.
+  - The outcome schema, `change-outcome.schema.json` under `.agents/`.
   - The `change-workflow` capability: its specification, index, companion, and
     diagrams under `openspec/specs/change-workflow/`.
   - The workflow's guidance, `docs/guidance/workflow/`, and the owner's handbook,
-    `docs/change-workflow-handbook.md`.
-  - The make fragment, `scripts/change_workflow/workflow.mk`, which the root
+    `change-workflow-handbook.md` under `docs/`.
+  - The make fragment, `workflow.mk` in `scripts/change_workflow/`, which the root
     `Makefile` includes.
   - The engine's default checks (`index`, `tasks`, `skills`, `openspec`), which are
     modules of the engine, not separate artifacts.
