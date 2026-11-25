@@ -47,7 +47,9 @@ The identity capability MUST publish scheme-neutral signer and verifier contract
 
 Every authenticated state-changing request MUST use `arkhai.market-request-signature.v2`. Its proof MUST cover one domain-separated, length-delimited canonical sequence containing the protocol version, caller role, complete principal, HTTP method, semantic operation, resource identity, request ID, timestamp, and SHA-256 of canonical JSON or the empty body. Authentication headers MUST carry the version, principal scheme and identifier, role, request ID, timestamp, and proof. Behavior-affecting query values MUST be represented in the signed semantic body, and the route boundary MUST supply the expected semantic operation and resource independently of proxy path spelling.
 
-The receiving authority MUST reserve `(principal, request_id)` before dispatch, enforce configured clock skew on first use — on every operation but a time-setting operation mounted under injected time, which "The time-setting operation is exempt from request freshness" governs — and reject changed reuse, missing fields, unsupported versions, or invalid proofs. An exact reuse of the same canonical request MUST resolve to the recorded operation outcome rather than execute a conflicting mutation, except on a route declared credential-capable: such a route MUST record its outcome without access material, and an exact reuse MUST run its read again under current authorization and MAY be refused, while a mutation it carries MUST resume the same domain operation rather than repeat it.
+For principal-owned routes the receiving authority MUST reserve `(principal, request_id)` before dispatch, enforce configured clock skew on first use — on every operation but a time-setting operation mounted under injected time, which "The time-setting operation is exempt from request freshness" governs — and reject changed reuse, missing fields, unsupported versions, or invalid proofs. An exact reuse of the same canonical request MUST resolve to the recorded operation outcome rather than execute a conflicting mutation, except on a route declared credential-capable: such a route MUST record its outcome without access material, and an exact reuse MUST run its read again under current authorization and MAY be refused, while a mutation it carries MUST resume the same domain operation rather than repeat it.
+
+On a route declared to use delegated-account replay, the receiving authority MUST verify the configured signing authority principal and the audience's exact target registry name and public principal, the signed immutable account subject and its authority namespace, and proof freshness before replay lookup. It MUST reserve the verified namespace, account subject and request ID before dispatch in that route's replay store. It MUST reject reuse with different logical inputs, including after a dispatch whose domain mutation rolled back. It MUST exclude the changing signer and transport proof fields from the comparison of logical inputs. A committed mutation MUST resolve to its contact-free recorded outcome without dispatching again. A repeated read MUST reauthorize and render current state, and the authority MUST NOT store private read bodies for replay. The shared v2 signing and response verification requirements apply to both replay modes.
 
 Every response an authority returns on an authenticated route MUST use the shared version 2 response contract to bind its domain, status, originating request identity, authority principal, timestamp, and canonical response body hash. This MUST hold for refusals as well as acknowledgements, and for a refusal raised while authenticating the request as well as one raised after. A caller MUST verify the proof, body, request identity, and exact expected authority before accepting any of them.
 
@@ -105,6 +107,16 @@ A refusal body MUST NOT disclose anything the caller has not already proven it h
 
 - **WHEN** a signed request on any operation but a time-setting one reaches an authority with a timestamp outside its configured skew
 - **THEN** it is refused for timestamp skew before dispatch
+
+#### Scenario: Delegated account retries a committed RFQ mutation
+
+- **WHEN** the delegated authority uses a currently accepted successor signer to repeat the same account operation with its original request ID and logical inputs
+- **THEN** the receiving authority returns the account's recorded contact-free result without dispatching the mutation again
+
+#### Scenario: A delegated account retries a private read after access ends
+
+- **WHEN** the same delegated account repeats a successful private RFQ read after authorization or contact eligibility ends
+- **THEN** the receiving authority refuses it under the current policy and returns no cached contact data
 
 ### Requirement: Two-proof principal rotation
 

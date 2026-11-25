@@ -721,6 +721,12 @@ no requirement, and its admission is host-agnostic; one that supplies a requirem
 but no report treats every named host as usable. See the
 [site-capacity architecture](../../openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity).
 
+### Buyer RFQ authority
+
+The registry owns buyer RFQ records, terms revisions, responses, introductions and their access decisions. When the registry's supply read-key gate is off, open search and lookup by ID are available anonymously. For account operations, a configured authority authenticates the caller and signs the request for that registry. Stable account ownership is the authority namespace and immutable account subject. The registry verifies the request's exact audience and uses RFQ-scoped party references in account-visible records.
+
+The compute family owns the typed requirements, filters and offer quantity. The registry loads the selected family artifact as validation data and keeps the RFQ lifecycle market-neutral. Browser, terminal and authorized programmatic callers use the same operation contract. See [Buyer compute RFQs](../../openspec/specs/buyer-compute-rfqs/architecture.md).
+
 ## Shared vocabulary and identities
 
 ### Marketplace principals

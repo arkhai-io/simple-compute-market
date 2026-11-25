@@ -37,6 +37,8 @@ The authority reserves `(principal, request_id)` before dispatch. An exact retry
 
 Authenticated service responses use the same versioned canonical primitives under a distinct response domain, binding the status, canonical response body hash, originating request identity, authority principal, and timestamp. Callers verify the response against the expected service principal and request before trusting its contents. Request and response models share principal and verifier infrastructure without collapsing their domains or allowing an unsigned acknowledgement path.
 
+For delegated RFQ exchanges, the configured account authority signs the operation as a service principal. The signed body binds the authority-scoped account subject, its current permission and the exact target registry. The registry verifies the authority signer against that namespace's pins and checks that the audience identifies the registry's active principal. The account-facing client can verify the registry reply against the requested operation and registry pin. Account credential replacement and admitted authority-signer rotation preserve the immutable account subject.
+
 ## Rotation across authorities
 
 Rotation binds one canonical intent to the current principal, replacement principal, stable subject, authority, nonce, requested overlap, and expiry. Both principals sign the same bytes. Each authority applies the intent idempotently and records primary, bounded active overlap, disabled, and retired history.
