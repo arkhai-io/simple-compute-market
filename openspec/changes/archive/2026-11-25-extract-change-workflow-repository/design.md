@@ -623,8 +623,8 @@ edit.
 
 ### D23 — The `change-workflow` delta reaches the permanent specification in (i)
 
-(i)'s last section applies this change's `change-workflow` delta to
-`openspec/specs/change-workflow/spec.md`, and writes its `index.md` entries as
+(i)'s last section applies this change's `change-workflow` delta to its
+permanent `spec.md` under `openspec/specs/change-workflow/`, and writes its `index.md` entries as
 promotion would, so the preliminary merge, the wheel built from the tree (D6), and the
 coordinator's lift (D16) carry the requirements the release implements, and the
 distribution's test of cited ids (CW-lm42) holds the skills' new citations. (iii)
@@ -776,3 +776,85 @@ Stated by the owner in this design, for promotion:
   validated by (iii)'s own validation. Revisit at a second adopter, or when a
   published release breaks one: the workflow's release process then checks each known
   adopter's configuration against the candidate.
+
+## Implementation record
+
+Rationale from the implementation, kept here when closeout compressed the task notes:
+
+- **The temporary wheel's form (section 1, D24).** Hatchling's `only-include` and
+  `sources` refuse a path outside the project directory ("must be relative"), so the
+  wheel took `bypass-selection = true` with a `force-include` table: the reason D24's
+  table had that shape.
+- **Only an installed engine checks the installed skills (section 3, 30 F3).** The
+  engine run from its source tree had the tree's sources for skills, which nothing
+  stamps; checking there would have refused every command in a checkout, and every
+  in-process test, until the owner installed. The triage amended CW-1rhd and CW-d8de
+  to say "of an installed engine", and CW-sv3u to treat an empty local file, the
+  sandbox's form of an absent protected file, as absent.
+- **The tool environment's root left unprotected (section 3, D13).** Protecting it,
+  against a `.pth` file or a replaced entry script beside the protected package, was
+  declined because it would also protect a shared environment the engine is installed
+  into; it is recorded instead as a current limit of `change-workflow`'s companion.
+- **The install target during the pause (section 4).** It reinstalled with
+  `--reinstall`, since an edit of the engine or a skill keeps the version and uv would
+  otherwise keep the build it had; calling `$(CHANGE_WORKFLOW) install` in its recipe
+  was declined, since it would run the command just installed whatever
+  `CHANGE_WORKFLOW` names. The target left with the in-tree engine.
+- **The CI observation of skipped tests (section 4, 44 F1).** The owed observation "no
+  sandbox test skipped" had been inferred from a `-q` summary that names no skip, and
+  was false: the Codex sandbox test skips on a runner with no Codex. `-rfEs` was chosen
+  over `-rs` because `-r` replaces pytest's default `fE`, whose failure lines the CI
+  evidence reads.
+- **What `check config` reads (section 5).** It reads the engineering sections the
+  workflow's own guidance cites as well as those the shipped skills cite, beyond
+  CW-7x0z's letter, since that guidance ships with the skills and cites them in the
+  same form; no review raised it.
+- **The orchestrating skill's citations (section 5).** It cites its own routing
+  sections rather than the engine's next-step module for the computation's result,
+  because no requirement words the result's shape, and making that shape a public
+  interface would need a requirement of its own.
+- **The diagrams' redraw (section 8, D20).** The step's sandbox had no draw.io, so the
+  redrawn diagrams were emitted, source and SVG, from one layout by a script kept
+  outside the repository, their edges fixed points rather than connections; a later
+  redraw edits the `.drawio` source in draw.io and exports its SVG.
+
+## Design promotion record
+
+The `change-workflow` capability, its handbook, and its guidance left this repository
+with the workflow, so their destinations are in the released `arkhai-change-workflow`
+0.1.0, which carried them from this tree (sections 7 and 8, D23); they are named here
+by section and requirement id, with no link, as this repository cites the workflow
+(D6).
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 One change in two halves | `arkhai-change-workflow`'s companion, "The public surface"; the staging itself is this change's history |
+| D2 The gate between the halves | No permanent destination: the gate governed this change's own pause, recorded in 9.2's note |
+| D3 Engineering guidance through a pointer | `arkhai-change-workflow`'s companion, "The repository's guidance is layered"; CW-hu0z |
+| D4 The pointer's form, citations by section name | `arkhai-change-workflow`'s companion, "A repository's configuration" and "Interfaces are tiered"; CW-hu0z, CW-7x0z, CW-d2rw, CW-n8tr; this repository's unique engineering headings (section 5) |
+| D5 Committed configuration and one local file | `arkhai-change-workflow`'s companion, "A repository's configuration"; CW-4pm4, CW-f3qk; here, `MCW-iqh1` (`openspec/specs/market-change-workflow/spec.md#requirement-mcw-iqh1-this-repositorys-local-configuration-template-points-at-its-engineering-guidance`) and `.agents/workflow.local.template.toml` (`.agents/workflow.local.template.toml`) |
+| D6 The workflow's documents ship with the engine; this repository cites them in prose | `arkhai-change-workflow`'s companion, "Leaf skills from one source" and "A repository's configuration"; CW-lm42, CW-l7hn, CW-n8tr; here, `MCW-9k0c` (`openspec/specs/market-change-workflow/spec.md#requirement-mcw-9k0c-this-repository-runs-the-installed-workflow-within-its-declared-range`), `market-change-workflow`'s companion (`openspec/specs/market-change-workflow/README.md#this-repository-is-the-workflows-first-adopter`), and `AGENTS.md`, "The change workflow" (`AGENTS.md#the-change-workflow`) |
+| D7 One installed version per machine, checked against each repository's range | `arkhai-change-workflow`'s companion, "The public surface", and its handbook; CW-f8yy; here, `ARCHITECTURE.md`, "The change workflow" (`docs/development/ARCHITECTURE.md#the-change-workflow`) |
+| D8 A wheel, an installer, the command on the path | `arkhai-change-workflow`'s companion, "The command and its tiers" and "Its parts"; CW-5kl9, CW-1rhd, CW-sv3u, CW-r3ka; its handbook, "Installing the workflow" |
+| D9 Names and licence | `arkhai-change-workflow`'s companion, "The command and its tiers"; the licence is the workflow repository's; here, `ARCHITECTURE.md`, "The change workflow" (`docs/development/ARCHITECTURE.md#the-change-workflow`) names it only as its distribution |
+| D10 Two more default checks | `arkhai-change-workflow`'s companion, "A repository's configuration"; CW-368t, CW-c8lw; here, `market-change-workflow`'s companion, "What each check enforces" (`openspec/specs/market-change-workflow/README.md#what-each-check-enforces`) and `openspec/README.md`, "The index check" (`openspec/README.md#the-index-check`) |
+| D11 The version range | `arkhai-change-workflow`'s companion, "A repository's configuration"; CW-f8yy; here, `.agents/workflow.toml`'s `[workflow] version` and `MCW-9k0c` (`openspec/specs/market-change-workflow/spec.md#requirement-mcw-9k0c-this-repository-runs-the-installed-workflow-within-its-declared-range`) |
+| D12 Each log line records the workflow version | `arkhai-change-workflow`'s companion, "A change's records carry one format version"; CW-d867 |
+| D13 What is installed is protected | `arkhai-change-workflow`'s companion, "Restrictions bind unattended runs only" and "Current limits"; CW-r6kd |
+| D14 How `market-change-workflow` cites the workflow, and who verifies its adoption | `arkhai-change-workflow`'s companion, "What an adopting repository provides"; CW-ora1; here, `MCW-5tgp` (`openspec/specs/market-change-workflow/spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles`), `market-change-workflow`'s companion, "How this repository provides the workflow's roles" (`openspec/specs/market-change-workflow/README.md#how-this-repository-provides-the-workflows-roles`), and the owner's principle in `ARCHITECTURE.md`, "The change workflow" (`docs/development/ARCHITECTURE.md#the-change-workflow`); the requests to the workflow's repository (its skills' test, and its companion's sentence on an adopter's test) delivered through the coordinator before section 9 (9.1, log seq 92) |
+| D15 The make fragment's installed path | `arkhai-change-workflow`'s companion, "The command and its tiers"; CW-dvz5; here, the `Makefile`'s conditional include and its comment, and `MCW-w7nb` (`openspec/specs/market-change-workflow/spec.md#requirement-mcw-w7nb-this-repository-builds-tests-and-releases-without-the-workflow`) |
+| D16 The history is lifted by path | `arkhai-change-workflow`'s handbook, "Moving the workflow to its own repository" (section 7) |
+| D17 The workflow's repository works through the workflow | No permanent destination here: the workflow repository's own process is its bootstrap's |
+| D18 In-flight changes cross at their merge of `dev` | `arkhai-change-workflow`'s handbook, "When an open change crosses to the installed workflow" |
+| D19 The lesser goal's section after extraction | `openspec/changes/README.md`, "Retired lesser goal — Make the change workflow a tool any repository can adopt" (`openspec/changes/README.md#retired-lesser-goal--make-the-change-workflow-a-tool-any-repository-can-adopt`), under "Archived and superseded"; its open guidance-loading gap moved to "Unowned work with no campaign" |
+| D20 The engine's diagrams redrawn | `arkhai-change-workflow`'s companion diagrams of the engine's parts and of a step run's life (section 8) |
+| D21 What the skills check holds | CW-d8de; `arkhai-change-workflow`'s companion, "Leaf skills from one source" |
+| D22 Implementation cadence | No permanent destination: the cadence was this change's plan |
+| D23 The `change-workflow` delta reaches the permanent specification in (i) | No permanent destination: recorded in this plan and its archival with `--skip-specs` (11.12); the `change-workflow` delta was applied by hand in section 8 and left with the specification, and the `market-change-workflow` delta by hand in 10.2 |
+| D24 A temporary exception for the workflow's wheel | No permanent destination: the exception row and `make check-project-layout`'s admission stood through the pause and left with the wheel (9.6); the condition that no `force-include` table remain went to the workflow's repository with the handbook's procedure for the move |
+| D25 Unattended Claude Code runs load the installed skills, and stop without them | CW-d8de, its unattended stop and scenario; `arkhai-change-workflow`'s companion, "Restrictions bind unattended runs only" |
+| D26 This repository builds, tests, and releases without the workflow | `MCW-w7nb` (`openspec/specs/market-change-workflow/spec.md#requirement-mcw-w7nb-this-repository-builds-tests-and-releases-without-the-workflow`); `market-change-workflow`'s companion, "This repository is the workflow's first adopter" (`openspec/specs/market-change-workflow/README.md#this-repository-is-the-workflows-first-adopter`); `ARCHITECTURE.md`, "The change workflow" (`docs/development/ARCHITECTURE.md#the-change-workflow`); the round-view caution in the `Makefile`'s help text of the seven validation and diff targets |
+| The owner's principles (Principles above) | `ARCHITECTURE.md`, "The change workflow" (`docs/development/ARCHITECTURE.md#the-change-workflow`) for D7, D14, D26, and naming the workflow only as its distribution; `arkhai-change-workflow`'s companion for D3, D4, and D5 |
+| `market-change-workflow`'s requirements | MCW-9k0c, MCW-iqh1, and MCW-w7nb added and MCW-5tgp and MCW-s4bx modified in its `spec.md` (`openspec/specs/market-change-workflow/spec.md`) by hand (10.2), indexed in its `index.md` (`openspec/specs/market-change-workflow/index.md`) |
+| Roadmap currency | No roadmap goal holds the change workflow; `ROADMAP.md` (`docs/development/ROADMAP.md`) is unchanged |
+| Campaign index currency | The lesser goal retired (D19); the two gap rows this change owned — the distribution and the diagrams' redraw — closed; this change's row moved with the goal's archived rows, `in closeout` until archive cleanup |
