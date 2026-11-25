@@ -72,17 +72,24 @@ The change has two halves, with a pause between them (design D1, D2).
   specification, so the release carries its own requirements (D23). This half may be
   merged to `dev` while the change waits.
 
-**The pause.** A coordinator bootstraps the workflow's public repository, `change-workflow`,
+**The pause.** A coordinator bootstraps the workflow's repository, which is private,
 from what the first half left, lifting the moved files with their history by path,
-and releases it. The change waits in implementation for its evidence: the
-repository, the release, its artifacts, and how to install it (D2, D16, D17).
+and releases it to that repository's release page and the dev artifact repository.
+The change waits in implementation for its evidence: the distribution, its version
+and tag, and the release's wheel by file name and digest, which the gate checks
+against the installed tool (D2, D9, D16, D17).
 
-**This repository as an adopter (the second half).** It declares the range it
-accepts, installs the release, removes the in-tree engine, skills, schema, workflow
-guidance, `change-workflow` capability, and handbook, and re-points its documents to
-cite the workflow in prose by name, id, and section. It keeps its committed
-configuration, its evidence guides and hooks, its engineering and repository
-guidance, and `market-change-workflow` (D6, D14, D18, D19).
+**This repository as an adopter (the second half).** It installs the release within
+the range it declares, removes the in-tree engine, skills, schema, workflow guidance,
+`change-workflow` capability, and handbook, and re-points its documents to cite the
+workflow in prose by its distribution's name, id, and section, with no link to its
+repository. It keeps its committed configuration, its evidence guides and hooks, its
+engineering and repository guidance, and `market-change-workflow`, and no test of its
+configuration of the workflow, which the workflow's repository verifies. It builds,
+tests, and releases without the workflow installed: CI installs none, and its
+`Makefile`'s own targets need nothing of the fragment. The six open workflow changes
+that moved with the release leave its change index, and the lesser goal they served
+is retired (D6, D14, D18, D19, D26).
 
 ## Capabilities
 
@@ -98,7 +105,9 @@ guidance, and `market-change-workflow` (D6, D14, D18, D19).
   repository for the workflow's.
 - **`market-change-workflow`** states how this repository provides the workflow's
   roles across both configuration files, that it runs the installed workflow within
-  its declared range, and what its local configuration template names.
+  its declared range and names it only as its distribution, what its local
+  configuration template names, and that it builds, tests, and releases without the
+  workflow.
 
 ## Public interfaces changed
 
@@ -124,7 +133,7 @@ release's surface (CW-c2tw):
 - **Do not move the engineering guidance.** Where it lives, and how it gets a neutral
   home, are a later change; this change builds the pointer that change updates.
 - **Do not add harnesses.** The installer serves Claude Code and Codex; adding one is
-  `add-workflow-harness-adapters`'.
+  the workflow repository's work.
 - **Do not build the model gateway or the hosted runner.**
 - **Do not install versions side by side.** One version is installed per machine.
 - **Do not open a public distribution channel.** It is deferred to the first public
@@ -156,8 +165,16 @@ release's surface (CW-c2tw):
 - About 95 permanent documents citing the workflow's specification or guidance,
   `AGENTS.md` and `openspec/README.md` among them; the citation check fails on any
   reference left behind.
-- `scripts/tests/test_change_workflow_assumptions.py`.
-- A new public repository, its release, and its own process, which are the
+- `scripts/tests/test_change_workflow_assumptions.py` and
+  `scripts/tests/test_market_change_workflow.py`, deleted in the second half (D14).
+- `.github/workflows/tests.yml` and `scripts/tests/test_tests_workflow.py`: the
+  workflow's install, bubblewrap, and `SANDBOX_REQUIRED` go in the second half (D26).
+- The `Makefile`'s `validate-local`, `validate-ci`, `validate-helm`, `run-ci`,
+  `run-e2e`, `review-diff`, `last-diff`, and `code-snapshot`, whose round-view guard
+  reads Git's metadata (D26).
+- The six moved workflow changes' directories under `openspec/changes/` and their
+  rows, and the lesser goal's section, retired at closeout (D19).
+- A new private repository, its release, and its own process, which are the
   coordinator's.
 
 ## Dependencies and Related Changes
@@ -165,16 +182,12 @@ release's surface (CW-c2tw):
 - **`specify-change-workflow-and-engine`, `add-workflow-capability-contract`,
   `sandbox-unattended-workflow-steps`, `add-skill-extension-points`, and
   `layer-engineering-guidance`**: archived; this design rests on what they left.
-- **`add-workflow-harness-adapters`**: independent in either order; whichever lands
-  second extends `install` to its harnesses' user skill directories.
-- **`relay-messages-to-step-sessions`**: once landed, may carry the coordinator's
-  report of the gate's evidence; not a dependency.
-- **`host-change-workflow-runner`**: builds its image from the extracted workflow at a
-  version.
 - **The extraction of the engineering guidance, still to be opened**: updates the
   pointer this change builds to its distribution.
-- **Open workflow changes in this index** move to the workflow's repository once it
-  exists (D19).
+- **The six open workflow changes** — harness adapters, the model gateway, the hosted
+  runner, splitting implementation sessions, relaying messages to step sessions, and
+  passing checks at every commit — moved to the workflow's repository with its first
+  release; the second half removes them from this index (D19).
 
 ## Permanent documentation impact
 
@@ -226,13 +239,18 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
   "Current limits"; the modified CW-r6kd.
 - D14: `change-workflow`'s companion, "What an adopting repository provides"; CW-ora1;
   `market-change-workflow`'s companion, "How this repository provides the workflow's
-  roles", and the modified MCW-5tgp.
+  roles", and the modified MCW-5tgp; that the workflow's repository verifies an
+  adopter's configuration and rewrites the skills' test, to the handbook's procedure
+  for the move; the owner's principle that this repository keeps no test of its
+  configuration of the workflow, to `docs/development/ARCHITECTURE.md`, "The change
+  workflow".
 - D15: `change-workflow`'s companion, "The command and its tiers"; CW-dvz5.
 - D16: the handbook's procedure for the move.
 - D17: no permanent destination here — the workflow repository's own process is its
   bootstrap's, outside this repository.
 - D18: the handbook, for when an open change crosses to the installed workflow.
-- D19: `openspec/changes/README.md`, the lesser goal's section.
+- D19: `openspec/changes/README.md`: the lesser goal's section, retired with its
+  current state and its archived rows moved to "Archived and superseded".
 - D20: `change-workflow`'s companion diagrams, `change-workflow-engine-parts` and the
   step run's.
 - D21: the modified CW-d8de and `change-workflow`'s companion, "Leaf skills from one
@@ -247,6 +265,11 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
   companion, "Restrictions bind unattended runs only", its adapter paragraph.
 - D23: no permanent destination — how this change's own delta reaches the permanent
   specification and how it archives are recorded in its plan and closeout task.
-- `market-change-workflow`: MCW-9k0c and MCW-iqh1, and its companion's "This
-  repository is the workflow's first adopter"; `docs/development/ARCHITECTURE.md` for
-  how this repository adopts the workflow.
+- D26: the added MCW-w7nb; `market-change-workflow`'s companion, "This repository is
+  the workflow's first adopter"; `docs/development/ARCHITECTURE.md`, "The change
+  workflow", for the owner's principle that this repository builds, tests, and
+  releases without the workflow; that the workflow's repository state the round-view
+  marker's location, to the handbook's procedure for the move.
+- `market-change-workflow`: MCW-9k0c, MCW-iqh1, and MCW-w7nb, and its companion's
+  "This repository is the workflow's first adopter"; `docs/development/ARCHITECTURE.md`
+  for how this repository adopts the workflow, naming it only as its distribution.
