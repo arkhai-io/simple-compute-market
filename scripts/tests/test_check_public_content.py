@@ -3,18 +3,12 @@ from __future__ import annotations
 
 import io
 import os
-import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
 import check_public_content as checker
-
-# The change workflow versions the test's workflow configuration accepts, which every
-# command reading the configuration checks first.
-ACCEPTED = '[workflow]\nversion = ">=0.1"\n'
 
 
 @pytest.fixture
@@ -45,15 +39,12 @@ def personal_path() -> str:
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMAND = ROOT / 'scripts/change-workflow'
 
 
 @pytest.fixture
 def branch(repo: Path, tmp_path: Path) -> Path:
     """`repo` on a change branch not yet pushed, beside a bare `origin` holding
-    `dev`, with this check in its tree and a workflow configuration whose `pre-push`
-    runs it as the guarded push runs a pre-push hook; both ignored so the worktree
-    stays clean."""
+    `dev`, with this check in its tree, ignored so the worktree stays clean."""
     remote = tmp_path / 'remote.git'
     subprocess.run(['git', 'init', '-q', '--bare', str(remote)], check=True)
     git(repo, 'remote', 'add', 'origin', str(remote))
@@ -65,32 +56,14 @@ def branch(repo: Path, tmp_path: Path) -> Path:
     script = repo / 'scripts' / Path(checker.__file__).name
     script.parent.mkdir()
     script.write_text(Path(checker.__file__).read_text('utf-8'), 'utf-8')
-    (repo / '.agents').mkdir()
-    (repo / '.agents/workflow.toml').write_text(
-        ACCEPTED + '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
-        f'pre-push = "{shlex.quote(sys.executable)} scripts/{script.name} --pre-push '
-        '{remote}"\n', 'utf-8')
     with (repo / '.git/info/exclude').open('a', encoding='utf-8') as exclude:
         # The repository is the test's own directory, which holds the remote too.
-        exclude.write('/scripts/\n/.agents/\n/remote.git/\n')
+        exclude.write('/scripts/\n/remote.git/\n')
     return repo
-
-
-def push(repo: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(COMMAND), 'push'], cwd=repo, capture_output=True, text=True)
 
 
 def remote_head(repo: Path) -> str:
     return git(repo, 'ls-remote', 'origin', 'refs/heads/feat/change').split('\t')[0]
-
-
-def test_the_check_passes_a_clean_guarded_push(branch: Path) -> None:
-    (branch / 'notes.md').write_text('notes\n')
-    git(branch, 'add', 'notes.md')
-    git(branch, 'commit', '-qm', 'notes')
-
-    assert push(branch).returncode == 0
-    assert remote_head(branch) == git(branch, 'rev-parse', 'HEAD')
 
 
 def _pre_push_target() -> str:
@@ -212,17 +185,19 @@ def test_the_secret_scan_refusing_refuses_the_push(hooked: Path) -> None:
 
 
 @pytest.mark.parametrize('removed_later', [False, True])
-def test_private_content_refuses_the_guarded_push(branch: Path, removed_later: bool) -> None:
-    stage(branch, personal_path())
-    git(branch, 'commit', '-qm', 'notes')
+def test_private_content_refuses_the_push(hooked: Path, removed_later: bool) -> None:
+    """An outgoing commit adding a private path refuses the push through the
+    repository's hook, even when a later commit removes it."""
+    stage(hooked, personal_path())
+    git(hooked, 'commit', '-qm', 'notes')
     if removed_later:
-        git(branch, 'rm', '-q', 'notes.md')
-        git(branch, 'commit', '-qm', 'remove notes')
+        git(hooked, 'rm', '-q', 'notes.md')
+        git(hooked, 'commit', '-qm', 'remove notes')
 
-    pushed = push(branch)
+    pushed = _git_push(hooked)
 
-    assert pushed.returncode == 1
-    assert remote_head(branch) == ''
+    assert pushed.returncode != 0
+    assert remote_head(hooked) == ''
     assert 'personal home path' in pushed.stderr
     assert personal_path() not in pushed.stderr + pushed.stdout
 

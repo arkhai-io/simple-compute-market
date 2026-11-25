@@ -31,9 +31,9 @@ DIST_DIR := ${CURDIR}/.dist
 .PHONY: test-lane-double-controls dist-lane-double-controls test-payments-lane-double test-mediation-lane-double build-tools
 .PHONY: dist-arkhai-core-registry dist-release-set dist-apicredits-sample-app
 .PHONY: build-market-binary build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-e2e-native-gate test-provisioning-iac-native test-bare-metal-iac-native
-.PHONY: run-e2e run-ci fetch-e2e-logs
+.PHONY: run-e2e run-ci fetch-e2e-logs help
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: design-review validate-local validate-ci validate-helm validate-parallel check-change check-repository install-workflow install-gitleaks check-public-content check-secrets audit-secrets check-decision-destinations check-history-wording check-version-bumps check-local-imports check-time-reads check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
+.PHONY: validate-local validate-ci validate-helm validate-parallel check-repository install-gitleaks check-public-content check-secrets audit-secrets check-history-wording check-version-bumps check-local-imports check-time-reads check-capability-index check-guidance record-capacity review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks pre-push
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -684,13 +684,6 @@ check-time-reads: ## Fail on a direct wall-clock read (time.time, datetime.now, 
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
-# An indexed capability's spec.md held to its index.md
-# (openspec/README.md#the-index-check). With CHANGE=<name> that
-# change's deltas count as its archive will leave them, since closeout writes the
-# index before the archive merges them.
-check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids, the change workflow's default check (CHANGE=<name> counts its deltas)
-	@$(CHANGE_WORKFLOW) check spec-index $(if $(strip $(CHANGE)),"$(CHANGE)")
-
 # Each storefront chart's values schema carries one definition generated from
 # that storefront's typed configuration models; it keeps secret-marked fields
 # out of the chart's pass-through config. Each storefront names the schema files
@@ -788,7 +781,7 @@ architecture-report: ## Write the full architecture report, no exception applied
 # `zip -y` stores a symlink as a link. Without it the agent-skill links under
 # .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
 # longer shows which skills each harness loads.
-code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -803,7 +796,7 @@ code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (exclu
 # staging their content; the trailing `git reset` unwinds the index back
 # to exactly its pre-run state, so the target's own "without changing git
 # state" guarantee still holds once it completes.
-review-diff: round-view-closed ## Write a binary-safe HEAD-relative diff for review without changing git state.
+review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state; not while a round view is open, when the branch points at the round's base rather than its commit
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -812,7 +805,7 @@ review-diff: round-view-closed ## Write a binary-safe HEAD-relative diff for rev
 	git reset -q; \
 	echo "Done: $$OUTFILE"
 
-last-diff: round-view-closed ## Write a binary-safe diff for the most recent commit.
+last-diff: ## Write a binary-safe diff for the most recent commit; not while a round view is open, when the branch points at the round's base rather than its commit
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}-last.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -824,22 +817,23 @@ review-locks: ## Refresh selected project lockfiles against current repository w
 	python3 scripts/uv_project.py lock $${REVIEW_PROJECTS}
 
 # The change workflow's targets — each step, the review, the round view, the
-# workflow's checks, and the guarded push — are the engine's make fragment, which
-# reads the branch a change lands on from the change's clone. Each calls the
-# installed `change-workflow`, which `install-workflow` builds from this tree. A
-# value of the owner's machine, such as HELM_ALL_SCENARIOS or HELM_CONTEXT given to
-# `make validate`, reaches the Helm part's command through the environment: make
-# exports a variable set on its command line to every command it runs, the
-# validation session included, and the part's own make reads it there.
-include scripts/change_workflow/workflow.mk
+# workflow's checks, and the guarded push — exist only where the workflow is
+# installed, as its handbook sets it up: they are the make fragment of the
+# installed `arkhai-change-workflow`, at the path `change-workflow fragment`
+# prints, and the closing checks below, which call its command. Without the command
+# on the path nothing is included and nothing is printed, so CI's logs carry no
+# note: every target of this repository's own works, and a workflow target is make's
+# own "no rule". A value of the owner's machine, such as HELM_ALL_SCENARIOS or
+# HELM_CONTEXT given to `make validate`, reaches the Helm part's command through the
+# environment: make exports a variable set on its command line to every command it
+# runs, the validation session included, and the part's own make reads it there.
+CHANGE_WORKFLOW_FRAGMENT := $(shell command -v change-workflow >/dev/null 2>&1 && change-workflow fragment)
+ifneq ($(strip $(CHANGE_WORKFLOW_FRAGMENT)),)
+include $(CHANGE_WORKFLOW_FRAGMENT)
 
-# The workflow is installed once per machine, as a tool: the command on the path,
-# and its skills in each harness's user skill directory, where every session loads
-# them. `--reinstall` rebuilds the wheel from the tree as it is, since an edit of the
-# engine or a skill keeps the version it is built at.
-install-workflow: ## Install the change workflow built from this tree as the `change-workflow` command, then write its skills into each harness's user skill directory and, where this checkout has none, its local configuration from the committed template; run again after editing the engine or a skill
-	uv tool install --force --reinstall scripts/change-workflow-wheel
-	change-workflow install
+# Declared phony here only: a phony target with no rule is one make has, so declared
+# outside the conditional it would do nothing and succeed where the workflow is absent.
+.PHONY: check-change check-spec-index check-decision-destinations design-review
 
 # The owner's complete closing check is the workflow's whole `pre-commit`: its
 # default checks, then this repository's `check-repository`, each once. Run as the
@@ -848,11 +842,30 @@ install-workflow: ## Install the change workflow built from this tree as the `ch
 check-change: ## Run the change workflow's pre-commit for a change: its default checks — the change index, the task list, the agent skills, the specification indexes, decision destinations, the strict OpenSpec validation — then check-repository; when the worktree changes a path outside the inert paths, relocking, the packaging check, and every suite first (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
 	@$(CHANGE_WORKFLOW) run pre-commit "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
-check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
-	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
+# An indexed capability's spec.md held to its index.md
+# (openspec/README.md#the-index-check). With CHANGE=<name> that
+# change's deltas count as its archive will leave them, since closeout writes the
+# index before the archive merges them.
+check-spec-index: ## Fail if an indexed capability's spec.md and index.md disagree on its requirement ids, the change workflow's default check (CHANGE=<name> counts its deltas)
+	@$(CHANGE_WORKFLOW) check spec-index $(if $(strip $(CHANGE)),"$(CHANGE)")
 
 check-decision-destinations: ## Fail if a `### D<n>` decision of a change's design has no bullet starting `D<n>` in its proposal's "Knowledge to promote", the change workflow's default check (CHANGE=<change>)
 	@$(CHANGE_WORKFLOW) check decisions "$(CHANGE)"
+
+design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
+	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
+endif
+
+# Read from the makefiles' text, so the targets inside the conditional above are
+# skipped where the workflow is not installed and they do not exist.
+help: ## List the targets with their help text, the change workflow's among them where it is installed
+	@awk -F ':.*## ' -v installed='$(CHANGE_WORKFLOW_FRAGMENT)' \
+		'/^ifneq \(\$$\(strip \$$\(CHANGE_WORKFLOW_FRAGMENT\)\),\)$$/ { skip = installed == "" } \
+		/^endif$$/ { skip = 0 } \
+		!skip && /^[A-Za-z0-9_.-]+:.*## / { printf "%-36s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
+check-repository: ## Run this repository's own closing checks of a change — comment hygiene, its citations, history wording, version bumps, local imports, the capability index, and the guidance's layering — printing only failures and one pass line; the workflow's pre-commit hook (CHANGE=<change> [CHANGE_BASE=<the branch it lands on; the one its clone recorded>])
+	@python3 scripts/check_change.py "$(CHANGE)"$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
 
 check-history-wording: ## Fail if a comment or docstring line added since the merge-base with the branch the change lands on describes history ([CHANGE_BASE=dev])
 	@python3 scripts/check_history_wording.py$(if $(strip $(CHANGE_BASE)), --base "$(CHANGE_BASE)")
@@ -875,9 +888,6 @@ check-guidance: ## Fail if a guidance file lacks one layer tag, carries a tag no
 record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, from the current Helm attempt of the tree its validated commit holds, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
 	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
 
-design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
-	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
-
 HELM_CONTEXT ?= docker-desktop
 
 # The tree or commit a validation target's evidence describes, as the change
@@ -886,16 +896,16 @@ HELM_CONTEXT ?= docker-desktop
 TREE ?=
 COMMIT ?=
 
-validate-local: round-view-closed ## Clear the wheelhouse, check packaging, and run every suite on the worktree as it stands, without changing it, keeping the evidence under .snapshot/evidence/<tree>/local/ ([TREE=<tree>])
+validate-local: ## Clear the wheelhouse, check packaging, and run every suite on the worktree as it stands, without changing it, keeping the evidence under .snapshot/evidence/<tree>/local/; not while a round view is open, when the branch points at the round's base rather than its commit ([TREE=<tree>])
 	@python3 scripts/validate_slice.py local $(if $(strip $(TREE)),--tree "$(TREE)")
 
 WORKFLOW ?=
 CI_AFTER_RUN ?=
 
-validate-ci: round-view-closed ## Validate HEAD on a CI run dispatched by run-ci: wait for the run newer than CI_AFTER_RUN, keep its job logs, and class each failure against the same job in the latest completed dev run of code the branch contains, keeping the evidence under .snapshot/evidence/<commit>/ci-<workflow>/ (WORKFLOW=<file> CI_AFTER_RUN=<id> [COMMIT=<commit>])
+validate-ci: ## Validate HEAD on a CI run dispatched by run-ci: wait for the run newer than CI_AFTER_RUN, keep its job logs, and class each failure against the same job in the latest completed dev run of code the branch contains, keeping the evidence under .snapshot/evidence/<commit>/ci-<workflow>/; not while a round view is open, when the branch points at the round's base rather than its commit (WORKFLOW=<file> CI_AFTER_RUN=<id> [COMMIT=<commit>])
 	@python3 scripts/validate_slice.py ci --workflow "$(WORKFLOW)" $(if $(strip $(CI_AFTER_RUN)),--after-run "$(CI_AFTER_RUN)") $(if $(strip $(COMMIT)),--commit "$(COMMIT)")
 
-validate-helm: round-view-closed ## Validate the worktree's tree on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there, keeping the evidence under .snapshot/evidence/<tree>/helm/ (CHANGE=<change> HELM_CONTEXT=docker-desktop [TREE=<tree>] [HELM_ALL_SCENARIOS=1])
+validate-helm: ## Validate the worktree's tree on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there, keeping the evidence under .snapshot/evidence/<tree>/helm/; not while a round view is open, when the branch points at the round's base rather than its commit (CHANGE=<change> HELM_CONTEXT=docker-desktop [TREE=<tree>] [HELM_ALL_SCENARIOS=1])
 	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios) $(if $(strip $(TREE)),--tree "$(TREE)")
 
 # It deploys, so it is named as a validation and its script outside `check_*`:
@@ -906,10 +916,10 @@ validate-parallel: ## Run two changes' clones' Helm parts at the same moment and
 # Each dispatch ends its output with the newest run of its workflow on the branch
 # before the dispatch, alone on the last line: the marker validation's collect
 # waits past (fetch-e2e-logs' E2E_AFTER_RUN, validate-ci's CI_AFTER_RUN).
-run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch, ending with the newest run of it there before the dispatch
+run-e2e: ## Run the E2E GitHub Actions workflow on the current branch, ending with the newest run of it there before the dispatch; not while a round view is open, when the branch points at the round's base rather than its commit
 	@python3 scripts/ci_evidence.py pipeline
 
-run-ci: round-view-closed ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, ending with the newest run of it there before the dispatch (WORKFLOW=<file>)
+run-ci: ## Dispatch a CI workflow validation may dispatch on the current branch, refusing any other, ending with the newest run of it there before the dispatch; not while a round view is open, when the branch points at the round's base rather than its commit (WORKFLOW=<file>)
 	@python3 scripts/ci_evidence.py dispatch "$(WORKFLOW)"
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs

@@ -22,11 +22,7 @@ has a legitimate, unrelated meaning (a soft-delete marker row) in this codebase,
 and a pattern cannot tell the two apart; the tombstone convention stays a
 judgement-call check.
 
-A script that reads a change document must name its file once, so that one
-definition is exempt from the first scan: `TASKS_FILE` in
-`scripts/change_workflow/next_step.py`, which reads the task list, and `DESIGN_FILE`
-and `PROPOSAL_FILE` in `scripts/change_workflow/decisions.py`, which reads the
-design and the proposal. Any other mention in those scripts is still caught. This
+No line is exempt: no script here reads a change document by its file name. This
 script and its test are scanned like any other file, so neither spells out what the
 first scan looks for: the pattern is written as a pattern, and the test builds its
 samples at run time.
@@ -47,11 +43,6 @@ HISTORY_PATTERN = re.compile(
 HISTORY_SUFFIXES = (".py", ".yml", ".yaml")
 HISTORY_EXCLUDED_DIRS = frozenset(
     {"openspec", ".git", "__pycache__", ".venv", ".dist", "node_modules", "build"})
-#: The exempt lines: each file name's definition in the script that reads it.
-EXEMPT = {
-    "scripts/change_workflow/next_step.py": re.compile(r'^TASKS_FILE = "[^"]*"$'),
-    "scripts/change_workflow/decisions.py": re.compile(r'^(DESIGN|PROPOSAL)_FILE = "[^"]*"$'),
-}
 
 NAME_SUFFIXES = (".py", ".toml", ".yml", ".yaml")
 NAME_EXCLUDED_DIRS = HISTORY_EXCLUDED_DIRS | {"docs", ".claude"}
@@ -83,12 +74,11 @@ def _shown(root: Path, path: Path, number: int, line: str) -> str:
 
 def change_history_matches(root: Path = ROOT) -> list[str]:
     """Every line outside openspec/ that names a change ID, a task, or a change
-    document, as `./path:line:text`, the exempt lines left out."""
+    document, as `./path:line:text`."""
     matches: list[str] = []
     for path in _files(root, HISTORY_SUFFIXES, HISTORY_EXCLUDED_DIRS):
-        exempt = EXEMPT.get(path.relative_to(root).as_posix())
         for number, line in enumerate(_lines(path), start=1):
-            if HISTORY_PATTERN.search(line) and not (exempt and exempt.match(line)):
+            if HISTORY_PATTERN.search(line):
                 matches.append(_shown(root, path, number, line))
     return matches
 

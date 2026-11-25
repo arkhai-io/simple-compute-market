@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
@@ -624,118 +623,79 @@ def test_the_make_target_runs_the_check_over_its_clones() -> None:
                                "\"kind-test\" ../a ../b")
 
 
-# Which change a clone is of, read from a real clone in a temporary directory, made
-# and bootstrapped by the workflow's command as `make change-clone` makes one.
-
-COMMAND = REPO_ROOT / "scripts" / "change-workflow"
-# The longest a fixture clone's bootstrap, an `init` target that only exits, may take.
-BOOTSTRAP_SECONDS = 30.0
-
-
-def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True,
-                          check=True).stdout.strip()
+# Which change a clone is of: the directory's name, once the workflow's command,
+# asked from inside it with `clone where`, answers with that directory. The
+# command is a stand-in on the path answering as `clone where` is documented to,
+# since this repository's suites run without the workflow installed.
 
 
 @pytest.fixture
-def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
-    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
-    for name in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "INIT_STATUS"):
-        monkeypatch.delenv(name, raising=False)
-    for role in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{role}_NAME", "test")
-        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
-    work = tmp_path / "work"
-    for change in (FIRST, SECOND):
-        (work / "openspec/changes" / change).mkdir(parents=True)
-        (work / "openspec/changes" / change / "README").write_text("x\n", "utf-8")
-    (work / ".gitignore").write_text(
-        ".claude/settings.local.json\n.agents/workflow.local.toml\n", "utf-8")
-    # The clone's bootstrap is the configuration's `post-clone`, `make init`; here it
-    # only exits, with the status a test sets.
-    (work / "Makefile").write_text("init:\n\t@exit $${INIT_STATUS:-0}\n", "utf-8")
-    (work / ".agents").mkdir()
-    (work / ".agents/workflow.toml").write_text(
-        '[workflow]\nversion = ">=0.1"\n[hooks]\npost-clone = "make init"\n', "utf-8")
-    _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(tmp_path / "origin.git"))
-    _git(work, "init", "-q", "-b", "dev")
-    _git(work, "add", "--all")
-    _git(work, "commit", "-q", "-m", "dev")
-    _git(work, "remote", "add", "origin", str(tmp_path / "origin.git"))
-    _git(work, "push", "-q", "-u", "origin", "dev")
-    return work
+def answering(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Puts first on the path a `change-workflow` whose `clone where <change>`
+    prints `printed` on standard output and `refused` on standard error, exiting 1
+    when it refuses; it records the arguments and directory it was asked in."""
+    def put(printed: str = "", refused: str = "") -> Path:
+        directory = tmp_path / "bin"
+        directory.mkdir(exist_ok=True)
+        asked = tmp_path / "asked"
+        command = directory / "change-workflow"
+        command.write_text(
+            "#!/bin/sh\n"
+            f'echo "$PWD $*" > "{asked}"\n'
+            + (f"echo 'ERROR: {refused}' >&2\nexit 1\n" if refused else f"echo '{printed}'\n"),
+            "utf-8")
+        command.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+        return asked
+    return put
 
 
-def _cloned(workspace: Path, change: str) -> Path:
-    """The change's clone, made by the command, once its bootstrap has ended."""
-    subprocess.run([str(COMMAND), "clone", change], cwd=workspace, capture_output=True,
-                   text=True, check=True)
-    clone = workspace.parent / f"{workspace.name}.changes" / change
-    # The bootstrap runs in the background; `clone where` reports it running until
-    # it records its exit status.
-    deadline = time.monotonic() + BOOTSTRAP_SECONDS
-    while True:
-        where = subprocess.run([str(COMMAND), "clone", "where", change], cwd=workspace,
-                               capture_output=True, text=True)
-        if "bootstrap is running" not in where.stderr:
-            return clone
-        assert time.monotonic() < deadline, where.stderr
-        time.sleep(0.05)
+def _clone(tmp_path: Path, change: str = FIRST) -> Path:
+    clone = tmp_path / "work.changes" / change
+    clone.mkdir(parents=True)
+    return clone
 
 
-def test_a_clone_whose_bootstrap_succeeded_is_of_its_change(workspace: Path) -> None:
-    clone = _cloned(workspace, FIRST)
+def test_a_clone_the_workflow_finds_at_itself_is_of_its_change(tmp_path: Path,
+                                                               answering) -> None:
+    clone = _clone(tmp_path)
+    asked = answering(printed=str(clone))
 
     assert check.change_of(clone) == FIRST
+    assert asked.read_text("utf-8").strip() == f"{clone.resolve()} clone where {FIRST}"
 
 
-def test_a_clone_whose_bootstrap_failed_is_refused_naming_its_log(
-        workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("INIT_STATUS", "2")
-    clone = _cloned(workspace, FIRST)
+def test_a_clone_the_workflow_refuses_is_refused_with_its_reason(tmp_path: Path,
+                                                                 answering) -> None:
+    clone = _clone(tmp_path)
+    answering(refused=f"the bootstrap of {FIRST} is failed; its log is {clone}/x.log")
 
-    with pytest.raises(check.CheckError, match="bootstrap is failed; its log is .*"
-                                               "change-bootstrap.log"):
+    with pytest.raises(check.CheckError,
+                       match=f"not a change's clone the workflow can use: the bootstrap of "
+                             f"{FIRST} is failed; its log is"):
         check.change_of(clone)
 
 
-def test_a_clone_with_another_branch_checked_out_is_refused(workspace: Path) -> None:
-    clone = _cloned(workspace, FIRST)
-    _git(clone, "checkout", "-q", "-b", "elsewhere")
-
-    with pytest.raises(check.CheckError, match=f"does not have feat/{FIRST} checked out"):
-        check.change_of(clone)
-
-
-def test_a_checkout_that_is_no_clone_is_refused(workspace: Path) -> None:
-    # The workspace is named for no change, so the workflow refuses the name.
-    with pytest.raises(check.CheckError, match="is not a change's clone.*no change 'work'"):
-        check.change_of(workspace)
-
-
-def test_a_directory_named_for_a_change_that_is_no_clone_is_refused(
-        workspace: Path, tmp_path: Path) -> None:
-    # A plain clone of the workspace, named for the change but not where the workflow
-    # puts the change's clone, is found as no clone at all.
-    elsewhere = tmp_path / "elsewhere" / FIRST
-    elsewhere.parent.mkdir()
-    _git(tmp_path, "clone", "-q", str(workspace), str(elsewhere))
+def test_a_change_worked_in_place_is_no_clone(tmp_path: Path, answering) -> None:
+    clone = _clone(tmp_path)
+    answering(printed="")
 
     with pytest.raises(check.CheckError, match=f"finds no clone of {FIRST} at it"):
-        check.change_of(elsewhere)
+        check.change_of(clone)
 
 
-def test_a_checkout_other_than_the_changes_clone_is_refused(
-        workspace: Path, tmp_path: Path) -> None:
-    # A checkout named for the change and naming the workspace by its `workspace`
-    # remote, as a clone does, while the change's clone is elsewhere: the workflow
-    # answers with that clone's path, which is not the checkout asked about.
-    _cloned(workspace, FIRST)
-    moved = tmp_path / "moved" / FIRST
-    moved.parent.mkdir()
-    _git(tmp_path, "clone", "-q", str(workspace), str(moved))
-    _git(moved, "remote", "add", "workspace", str(workspace))
+def test_a_checkout_other_than_the_changes_clone_is_refused(tmp_path: Path,
+                                                            answering) -> None:
+    moved = _clone(tmp_path / "moved")
+    answering(printed=str(_clone(tmp_path)))
 
     with pytest.raises(check.CheckError, match=f"finds no clone of {FIRST} at it"):
         check.change_of(moved)
+
+
+def test_without_the_workflow_installed_no_clone_can_be_told(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+
+    with pytest.raises(check.CheckError, match="cannot run change-workflow"):
+        check.change_of(_clone(tmp_path))

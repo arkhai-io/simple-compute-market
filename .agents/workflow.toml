@@ -52,7 +52,7 @@ test-before = "python3 \"$(git rev-parse --path-format=absolute --git-common-dir
 disable = []
 
 [openspec]
-# Engine, `scripts/change-workflow openspec` and the default pre-commit's strict
+# Engine, `change-workflow openspec` and the default pre-commit's strict
 # validation: how the OpenSpec CLI is run.
 command = "scripts/openspec"
 

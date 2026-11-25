@@ -106,12 +106,22 @@ def test_loads_lazy_make_completion(repository: Path) -> None:
     assert _complete(repository, "make tri", ["make", "tri"], preload=False) == ["triage"]
 
 
+# A stand-in for the installed workflow's make fragment, with targets of its names;
+# this repository's suites run without the workflow installed.
+FRAGMENT_TARGETS = ("change-next", "round-view", "round-done", "round-view-closed",
+                    "archive-cleanup", "check-change-index", "check-change-workflow-config")
+
+
 @pytest.fixture
-def including(repository: Path) -> Path:
+def including(repository: Path, tmp_path: Path) -> Path:
     """A repository whose Makefile, like this one's, takes the workflow's targets from
-    the engine's fragment."""
+    a fragment it includes from outside the checkout."""
+    fragment = tmp_path / "installed/workflow.mk"
+    fragment.parent.mkdir()
+    fragment.write_text("".join(f"{target}:\n\t@true\n" for target in FRAGMENT_TARGETS),
+                        "utf-8")
     (repository / "Makefile").write_text(
-        f"include {ROOT}/scripts/change_workflow/workflow.mk\n"
+        f"include {fragment}\n"
         "check-change:\n\t@true\n", "utf-8")
     return repository
 

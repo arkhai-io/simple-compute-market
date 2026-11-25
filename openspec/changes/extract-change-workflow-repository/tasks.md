@@ -1453,7 +1453,7 @@ fixtures under `scripts/tests/`, `.agents/skills/change-*`,
 under `openspec/changes/`. The workflow is reached throughout as the installed
 `change-workflow`; nothing here names the workflow's repository or links to it (D2, D6).
 
-- [ ] 9.1 The orchestrator's, on the owner's word, before the section's session (D2,
+- [x] 9.1 The orchestrator's, on the owner's word, before the section's session (D2,
   D14):
   - download the release's wheel, `arkhai_change_workflow-0.1.0-py3-none-any.whl`,
     from the release page of the workflow's repository to a path outside the tree;
@@ -1476,7 +1476,11 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   - record each with `change-workflow note extract-change-workflow-repository
     orchestrator --by owner`, naming nothing of the workflow's repository but the
     release page by role.
-- [ ] 9.2 Decision gate (D2): record in this task's note the coordinator's evidence —
+
+  Done by the orchestrator on the owner's word (log seq 89–92, and 96 for the
+  reinstall from a file the step can read); the `[openspec]` comment's edit was in
+  the worktree and is committed with this section.
+- [x] 9.2 Decision gate (D2): record in this task's note the coordinator's evidence —
   the distribution and its version, `arkhai-change-workflow` 0.1.0; the tag,
   `v0.1.0`; the artifact, `arkhai_change_workflow-0.1.0-py3-none-any.whl` with
   SHA-256 `3434aceddbb56ac9763ac32a17c9fd25ce37e8e588beeaee242e5d328eb2d71f`, on the
@@ -1491,7 +1495,25 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   the session `stopped`, naming what is missing, when any of it is absent or any check
   fails. No URL, repository name, commit, registry location, or install guide enters
   the note.
-- [ ] 9.3 Remove the workflow's copy from the tree: every path the handbook's procedure
+  Done: the coordinator's evidence — `arkhai-change-workflow` 0.1.0, tag `v0.1.0`;
+  the artifact `arkhai_change_workflow-0.1.0-py3-none-any.whl`, SHA-256
+  `3434aceddbb56ac9763ac32a17c9fd25ce37e8e588beeaee242e5d328eb2d71f`, on the
+  release page of the workflow's repository and in the dev artifact repository. The
+  log's 9.1 lines (seq 89–92): the release's wheel downloaded from the release page,
+  its digest checked, installed from the file with `uv tool install --force`, and
+  `change-workflow install` run, on the owner's word; the coordinator's confirmation
+  (seq 92) that both unowned rows — the engine reading fenced blocks three ways, and
+  the unmodified scenarios naming `scripts/change-workflow` — are carried to the
+  workflow's repository, and its acceptance of D14's two requests; the
+  `[openspec]` comment corrected, committed with this section. Checked by the
+  session: `change-workflow --version` prints `0.1.0`, within `>=0.1, <0.2`; uv's
+  receipt names a wheel file of the recorded name, not the tree's wheel project,
+  whose SHA-256 is the recorded digest; `change-workflow check skills` passes. The
+  first check stopped (seq 95): the receipt named a file under the orchestrator's
+  temporary directory, which the step's sandbox, with a private `/tmp`, could not
+  read; the owner moved the wheel to a directory under the home directory outside
+  the tree and reinstalled from it (seq 96), and the checks then passed.
+- [x] 9.3 Remove the workflow's copy from the tree: every path the handbook's procedure
   for the move lists (read it before removing it, or in the installed release's
   handbook, `change-workflow config --json`'s `workflow.handbook`), with the
   fixtures and the sandbox fixture of `scripts/tests/conftest.py` only the removed
@@ -1503,7 +1525,22 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   `scripts/tests/test_market_change_workflow.py` (D14). Drop `change-workflow`'s row
   from `openspec/specs/README.md` (MCW-9k0c). Verify: `make check-capability-index`,
   `make check-comment-hygiene`, and `test_workflow_command.py` (unit).
-- [ ] 9.4 The `Makefile` and CI without the workflow (D15, D26; MCW-w7nb):
+  Done: the procedure's 66 paths (its list, read in the tree's handbook before it went)
+  removed with `git rm`, and with them the whole of `openspec/specs/change-workflow/`,
+  its `diagrams.md` guidance among them, whose subject left; `conftest.py` keeps only
+  the path insertion and the fixture that drops the step's marker,
+  `CHANGE_WORKFLOW_UNATTENDED`, now named literally rather than imported: the step's
+  `git` refuses a test's own push to a temporary remote while it is set (handoff).
+  Comment hygiene exempts nothing; its test shows a constant naming a change document
+  caught in any script. `workflow_command.COMMAND` is `change-workflow`, found on the
+  path; `test_workflow_command.py` runs stand-ins only, the default command one put on
+  the path, and a case for the command missing. `make check-capability-index`, `make
+  check-comment-hygiene`: passed. Unit: `test_check_comment_hygiene.py`; integration
+  with a stand-in executable doubling the workflow's command at the process boundary:
+  `test_workflow_command.py`; passed. Beyond the plan, every other suite that ran the
+  tree's command or the engine was moved off it; Section 9 notes list each, with the
+  cases dropped.
+- [x] 9.4 The `Makefile` and CI without the workflow (D15, D26; MCW-w7nb):
   - the `Makefile` includes `$(shell change-workflow fragment)` only when
     `change-workflow` is on the path, printing nothing when it is not, and drops
     `install-workflow`; its comment over the include says the workflow's targets exist
@@ -1523,7 +1560,29 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   validate-local` print no `change-workflow`, and `make design CHANGE=x` fails with
   make's "no rule"; with it on the path, `make -n check-change CHANGE=x` prints the
   fragment's `change-workflow run pre-commit`.
-- [ ] 9.5 The guidance check reads the workflow layer from the installed workflow
+  Done: the include is `$(shell command -v change-workflow … && change-workflow
+  fragment)`, empty and silent without the command; `check-change`,
+  `check-spec-index`, and `check-decision-destinations`, which call the workflow's
+  command through the fragment's `CHANGE_WORKFLOW`, and `design-review`, which runs
+  the fragment's `review`, sit inside the same conditional, declared phony only there,
+  so without the workflow each is make's "no rule" like the fragment's targets.
+  `install-workflow` is gone. The eight targets lost `round-view-closed`; seven carry
+  the caution. No `help` target existed, though this task's verify and MCW-w7nb's
+  scenario read one: `help` lists every target's `##` text from `$(MAKEFILE_LIST)`,
+  skipping the conditional's targets where the workflow is absent (outside the plan).
+  `tests.yml` lost the install, bubblewrap, and `SANDBOX_REQUIRED`, its header saying
+  no job installs the workflow. Unit: `test_tests_workflow.py` (no `change-workflow`
+  in the workflow file; no `SANDBOX_REQUIRED`), passed. Static configuration tests of
+  the root `Makefile` under make, with no `change-workflow` on the path:
+  `test_workflow_targets.py` — `help` succeeds and lists no workflow target; `make
+  design`, `check-change`, `check-spec-index`, `check-decision-destinations`, and
+  `design-review` are make's "no rule"; `make -n` of `code-snapshot`,
+  `validate-local`, `review-diff`, `last-diff` names no `change-workflow` and no round
+  view; the seven cautions read in `help` — passed. The include with the workflow
+  installed is its wiring here, which no test holds (D14); by hand, with the
+  installed release: `make -n check-change CHANGE=x` printed `change-workflow run
+  pre-commit "x"`, and `help` listed 133 targets, 102 without it.
+- [x] 9.5 The guidance check reads the workflow layer from the installed workflow
   (D6, D10, D26): `AGENTS.md`'s layer table names the workflow layer as the installed
   `arkhai-change-workflow`'s guidance in place of `docs/guidance/workflow/`, and
   `scripts/check_guidance.py` takes that layer's directory, and its tag vocabulary,
@@ -1534,11 +1593,31 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   directory without the command. Verify: `scripts/tests/test_check_guidance.py`
   (unit, a case for the layer read from structured output and one for the missing
   command) and `make check-guidance`.
-- [ ] 9.6 Remove the `overrides` row from `AGENTS.md` and `scripts/check_project_layout.py`'s
+  Done: the layer table's workflow row names the installed guidance in prose, and the
+  check skips that row as naming no path here. `check(root, files, installed)` reads
+  the installed layer's vocabulary, and the tags its files carry, which carry the
+  vocabulary's rows, from that directory; none of its files joins the set. `main`
+  takes it from `workflow_command.installed_guidance`, which reads `config --json`'s
+  `workflow.guidance`, and fails without the command, naming
+  `arkhai-change-workflow`. The checks of in-tree workflow-tagged files stay as they
+  were, generic. Unit: `test_check_guidance.py` — the main cases over a checkout whose
+  workflow layer sits in a directory beside it, a repository document carrying a tag
+  only the installed vocabulary defines, an installed row no installed file carries,
+  and the command missing — and, with a stand-in executable at the process boundary,
+  `test_workflow_command.py`'s cases for `installed_guidance` reading the path and
+  refusing output naming none: passed. The
+  test running the tree's `check config` against this repository's engineering
+  guidance went with the command (D14). `make check-guidance`: 97 files, passed; with
+  no `change-workflow` on the path, it fails saying the workflow is needed.
+- [x] 9.6 Remove the `overrides` row from `AGENTS.md` and `scripts/check_project_layout.py`'s
   admission of `scripts/change-workflow-wheel` (D24). Verify:
   `scripts/tests/test_check_project_layout.py` (unit), `make check-project-layout`,
   and `make check-guidance`.
-- [ ] 9.7 Remove the six workflow changes that moved to the workflow's repository
+  Done: the row is gone, and `check_project_layout.py` is as it was before section 1
+  admitted the wheel's project (no difference from that commit's parent); its two
+  admission tests went. Unit: `test_check_project_layout.py`, passed; `make
+  check-project-layout`, `make check-guidance` (4 exception rows): passed.
+- [x] 9.7 Remove the six workflow changes that moved to the workflow's repository
   (D19): the directories `openspec/changes/add-workflow-harness-adapters/`,
   `add-workflow-model-gateway/`, `host-change-workflow-runner/`,
   `split-implementation-sessions-automatically/`, `relay-messages-to-step-sessions/`,
@@ -1553,7 +1632,14 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   closeout's (11.6). Verify: `make check-change-index`, and no document outside the
   archive and this change's records naming a removed change's directory
   (`make check-doc-citations` unscoped, for those paths).
-- [ ] 9.8 Verify the section: `make test-release-tooling`; with `change-workflow` off
+  Done: the six directories removed with `git rm`; their six change rows, the six gap
+  rows, and the "Unowned work found by" heading with its two rows removed from the
+  index, the coordinator having carried both (9.2). `make check-change-index`:
+  passed. One permanent document still cites a removed directory:
+  `market-change-workflow`'s companion links `host-change-workflow-runner`'s
+  proposal, which 10.3 rewrites as the workflow repository's work; an archived row's
+  notes name two of them in prose.
+- [x] 9.8 Verify the section: `make test-release-tooling`; with `change-workflow` off
   the path (a `PATH` without `uv tool dir --bin`), `make test-release-tooling`, `make
   dist-release`, `make check-release-components`, and `make pre-push REMOTE=origin`
   with an empty ref list on standard input, none calling `change-workflow`;
@@ -1561,9 +1647,83 @@ under `openspec/changes/`. The workflow is reached throughout as the installed
   CHANGE=extract-change-workflow-repository` passing but for the citations of removed
   documents section 10 rewrites and the `market-change-workflow` delta's added ids
   10.2 indexes; and `git ls-files` listing no path of those 9.3 and 9.7 remove.
+  Done: `make test-release-tooling` with the installed release on the path: 1488
+  passed before the fresh-context check's fixes. With no `change-workflow` on the path
+  (uv's tool bin directory replaced by a copy of its links without the command, since
+  `uv` lives there too): `make test-release-tooling`, 1485 passed; `make
+  dist-release`, built; `make check-release-components`, passed; `make pre-push
+  REMOTE=origin` with no ref on standard input, passed — no output naming
+  `change-workflow` but the checkout's own path. `change-workflow --version`:
+  `0.1.0`, within `>=0.1, <0.2`. `git ls-files`: no path 9.3 or 9.7 removes. The new
+  tests fail at the section's base (`change-workflow run test-before`):
+  `test_tests_workflow.py` 2 of 3, `test_workflow_targets.py` all 7, on their
+  assertions. `change-workflow run pre-commit`: `make lock` passed; `make
+  validate-local` passed packaging and failed `make test` at the Ansible project's
+  suite alone, 5 cases, every one Ansible refused its local temporary directory under
+  `~/.ansible`, which the step's sandbox does not let it write (environmental: the
+  configuration's `writable.common` names no `~/.ansible`); `make -k test` with
+  `ANSIBLE_LOCAL_TEMP` in a temporary directory then passed every suite, the
+  Ansible project's 214 among them. The default checks passed but `spec-index`
+  (MCW-9k0c, MCW-iqh1, MCW-w7nb, which 10.2 indexes); `check-repository` passed but
+  the citations scoped to this change, which fail on 23 paths this section removed,
+  each cited by this change's own design, proposal, or earlier notes (the section's
+  notes). The tree committed differs from the one `validate-local` ran on only in
+  this file and this change's row of the change index.
   End-to-end: none exercises the workflow's tooling; none owed.
   Owed by validation (ci tests.yml): the `test · test-deployment-packaging` job, its
   log showing no step installing the change workflow and the scripts' suites passed.
+
+Section 9 notes (handoff):
+
+- Outside the plan, every suite that ran the tree's command or the engine, which D26
+  says no suite may need, was moved off it; what each dropped is the workflow's to
+  test (D14):
+  - `test_check_public_content.py`: the clean guarded push dropped, the Git hook's
+    clean push covering it; the private-content push goes through the repository's
+    Git hook and `make pre-push`.
+  - `test_check_secrets.py`: its three push cases push through a Git pre-push hook
+    running the gate, as `make pre-push` runs it.
+  - `test_validate_parallel.py`: the six cases over real clones the engine made — a
+    failed bootstrap, another branch checked out, a plain clone — became five cases of
+    `change_of` against a stand-in on the path answering `clone where` (found at the
+    clone, refused with its reason, worked in place, another path, no command).
+  - `test_check_change.py`: `run_checks` takes an injected finder, defaulting to
+    `found_change`; the case outside any repository, the engine's refusal, dropped.
+  - `test_check_doc_citations.py` and `test_validate_slice.py`'s capacity cases: a
+    shared stand-in, `scripts/tests/workflow_stand_in.py`, answers `find --json` and
+    `check spec-index --json` with what each test gives it, deciding nothing; the five
+    cases of what a delta creates dropped, the workflow's `check spec-index` computing
+    it; `make validate`'s `UNATTENDED` case, the fragment's target, dropped.
+  - `test_check_guidance.py`: the tree's `check config` over this repository's
+    engineering guidance dropped; the test that no engineering heading repeats stays.
+  - `test_make_change_completion.py`: completes the targets of a stand-in fragment.
+- `scripts/tests/conftest.py` names the step's marker, `CHANGE_WORKFLOW_UNATTENDED`,
+  literally: the fragment names it, but no interface promises it. A release renaming
+  it fails loudly — a test's push refused inside a step — rather than silently.
+- The citations check scoped to this change fails on 23 paths section 9 removed, all
+  cited by this change's own `design.md`, `proposal.md`, and earlier task notes:
+  completed tasks are not rewritten, so they stand until closeout's narrative
+  compression (11.4) and its citations task (11.11). Until then every `pre-commit`
+  of this change fails on them, beside the `spec-index` check's three
+  `market-change-workflow` ids 10.2 indexes.
+- For section 10: `AGENTS.md`'s "What every session reads" still links
+  `docs/guidance/workflow/`, and its layer table's workflow row is prose this section
+  wrote, which the guidance check skips; `check_change.py`'s docstring now names the
+  installed command, but `check_guidance.py`'s and `check_comment_hygiene.py`'s still
+  cite removed documents, as do the citation check's own docstring and the
+  `Makefile`'s comments over `check-guidance` and the comment-hygiene target;
+  `market-change-workflow`'s companion cites `host-change-workflow-runner`'s
+  proposal, `install-workflow`, and `round-view-closed`; the change index's goal
+  section describes the in-tree workflow, closeout's 11.6 retiring it;
+  `docs/guidance/repository/test-targets.md` gives `make
+  check-change-workflow-config` as a repository check, now the fragment's alone.
+- The whole scripts suite now runs without the workflow: 1485 passed with no
+  `change-workflow` on the path.
+- The step's sandbox does not let Ansible write `~/.ansible`, and the configuration's
+  `writable.common` does not grant it, so the Ansible project's suite fails in any
+  sandboxed step running `make test`, validation's local kind among them, until the
+  orchestrator adds it or the suite sets its own `ANSIBLE_LOCAL_TEMP`; nothing of this
+  section touches that suite.
 
 ## 10. This repository's documents cite the workflow, and `market-change-workflow` amended
 
