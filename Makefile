@@ -641,12 +641,12 @@ load-candidate: _require-ar-project ## Load HEAD as a release candidate: store e
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene — mechanical sweep for the change-references rule
-# (docs/guidance/workflow/change-references.md, with market-change-workflow's
-# README, "The closing checks", naming the file types): change IDs, section/task numbers, change-document filenames,
-# and OpenSpec change names must never appear in code outside openspec/. The
-# scans, their file types, exclusions, and the one exemption are
-# scripts/check_comment_hygiene.py's, with their reasons.
+# check-comment-hygiene — mechanical sweep for the change workflow's rule that code
+# names no change (arkhai-change-workflow's guidance, "Change references"; the file
+# types are market-change-workflow's README, "The closing checks"): change IDs,
+# section/task numbers, change-document filenames, and OpenSpec change names must
+# never appear in code outside openspec/. The scans, their file types, and their
+# exclusions are scripts/check_comment_hygiene.py's, with their reasons.
 # ---------------------------------------------------------------------------
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
 	@python3 scripts/check_comment_hygiene.py
@@ -822,8 +822,9 @@ review-locks: ## Refresh selected project lockfiles against current repository w
 # installed `arkhai-change-workflow`, at the path `change-workflow fragment`
 # prints, and the closing checks below, which call its command. Without the command
 # on the path nothing is included and nothing is printed, so CI's logs carry no
-# note: every target of this repository's own works, and a workflow target is make's
-# own "no rule". A value of the owner's machine, such as HELM_ALL_SCENARIOS or
+# note: every build, suite, and release target works, and a workflow target is
+# make's own "no rule". The checks the workflow's steps run here — `check-repository`,
+# `check-guidance`, a change's citations, `record-capacity` — reach its command. A value of the owner's machine, such as HELM_ALL_SCENARIOS or
 # HELM_CONTEXT given to `make validate`, reaches the Helm part's command through the
 # environment: make exports a variable set on its command line to every command it
 # runs, the validation session included, and the part's own make reads it there.
@@ -879,7 +880,7 @@ check-local-imports: ## Fail if an import added inside a function since the merg
 check-capability-index: ## Fail if a capability with a spec.md has no row in openspec/specs/README.md, or a row links nothing
 	@python3 scripts/check_capability_index.py
 
-# The guidance's layering (docs/guidance/workflow/README.md, "The layers of
+# The guidance's layering (arkhai-change-workflow's guidance, "The layers of
 # guidance"); `scripts/check_guidance.py --list [--tag <tag>]` and
 # `--list-exceptions` print the guidance set and its exception rows.
 check-guidance: ## Fail if a guidance file lacks one layer tag, carries a tag no vocabulary of its layer or a lower one defines, a vocabulary row is carried by no file, a vocabulary or exception table is malformed, an exception row cites no guidance file or names a kind other than selects or overrides, guidance links to a higher layer, or a citation of a guidance file names an anchor no heading of it has

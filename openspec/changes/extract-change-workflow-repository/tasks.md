@@ -1741,7 +1741,7 @@ documents, the repository guidance, `.agents/evidence/`, and the docstrings and
 comments of this repository's scripts), and `openspec/specs/market-change-workflow/`
 (`spec.md`, `index.md`, `README.md`).
 
-- [ ] 10.1 Rewrite each citation of the workflow's specification, companion,
+- [x] 10.1 Rewrite each citation of the workflow's specification, companion,
   guidance, handbook, skills, or command path in prose — `arkhai-change-workflow`'s
   requirement by id and its guidance or handbook by section name — with no link to or
   address of the workflow's repository (D6, MCW-9k0c). `AGENTS.md` names the installed
@@ -1751,7 +1751,29 @@ comments of this repository's scripts), and `openspec/specs/market-change-workfl
   in place of `.agents/skills/` and `docs/guidance/workflow/` (MCW-iqh1, D15).
   Verify: `make check-doc-citations` unscoped naming no path section 9 removed, `make
   check-guidance`, and `make check-capability-index`.
-- [ ] 10.2 Apply the `market-change-workflow` delta to its `spec.md` by hand — MCW-9k0c,
+  Done: every citation outside the archive and this change's own documents rewritten —
+  `AGENTS.md` (the change workflow's paragraph now names `arkhai-change-workflow`, its
+  `[workflow] version` range, the local configuration and its template, says to
+  install it to drive a change and leaves the setup to its handbook; "What every
+  session reads" names the installed guidance `change-workflow config load` prints;
+  the layers, deferred work, terms, and a change's public documents cited by the
+  workflow guidance's section names), `openspec/README.md` (its placement table drops
+  the workflow's guidance and handbook rows), `openspec/specs/README.md`,
+  `planning-governance`'s Evidence, `docs/guidance/repository/README.md` and
+  `test-targets.md` (whose example check, `check-change-workflow-config`, the
+  fragment's alone, became `check-guidance`), `docs/release-handbook.md`, the
+  `Makefile`'s comments, and the docstrings and one failure message of
+  `check_comment_hygiene.py`, `check_guidance.py`, `check_local_imports.py`,
+  `check_doc_citations.py`, `ci_evidence.py`, and `validate_slice.py`; the change
+  index's goal section and row notes; and the closeout lines and workflow paths of 49
+  other changes' documents (see the notes). No link to or address of the workflow's
+  repository. `make check-doc-citations` unscoped: no path section 9 removed but in
+  this change's own `design.md`, `proposal.md`, and earlier task notes (23 paths, as
+  section 9 recorded); two older broken citations remain, neither section 9's (notes).
+  `make check-guidance` (97 files) and `make check-capability-index`: passed. Unit:
+  `test_check_doc_citations.py` (its `.agents/` fixture now a guide, not the removed
+  schema), `test_check_comment_hygiene.py`, `test_check_guidance.py`: 97 passed.
+- [x] 10.2 Apply the `market-change-workflow` delta to its `spec.md` by hand — MCW-9k0c,
   MCW-iqh1, and MCW-w7nb added, MCW-5tgp modified — and its `## Evidence` section's
   bullet on the provisions, which names the deleted
   `test_change_workflow_assumptions.py`, rewritten to say review holds the statement
@@ -1760,7 +1782,20 @@ comments of this repository's scripts), and `openspec/specs/market-change-workfl
   MCW-iqh1, MCW-w7nb) (D23). Verify: `make check-spec-index
   CHANGE=extract-change-workflow-repository` and a diff against the delta in the
   handoff.
-- [ ] 10.3 Amend `market-change-workflow`'s companion: "This repository is the
+  Done: MCW-9k0c, MCW-iqh1, and MCW-w7nb added and MCW-5tgp replaced, verbatim from
+  the delta; the Evidence's provisions bullet says no test reads the statement and
+  review holds it complete, beside new bullets for the template and for building
+  without the workflow (`test_tests_workflow.py`, `test_workflow_targets.py`), and
+  its closing-checks bullet names the installed command; the Purpose names the
+  distribution. Outside the plan: MCW-s4bx's two scenarios ran `scripts/change-workflow`,
+  so the delta gains MCW-s4bx as MODIFIED, the command alone corrected, applied the
+  same way. Index: MCW-5tgp's summary revised under "1. The workflow's roles", and
+  MCW-9k0c, MCW-iqh1, MCW-w7nb entered under "4. This repository's workflow values".
+  `make check-spec-index CHANGE=extract-change-workflow-repository`: passed (the three
+  added ids now indexed). Diff against the delta: each of the delta's five
+  requirements appears in `spec.md` character for character. `change-workflow
+  openspec validate extract-change-workflow-repository --strict`: valid.
+- [x] 10.3 Amend `market-change-workflow`'s companion: "This repository is the
   workflow's first adopter" (it adopts `arkhai-change-workflow` within its range, and
   builds, tests, and releases without it, D26); "How this repository provides the
   workflow's roles" (both configuration files; no test reads `config --json` and
@@ -1771,10 +1806,85 @@ comments of this repository's scripts), and `openspec/specs/market-change-workfl
   now the engine's, D10); the validation and diff targets not to be run while a round
   view is open (D26); and the hosted runner named as the workflow repository's work.
   Verify: `make check-doc-citations CHANGE=extract-change-workflow-repository`.
-- [ ] 10.4 Verify the section: `make check-change
+  Done: "This repository is the workflow's first adopter" gains two paragraphs — the
+  adoption by distribution within `[workflow] version`, cited in prose, with the
+  local configuration and its template (MCW-9k0c, MCW-iqh1); and building, testing,
+  and releasing without the workflow, the conditional include, `make help`, the
+  checks the workflow's steps run reaching its command, and the seven validation and
+  diff targets' instruction not to run while a round view is open, `code-snapshot`
+  needing none (MCW-w7nb, D26). "How this repository provides the workflow's roles":
+  both configuration files; no test reads `config --json` or the statement, review
+  holds it complete on the four edits D14 names; the skills' naming nothing is the
+  workflow's to verify (CW-n8tr); the section "What the workflow's skills name of this
+  repository", its exemptions table, removed; the fragment row includes the installed
+  fragment only where the command is on the path. "The engine's own assumptions":
+  aligned with the release's table — the command installed from the release's wheel,
+  both configuration files, the workflow's documents the distribution's with no path
+  of the engine's in the tree, the skills in the user skill directories, both linked
+  local files, and a row for a step's private `/tmp`. "What each check enforces"
+  cites by section name; comment hygiene exempts nothing; the guidance check reads
+  the installed layer; the scoped citation check reads `check spec-index --json` and
+  the unscoped one needs no workflow. The models are the local configuration's. The
+  hosted runner is named as the workflow repository's work. `make check-doc-citations
+  CHANGE=extract-change-workflow-repository`: fails only on the 23 paths this change's
+  own documents cite (notes); the companion cites none.
+- [x] 10.4 Verify the section: `make check-change
   CHANGE=extract-change-workflow-repository`, `make check-guidance`, and `make
   test-release-tooling`.
+  Done: `change-workflow run pre-commit extract-change-workflow-repository`, the
+  same run `make check-change` makes: `make lock` passed; `make validate-local`
+  passed — packaging, and every suite of `make test`, the scripts' 1485 and the
+  Ansible project's 214 among them, under the owner's per-run grant of `~/.ansible`;
+  the default checks passed — index, tasks, skills, `spec-index` (the three added
+  ids now indexed), decisions, and the strict OpenSpec validation; `check-repository`
+  passed six of its seven checks and failed the citations scoped to this change on
+  the 23 paths section 9 removed that this change's own design, proposal, and earlier
+  task notes cite, which closeout rewrites (notes). `make check-guidance`: 97 files,
+  passed. The tree committed differs from the one `validate-local` ran on only in
+  this file.
   End-to-end: none exercises the workflow's tooling; none owed.
+
+Section 10 notes (handoff):
+
+- Other changes' documents: 42 task lists' closeout lines now cite
+  `arkhai-change-workflow`'s guidance, "Closeout", and two task lists' closeout
+  validation the installed `change-workflow openspec`. Five changes still in this
+  index work on the workflow itself — `workflow-round-review-without-merges`,
+  `remove-workflow-log-conversion`, `add-change-intake`, and in part
+  `build-test-before-environments` and `test-affected-suite-selection` — and their
+  proposals named the engine's, skills', specification's, and handbook's paths; they
+  now name them in prose as `arkhai-change-workflow`'s, with requirement ids where a
+  requirement was cited, and `render-diagrams-from-source` names the workflow's graph
+  test the same way. Where they belong is not this change's to settle (D19 moved six):
+  an unowned row under "Unowned work with no campaign" records it, naming too the
+  unowned row on the next-step computation's round join, which is the workflow's.
+- The change index's lesser goal: its current state now says this repository adopts
+  `arkhai-change-workflow` within its declared range, builds without it, and that the
+  goal's six open changes moved in 2026-11; what it keeps is its configuration, the
+  template, the guides, and `market-change-workflow`. Closeout's campaign index
+  currency (11.6) still retires the goal — its entry, its gap rows, its archived
+  rows — and finds that current-state text written. Archived rows' notes naming the
+  handbook's path now say it is `arkhai-change-workflow`'s.
+- Two broken citations the unscoped check reports are older than section 9 and not
+  the workflow's: the change index's row citing the native Ansible gate's shell script, and
+  `renewable-compute-lease-deadlines`' design citing an archived change's review,
+  which is untracked. Left as found.
+- This change's own `design.md`, `proposal.md`, and earlier task notes still cite the
+  23 paths section 9 removed, so `make check-doc-citations
+  CHANGE=extract-change-workflow-repository` and the `check-repository` hook fail on
+  them alone until closeout: the scoped check finds an archived change too, so
+  archiving does not clear them, and closeout's narrative compression (11.4) and its
+  citations part (11.11) rewrite them; design and proposal citations of what moved
+  can name it in prose as this section did elsewhere.
+- `test_check_guidance.py`'s fixtures still build a checkout whose workflow layer sits
+  under `docs/guidance/workflow/`: they test the check's generic handling of a
+  workflow-tagged file in a tree, not this repository's layout, and stay.
+- The fresh-context check found two statements false of the tree, both fixed: the
+  companion and the `Makefile`'s comment said every target of the repository's own
+  works without the workflow, but `check-repository`, `check-guidance`, a change's
+  citations, and `record-capacity` reach its command; and `AGENTS.md` said nothing
+  else needs it. Both now say the builds, suites, and releases work, and those checks
+  reach the command.
 
 ## 11. Closeout
 

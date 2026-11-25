@@ -8,7 +8,7 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## 1. The workflow's roles
 
-- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's fields, and the repository states how it fills each role outside them; every target and path the make fragment names appears in one or the other, and the skills name none.
+- [MCW-5tgp](spec.md#requirement-mcw-5tgp-this-repository-provides-the-workflows-roles) — `.agents/workflow.toml` declares the workflow's committed fields, and the repository states how it fills each role outside them; no test reads the statement, which review holds complete when a change edits the range, the configuration, the statement, or a target it names.
 
 ## 2. Validation
 
@@ -41,6 +41,9 @@ meaningful order; [`README.md`](README.md) is the readable description.
 
 ## 4. This repository's workflow values
 
+- [MCW-9k0c](spec.md#requirement-mcw-9k0c-this-repository-runs-the-installed-workflow-within-its-declared-range) — the repository runs the installed `change-workflow` within the versions its configuration declares, holds no copy of the workflow, and cites it in prose as `arkhai-change-workflow`, by id and section.
+- [MCW-iqh1](spec.md#requirement-mcw-iqh1-this-repositorys-local-configuration-template-points-at-its-engineering-guidance) — the committed local configuration template points the engineering guidance at `docs/guidance/engineering/` and names the steps' models; the local file is ignored by Git.
+- [MCW-w7nb](spec.md#requirement-mcw-w7nb-this-repository-builds-tests-and-releases-without-the-workflow) — the repository builds, tests, and releases without the workflow: CI installs none, no suite or release target calls it, the fragment is included only where installed, and the validation and diff targets' help asks not to run them while a round view is open.
 - [MCW-farr](spec.md#requirement-mcw-farr-this-repositorys-protected-branches-are-main-and-dev) — the protected branches are `main` and `dev`, which the guarded push refuses.
 - [MCW-q8vd](spec.md#requirement-mcw-q8vd-the-pre-push-check-refuses-recognizable-private-content) — the pre-push check rejects private paths and denylisted identifiers across every commit, failing closed.
 - [MCW-k3vy](spec.md#requirement-mcw-k3vy-the-pre-push-checks-are-one-make-target) — the pre-push checks are one target, `make pre-push`, which the configuration's `pre-push` and the Git hook both run.

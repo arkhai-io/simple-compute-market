@@ -3,8 +3,8 @@
 
 Guidance divides into three layers — engineering, the change workflow's, and this
 repository's — and a lower layer never links to a higher one
-(docs/guidance/workflow/README.md, "The layers of guidance"). This check holds every
-guidance file to that model.
+(`arkhai-change-workflow`'s guidance, "The layers of guidance"). This check holds
+every guidance file to that model.
 
 The guidance set is found by place before any frontmatter is read, so a guide that
 forgot its tags fails rather than escaping: every Markdown file under
@@ -47,8 +47,8 @@ Run by `make check-repository`, the change workflow's `pre-commit`. Usage:
 `check_guidance.py [--list [--tag <tag>] | --list-exceptions]`.
 
 Contract: openspec/specs/market-change-workflow/spec.md, MCW-c4ek; the rules it
-checks are openspec/specs/change-workflow/spec.md's CW-g7lt, CW-d2rw, CW-x4ex,
-CW-n6dm, and CW-r8cg.
+checks are `arkhai-change-workflow`'s CW-g7lt, CW-d2rw, CW-x4ex, CW-n6dm, and
+CW-r8cg.
 """
 
 from __future__ import annotations

@@ -90,3 +90,41 @@ make target it names.
 
 - **WHEN** a reader looks up this repository's protected branches
 - **THEN** the configuration names `main` and `dev`, which the guarded push refuses
+
+### Requirement: MCW-s4bx This repository's sandbox extensions
+
+This repository's configuration MUST give design and planning `docs/` beside their
+baseline scope, and every step the tool state its suites, builds, and deployments
+write outside the checkout, the review included, since none of it is a file the
+review reads: uv's Pythons and tools, the Kubernetes
+client's cache, the Google Cloud SDK's configuration, which refreshes its tokens,
+Docker's client configuration, and npm's cache, which the configured OpenSpec command
+writes. It MUST protect nothing beyond the engine's and the adapters' protected
+paths.
+
+#### Scenario: Design edits the roadmap
+
+- **WHEN** an unattended design run edits `docs/development/ROADMAP.md`
+- **THEN** the write succeeds, since the configuration gives design `docs/`
+
+#### Scenario: Implementation syncs an environment
+
+- **WHEN** an unattended implementation run's `uv sync` installs a Python under
+  `~/.local/share/uv`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: Design validates the change
+
+- **WHEN** an unattended design run runs `change-workflow openspec validate
+  <change> --strict`, whose `npx` writes npm's cache under `~/.npm`
+- **THEN** the write succeeds, since the configuration gives every writing step that
+  path
+
+#### Scenario: A review runs the repository's checks
+
+- **WHEN** an unattended review run runs `change-workflow run pre-commit
+  <change>` for evidence, whose OpenSpec check's `npx` writes npm's cache under
+  `~/.npm`
+- **THEN** the write succeeds, since the path lies outside the checkout and the
+  configuration gives it to every step

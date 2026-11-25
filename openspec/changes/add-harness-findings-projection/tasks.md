@@ -123,7 +123,7 @@ pause for design review.
 
 ### 9. Closeout
 
-Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
+Per `arkhai-change-workflow`'s guidance, "Closeout", with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
 - [ ] 9.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
   the comments this change added for any that narrate the review or migration that

@@ -2,17 +2,18 @@
 
 For the owner who releases this repository's packages and artifacts: how a marketplace
 release goes, merging `dev` into `main` and describing the release, loading a release
-candidate, what the deployment does with it, running the lanes on its images, cutting a
-release, deciding a release's migration floor, the
-compatibility paths due to retire, the import package renames consumers meet, and diagnosing a load or a cut that fails. It
-sits beside the [operator handbook](operator-handbook.md), for whoever runs a
-deployment, and the [change workflow handbook](change-workflow-handbook.md), for
-operating the workflow. What a change must satisfy for its packages to release — what a
-release comprises, the published set, their names and dependencies, how a release is
-recorded, and how a version changes — is the repository's guidance:
+candidate, what the deployment does with it, running the lanes on its images, cutting
+a release, deciding a release's migration floor, the compatibility paths due to
+retire, the import package renames consumers meet, and diagnosing a load or a cut that
+fails. It sits beside the [operator handbook](operator-handbook.md), for whoever runs
+a deployment, and the installed change workflow's handbook,
+`arkhai-change-workflow`'s, for operating the workflow. What a change must satisfy for
+its packages to release — what a release comprises, the published set, their names and
+dependencies, how a release is recorded, and how a version changes — is the
+repository's guidance:
 [`published-packages.md`](guidance/repository/published-packages.md) and
-[`package-versions.md`](guidance/repository/package-versions.md). The terms used here —
-release candidate, marketplace release, release component, candidate store — are
+[`package-versions.md`](guidance/repository/package-versions.md). The terms used here
+— release candidate, marketplace release, release component, candidate store — are
 [`ARCHITECTURE.md`, "Terms"](development/ARCHITECTURE.md#terms).
 
 This repository's continuous integration publishes nothing: merging to `dev` or `main`
@@ -79,7 +80,8 @@ The description has these sections, in order:
 - **merge notes**: how `main` was merged into the release branch and any conflict
   resolved.
 
-Work on the repository's own change workflow, guidance and agent tooling is not a user
+Work on how the repository adopts the change workflow, on its guidance, and on agent
+tooling is not a user
 feature; it is mentioned briefly under operations, if at all. Like every description
 here, it is public
 ([`repository-content.md`](guidance/engineering/repository-content.md)): it names

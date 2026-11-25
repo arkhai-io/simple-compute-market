@@ -179,7 +179,7 @@ are open in `design.md`; no task below decides them.
 ## 5. Closeout
 
 Documentation-only, after code review; any required code correction returns to
-implementation. Follow `docs/guidance/workflow/closeout.md`, with this repository's
+implementation. Follow `arkhai-change-workflow`'s guidance, "Closeout", with this repository's
 parts in `openspec/README.md#this-repositorys-closeout-parts`, in this order.
 
 - [ ] 5.1 **Comment hygiene:** run `make check-comment-hygiene` and confirm touched

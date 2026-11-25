@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Fail if code outside openspec/ names a change, a task, or a change document.
 
-A mechanical sweep for the rule that code names no change, task, or change
-document (`docs/guidance/workflow/change-references.md`), beside the rule that
-comments describe the current system, not the history of the change that
-produced it (`docs/guidance/engineering/comments.md`). Two scans, each a line search over the tree from the repository
-root, skipping the directories that hold no code of ours:
+A mechanical sweep for the change workflow's rule that code names no change,
+task, or change document (`arkhai-change-workflow`'s guidance, "Change
+references"), beside the rule that comments describe the current system, not the
+history of the change that produced it (`docs/guidance/engineering/comments.md`).
+Two scans, each a line search over the tree from the repository root, skipping the
+directories that hold no code of ours:
 
 - change-history references — a `POOLS-<n>` change ID, a section or task
   number, or the file name of a change document (its task list, design, or
@@ -119,8 +120,8 @@ def main(root: Path = ROOT) -> int:
     if matches := change_history_matches(root):
         print("\n".join(matches))
         print()
-        print("FAIL: found change-history references outside openspec/. See")
-        print("docs/guidance/workflow/change-references.md and")
+        print("FAIL: found change-history references outside openspec/. See the")
+        print("change workflow's guidance, \"Change references\", and")
         print("docs/guidance/engineering/comments.md -- comments must describe the")
         print("current system, not the history of the change that produced it.")
         return 1

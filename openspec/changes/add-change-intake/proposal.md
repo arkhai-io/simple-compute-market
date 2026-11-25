@@ -80,12 +80,13 @@ None.
 
 ## Impact
 
-- `.agents/skills/change-intake/` and `.agents/skills/change-intake-design/`, linked
-  from `.claude/skills/` and `.codex/skills/` (`make check-agent-skills`).
-- `scripts/change_workflow/clone.py` and its tests: the landing-branch command.
-- `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`) and
-  `docs/change-workflow-handbook.md`.
-- `docs/guidance/workflow/`, if the skills need a rule of presentation or settlement
+All of it is `arkhai-change-workflow`'s, the installed change workflow:
+
+- two new skills, `change-intake` and `change-intake-design`, installed with the
+  workflow's other skills;
+- the engine's `clone` command and its tests: the landing-branch command;
+- the workflow's specification, its index and companion, and its handbook;
+- the workflow's guidance, if the skills need a rule of presentation or settlement
   the guidance does not yet hold (D7).
 
 ### Workflow engine interfaces
@@ -113,5 +114,5 @@ None.
 
 To be determined at design completion. Expected destinations: `change-workflow`'s
 `spec.md` and `README.md` for the two skills, the entry an outside change takes, and
-the landing-branch command; `docs/change-workflow-handbook.md` for how the owner takes
-a change in; `docs/guidance/workflow/` for any rule D7 adds.
+the landing-branch command; the workflow's handbook for how the owner takes a change
+in; the workflow's guidance for any rule D7 adds.
