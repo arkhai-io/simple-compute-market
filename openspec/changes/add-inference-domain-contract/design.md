@@ -67,7 +67,7 @@ named follow-on change.
 
 ## Decisions
 
-### A domain, not an API-credits extension
+### D1. A domain, not an API-credits extension
 
 API credits sells prepaid access to a *named service*. Its listing carries a
 service name, an endpoint, and a quota; nothing on it says what is served, at
@@ -92,7 +92,7 @@ API-credits listing would make every weather-API seller carry a context length,
 and one buyer plugin interpret two comparison surfaces. That alternative — a
 `pricing_model` discriminator on the API-credits listing — was rejected on those
 grounds.
-### One listing is one served model
+### D2. One listing is one served model
 
 The registry compares listings, not sellers. A buyer asking "who serves this
 model under this price with this context length" needs each answer to be a
@@ -105,7 +105,7 @@ listing if *any* catalogue entry matched, so a price bound on one model would
 surface a listing because a different model was cheap. Per-model listings make
 every filter mean what it says.
 
-### Model identity is seller-asserted and convergent
+### D3. Model identity is seller-asserted and convergent
 
 `model_id` is asserted by the seller. The domain does not maintain a list of
 models and must not: which models are sold is the storefront's business, and
@@ -161,7 +161,7 @@ value under a version bump when that domain exists.
 Rejected: `deployment_id` as a further identifier. A seller's deployment is
 already identified by `storefront_url` plus the publisher-chosen, normatively
 stable `listing_id`, and `served_model_name` is what a request names.
-### One pricing layer: a credit is one base unit of the settlement asset
+### D4. One pricing layer: a credit is one base unit of the settlement asset
 
 In inference, **one credit is one base unit of the asset the listing settles
 in** — one micro-USDC, one cent, one wei. The settlement option therefore
@@ -213,7 +213,7 @@ amounts and the derived charge use the repository's uint256 wire type —
 Python integers in memory, decimal-digit strings on the wire — and the filter
 specification compares the bounds as exact decimal text. Token counts stay
 plain strict integers; the magnitude lives in the charge.
-### The rate card is carried to issuance and pinned on the grant
+### D5. The rate card is carried to issuance and pinned on the grant
 
 A grant carries the rate card in force when it was issued. A seller who
 republishes a listing with a new card changes the price of *new* purchases only;
@@ -231,7 +231,7 @@ the grant is `compose-inference-domain-stack`'s requirement, and pricing
 consumption by it, so republication reprices only later grants, is
 `meter-inference-usage`'s.
 
-### Comparability without a derived price field
+### D6. Comparability without a derived price field
 
 An earlier sketch published a derived monetary block computed from two
 authoritative fields so the registry could range-filter a price. Rejected: a
@@ -252,7 +252,7 @@ projection over options a buyer uses to find how a listing can be paid. The buye
 from the served specification, as `registry-discovery` requires; nothing
 encodes it in code. Cross-asset comparison needs an exchange rate the registry
 must not be an authority on, and stays client-side, consistent with Goal 7.
-### Quota-backed publication in version 1
+### D7. Quota-backed publication in version 1
 
 An inference seller's supply is, in truth, not finite in the way a GPU is: a
 model server can keep serving. Backing is now a declared property of every pool
@@ -277,7 +277,7 @@ per durable listing. It is not a migration. What unbacked would buy an inference
 seller is not declaring a sellable quantity and not being closed at zero — a
 convenience, not a correctness property — so it waits for a seller to ask.
 
-### Provision intent is the API-credits shape under a new kind
+### D8. Provision intent is the API-credits shape under a new kind
 
 Round zero carries `ProvisionTerms{kind: inference.v1, version: 1, payload:
 {quantity, key: {mode, key_id?}}}`. This is byte-for-byte the API-credits
@@ -304,7 +304,7 @@ payload as before; API credits now refuses the malformed forms it used to
 coerce, which no buyer in this repository sends, because both buying paths pass
 an `int`.
 
-### Usage record and charge derivation are domain-owned deterministic semantics
+### D9. Usage record and charge derivation are domain-owned deterministic semantics
 
 `market-composition` requires a domain to own "the pure interpretation required
 for independent implementations of that market to agree." The charge a request
@@ -325,7 +325,7 @@ This gives `meter-inference-usage` a fixed target and gives conformance
 something to pin across the Python, TypeScript, and Rust gates, which is
 exactly where per-token billing would otherwise diverge silently.
 
-### Usage evidence is secret-free
+### D10. Usage evidence is secret-free
 
 The usage evidence body — what a storefront or authority can sign and hand to a
 resolver — carries the usage record, the pinned rate card, the derived charge,
@@ -340,7 +340,7 @@ request together name one usage record. Debiting each pair at most once is
 `meter-inference-usage`'s requirement, because only the hold-and-settle path
 that enforces it can prove it (implementation review 02, F11).
 
-### Attestation is reserved and unverified
+### D11. Attestation is reserved and unverified
 
 The model card carries an optional `attestation` field shaped as the
 repository's standard versioned envelope — `kind`, `schema_version`, and an
@@ -363,7 +363,7 @@ input is the verification chain a comparable open-source market already ships �
 platform, measurement, and verifier on the listing; a check at purchase; a check
 per request — read before the field's shape is fixed.
 
-### Three identities, restated for this domain
+### D12. Three identities, restated for this domain
 
 The normative statement of this decision, and of the two that follow, lives in
 the spec delta of the change that builds the behaviour —
@@ -384,7 +384,7 @@ else. A hosted route that adds a spending authority does so beside these, not
 by merging them. In one sentence: an API credential is access, not the billing
 model.
 
-### The authority stays synchronous; rating systems are downstream
+### D13. The authority stays synchronous; rating systems are downstream
 
 The inference authority — the service that holds keys, grants, pinned rate
 cards, and balances — is the only thing consulted on the admission path.
@@ -396,7 +396,7 @@ third party's availability to serve a request. Keeping them at the usage-record
 seam preserves seller autonomy and provider neutrality, which is the SCM
 posture.
 
-### Storefront composition mirrors API credits
+### D14. Storefront composition mirrors API credits
 
 The stack change will give inference its own storefront executable on the
 `kit/storefront` shell, registered under `market.storefront_domains`, exactly as
@@ -406,7 +406,7 @@ contracts and names generalizing to API credits as a non-goal; inference is
 non-compute in the same way. Recorded here because the listing shape (no
 `CapacityBinding` to a Resource Pool; a quota resource instead) follows from it.
 
-### The family kit first, the stack on it
+### D15. The family kit first, the stack on it
 
 The campaign's sequencing rule, stated once: `compose-api-family-kit` pins the
 API-credits issuance digests and attestation shapes byte-for-byte, builds the
@@ -434,7 +434,7 @@ a parameterization byte-identical; that pin is the kit change's first task. And
 `meter-inference-usage` still mutates the authority once, against the
 kit-composed one, after the stack has proven a deal.
 
-### Schema identity and filter specification
+### D16. Schema identity and filter specification
 
 Schema identity is `inference`, version 1; filter-specification version 1. The
 buyer plugin declares `inference` and therefore queries only registries
@@ -449,7 +449,8 @@ rate card's base-unit integers, each co-requiring `rate_card_asset` as
 described above. The token, mechanism, and asset projections follow the
 API-credits specification's. `offering_mode` is required and
 equals `inference`. The attestation envelope is **not** a filter.
-### OpenAI-compatible surface, version 1
+
+### D17. OpenAI-compatible surface, version 1
 
 `endpoint.api_style` is `openai.v1` and names chat completions and completions.
 Embeddings, images, audio, and batch are excluded from version 1 so that the

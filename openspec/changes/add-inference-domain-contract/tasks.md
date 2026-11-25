@@ -435,7 +435,7 @@ buyer-plugin text in `design.md`, `proposal.md`, and `tasks.md`, closeout parts
 - [x] 8.4 **Narrative compression.** Compress completed-task notes to final
       behavior, validation evidence, and promotion destinations; keep rejected
       alternatives in `design.md`.
-- [x] 8.5 **Roadmap currency.** Update Goal 8's current-state prose in
+- [x] 8.5 **Roadmap currency.** Update Goal 9's current-state prose in
       `docs/development/ROADMAP.md` (the vocabulary now exists) and remove this
       change's row from its gap table; name the update in the promotion record.
 - [x] 8.6 **Campaign index currency.** Update this change's row and the
@@ -489,6 +489,6 @@ buyer-plugin text in `design.md`, `proposal.md`, and `tasks.md`, closeout parts
 | No derived discovery price; a rate bound co-requires the card's asset (`rate_card_asset`) in the filter specification, so the registry refuses an unpaired bound | the `inference` capability's `spec.md` — "Discovery under the inference schema identity"; `architecture.md` — "Current limits" |
 | Inference binds the family's purchase shape, which validates exactly the two documented key dispositions and a strict integer quantity for every binding domain | the `api-family` capability's `spec.md` — "The purchase shape admits two key dispositions and an exact quantity" |
 | Attestation is reserved, unverified, and unfilterable in this version: an opaque canonical-JSON envelope on the card, a digest reference on the evidence | the `inference` capability's `spec.md` — "Attestation is reserved and unverified"; rationale in its `architecture.md` |
-| The family kit first, the stack on it: inference binds the `api` family's purchase shape and carriers rather than copying API credits | `design.md` — "The family kit first, the stack on it"; the `api-family` capability's `spec.md` — "The api family shares one vocabulary and one kit"; `docs/development/ROADMAP.md` Goal 8 current state |
+| The family kit first, the stack on it: inference binds the `api` family's purchase shape and carriers rather than copying API credits | `design.md` — "The family kit first, the stack on it"; the `api-family` capability's `spec.md` — "The api family shares one vocabulary and one kit"; `docs/development/ROADMAP.md` Goal 9 current state |
 | `inference` joins the enumerated offering modes; **rate card** and **usage record** join the Terms table | `docs/development/ARCHITECTURE.md` — "One name per concept", "Terms" |
 | Model identity is seller-asserted with a SHOULD derivation rule; the domain keeps no model list; quantization is an enumerated field; provenance is required and resale legitimate; a registry may curate but never mints; `model_owner` is the three-party hook with no royalty field | the `inference` capability's `spec.md` — "One listing is one served model"; rationale in its `architecture.md` |

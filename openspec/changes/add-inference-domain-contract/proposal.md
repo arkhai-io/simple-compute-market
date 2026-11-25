@@ -191,33 +191,62 @@ them.
 
 ### Knowledge to promote
 
-- The domain owns listing, rate-card, and usage shapes; a storefront decides
-  what it sells and charges; the payment kit converts money; comparability
-  across sellers is a registry operator's policy — the `inference`
-  capability's `architecture.md`.
-- One credit is one base unit of the settlement asset, so the rate card is the
-  price and there is one authoritative number; the handoff to issuance carries
-  the accepted listing's card — the `inference` capability's `spec.md`.
-- Attestation is reserved and unverified: an opaque canonical envelope on the
-  card, a digest reference on the evidence — the `inference` capability's
-  `spec.md` and `architecture.md`.
-- One listing is one served model, so the registry compares sellers per model —
-  the `inference` capability's `spec.md`.
-- Marketplace principal, bearer credential, and spending authority are three
-  identities; the bearer credential is delivery, never payment authorization —
-  rationale in the `inference` capability's `architecture.md`; the normative
-  requirement is `compose-inference-domain-stack`'s delta, which builds the
-  credential.
-- Model identity is seller-asserted with a SHOULD derivation rule; the domain
-  keeps no model list; quantization is an enumerated field; provenance is
-  required and resale is legitimate; a registry may curate but never mints;
+- D1: the domain owns listing, rate-card, and usage shapes; a storefront
+  decides what it sells and charges; the payment kit converts money;
+  comparability across sellers is a registry operator's policy — the
+  `inference` capability's `architecture.md`, "Market shape"; one sentence in
+  the `api-credits` capability's `architecture.md`, "Market shape".
+- D2: one listing is one served model, so the registry compares sellers per
+  model — the `inference` capability's `spec.md`.
+- D3: model identity is seller-asserted with a SHOULD derivation rule; the
+  domain keeps no model list; quantization is an enumerated field; provenance
+  is required and resale is legitimate; a registry may curate but never mints;
   `model_owner` is the three-party hook and there is no royalty field — the
   `inference` capability's `spec.md` and `architecture.md`.
-- Charge derivation is a pure function of a usage record and a rate card —
+- D4: one credit is one base unit of the settlement asset, so the rate card is
+  the price and there is one authoritative number — the `inference`
+  capability's `spec.md`; rationale in its `architecture.md`.
+- D5: the handoff to issuance carries the accepted listing's card — the
+  `inference` capability's `spec.md`; recording it on the grant is
+  `compose-inference-domain-stack`'s delta and pricing by it
+  `meter-inference-usage`'s.
+- D6: no derived discovery price; a rate bound co-requires the card's asset in
+  the filter specification — the `inference` capability's `spec.md` and its
+  `architecture.md`, "Current limits".
+- D7: quota-backed publication in version 1, quota being a sales cap — the
+  `inference` capability's `architecture.md`, "Current limits"; the
+  requirement is `compose-inference-domain-stack`'s delta.
+- D8: inference binds the family's purchase shape, which admits exactly two
+  key dispositions and a strict integer quantity — the `api-family`
+  capability's `spec.md`.
+- D9: charge derivation is a pure function of a usage record and a rate card —
   the `inference` capability's `spec.md`.
-- Why the family kit precedes the stack, and what the withdrawn copy measured
-  — the `inference` capability's `architecture.md`, and
-  `docs/development/ROADMAP.md`'s Goal 9 current state.
+- D10: usage evidence is secret-free by format and bound to the grant and the
+  request — the `inference` capability's `spec.md`.
+- D11: attestation is reserved and unverified: an opaque canonical envelope on
+  the card, a digest reference on the evidence — the `inference` capability's
+  `spec.md` and `architecture.md`.
+- D12: marketplace principal, bearer credential, and spending authority are
+  three identities; the bearer credential is delivery, never payment
+  authorization — rationale in the `inference` capability's `architecture.md`;
+  the normative requirement is `compose-inference-domain-stack`'s delta, which
+  builds the credential.
+- D13: the authority is the one synchronous admission decision and rating
+  systems are downstream — rationale in the `inference` capability's
+  `architecture.md`; the requirement is `meter-inference-usage`'s delta.
+- D14: inference has its own storefront executable, composed as API credits
+  is, with a quota resource in place of a capacity binding — the `inference`
+  capability's `architecture.md`; the composition is
+  `compose-inference-domain-stack`'s delta.
+- D15: why the family kit precedes the stack, and what the withdrawn copy
+  measured — the `inference` capability's `architecture.md`, the `api-family`
+  capability's `spec.md`, and `docs/development/ROADMAP.md`'s Goal 9 current
+  state.
+- D16: discovery under the `inference` schema identity and its filter
+  specification — the `inference` capability's `spec.md`.
+- D17: the version 1 surface is `openai.v1`, chat completions and completions
+  only — the `inference` capability's `spec.md`, "One listing is one served
+  model".
 
 ## Dependencies and Related Changes
 
