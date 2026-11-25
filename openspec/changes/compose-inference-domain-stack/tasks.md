@@ -2355,6 +2355,24 @@ Evidence, at the tree of review 25's fixes, on the same host:
 - A fresh-context check of the diff found one point, fixed: this note gave no
   run on the tree that holds F4's edits.
 
+*Pipeline run of `3d4f86e7f`, outside the plan's sections.* The end-to-end
+pipeline ran on the change's branch for the first time: `e2e-vm`,
+`e2e-bare-metal`, `e2e-apicredits`, `e2e-inference` and the native Ansible
+gate all succeeded. Reading its evidence found two things:
+- The log collector kept no inference compose logs: `scripts/fetch-e2e-logs.py`
+  listed the three earlier lanes' artifacts. It now lists `e2e-inference-logs`,
+  with `scripts/tests/test_fetch_e2e_logs.py` and `docs/development/TESTING.md`
+  naming the four.
+- A storefront's capacity reconcile refused during a lane-time set, in the
+  inference and API-credit lanes alike; it is shared lane machinery and is an
+  unowned gap in the change index.
+
+Evidence, at this fix's tree, on an arm64 macOS host:
+- Unit: `scripts/tests/test_fetch_e2e_logs.py`, every case passed.
+- `make check-repository` against `dev` passed.
+- The pipeline has not run on this tree; the next run's collection proves the
+  fourth artifact is kept.
+
 ## 12. Closeout
 
 The parts of `docs/guidance/workflow/closeout.md`, in its order, with this

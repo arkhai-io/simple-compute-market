@@ -484,8 +484,9 @@ previous run tested a different commit. `E2E_COMMIT` may be a short ID or a ref.
 With `E2E_AFTER_RUN` naming a run ID, it takes only a later run, so a commit's
 earlier run is not taken while its new one is still unlisted. Logs live under `.snapshot/e2e-logs/<run-id>/`:
 `actions.log`, `e2e-vm-logs/compose-logs.txt`,
-`e2e-bare-metal-logs/compose-logs.txt`, and
-`e2e-apicredits-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root
+`e2e-bare-metal-logs/compose-logs.txt`,
+`e2e-apicredits-logs/compose-logs.txt`, and
+`e2e-inference-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root
 directory.
 Each successful fetch also creates `<run-id>.zip` beside the run directory,
 containing that directory and its logs. Repeated fetches replace the ZIP.

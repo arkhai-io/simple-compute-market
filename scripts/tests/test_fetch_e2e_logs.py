@@ -25,7 +25,12 @@ sys.modules[_SPEC.name] = fetcher
 _SPEC.loader.exec_module(fetcher)
 
 # One compose-log artifact per end-to-end lane, as the workflow uploads them.
-LANE_LOGS = ("e2e-vm-logs", "e2e-bare-metal-logs", "e2e-apicredits-logs")
+LANE_LOGS = (
+    "e2e-vm-logs",
+    "e2e-bare-metal-logs",
+    "e2e-apicredits-logs",
+    "e2e-inference-logs",
+)
 
 
 def test_every_lane_log_is_fetched() -> None:

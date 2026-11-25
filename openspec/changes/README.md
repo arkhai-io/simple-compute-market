@@ -507,6 +507,12 @@ No change owns these yet. They were deferred by `add-inference-domain-contract`'
 | The model card requires `endpoint`, an address the seller writes by hand and nothing checks. A design in which the provider registers its routes and the address is delivered at fulfillment removes the field from the card, the served shape and the `inference` specification | `add-inference-domain-contract` pre-closeout review 01, F5 |
 | The rate card requires `asset`, a second statement of the asset beside the option's. Stating token rates in the shared option envelope removes the field, with the one-asset rule and the discovery co-requirement that rest on it | `add-inference-domain-contract` pre-closeout review 01, F5 |
 
+No change owns this yet. It was found in `compose-inference-domain-stack`'s first pipeline run.
+
+| Item | Origin |
+|---|---|
+| A Compose lane sets each party's injected time in turn, so while a set is in progress a storefront already at the new instant reads a site authority still at the old one. A capacity event the storefront's poller applies in that window runs a reconcile whose signed response it refuses as `timestamp_skew`; the reconcile is dropped with a `[CAPACITY] subscriber '_on_delta' failed` warning, and nothing shows that a later one always makes it up. Seen once each in the inference and API-credit lanes after the scenario moved lane time an hour past a purchase. Holding a storefront's loops while lane time is set, or retrying a refused reconcile in `kit/capacity-publication`, would close it | `compose-inference-domain-stack` pipeline run of `3d4f86e7f`, both lanes' storefront logs |
+
 ## Lesser goal — POOLS capacity and fulfillment foundation
 
 **What it adds up to.** The durable capacity and fulfillment substrate every roadmap goal builds on: a central Settlement Record, transactional scheduling and assignment, pull-correct fulfillment results, recovery, and the projections a storefront consumes instead of owning hardware itself. POOLS-1 through POOLS-6's foundations are archived. This is not a roadmap goal because it changes how the system is built rather than what the market can do — but nearly every goal has a dependency edge into it.

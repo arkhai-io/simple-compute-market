@@ -52,7 +52,12 @@ ATTEMPT_FORMAT = "%Y%m%dT%H%M%S.%fZ"
 RUN_LIST_LIMIT = 100
 DEFAULT_WAIT_SECONDS = 180.0
 POLL_SECONDS = 5.0
-LOG_ARTIFACTS = ("e2e-vm-logs", "e2e-bare-metal-logs", "e2e-apicredits-logs")
+LOG_ARTIFACTS = (
+    "e2e-vm-logs",
+    "e2e-bare-metal-logs",
+    "e2e-apicredits-logs",
+    "e2e-inference-logs",
+)
 COMPOSE_LOG = "compose-logs.txt"
 
 
