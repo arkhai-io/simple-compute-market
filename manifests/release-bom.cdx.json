@@ -1,0 +1,905 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "lifecycles": [
+      {
+        "phase": "post-build"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "marketplace",
+      "name": "marketplace",
+      "version": "0.4.0",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/arkhai-io/simple-compute-market"
+        }
+      ],
+      "properties": [
+        {
+          "name": "arkhai:bom-layout",
+          "value": "1"
+        },
+        {
+          "name": "arkhai:source-revision",
+          "value": "8ff704b8e85e11ceb7383adff8277007f3ecffe4"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-injected-time",
+      "name": "arkhai-injected-time",
+      "version": "0.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cb110a97f2352f4746cba0c481bc668a37d7a7d14469ccbe015702090f75172d"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-injected-time@0.1.0?file_name=arkhai_injected_time-0.1.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-schema-migrations",
+      "name": "arkhai-kit-schema-migrations",
+      "version": "0.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2d6eead7c997bcab58e2ec105549e47aa55acd048d2e12f65dec8bab983adbb1"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-schema-migrations@0.1.0?file_name=arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-identity",
+      "name": "arkhai-kit-identity",
+      "version": "0.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6881dc5225fb5eb039f72b9012ea4a06d9af411d67979933ef82e7cb61bb2fe2"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-identity@0.5.0?file_name=arkhai_kit_identity-0.5.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-deal-lifecycle-contracts",
+      "name": "arkhai-kit-deal-lifecycle-contracts",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d76b24c9004140d224444038ea260f9014bbf428e4badd0cdfe84484782fa18c"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-deal-lifecycle-contracts@0.3.0?file_name=arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-deal-lifecycle",
+      "name": "arkhai-kit-deal-lifecycle",
+      "version": "0.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "22683211e20b3041d767bf93b4fb27a0cef3e99fc9d2f0af8e3c9fe2c2ae5778"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-deal-lifecycle@0.5.0?file_name=arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-deal-lifecycle-client",
+      "name": "arkhai-kit-deal-lifecycle-client",
+      "version": "0.2.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ba43dc06d5ad36465db3f3f58f30418f69508c281f83b6bcea9b964903c6fb4b"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-deal-lifecycle-client@0.2.0?file_name=arkhai_kit_deal_lifecycle_client-0.2.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-arkhai-mediation",
+      "name": "arkhai-kit-arkhai-mediation",
+      "version": "0.3.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4e7e9129a5cf928473b2431599bc99bf0ec1986e95f781337d9d2dab9c583a83"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-arkhai-mediation@0.3.1?file_name=arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-deal-lifecycle-buyer",
+      "name": "arkhai-kit-deal-lifecycle-buyer",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8badf728313914219e2e4ccd8c119418f4ce9ef553e18d50bece03509989ff77"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-deal-lifecycle-buyer@0.3.0?file_name=arkhai_kit_deal_lifecycle_buyer-0.3.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-deal-servicing",
+      "name": "arkhai-kit-deal-servicing",
+      "version": "0.4.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "47f002a1292d7dbeb606f4b50d71bb638159d40ec4ff9068486813ba6d9dbcf2"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-deal-servicing@0.4.0?file_name=arkhai_kit_deal_servicing-0.4.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core",
+      "name": "arkhai-core",
+      "version": "0.6.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "79049afe2b0a119697a349d06381e0279d783430473d3d9515e182dd877e36f6"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core@0.6.0?file_name=arkhai_core-0.6.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-settlement-runtime",
+      "name": "arkhai-kit-settlement-runtime",
+      "version": "0.8.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f16321fd51d10bd199c76c16b405ca0f1c1aee1efb9bb6f8423d3ababdf52119"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-settlement-runtime@0.8.1?file_name=arkhai_kit_settlement_runtime-0.8.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-config",
+      "name": "arkhai-kit-config",
+      "version": "0.6.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ff2c64ecd1a545b303f79ce9f838e0442e69a44bec2c4d590d3c11e80273795d"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-config@0.6.1?file_name=arkhai_kit_config-0.6.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-alkahest",
+      "name": "arkhai-kit-alkahest",
+      "version": "0.14.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "25e271d095fe11c97737435f58665696ba3feb5d0e9f53d6f31b7cc9d8b79e6e"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-alkahest@0.14.0?file_name=arkhai_kit_alkahest-0.14.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-policy",
+      "name": "arkhai-kit-policy",
+      "version": "0.7.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8801fd963abcd8b3adbc5f5fdc562a99042e2ca2f6f5c8d7c0d20a9890e77807"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-policy@0.7.0?file_name=arkhai_kit_policy-0.7.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-negotiation-runtime",
+      "name": "arkhai-kit-negotiation-runtime",
+      "version": "0.6.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "40ca2d34f21aa63344682ee5d3cce52cf0fbb376348371ae15b43f5eeacabb0a"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-negotiation-runtime@0.6.0?file_name=arkhai_kit_negotiation_runtime-0.6.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-arkhai-payments",
+      "name": "arkhai-kit-arkhai-payments",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "56cd40b1055061d30da6513bd3ac3492d88a2ea2aec49c08ea69d41e58f3ae9d"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-arkhai-payments@0.9.0?file_name=arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core-registry-client",
+      "name": "arkhai-core-registry-client",
+      "version": "0.13.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "192c2037ff4cd51ef850e0a0c1cc3e56f587ac879a36d24cfb4889656504d51b"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core-registry-client@0.13.0?file_name=arkhai_core_registry_client-0.13.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-delivery",
+      "name": "arkhai-kit-delivery",
+      "version": "0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "03db91e98b5adbe46ae02cbfc0b5761c669da8c1e97ee32ce2244021b59523d5"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-delivery@0.2.2?file_name=arkhai_kit_delivery-0.2.2-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core-buyer",
+      "name": "arkhai-core-buyer",
+      "version": "0.8.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5894b40ecf882065b3e351257d56d30d9619d04d3563b2025069ad9ae086c459"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core-buyer@0.8.0?file_name=arkhai_core_buyer-0.8.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-capability-shape",
+      "name": "arkhai-kit-capability-shape",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "960b2988ee45a84510a93b09b3781896a14396b061df4802b411557a184e3338"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-capability-shape@0.3.0?file_name=arkhai_kit_capability_shape-0.3.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-capability-admissibility",
+      "name": "arkhai-kit-capability-admissibility",
+      "version": "0.1.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "dc2a1027c40203cb711a959008e2abdc16966677749890ce0d874601510d58db"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-capability-admissibility@0.1.1?file_name=arkhai_kit_capability_admissibility-0.1.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-resource-pools-contracts",
+      "name": "arkhai-kit-resource-pools-contracts",
+      "version": "0.4.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6764aa133054f35ec5f81449595a08c00269f7e603bddee25326fa4e6c532bc8"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-resource-pools-contracts@0.4.0?file_name=arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core-storefront",
+      "name": "arkhai-core-storefront",
+      "version": "0.19.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cf2242ea434d17575512d5a3f92cff3ea619af4a57e623cef004fc48aaf9ab09"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core-storefront@0.19.0?file_name=arkhai_core_storefront-0.19.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core-storefront-client",
+      "name": "arkhai-core-storefront-client",
+      "version": "0.30.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "44406b6ae17160e2188d0fdfc2d036328161d84640f582bd088d42a4ae29538a"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core-storefront-client@0.30.0?file_name=arkhai_core_storefront_client-0.30.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-core-registry",
+      "name": "arkhai-core-registry",
+      "version": "0.6.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "39c059efca0161b1920faacc3525def07bb6d5ccdedcb2234778f0b504bf470b"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-core-registry@0.6.1?file_name=arkhai_core_registry-0.6.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-resource-pools",
+      "name": "arkhai-kit-resource-pools",
+      "version": "0.10.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "dd05c8decb8f851dba6709906f5f547c17caf62b37d67bed2b86ea7952a54d66"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-resource-pools@0.10.1?file_name=arkhai_kit_resource_pools-0.10.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-site",
+      "name": "arkhai-kit-site",
+      "version": "0.14.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4a8317b07cbc42319f5ba853bab681b3ee1b0b370dcd9033c8740de417d4b217"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-site@0.14.0?file_name=arkhai_kit_site-0.14.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-site-client",
+      "name": "arkhai-kit-site-client",
+      "version": "0.13.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6770c75467b0f19a5f2bd33d6e7e26b6c622607071146bd72d2cb6855459b4b2"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-site-client@0.13.1?file_name=arkhai_kit_site_client-0.13.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-capacity-publication",
+      "name": "arkhai-kit-capacity-publication",
+      "version": "0.12.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "892f97bf06fc70398b4ff6ccb4cf3d97e95c29a44160d9f06b910a073afe3c89"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-capacity-publication@0.12.1?file_name=arkhai_kit_capacity_publication-0.12.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-contact-exchange",
+      "name": "arkhai-kit-contact-exchange",
+      "version": "0.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ff8b9e137706ca7d0042b3ce130df341b4f8055a8eeaad54c6cf3a5147bb9a9f"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-contact-exchange@0.5.1?file_name=arkhai_kit_contact_exchange-0.5.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-fulfillment",
+      "name": "arkhai-kit-fulfillment",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8adca08af1ed5d0ccf542917d10d904e6105aae14bf19045c740d6a36dc5d372"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-fulfillment@0.9.0?file_name=arkhai_kit_fulfillment-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-resource-pools-client",
+      "name": "arkhai-kit-resource-pools-client",
+      "version": "0.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "99aade37ac5874271dba1ac718c16c6e6170a5c13d231e48f25ee9bb7bd188ac"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-resource-pools-client@0.1.0?file_name=arkhai_kit_resource_pools_client-0.1.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-storefront",
+      "name": "arkhai-kit-storefront",
+      "version": "0.12.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b57be96ce3a8ffb04bd6a7633a0f82e9a5e066c980cc6e507cdfcfd4b9136e44"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-storefront@0.12.0?file_name=arkhai_kit_storefront-0.12.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute",
+      "name": "arkhai-compute",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "935eb8d26a096054a8e1248fc6a778aaa1c9ee96bc0498d1a766eb66f8f75bba"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute@0.3.0?file_name=arkhai_compute-0.3.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-bare-metal",
+      "name": "arkhai-bare-metal",
+      "version": "0.16.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "36b502637ef2575e5d42ef00957e1bb9009472f630fbe83b21e36f6bd0109522"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-bare-metal@0.16.0?file_name=arkhai_bare_metal-0.16.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-delivery-apprise",
+      "name": "arkhai-kit-delivery-apprise",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3d8cdb0d301a1ac7f2cd1b046cdf332e2d50b7d57d4a5893dd4642d3e276e7a7"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-delivery-apprise@0.1.2?file_name=arkhai_kit_delivery_apprise-0.1.2-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-pool-overrides",
+      "name": "arkhai-kit-pool-overrides",
+      "version": "0.3.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3334333aefe5b3caee7fc051aa9c1bae5e42c81ac884e1aaef26e74854b24ec4"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-pool-overrides@0.3.0?file_name=arkhai_kit_pool_overrides-0.3.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute-provisioning-contracts",
+      "name": "arkhai-compute-provisioning-contracts",
+      "version": "0.17.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "52732e03600946d09200510eb8e6047faffb16120f909768538f594b70cb1b78"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute-provisioning-contracts@0.17.0?file_name=arkhai_compute_provisioning_contracts-0.17.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute-delivery",
+      "name": "arkhai-compute-delivery",
+      "version": "0.2.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ede51d8d5448a61e4848631ae064dfdb1bc2bb26ba759a07e7b91c8e326931c5"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute-delivery@0.2.0?file_name=arkhai_compute_delivery-0.2.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute-provisioning-client",
+      "name": "arkhai-compute-provisioning-client",
+      "version": "0.12.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f4b089b46237b7656eb86b50585f1eb60f802b7d0d688f6ffecc6d465704603b"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute-provisioning-client@0.12.0?file_name=arkhai_compute_provisioning_client-0.12.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-bare-metal-storefront",
+      "name": "arkhai-bare-metal-storefront",
+      "version": "0.29.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "61aa9be6eb454b70c165db400a7bf55dbd881640a268a10ffa3cbad5936d3bee"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-bare-metal-storefront@0.29.0?file_name=arkhai_bare_metal_storefront-0.29.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute-provisioning",
+      "name": "arkhai-compute-provisioning",
+      "version": "0.30.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "66a04545ecd4eed9d18b2b0dfbe26892837ac61ca290c96428edb3da2be59028"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute-provisioning@0.30.0?file_name=arkhai_compute_provisioning-0.30.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute-provisioning-ansible",
+      "name": "arkhai-compute-provisioning-ansible",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d7c3953a5694ce32bfdb7d650eb653ea7858983b3a1298e248e2f24117e20e67"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute-provisioning-ansible@0.9.0?file_name=arkhai_compute_provisioning_ansible-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-bare-metal-provisioning-adapter",
+      "name": "arkhai-bare-metal-provisioning-adapter",
+      "version": "0.15.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "225be773a1a801fb229ae17a43d8af544af46a9e8490f3227f45fff9ed52bb2e"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-bare-metal-provisioning-adapter@0.15.0?file_name=arkhai_bare_metal_provisioning_adapter-0.15.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-kit-capability-pricing",
+      "name": "arkhai-kit-capability-pricing",
+      "version": "0.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "51cb0af6d594460f5da24a63ed65217e7fa846387da7719997f4dee8d2b6f7ec"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-kit-capability-pricing@0.1.0?file_name=arkhai_kit_capability_pricing-0.1.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms",
+      "name": "arkhai-vms",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "af17fc01df4db844e2b579408b6ba52ae889ff11de8830edc82e24b64a96a515"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms@0.9.0?file_name=arkhai_vms-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-listings",
+      "name": "arkhai-vms-listings",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2134d68ebde76dbd8ca3c7c1c1f83f00c4927189cd0798ca724a333b44940b5f"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-listings@0.9.0?file_name=arkhai_vms_listings-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-negotiation",
+      "name": "arkhai-vms-negotiation",
+      "version": "0.7.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e14b0039b81ff9ed444b1a2c5f6534e172f686ba12d36d3a83e5b634e35daffd"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-negotiation@0.7.0?file_name=arkhai_vms_negotiation-0.7.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-settlement",
+      "name": "arkhai-vms-settlement",
+      "version": "0.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7ad3d6eea607a0b79c6879424a4b717724a38d1fb221f09af5c39d8ac285024a"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-settlement@0.5.0?file_name=arkhai_vms_settlement-0.5.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-buyer",
+      "name": "arkhai-vms-buyer",
+      "version": "0.13.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f78d5cf3982cae2f35cf08eca2ef41182887228ea0c5eaadbc3937187c13aacb"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-buyer@0.13.0?file_name=arkhai_vms_buyer-0.13.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-provisioning-operator-client",
+      "name": "arkhai-vms-provisioning-operator-client",
+      "version": "0.12.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f73d60cd4dcea5f601d12e7d8039ad7ce939f632786e87d2a26520c948da760c"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-provisioning-operator-client@0.12.0?file_name=arkhai_vms_provisioning_operator_client-0.12.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-provisioning-adapter",
+      "name": "arkhai-vms-provisioning-adapter",
+      "version": "0.21.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "41fbf77b80519976e6de804b19594a90b091ecab590d24c7c8e4f95b0d2cc9d8"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-provisioning-adapter@0.21.0?file_name=arkhai_vms_provisioning_adapter-0.21.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-compute-provisioning-service",
+      "name": "arkhai-compute-provisioning-service",
+      "version": "0.28.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e1f8209c78a18eccf603e48322e3bcf97a5dbf7174c684a1e281d31a79f3f7e1"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-compute-provisioning-service@0.28.0?file_name=arkhai_compute_provisioning_service-0.28.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-vms-storefront",
+      "name": "arkhai-vms-storefront",
+      "version": "0.29.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9f7d05a1eddae703044d875760195079dd489618bcb8f92055e47b4f00469022"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-vms-storefront@0.29.0?file_name=arkhai_vms_storefront-0.29.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-apicredits-domain",
+      "name": "arkhai-apicredits-domain",
+      "version": "0.10.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "aff9b8560159810b310a83e6fe286f8d43b5f7734f57f42e9e39e2f21306daed"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-apicredits-domain@0.10.0?file_name=arkhai_apicredits_domain-0.10.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-apicredits-buyer",
+      "name": "arkhai-apicredits-buyer",
+      "version": "0.8.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1db9f00a62a5a269f0dbbe0b418244a3fd56969d3b1d04c37d4d83e3b521b55a"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-apicredits-buyer@0.8.1?file_name=arkhai_apicredits_buyer-0.8.1-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-apicredits-middleware",
+      "name": "arkhai-apicredits-middleware",
+      "version": "0.1.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "de4ab38b836349823d3054731d3f66c793e77f0f287a29489559238720330ad2"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-apicredits-middleware@0.1.2?file_name=arkhai_apicredits_middleware-0.1.2-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-apicredits-storefront",
+      "name": "arkhai-apicredits-storefront",
+      "version": "0.23.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ee1b09fe4a9732aa92817c4ad96fab61fd77177b837909a0064366e193369f21"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-apicredits-storefront@0.23.0?file_name=arkhai_apicredits_storefront-0.23.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-apicredits-service",
+      "name": "arkhai-apicredits-service",
+      "version": "0.8.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e573aa74e1f06815cfe56c30855a0998238534996dd7eee1d18db6aad4acc1df"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-apicredits-service@0.8.0?file_name=arkhai_apicredits_service-0.8.0-py3-none-any.whl"
+    },
+    {
+      "type": "library",
+      "bom-ref": "wheel/arkhai-bare-metal-buyer",
+      "name": "arkhai-bare-metal-buyer",
+      "version": "0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "925ce587da93ac76bb62979cd2f93760f4fb02fdf33eaea10abe33ca1d225c73"
+        }
+      ],
+      "purl": "pkg:pypi/arkhai-bare-metal-buyer@0.9.0?file_name=arkhai_bare_metal_buyer-0.9.0-py3-none-any.whl"
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/registry",
+      "name": "registry",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8affb2dbad625937d36de0981a5b170ce38d0b9febb18542110237dad6691bc6"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3A8affb2dbad625937d36de0981a5b170ce38d0b9febb18542110237dad6691bc6?tag=registry-8ff704b8e"
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/storefront",
+      "name": "storefront",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "18fcff27a3e0b595361ab5d84b6191f1428ddd200769b909f78f9823d17d7c53"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3A18fcff27a3e0b595361ab5d84b6191f1428ddd200769b909f78f9823d17d7c53?tag=storefront-8ff704b8e"
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/provisioning",
+      "name": "provisioning",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d89cd6cb4eb4ea2ce4f16fa20ca26283b50bd9539383d13d4f1fafac4de74ff4"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3Ad89cd6cb4eb4ea2ce4f16fa20ca26283b50bd9539383d13d4f1fafac4de74ff4?tag=provisioning-8ff704b8e"
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/bare-metal-storefront",
+      "name": "bare-metal-storefront",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "77dd5e3da3a39305dd3e399192555a9a3d2fd159276347249491da6258f17888"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3A77dd5e3da3a39305dd3e399192555a9a3d2fd159276347249491da6258f17888?tag=bare-metal-storefront-8ff704b8e"
+    },
+    {
+      "type": "container",
+      "bom-ref": "image/frp-grant-admission",
+      "name": "frp-grant-admission",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "575aedd2f3a768c4fd358abb24dcd1c36734137572951909a4a4dc0bbfdd4920"
+        }
+      ],
+      "purl": "pkg:oci/arkhai@sha256%3A575aedd2f3a768c4fd358abb24dcd1c36734137572951909a4a4dc0bbfdd4920?tag=frp-grant-admission-8ff704b8e"
+    },
+    {
+      "type": "application",
+      "bom-ref": "chart/arkhai-node-operator",
+      "name": "arkhai-node-operator",
+      "version": "0.5.2",
+      "properties": [
+        {
+          "name": "arkhai:content-digest",
+          "value": "33b41d4d8356b192569a58a638dbad09bdfc880d73603b84dedf779c46f8c456"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "bom-ref": "binary/market",
+      "name": "market",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a3c347875ebc864da27a8c669aba6c8c25c6d4071ee6e57d184db8a7aa2232b9"
+        }
+      ],
+      "properties": [
+        {
+          "name": "arkhai:platform",
+          "value": "linux/amd64"
+        }
+      ]
+    }
+  ]
+}
