@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 import injected_time
@@ -161,6 +162,7 @@ async def lifespan(app: FastAPI):
                 )
 
     contacts_enabled = app.state.rfq_spec is not None and app.state.rfq_trust is not None
+    app.state.rfq_contact_window = timedelta(seconds=settings.registry_rfq_contact_window_seconds)
     app.state.rfq_contact_keys = await asyncio.to_thread(
         prepare_rfq_contact_access,
         sessions,

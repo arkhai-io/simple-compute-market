@@ -1164,6 +1164,7 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
             "service": {"port": 8081},
             "config": {
                 "rfqSpecPath": "/app/rfq-schema.json",
+                "rfqContactWindowSeconds": 604800,
                 "rootPath": "/registry",
                 "logLevel": "debug",
                 "requireReadApiKey": True,
@@ -1193,6 +1194,8 @@ def test_the_rendered_registry_profile_loads_with_the_registry_loader() -> None:
     profile = _registry_profile(manifest)
 
     assert settings["registry_rfq_spec_path"] == "/app/rfq-schema.json"
+    assert profile["REGISTRY_RFQ_CONTACT_WINDOW_SECONDS"] == "604800"
+    assert settings["registry_rfq_contact_window_seconds"] == 604800
     assert settings["registry_descriptor_display_name"] == awkward
     assert settings["registry_descriptor_recommended_dispute_authorities"] == [_recommended_mediation_double()]
     for setting, line in (

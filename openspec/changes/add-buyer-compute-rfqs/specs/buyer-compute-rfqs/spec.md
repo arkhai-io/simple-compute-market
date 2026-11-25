@@ -203,7 +203,7 @@ When submitting a response, the respondent SHALL explicitly consent to share the
 
 ### Requirement: Completed introductions have a bounded contact retrieval window
 
-The default retrieval window SHALL end 30 days after an introduction completes. Either participant SHALL be able to end retrieval early for both participants in that introduction. At or after the cutoff the registry SHALL refuse all further contact reads for that pair, including retries.
+The registry SHALL establish the contact retrieval cutoff when an introduction completes, using the operator-configured window. The window SHALL default to 30 days. Configuration changes SHALL apply only to introductions completed under the new configuration. Either participant SHALL be able to end retrieval early for both participants in that introduction. At or after the cutoff the registry SHALL refuse all further contact reads for that pair, including retries.
 
 #### Scenario: Two introductions complete on different dates
 
@@ -214,6 +214,11 @@ The default retrieval window SHALL end 30 days after an introduction completes. 
 
 - **WHEN** either participant ends retrieval and the other retries an earlier successful contact read
 - **THEN** the registry returns no contact details and future reads by either participant remain closed
+
+#### Scenario: The operator changes the contact retrieval window
+
+- **WHEN** an introduction already exists and the operator changes the registry's retrieval window
+- **THEN** the existing introduction keeps its original cutoff and later introductions use the configured window at completion
 
 ### Requirement: RFQ ownership belongs to an authenticated account
 

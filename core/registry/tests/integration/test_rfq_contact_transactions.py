@@ -113,7 +113,9 @@ def race(sessions, mode, *, select_first):
 
     def select_offer(*, contender):
         def action(db):
-            return RfqResponses(db, spec, buyer, audience, contact_keys).select(rfq_id, response_id, selection)
+            return RfqResponses(db, spec, buyer, audience, contact_keys).select(
+                rfq_id, response_id, selection, contact_window=timedelta(days=30),
+            )
 
         return execute(buyer, select_target, selection, action, contender=contender)
 

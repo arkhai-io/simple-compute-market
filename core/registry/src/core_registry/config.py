@@ -96,6 +96,12 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="REGISTRY_RFQ_CONTACT_KEYS_FILE",
     )
+    registry_rfq_contact_window_seconds: int = Field(
+        default=30 * 24 * 60 * 60,
+        gt=0,
+        le=2**31 - 1,
+        validation_alias="REGISTRY_RFQ_CONTACT_WINDOW_SECONDS",
+    )
     registry_rfq_redact_restored_contacts: bool = Field(
         default=False,
         validation_alias="REGISTRY_RFQ_REDACT_RESTORED_CONTACTS",

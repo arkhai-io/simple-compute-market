@@ -52,7 +52,7 @@ Each respondent account can have one pending response per RFQ revision. Concurre
 
 ### D12 — Bounded retrieval
 
-The default contact retrieval window is 30 days from completion of each introduction. Either participant can end retrieval early for that pair. At the cutoff, all subsequent reads, including retries, refuse contact disclosure to both participants. Each can keep details already received. Ending one introduction’s retrieval leaves the others on their own schedules.
+The registry operator configures the contact retrieval window in positive whole seconds through the registry profile or its Helm value. It defaults to 30 days. The registry sets each introduction's cutoff at completion using the current setting. A configuration change applies only to new introductions. Either participant can end retrieval early for that pair. At the cutoff, all subsequent reads, including retries, refuse contact disclosure to both participants. Each can keep details already received. Ending one introduction’s retrieval leaves the others on their own schedules.
 
 ### D13 — One RFQ API for people and authorized delegates
 

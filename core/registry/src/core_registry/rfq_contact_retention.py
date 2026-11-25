@@ -61,6 +61,8 @@ def prepare_rfq_contact_access(
 class RfqContactRetention:
     """Serialize timer-driven and manually advanced retention cycles."""
 
+    _wait = staticmethod(asyncio.wait_for)
+
     def __init__(self, sessions: sessionmaker[Session]):
         self._sessions = sessions
         self._wake = asyncio.Event()
@@ -94,7 +96,7 @@ class RfqContactRetention:
         while not self._stopping:
             interval = None if self._paused else _SWEEP_INTERVAL_SECONDS
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=interval)
+                await self._wait(self._wake.wait(), timeout=interval)
             except TimeoutError:
                 try:
                     await self._cycle()

@@ -1,5 +1,6 @@
 """RFQ consent, pair isolation and retention through the registry HTTP boundary."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -20,6 +21,7 @@ from registry_client.rfq_registry import RfqRegistryClient
 from sqlalchemy import create_engine, make_url, select
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+from core_registry import rfq_contact_retention
 from core_registry.db.models import RfqContactPayload, RfqIntroduction, RfqReplayReservation, utcnow
 from core_registry.rfq_contact_crypto import RfqContactKeys, RfqContactUnavailable
 from core_registry.rfq_contact_store import require_retained_keys, sweep_contact_batch
@@ -175,6 +177,71 @@ async def test_current_consent_and_independent_introductions(configured_registry
             assert accepted.model_dump(mode="json", exclude_none=True) in receipts
             allowed_fields = {"resource_id", "state", "version", "terms_revision", "introduction_id"}
             assert all(set(receipt) <= allowed_fields for receipt in receipts if receipt is not None)
+
+
+async def test_contact_window_changes_apply_to_new_introductions_and_cleanup_runs_automatically(
+    configured_registry, monkeypatch,
+):
+    registry, clock, _ = configured_registry
+    buyer, alice, bob = actor("buyer"), actor("alice"), actor("bob")
+    posted = await registry.create(requirements(), subject=buyer.subject)
+    rfq_id = posted.resource_id
+
+    async def introduce(client, respondent):
+        details = await client.read(respondent, rfq_id)
+        offer = await client.respond(respondent, rfq_id, OfferResponse(
+            version=1, terms_revision=1, counterparty=details.buyer_reference,
+            consent_to_share=True, offer={"offered_node_count": 40},
+            contact={"email": "respondent@example.test"},
+        ))
+        response = await client.read_response(buyer, rfq_id, offer.resource_id)
+        accepted = await client.select(buyer, rfq_id, offer.resource_id, selection(response))
+        return offer.resource_id, await client.read_introduction(buyer, accepted.introduction_id)
+
+    registry.configuration["registry_rfq_contact_window_seconds"] = 60
+    async with registry.running() as application, client_for(registry, application) as client:
+        first_response, first = await introduce(client, alice)
+        assert datetime.fromisoformat(first.contact_until).timestamp() == clock.now() + 60
+
+    def payload_ids():
+        with registry.sessions() as db:
+            return set(db.scalars(select(RfqContactPayload.response_id)))
+
+    waiting = asyncio.Event()
+    tick = asyncio.Event()
+    swept = asyncio.Event()
+    scheduled_wait = rfq_contact_retention.RfqContactRetention._wait
+
+    async def controlled_timer(wake, *, timeout):
+        if waiting.is_set():
+            swept.set()
+            await scheduled_wait(wake, timeout=timeout)
+        else:
+            wake.close()
+            assert timeout is not None and 0 < timeout < 3600
+            waiting.set()
+            await tick.wait()
+            raise TimeoutError
+
+    registry.configuration["registry_rfq_contact_window_seconds"] = 120
+    monkeypatch.setattr(rfq_contact_retention.RfqContactRetention, "_wait", staticmethod(controlled_timer))
+    async with registry.running() as application, client_for(registry, application) as client:
+        try:
+            await asyncio.wait_for(waiting.wait(), timeout=5)
+            second_response, second = await introduce(client, bob)
+            assert datetime.fromisoformat(second.contact_until).timestamp() == clock.now() + 120
+            assert (await client.read_introduction(buyer, first.introduction_id)).contact_until == first.contact_until
+            assert payload_ids() == {first_response, second_response}
+
+            clock.set(clock.now() + 60)
+            with pytest.raises(RegistryClientError, match="HTTP 410"):
+                await client.read_introduction(buyer, first.introduction_id)
+            tick.set()
+            await asyncio.wait_for(swept.wait(), timeout=5)
+            assert payload_ids() == {second_response}
+            assert (await client.read_introduction(buyer, second.introduction_id)).contact == second.contact
+        finally:
+            tick.set()
 
 
 async def test_permission_is_rechecked_before_replaying_an_offer(configured_registry):

@@ -19,6 +19,13 @@
 {{- if $config.rfqSpecPath -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_RFQ_SPEC_PATH" $config.rfqSpecPath)) -}}
 {{- end -}}
+{{- if not (kindIs "invalid" $config.rfqContactWindowSeconds) -}}
+  {{- $window := $config.rfqContactWindowSeconds | toJson -}}
+  {{- if not (and (regexMatch "^[1-9][0-9]*$" $window) (ge (int64 $window) 1) (le (int64 $window) 2147483647)) -}}
+    {{- fail "registry config.rfqContactWindowSeconds must be a positive whole number of seconds up to 2147483647" -}}
+  {{- end -}}
+  {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_RFQ_CONTACT_WINDOW_SECONDS" $window)) -}}
+{{- end -}}
 {{- if $rfqKeys.name -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_RFQ_REPLAY_KEYS_FILE" (include "registry.rfqReplayKeyFile" .))) -}}
 {{- end -}}

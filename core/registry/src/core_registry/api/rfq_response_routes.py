@@ -58,7 +58,10 @@ async def _exchange(
         if action is RfqOperation.RECONFIRM:
             return partial(service.reconfirm, rfq_id, response_id, OfferResponse.model_validate(inputs))
         if action is RfqOperation.SELECT:
-            return partial(service.select, rfq_id, response_id, ShareContact.model_validate(inputs))
+            return partial(
+                service.select, rfq_id, response_id, ShareContact.model_validate(inputs),
+                contact_window=request.app.state.rfq_contact_window,
+            )
         if action is RfqOperation.WITHDRAW:
             return partial(service.finish_pending, rfq_id, response_id, ResponseVersion.model_validate(inputs), "withdrawn")
         if action is RfqOperation.DISMISS:

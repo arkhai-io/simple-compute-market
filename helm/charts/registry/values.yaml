@@ -55,6 +55,7 @@ config:
   filterSpecPath: "/app/filter-spec.yaml"
   # Select a packaged RFQ schema when this registry serves requests for quotes.
   rfqSpecPath: ""
+  # Optional rfqContactWindowSeconds overrides the 30-day default for new introductions.
   # SQLite path resolves against the persistence mount below by default.
   # Override with an external DSN (e.g. Postgres) when moving off SQLite.
   databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"

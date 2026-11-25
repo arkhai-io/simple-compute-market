@@ -178,9 +178,21 @@ def test_rfq_contact_key_is_mounted_only_for_registry_runtime() -> None:
     assert "REGISTRY_RFQ_CONTACT_KEYS_FILE" not in disabled and "rfq-contact-keys" not in disabled
 
 
+def test_the_rfq_contact_window_renders_in_the_registry_profile() -> None:
+    for values in ({}, {"config": {"rfqContactWindowSeconds": None}}):
+        manifest = _helm_template("registry-test", CHART, values)
+        assert "REGISTRY_RFQ_CONTACT_WINDOW_SECONDS" not in manifest
+    result = subprocess.run(
+        ["helm", "template", "registry-test", str(CHART), "--set", "config.rfqContactWindowSeconds=0"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0 and "config.rfqContactWindowSeconds" in result.stderr
+
+
 if __name__ == "__main__":
     test_the_migration_runs_first_from_the_application_image_over_its_database()
     test_the_migration_reads_the_secret_profile_the_application_reads()
     test_each_instance_renders_its_migration_and_a_disabled_one_renders_nothing()
     test_rfq_contact_key_is_mounted_only_for_registry_runtime()
+    test_the_rfq_contact_window_renders_in_the_registry_profile()
     print("registry chart render checks passed")

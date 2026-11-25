@@ -36,9 +36,6 @@ from core_registry.rfq_contact_crypto import (
 from core_registry.rfq_contact_store import contact_binding, open_contact, store_contact
 from core_registry.rfq_requests import RfqActionError, account_is_buyer, can_view_rfq
 
-_CONTACT_WINDOW = timedelta(days=30)
-
-
 def _account_is_respondent(response: RfqResponse, account: RfqAccountClaim) -> bool:
     return (response.respondent_namespace, response.respondent_subject) == (account.namespace, account.subject)
 
@@ -181,7 +178,9 @@ class RfqResponses:
             statement = statement.where(RfqContactPayload.purpose == PENDING_CONTACT)
         self.db.execute(statement)
 
-    def select(self, rfq_id: str, response_id: str, inputs: ShareContact) -> RfqMutationReceipt:
+    def select(
+        self, rfq_id: str, response_id: str, inputs: ShareContact, *, contact_window: timedelta,
+    ) -> RfqMutationReceipt:
         rfq = self._rfq(rfq_id, lock=True)
         if not account_is_buyer(rfq, self.account):
             raise RfqActionError(404, "rfq_response_not_found")
@@ -201,7 +200,7 @@ class RfqResponses:
         _require_open(rfq, now)
         intro = RfqIntroduction(
             introduction_id=uuid4().hex, response_id=response_id,
-            completed_at=now, contact_until=now + _CONTACT_WINDOW, version=1,
+            completed_at=now, contact_until=now + contact_window, version=1,
         )
         self.db.add(intro)
         self._delete_contact(response_id, pending_only=True)
