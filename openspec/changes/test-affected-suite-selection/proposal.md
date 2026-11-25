@@ -1,7 +1,7 @@
 ## Why
 
 The implement skill requires `make test` before every section's commit, "whatever
-the section touched" (`.agents/skills/change-implement/SKILL.md`, "Check before
+the section touched" (`arkhai-change-workflow`'s `change-implement` skill, "Check before
 committing"), because a change to a shared package, a dependency, or a lock
 reaches projects no focused suite covers. That rule is costly and unreliable:
 
@@ -81,8 +81,9 @@ None.
   `provisioning/compute/service`, `domains/apicredits/service`, `e2e-tests`, and
   the `scripts/tests` suite.
 - The new check, added to `make check-packaging`.
-- `.agents/skills/change-implement/SKILL.md`, `docs/development/TESTING.md`,
-  and `openspec/specs/change-workflow/README.md`, which describes the hooks.
+- `docs/development/TESTING.md`; and, in `arkhai-change-workflow`, the
+  `change-implement` skill and the `change-workflow` companion, which describes the
+  hooks.
 
 ### Workflow engine interfaces
 

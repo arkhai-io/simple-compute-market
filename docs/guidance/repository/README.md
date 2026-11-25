@@ -7,9 +7,8 @@ tags: [repository]
 Guidance that names this repository's own packages, services, tools, deployment,
 documents, or make targets and spans its systems: the rules a change here satisfies
 beyond the shared layers, and this repository's statement of each shared rule it
-applies, as
-[`docs/guidance/workflow/README.md`, "The layers of guidance"](../workflow/README.md#the-layers-of-guidance)
-defines the repository layer. Guidance pertaining to one capability sits beside its
+applies, as `arkhai-change-workflow`'s guidance, "The layers of guidance", defines
+the repository layer. Guidance pertaining to one capability sits beside its
 specification, in its directory under `openspec/specs/`. What the system is — its
 shape, its tests, its stacks and deployment — is described in
 [`ARCHITECTURE.md`](../../development/ARCHITECTURE.md),
@@ -30,8 +29,8 @@ the shared rule it applies by name rather than restating it.
 Every file carries YAML frontmatter whose `tags` hold `repository` and tags naming
 what the file covers, from this table or a lower layer's: the engineering table in
 [`docs/guidance/engineering/README.md`](../engineering/README.md#tags) and the
-workflow's in [`docs/guidance/workflow/README.md`](../workflow/README.md#tags).
-Content on another subject goes in another file. A capability's guidance is located
+workflow's in the installed workflow's guidance, its "Tags". Content on another
+subject goes in another file. A capability's guidance is located
 by its directory, so no capability has a tag.
 
 | Tag | Kind | Description |

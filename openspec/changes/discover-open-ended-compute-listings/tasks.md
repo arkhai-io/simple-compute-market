@@ -98,7 +98,7 @@ the registry (`core/registry/src/core_registry/filter-spec.yaml`).
 
 ## 4. Closeout
 
-Documentation-only, following `docs/guidance/workflow/closeout.md`, with this
+Documentation-only, following `arkhai-change-workflow`'s guidance, "Closeout", with this
 repository's parts in `openspec/README.md#this-repositorys-closeout-parts`, in
 order. Code defects return to implementation; do not promote planned behavior.
 
@@ -131,7 +131,7 @@ order. Code defects return to implementation; do not promote planned behavior.
 - [ ] 4.10 **Documentation citations:** run
   `make check-doc-citations CHANGE=discover-open-ended-compute-listings`, resolve
   matches, then
-  `scripts/change-workflow openspec validate discover-open-ended-compute-listings --strict`.
+  `change-workflow openspec validate discover-open-ended-compute-listings --strict`.
 - [ ] 4.11 **Archival:** last run
   `bunx @fission-ai/openspec@1.14.0 archive discover-open-ended-compute-listings -y`
   and link the campaign row to its archive.

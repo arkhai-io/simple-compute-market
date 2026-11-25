@@ -3,22 +3,21 @@
 Every line the workflow tooling appends to a change's workflow log carries the log's
 format marker, `"format": 2`, and the next-step computation reads only that format.
 A change whose log holds a line without the marker, or whose numbered records have
-no log, is brought to the owner with `python3 scripts/run_change_step.py convert
-<change>`, which rewrites the older lines in place and records where the change
-stands (`openspec/specs/change-workflow/spec.md#requirement-the-next-step-is-computed-from-the-files`).
+no log, is brought to the owner with `change-workflow convert <change>`, which
+rewrites the older lines in place and records where the change stands
+(`arkhai-change-workflow`'s CW-4rqr and CW-qj77).
 
 The command and the detection exist only for changes whose records were written
 before the format: a change worked on another branch runs that branch's tooling
 until it merges the code that reads the format, and is converted then
-(`openspec/specs/change-workflow/architecture.md#current-limits`). Once every change
+(`arkhai-change-workflow`'s companion, "Current limits"). Once every change
 not yet cleaned up has been converted, nothing will ever need them again, and they
 keep the older reading of triage files — the `## Next` tokens and `## Gate` —
-alive in `scripts/change_workflow/convert.py`, the only place it remains.
+alive in the engine's `convert` module, the only place it remains.
 
 ## What Changes
 
-- Remove the `convert` command, `scripts/change_workflow/convert.py`, and their
-  tests.
+- Remove the `convert` command, the engine's `convert` module, and their tests.
 - Remove the computation's detection of a change not yet converted, and its result
   naming the command.
 - Remove the conversion clauses and scenarios from the `change-workflow`
@@ -57,11 +56,12 @@ None.
 
 ## Impact
 
-- `scripts/change_workflow/convert.py`, `scripts/change_workflow/cli.py`,
-  `scripts/change_next_step.py`, and possibly `scripts/change_workflow/log.py`, and
-  their tests under `scripts/tests/`.
-- `.agents/skills/change-orchestrate/SKILL.md`, the `change-workflow` spec and
-  architecture, and `docs/change-workflow-handbook.md`.
+All of it is `arkhai-change-workflow`'s, the installed change workflow:
+
+- the engine's `convert` module, its command line, its next-step computation, and
+  possibly its log writer, and their tests;
+- the `change-orchestrate` skill, the `change-workflow` specification and companion,
+  and the workflow's handbook.
 
 ## Dependencies and Related Changes
 

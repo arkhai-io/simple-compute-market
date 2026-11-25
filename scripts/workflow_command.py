@@ -1,14 +1,15 @@
 """The change workflow's engine as this repository's own scripts reach it.
 
-A repository reaches the engine only through its command, `scripts/change-workflow`,
-never by importing the `change_workflow` package beside it: the command's
-subcommands, exit statuses, and structured outputs are what the engine keeps
-stable, while its modules may change under any of them. A script here therefore
-runs the command as a process, in the checkout it asks about, since the command
-acts on the Git repository containing its working directory, and reads only the
-structured output a program may rely on — `find --json`'s object, `check
-spec-index --json`'s, and `clone where`'s path — with the command's own reason when
-it refuses.
+The workflow is installed as a tool, `arkhai-change-workflow`, and a repository
+reaches its engine only through its command, `change-workflow` on the path, never
+by importing its package: the command's subcommands, exit statuses, and structured
+outputs are what the engine keeps stable, while its modules may change under any of
+them. A script here therefore runs the command as a process, in the checkout it
+asks about, since the command acts on the Git repository containing its working
+directory, and reads only the structured output a program may rely on — `find
+--json`'s object, `check spec-index --json`'s, `config --json`'s, and `clone
+where`'s path — with the command's own reason when it refuses. Where the command is
+not installed, each call is refused, saying it cannot be run.
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ import subprocess
 from pathlib import Path
 from typing import Sequence
 
-# The command beside this file; it acts on the working directory it is given.
-COMMAND = Path(__file__).resolve().parent / "change-workflow"
+# The installed command, found on the path; it acts on the working directory it is
+# given.
+COMMAND = "change-workflow"
 
 
 class WorkflowRefused(Exception):
@@ -27,7 +29,7 @@ class WorkflowRefused(Exception):
 
 
 def run(arguments: Sequence[str], cwd: Path,
-        command: Path = COMMAND) -> subprocess.CompletedProcess[str]:
+        command: str | Path = COMMAND) -> subprocess.CompletedProcess[str]:
     """`command` run with `arguments` in `cwd`, its output captured."""
     try:
         return subprocess.run([str(command), *arguments], cwd=cwd, stdin=subprocess.DEVNULL,
@@ -44,7 +46,8 @@ def _refused(done: subprocess.CompletedProcess[str],
                                      f"{done.returncode}")
 
 
-def found_change(root: Path, change: str, command: Path = COMMAND) -> dict[str, object]:
+def found_change(root: Path, change: str,
+                 command: str | Path = COMMAND) -> dict[str, object]:
     """The change called `change` in the checkout at `root`, as `find --json` prints it:
     its `name`, its `directory` relative to the checkout, whether it is `archived`,
     and its `records` directory in this checkout, or None where it holds none."""
@@ -63,7 +66,7 @@ def found_change(root: Path, change: str, command: Path = COMMAND) -> dict[str, 
 
 
 def created_specifications(root: Path, change: str,
-                           command: Path = COMMAND) -> frozenset[str]:
+                           command: str | Path = COMMAND) -> frozenset[str]:
     """The specification paths the deltas of `change` create, as `check spec-index
     --json` prints them in `created`. The index check's own result is not this
     caller's concern: a failing check prints its object all the same, exiting 1,
@@ -81,7 +84,28 @@ def created_specifications(root: Path, change: str,
     return frozenset(created)
 
 
-def clone_where(checkout: Path, change: str, command: Path = COMMAND) -> Path | None:
+def installed_guidance(root: Path, command: str | Path = COMMAND) -> Path:
+    """The directory of the installed workflow's own guidance, as `config --json`
+    names it in `workflow.guidance`, run in the checkout at `root`."""
+    arguments = ["config", "--json"]
+    done = run(arguments, root, command)
+    if done.returncode != 0:
+        raise _refused(done, arguments)
+    try:
+        shown = json.loads(done.stdout)
+    except json.JSONDecodeError as exc:
+        raise WorkflowRefused(f"change-workflow {' '.join(arguments)} printed no JSON "
+                              f"object: {exc}") from exc
+    workflow = shown.get("workflow") if isinstance(shown, dict) else None
+    guidance = workflow.get("guidance") if isinstance(workflow, dict) else None
+    if not isinstance(guidance, str) or not guidance:
+        raise WorkflowRefused(f"change-workflow {' '.join(arguments)} printed no "
+                              "`workflow.guidance` path")
+    return Path(guidance)
+
+
+def clone_where(checkout: Path, change: str,
+                command: str | Path = COMMAND) -> Path | None:
     """The usable clone of `change`, looked for from `checkout`; None where no clone
     directory exists and the change is worked in place.
 

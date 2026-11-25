@@ -31,10 +31,6 @@ import pytest
 import check_secrets as checker
 import install_gitleaks
 
-# The change workflow versions the test's workflow configuration accepts, which every
-# command reading the configuration checks first.
-ACCEPTED = '[workflow]\nversion = ">=0.1"\n'
-
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = os.environ.get("GITLEAKS_REQUIRED") == "1"
 HEADER = "-----BEGIN " + "RSA PRIVATE KEY-----"
@@ -478,18 +474,13 @@ def test_the_repositorys_own_tree_passes_the_gate(monkeypatch: pytest.MonkeyPatc
     assert found == []
 
 
-# ---------------------------------------------------------------- the guarded push
-
-# The workflow's command; the guarded push runs the repository's pre-push checks, the
-# gate among them, as commands.
-COMMAND = ROOT / "scripts/change-workflow"
+# ---------------------------------------------------------------- the push
 
 
 @pytest.fixture
 def branch(repo: Path, tmp_path: Path) -> Path:
-    """`repo` with a bare `origin` holding `dev`, on a change branch, its secret gate
-    where the guarded push looks for it: a stand-in that runs this repository's gate,
-    with its gitleaks configuration, over `repo`."""
+    """`repo` with a bare `origin` holding `dev`, on a change branch not yet
+    pushed."""
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     git(repo, "remote", "add", "origin", str(remote))
@@ -502,16 +493,14 @@ def branch(repo: Path, tmp_path: Path) -> Path:
 
 
 def provide_gate(repo: Path, version_problem: str | None = None) -> None:
-    """The stand-in gate, and the workflow configuration whose `pre-push` runs it as
-    the guarded push runs a pre-push hook, both ignored so the worktree stays clean;
-    `version_problem` stands in for a gitleaks that cannot run."""
-    (repo / ".agents").mkdir(exist_ok=True)
-    (repo / ".agents/workflow.toml").write_text(
-        ACCEPTED + '[repository]\nprotected-branches = ["main", "dev"]\n[hooks]\n'
-        f'pre-push = "{shlex.quote(sys.executable)} scripts/{Path(checker.__file__).name} '
-        '--pre-push {remote}"\n', "utf-8")
-    with (repo / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
-        exclude.write("/.agents/\n")
+    """The stand-in gate, ignored so the worktree stays clean, and a Git pre-push
+    hook running it with the remote and Git's ref updates, as the repository's hook
+    runs it through `make pre-push`; `version_problem` stands in for a gitleaks that
+    cannot run."""
+    hook = repo / ".git/hooks/pre-push"
+    hook.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} '
+                    f'scripts/{Path(checker.__file__).name} --pre-push "$1"\n', "utf-8")
+    hook.chmod(0o755)
     injected = ("" if version_problem is None
                 else f", version_problem=lambda: {version_problem!r}")
     gate = repo / "scripts" / Path(checker.__file__).name
@@ -527,33 +516,34 @@ def provide_gate(repo: Path, version_problem: str | None = None) -> None:
 
 
 def push(repo: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([str(COMMAND), "push"], cwd=repo, capture_output=True, text=True)
+    return subprocess.run(["git", "push", "-q", "origin", "feat/change"], cwd=repo,
+                          capture_output=True, text=True)
 
 
 def remote_head(repo: Path) -> str:
     return git(repo, "ls-remote", "origin", "refs/heads/feat/change").split("\t")[0]
 
 
-def test_a_gate_that_cannot_run_refuses_the_guarded_push(branch: Path) -> None:
+def test_a_gate_that_cannot_run_refuses_the_push(branch: Path) -> None:
     provide_gate(branch, "gitleaks 8.30.1 is required and no gitleaks is on PATH")
     commit(branch, "notes.md", "notes\n")
 
     pushed = push(branch)
 
-    assert pushed.returncode == 1
+    assert pushed.returncode != 0
     assert "REFUSED: gitleaks 8.30.1 is required" in pushed.stderr
     assert remote_head(branch) == ""
 
 
 @pytest.mark.usefixtures("gitleaks")
-def test_an_outgoing_commit_adding_a_key_refuses_the_guarded_push(branch: Path) -> None:
+def test_an_outgoing_commit_adding_a_key_refuses_the_push(branch: Path) -> None:
     provide_gate(branch)
     block, body = wrapped_key(64)
     commit(branch, "deploy.pem", block, "deploy key")
 
     pushed = push(branch)
 
-    assert pushed.returncode == 1
+    assert pushed.returncode != 0
     assert ":deploy.pem:1: private-key-block" in pushed.stderr
     assert body[:40] not in pushed.stderr + pushed.stdout
     assert remote_head(branch) == ""

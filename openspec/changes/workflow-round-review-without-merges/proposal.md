@@ -3,7 +3,7 @@
 The owner reads a committed implementation round through the round view: `make
 round-view` resets the change's branch to the round's base and shows the round's
 commits as uncommitted changes in the owner's checkout
-(`openspec/specs/change-workflow/architecture.md#current-limits`). A merge of `dev`
+(`arkhai-change-workflow`'s companion, "Current limits"). A merge of `dev`
 made inside the round shows `dev`'s changes beside the round's own, with nothing to
 tell them apart.
 
@@ -25,7 +25,7 @@ ignore and then rediscover or duplicate.
 
 Open for design, not decided here:
 
-- how a synthetic base fits `scripts/round_view.py`, which holds the view's base to
+- how a synthetic base fits the engine's round view, which holds the view's base to
   be an ancestor of the round's head: where `done` carries the owner's commits
   onto the head, where the view refuses a branch that has left the base's line,
   and where a refresh resets over new commits. A synthetic base is off that line;
@@ -53,9 +53,11 @@ None.
 
 ## Impact
 
-- `scripts/round_view.py` and its tests, and `make round-view` / `make round-done`.
-- The orchestrate skill's round-view reading, the `change-workflow` spec and
-  architecture, and `docs/change-workflow-handbook.md`.
+All of it is `arkhai-change-workflow`'s, the installed change workflow:
+
+- the engine's round view and its tests, and `make round-view` / `make round-done`;
+- the orchestrate skill's round-view reading, the `change-workflow` specification
+  and companion, and the workflow's handbook.
 
 ## Dependencies and Related Changes
 

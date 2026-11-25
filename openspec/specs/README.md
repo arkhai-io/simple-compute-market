@@ -4,7 +4,7 @@ This directory describes the implemented system by capability.
 
 - `spec.md` is the normative, machine-validated contract: observable behavior, invariants, ownership, and acceptance scenarios.
 - `architecture.md` is optional durable explanatory context: conceptual models, design motivation, trade-offs, relationships, and current limits.
-- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired ([the pattern](../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index)).
+- A capability organized by an index keeps that context in its `README.md` instead, its human-readable description with its diagrams, and has no `architecture.md`; its `index.md` lists its requirements by id under the parts and groups of its table of contents, with the ids it retired (the pattern is `arkhai-change-workflow`'s guidance, "A capability organized by an index").
 - [`docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md) is the repository-wide map connecting the capabilities.
 - [`openspec/changes/`](../changes/) contains proposed transitions and temporary implementation plans.
 
@@ -16,7 +16,6 @@ An architecture companion does not replace a normative requirement. When explana
 |---|---|---|
 | API credits | [Spec](api-credits/spec.md) | [Architecture](api-credits/architecture.md) |
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
-| Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
 | Compute delivery | [Spec](compute-delivery/spec.md) | [Architecture](compute-delivery/architecture.md) |
 | Compute provisioning contract | [Spec](compute-provisioning-contract/spec.md) | — |
