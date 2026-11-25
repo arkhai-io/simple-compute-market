@@ -47,10 +47,10 @@ ignored by Git.
 
 This repository MUST build, test, and release on a machine where the change workflow
 is not installed: its CI MUST NOT install the workflow, no suite `make test` runs and
-no release target MAY call `change-workflow`, its `Makefile` MUST include the
-workflow's fragment only when the command is installed, and its own targets that
-refuse while a round view is open MUST read the open view from Git's metadata rather
-than through the workflow's command.
+no release target MAY call `change-workflow`, and its `Makefile` MUST include the
+workflow's fragment only when the command is installed. None of its own targets MAY
+depend on the fragment's targets; its validation and diff targets MUST ask, in their
+help text, not to be run while a round view is open.
 
 #### Scenario: CI runs the suites without the workflow
 
@@ -58,12 +58,11 @@ than through the workflow's command.
   installed
 - **THEN** every suite runs, and none fails or skips for the workflow's absence
 
-#### Scenario: A repository target refuses an open round view
+#### Scenario: A repository target's help names the round view
 
-- **WHEN** a round view is open in the checkout and the developer runs `make
-  validate-local`
-- **THEN** it refuses before running anything, whether or not `change-workflow` is
-  installed
+- **WHEN** a developer reads `make help`'s line for `validate-local`
+- **THEN** it asks that the target not be run while a round view is open, and the
+  target runs whether or not `change-workflow` is installed
 
 #### Scenario: A code snapshot of a worktree in use
 
@@ -78,9 +77,9 @@ than through the workflow's command.
 This repository's committed configuration, `.agents/workflow.toml`, MUST declare the
 committed fields the workflow defines, and this repository MUST state how it provides
 each role the configuration does not hold: the make target, path, or document that
-fills it. Whether the statement is complete for the installed version is the
-workflow's repository's to verify, and a review's when a change edits the declared
-range; this repository keeps no test of it.
+fills it. This repository keeps no test of the statement: review holds it complete
+when a change edits the declared range, `.agents/workflow.toml`, the statement, or a
+make target it names.
 
 #### Scenario: The local validation role
 

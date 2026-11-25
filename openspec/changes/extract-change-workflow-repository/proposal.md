@@ -72,8 +72,8 @@ The change has two halves, with a pause between them (design D1, D2).
   specification, so the release carries its own requirements (D23). This half may be
   merged to `dev` while the change waits.
 
-**The pause.** A coordinator bootstraps the workflow's repository, which is private,
-from what the first half left, lifting the moved files with their history by path,
+**The pause.** A coordinator bootstraps the workflow's repository from what the first
+half left, lifting the moved files with their history by path,
 and releases it to that repository's release page and the dev artifact repository.
 The change waits in implementation for its evidence: the distribution, its version
 and tag, and the release's wheel by file name and digest, which the gate checks
@@ -85,7 +85,8 @@ the range it declares, removes the in-tree engine, skills, schema, workflow guid
 workflow in prose by its distribution's name, id, and section, with no link to its
 repository. It keeps its committed configuration, its evidence guides and hooks, its
 engineering and repository guidance, and `market-change-workflow`, and no test of its
-configuration of the workflow, which the workflow's repository verifies. It builds,
+configuration of the workflow, its statement of the workflow's roles held complete
+by review. It builds,
 tests, and releases without the workflow installed: CI installs none, and its
 `Makefile`'s own targets need nothing of the fragment. The six open workflow changes
 that moved with the release leave its change index, and the lesser goal they served
@@ -170,11 +171,12 @@ release's surface (CW-c2tw):
 - `.github/workflows/tests.yml` and `scripts/tests/test_tests_workflow.py`: the
   workflow's install, bubblewrap, and `SANDBOX_REQUIRED` go in the second half (D26).
 - The `Makefile`'s `validate-local`, `validate-ci`, `validate-helm`, `run-ci`,
-  `run-e2e`, `review-diff`, `last-diff`, and `code-snapshot`, whose round-view guard
-  reads Git's metadata (D26).
+  `run-e2e`, `review-diff`, `last-diff`, and `code-snapshot`, which lose their
+  round-view guard, their help text asking that the first seven not be run while a
+  round view is open (D26).
 - The six moved workflow changes' directories under `openspec/changes/` and their
   rows, and the lesser goal's section, retired at closeout (D19).
-- A new private repository, its release, and its own process, which are the
+- The workflow's own repository, its release, and its own process, which are the
   coordinator's.
 
 ## Dependencies and Related Changes
@@ -239,9 +241,9 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
   "Current limits"; the modified CW-r6kd.
 - D14: `change-workflow`'s companion, "What an adopting repository provides"; CW-ora1;
   `market-change-workflow`'s companion, "How this repository provides the workflow's
-  roles", and the modified MCW-5tgp; that the workflow's repository verifies an
-  adopter's configuration and rewrites the skills' test, to the handbook's procedure
-  for the move; the owner's principle that this repository keeps no test of its
+  roles", and the modified MCW-5tgp; that the workflow's repository rewrites the
+  skills' test and rewords its companion's sentence on an adopter's test of its
+  provisions, to the handbook's procedure for the move; the owner's principle that this repository keeps no test of its
   configuration of the workflow, to `docs/development/ARCHITECTURE.md`, "The change
   workflow".
 - D15: `change-workflow`'s companion, "The command and its tiers"; CW-dvz5.
@@ -268,8 +270,9 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
 - D26: the added MCW-w7nb; `market-change-workflow`'s companion, "This repository is
   the workflow's first adopter"; `docs/development/ARCHITECTURE.md`, "The change
   workflow", for the owner's principle that this repository builds, tests, and
-  releases without the workflow; that the workflow's repository state the round-view
-  marker's location, to the handbook's procedure for the move.
+  releases without the workflow; the instruction not to run this repository's
+  validation and diff targets while a round view is open, to their help text and that
+  companion section.
 - `market-change-workflow`: MCW-9k0c, MCW-iqh1, and MCW-w7nb, and its companion's
   "This repository is the workflow's first adopter"; `docs/development/ARCHITECTURE.md`
   for how this repository adopts the workflow, naming it only as its distribution.

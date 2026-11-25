@@ -6,7 +6,8 @@ planning's question P1 (D24), by the triage of implementation review 30 (D1, D24
 and D25 added), and by the owner's return to design of 2026-11-25 (D2, D5, D6, D9,
 D10, D11, D14, D15, D17, D19, and D22 amended, D26 added, and the distribution
 channel's open question resolved), once the coordinator had cut the first release
-from the workflow's repository, which is private. The change has two halves in one
+from the workflow's repository, and by the triage of design review 58 (D2, D6, D9,
+D14, and D26 amended). The change has two halves in one
 change: first the workflow becomes a self-contained, versioned, installable
 distribution that this repository runs installed from its own tree; then, once a
 coordinator has bootstrapped the workflow's own repository from that tree and
@@ -59,9 +60,9 @@ released it, this repository adopts the release and removes its copy.
   the coordinator cut the first release, `arkhai-change-workflow` 0.1.0 (D2). It
   differs from (i)'s tree in adding `change-workflow init` (CW-q2vn), which CW-f8yy and
   CW-1rhd exempt from their checks beside `install` and `--version`.
-- **The workflow's repository is private.** Its name, its commits, the registry's
-  location, and the coordinator's install guide stay out of this tree; this
-  repository names the workflow only by its distribution.
+- **This repository names the workflow only by its distribution**, as it names any
+  tool it installs: the name, commits, and registry location of the workflow's
+  source, and the coordinator's install guide, stay out of this tree.
 - **Six open workflow changes moved to the workflow's repository with the release**:
   `add-workflow-harness-adapters`, `add-workflow-model-gateway`,
   `host-change-workflow-runner`, `split-implementation-sessions-automatically`,
@@ -102,8 +103,8 @@ unadoptable while the hosted runner depends on it.
 ### D2 — The gate between the halves
 
 The orchestrating session holds the round after (i), which is the candidate for the
-preliminary merge, until the coordinator reports. The workflow's repository is
-private, so the evidence names the release only as its distribution: (iii)'s first
+preliminary merge, until the coordinator reports. This repository names the workflow
+only by its distribution, and the evidence names the release the same way: (iii)'s first
 section opens with a decision-gate task whose note records
 
 1. the distribution and its version, `arkhai-change-workflow` 0.1.0, and the
@@ -143,8 +144,8 @@ moved files' tree equality as evidence, too strict and immaterial to this reposi
 checking only that the installed tool is not this tree's build, which proves the tree
 is not installed rather than that the release is; recording the evidence as given,
 which lets an early or wrong install through to validation; and the session fetching
-from the release page itself, which puts the private repository's name in its
-commands and credentials in its sandbox.
+from the release page itself, which puts the workflow's source location in its
+commands and the credentials to reach it in its sandbox.
 
 ### D3 — The engineering guidance is reached through a pointer
 
@@ -298,10 +299,10 @@ The skills cite the workflow's guidance by section name and its specification by
 requirement id, and the distribution's own test fails on a cited section or id that
 does not exist in it. This repository's documents cite the workflow in prose by its
 distribution's name, `arkhai-change-workflow`, requirement id, and section, with no
-link to or address of the workflow's repository, which is private; an id and a
+link to or address of the workflow's repository; an id and a
 section mean the same in every version the range admits, where a link pinned to a tag
 would be rewritten at every range bump. Review holds the documents to it: a check
-would have to hold the private address to look for it.
+would have to hold the address it looks for.
 
 In (i), the workflow's documents stop linking out of their own set — the companion's
 four links to `market-change-workflow` become neutral text — and stay where they are,
@@ -312,7 +313,8 @@ in (iii).
 
 Rejected: a pointer for the workflow's own documents, which versions them apart from
 the skills citing them; copies installed into each repository; links pinned to a
-release; a link to the workflow's repository, which is private; links to the
+release; a link to the workflow's repository, which this repository does not name;
+links to the
 installed copy, a machine path; and a `workflow.documents`
 directory with its layout made public, which commits every later release to the
 package's internal paths (15 F4).
@@ -372,8 +374,8 @@ and installation from a tag alone, a channel rather than an artifact.
 ### D9 — Names and licence
 
 The wheel is `arkhai-change-workflow` and the command `change-workflow`; the import
-package stays `change_workflow` and the capability `change-workflow`. The workflow's
-repository is private, and this repository names it by the distribution alone. The
+package stays `change_workflow` and the capability `change-workflow`. This repository
+names the workflow by the distribution alone, never by its repository. The
 licence is MIT, as this repository's and the moved history's already are.
 
 Rejected: the plain name for the wheel too, which risks a collision on a public
@@ -443,23 +445,29 @@ capability.
 
 This repository keeps no test of its configuration or wiring of the workflow: (iii)
 deletes `test_change_workflow_assumptions.py` and `test_market_change_workflow.py`.
-What they proved is the workflow repository's to verify:
+What they proved goes as follows:
 
-- that the skills name no adopting repository's make target or path, a test the
-  workflow's repository rewrites as its skills move from make targets to calling its
-  command (CW-n8tr);
+- that the skills name no adopting repository's make target or path: the workflow
+  repository's to verify, in a test it rewrites as its skills move from make targets
+  to calling its command (CW-n8tr);
 - that the fragment's targets and paths are provided, which follows the same move;
-- that each role has a provision in an adopter's statement, a completeness check on
-  a prose table that every change to the workflow's configuration would make this
-  repository update;
+- that each role has a provision in this repository's statement: no test verifies it
+  once (iii) lands, by choice. The workflow's own test holds its companion's roles
+  table to `roles`, which keeps the workflow consistent with itself but reads no
+  adopter's statement (58 F2). Review holds the statement complete when a change edits
+  `[workflow] version`, `.agents/workflow.toml`, the statement, or a make target it
+  names; a provision broken between those shows when the step running it fails;
 - what `.agents/workflow.toml` and its template hold, which the engine checks
   whenever it reads them and which a change in the file's structure must not hold up
   a change here behind.
 
 MCW-5tgp keeps what this repository declares and states, without a test reading
-`config --json`; review holds the statement complete when a change edits `[workflow]
-version`. The rewritten test is handed to the workflow's repository with D24's
-`force-include` condition, through the handbook's procedure for the move.
+`config --json`. The released companion's "What an adopting repository provides"
+still says a test fails when a role has no provision in the adopter's statement,
+describing the test (iii) deletes; the request that the workflow's repository reword
+it as a check an adopter may keep goes to it, with the rewritten skills test and
+D24's `force-include` condition, through the handbook's procedure for the move.
+Checking a candidate release against its adopters stays an open question.
 
 Rejected: parsing the installed companion's table, which makes its layout an
 interface by accident; keeping both files in a target of their own outside `make
@@ -704,27 +712,33 @@ once (iii) lands, a machine without `change-workflow` builds, tests, and release
   workflow's sandbox tests needed, and their assertions in `test_tests_workflow.py`.
   No suite `make test` runs needs the workflow; the two that did are deleted (D14).
 - **The `Makefile`.** It includes the fragment only when the command is on the path
-  (D15). This repository's own targets that refuse while a round view is open —
+  (D15). This repository's own targets that refuse while a round view is open today —
   `validate-local`, `validate-ci`, `validate-helm`, `run-ci`, `run-e2e`,
-  `review-diff`, and `last-diff` — read the open view from Git's metadata, the
-  marker at `$(git rev-parse --git-path round-view.json)`, in place of the fragment's
-  `round-view-closed`. `code-snapshot` refuses nothing, so a snapshot is made from any
-  worktree.
+  `review-diff`, and `last-diff` — lose that guard, the fragment's
+  `round-view-closed`, and refuse nothing on its account. Their help text, and
+  `market-change-workflow`'s companion, ask the developer not to run them while a
+  round view is open, when the branch points at the round's base rather than its
+  commit. `code-snapshot` loses the guard too, and needs no such caution: a snapshot
+  is made from any worktree.
 - **Its scripts.** The citation check's unscoped run, `make check-doc-citations`
   with no change, and the release targets call no `change-workflow`; the scripts the
   workflow's steps run — `check_change.py` as the `pre-commit` hook, the citation
   check scoped to a change, local and parallel validation — reach the installed
   command on the path.
 
-The marker's file name is internal to the engine; no requirement of the workflow's
-names it, so a rename would leave the guard passing. The request that the workflow's
-repository state the marker's location as part of its interface goes to it with
-D14's and D24's handoffs, through the handbook's procedure for the move.
+The guard is dropped rather than replaced (58 F1). No public interface of the
+workflow's tells a tool-free check that a view is open: its round-view state is
+internal, so reading the marker file would pass silently once a release renamed it.
 
 Rejected: installing the release in CI, which makes the product's validation depend
-on a tool it does not use; keeping the fragment's `round-view-closed` prerequisite,
-which leaves this repository's own targets unusable without the workflow; and
-guarding `code-snapshot` as well, which refuses a snapshot of a worktree in use.
+on a tool it does not use; keeping the fragment's `round-view-closed` prerequisite
+unconditionally, which leaves this repository's own targets unusable without the
+workflow; reading the engine's round-view marker from Git's metadata, internal state
+a compatible release may rename; asking the workflow's repository to publish an
+open-view signal before (iii), which holds this change behind another release; and
+taking `round-view-closed` as a prerequisite only where the fragment is included,
+which the owner judged not worth its machinery beside an instruction; and guarding
+`code-snapshot` by any means, which refuses a snapshot of a worktree in use.
 
 ## Principles
 
@@ -742,10 +756,11 @@ Stated by the owner in this design, for promotion:
   ship it (D3).
 - This repository is releasable from a machine without the workflow: the workflow is
   how it is changed, not part of its validation (D26).
-- The workflow's repository verifies what adopting the workflow requires; this
-  repository keeps no test of its configuration or wiring of the workflow (D14).
-- The workflow's repository is private; this repository names the workflow only as
-  its distribution, `arkhai-change-workflow` (D2, D6, D9).
+- The workflow's repository verifies what adopting the workflow requires of every
+  adopter; this repository keeps no test of its configuration or wiring of the
+  workflow, and review holds its own statement of the roles complete (D14).
+- This repository names the workflow only as its distribution,
+  `arkhai-change-workflow`, as it names any tool it installs (D2, D6, D9).
 
 ## Open Questions
 
