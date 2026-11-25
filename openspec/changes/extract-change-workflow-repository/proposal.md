@@ -243,7 +243,9 @@ given the redraw by `add-skill-extension-points`' closeout triage (55 F4).
   `market-change-workflow`'s companion, "How this repository provides the workflow's
   roles", and the modified MCW-5tgp; that the workflow's repository rewrites the
   skills' test and rewords its companion's sentence on an adopter's test of its
-  provisions, to the handbook's procedure for the move; the owner's principle that this repository keeps no test of its
+  provisions, to the workflow's repository through the coordinator, delivered before
+  section 9 and recorded in the change's log, since the handbook's procedure for the
+  move was lifted with the first release; the owner's principle that this repository keeps no test of its
   configuration of the workflow, to `docs/development/ARCHITECTURE.md`, "The change
   workflow".
 - D15: `change-workflow`'s companion, "The command and its tiers"; CW-dvz5.

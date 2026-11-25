@@ -465,8 +465,11 @@ MCW-5tgp keeps what this repository declares and states, without a test reading
 `config --json`. The released companion's "What an adopting repository provides"
 still says a test fails when a role has no provision in the adopter's statement,
 describing the test (iii) deletes; the request that the workflow's repository reword
-it as a check an adopter may keep goes to it, with the rewritten skills test and
-D24's `force-include` condition, through the handbook's procedure for the move.
+it as a check an adopter may keep goes to it with the rewritten skills test through
+the coordinator, delivered by the orchestrator before (iii)'s gate-and-switch section
+and recorded in the change's log: the handbook's procedure for the move, which
+carried D24's `force-include` condition and D5's test, was lifted with the first
+release before these requests were settled, and its copy here leaves in (iii).
 Checking a candidate release against its adopters stays an open question.
 
 Rejected: parsing the installed companion's table, which makes its layout an
