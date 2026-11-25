@@ -213,6 +213,11 @@ amounts and the derived charge use the repository's uint256 wire type —
 Python integers in memory, decimal-digit strings on the wire — and the filter
 specification compares the bounds as exact decimal text. Token counts stay
 plain strict integers; the magnitude lives in the charge.
+
+`rate_card.asset` stands as built. Stating token rates in the shared option
+envelope removes it; that work is deferred, and recorded as an unowned gap in
+the change index.
+
 ### D5. The rate card is carried to issuance and pinned on the grant
 
 A grant carries the rate card in force when it was issued. A seller who
@@ -453,16 +458,23 @@ equals `inference`. The attestation envelope is **not** a filter.
 ### D17. OpenAI-compatible surface, version 1
 
 `endpoint.api_style` is `openai.v1` and names chat completions and completions.
-Embeddings, images, audio, and batch are excluded from version 1 so that the
-usage record has one shape. Adding a modality later adds rate-card fields and
-usage fields under a version bump, not a reinterpretation.
+Embedding, image-generation, audio, and batch endpoints are excluded from
+version 1 so that the usage record has one shape; an image given as input to a
+chat completion is priced, by the card's per-unit image rate. Adding a modality
+later adds rate-card fields and usage fields under a version bump, not a
+reinterpretation.
+
+The card's `endpoint` block stands as built. A design in which the provider
+registers its routes and the address is delivered at fulfillment removes it;
+that work is deferred, and recorded as an unowned gap in the change index.
 
 ## Risks / Trade-offs
 
-- **A sibling domain before its family exists.** This change's copies of the
-  provision-intent shape and the terms module predate the `api` family
-  vocabulary. Mitigated by their size and by `compose-api-family-kit`, which
-  decides what moves into the vocabulary before the stack composes anything.
+- **A sibling domain on a family's vocabulary.** The provision-intent shape
+  and the terms carriers are the `api` family's, bound here under the
+  inference kind, so a change to the family's purchase shape reaches both
+  domains at once. Mitigated by `compose-api-family-kit`'s byte-level pins of
+  the API-credits wire.
 - **Integer granularity.** On a fiat-cent asset the finest rate is one cent
   per million tokens; on an 18-decimal asset the integers are large. Neither
   prices anyone out; the overflow guards already exist.

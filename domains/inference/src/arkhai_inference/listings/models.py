@@ -24,7 +24,6 @@ Quantization = Literal["none", "fp16", "bf16", "fp8", "int8", "int4", "awq", "gp
 Provenance = Literal["self-hosted", "resold"]
 
 QUANTIZATIONS: tuple[str, ...] = get_args(Quantization)
-PROVENANCES: tuple[str, ...] = get_args(Provenance)
 
 _MODEL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$"
 
@@ -178,11 +177,3 @@ def coerce_resource_dict(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
-
-
-def resource_is_inference(resource: Any) -> bool:
-    """True when the resource is an inference offering."""
-    if isinstance(resource, InferenceModelCard):
-        return True
-    coerced = coerce_resource_dict(resource)
-    return coerced.get("kind") == INFERENCE_KIND

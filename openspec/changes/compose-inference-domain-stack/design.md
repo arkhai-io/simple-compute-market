@@ -26,9 +26,8 @@ Three facts about the kit decide more than the proposal assumed:
   production. The accepted rate card is therefore pinned by the kit for every
   domain; what inference adds is surfacing it.
 - The kit's negotiation prices from its own `extract_unit_price_from_order`
-  with no contribution hook, so the contract's own pricing helpers are not on a
-  kit-composed storefront's path; the listing codec's rate check at publication
-  is the load-bearing rule.
+  with no contribution hook, and the contract keeps no purchase-pricing helper;
+  the listing codec's rate check at publication is the load-bearing rule.
 - The kit's bearer gate admits or denies on the `Authorization` header and
   then calls the wrapped app, charging first; nothing in the repository
   proxies, streams, or reads a request body. The gateway is the one role with

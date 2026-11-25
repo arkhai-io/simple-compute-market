@@ -2,12 +2,11 @@
 
 Runs the registry against the packaged inference filter specification with its
 database, through the canonical `RegistryClient` over `ASGITransport`: a valid
-model-card listing publishes and is found by every declared filter, and the
-dry run refuses the shapes the specification exists to refuse. Full shape
-enforcement at publish is deliberately not this registry's posture (see
-`reject_retired_listing_shape`); the storefront's domain codec is where a
-malformed card is stopped, and the retired shape key's refusal is
-specification-independent, proven once in `test_settled_envelope_across_specs`.
+model-card listing publishes and is found by every declared filter, and both
+publication and the dry run refuse the shapes the specification exists to
+refuse. The storefront's domain codec refuses more than the served shape can
+express, the unit rate and the one-asset rule, and is proven in the domain's
+own tests.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from registry_client import ListingRequest, RegistryClientError, ValidatePublishRequest
 from core_registry.api import filter_spec as filter_spec_module
 from core_registry.api import validate_routes
@@ -29,6 +29,7 @@ _ESCROW = {
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
     "literal_fields": {"token": _ASSET},
+    "rates": [{"field": "amount", "per": "credit", "value": "1"}],
 }
 _OPTION = {
     "option_id": "a" * 64,
@@ -88,20 +89,41 @@ def _card(**overrides):
     return card
 
 
-@pytest.fixture
-def served_inference_spec(monkeypatch, tmp_path):
+def _serve(monkeypatch, tmp_path, spec_path):
     # Named by a profile env file, as a lane registry's profile names its
     # specification. The loader and the dry-run validator cache independently;
     # both must be cleared or a later test validates against this specification.
     monkeypatch.delenv("REGISTRY_FILTER_SPEC_PATH", raising=False)
-    (tmp_path / "config-spec.env").write_text(f"REGISTRY_FILTER_SPEC_PATH={_INFERENCE_SPEC}\n")
+    (tmp_path / "config-spec.env").write_text(f"REGISTRY_FILTER_SPEC_PATH={spec_path}\n")
     filter_spec_module.reset_cache(
         load_settings({"CONFIG_DIRECTORY": str(tmp_path), "ACTIVE_PROFILES": "spec"})
     )
     validate_routes._reset_cache()
-    yield filter_spec_module.get_loaded_spec()
+    return filter_spec_module.get_loaded_spec()
+
+
+def _stop_serving():
     filter_spec_module.reset_cache()
     validate_routes._reset_cache()
+
+
+@pytest.fixture
+def served_inference_spec(monkeypatch, tmp_path):
+    yield _serve(monkeypatch, tmp_path, _INFERENCE_SPEC)
+    _stop_serving()
+
+
+@pytest.fixture
+def served_narrowed_spec(monkeypatch, tmp_path):
+    """The packaged specification with `model_id` narrowed to one identifier,
+    as an operator enforcing its own vocabulary serves it."""
+    document = yaml.safe_load(_INFERENCE_SPEC.read_text())
+    properties = document["listing_shape"]["properties"]["listing_resource"]["properties"]
+    properties["model_id"] = {"type": "string", "enum": [_card()["model_id"]]}
+    narrowed = tmp_path / "narrowed-filter-spec.yaml"
+    narrowed.write_text(yaml.safe_dump(document))
+    yield _serve(monkeypatch, tmp_path, narrowed)
+    _stop_serving()
 
 
 async def _publish(registry_client, listing_id, card):
@@ -225,3 +247,36 @@ async def test_malformed_cards_fail_the_dry_run(served_inference_spec, registry_
     response = await _dry_run(registry_client, card)
     assert response.valid is False
     assert any(field in error for error in response.errors), response.errors
+
+
+@pytest.mark.parametrize(
+    "card,field",
+    [
+        ({k: v for k, v in _card().items() if k != "rate_card"}, "rate_card"),
+        ({k: v for k, v in _card().items() if k != "context_length"}, "context_length"),
+    ],
+    ids=["no-rate-card", "no-context-length"],
+)
+async def test_a_malformed_card_is_refused_at_publication_and_not_stored(
+    served_inference_spec, registry_client, card, field
+):
+    with pytest.raises(RegistryClientError) as refused:
+        await _publish(registry_client, "malformed", card)
+
+    assert refused.value.status_code == 422
+    assert field in refused.value.body
+    assert await _ids(registry_client, offering_mode="inference") == set()
+
+
+async def test_a_narrowed_vocabulary_refuses_another_model_identifier(
+    served_narrowed_spec, registry_client
+):
+    await _publish(registry_client, "listed", _card())
+    other = _card(model_id="mistralai/mistral-7b-instruct")
+    with pytest.raises(RegistryClientError) as refused:
+        await _publish(registry_client, "unlisted", other)
+    dry_run = await _dry_run(registry_client, other)
+
+    assert refused.value.status_code == 422
+    assert dry_run.valid is False
+    assert await _ids(registry_client, offering_mode="inference") == {"listed"}

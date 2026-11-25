@@ -35,10 +35,10 @@ whose `api_style` is `openai.v1`, a complete rate card, a `provenance` of
 carry an `artifact_digest`, a mutable `display_name`, a `model_owner` principal
 distinct from the seller, and an `attestation` envelope. A listing omitting any
 required field MUST be refused before it is published: the domain's listing
-codec refuses it on the storefront's publication path, and a registry's dry-run
-validation refuses it against the served shape. A registry's publish boundary
-refuses only retired shape spellings, so a malformed card is stopped at the
-seller, not at the index.
+codec refuses it on the storefront's publication path, and a registry serving
+the inference specification refuses it against the served shape at publication
+and in its dry-run validation. The codec also holds what the served shape
+cannot express, the unit rate and the one-asset rule.
 
 A listing SHOULD derive `model_id` by the domain's derivation rule — the
 upstream owner and repository name, lowercased, with revision and quantization
@@ -88,16 +88,15 @@ listing is a legitimate listing.
 
 One inference credit MUST equal one base unit of the asset the selected
 settlement option settles in. An inference settlement option MUST advertise
-exactly one amount rate, of one base unit per credit, and an accepted escrow at
-most one, of the same value; provision intent's `quantity` MUST be
-read as base units purchased, and the scalar reference payment MUST equal that
-quantity. A rate card MUST name the asset its values are denominated in, and
+exactly one amount rate, of one base unit per credit, and so MUST an accepted
+escrow, so no escrow's price is left to a seller's configured floor; provision
+intent's `quantity` MUST be read as base units purchased, and the scalar
+reference payment MUST equal that quantity. A rate card MUST name the asset its values are denominated in, and
 every settlement option and escrow token on the listing MUST identify that
 asset; rate-card values MUST be read as base units of it per million tokens
 or per request. The domain's listing codec MUST refuse, before publication, a
-listing whose settlement option or escrow advertises a per-credit rate other
-than one or names another asset, and the pricing path MUST apply the same
-check to the option a buyer selects.
+listing whose settlement option or escrow advertises no amount rate, more than
+one, a per-credit rate other than one, or another asset.
 
 #### Scenario: Buyer purchases a balance
 
@@ -112,17 +111,13 @@ check to the option a buyer selects.
   per-credit rate other than one
 - **THEN** the listing codec rejects the listing before publication
 
-#### Scenario: Option advertises no amount rate, or two
+#### Scenario: Option or escrow advertises no amount rate, or two
 
-- **WHEN** an inference settlement option carries no amount rate, or two
+- **WHEN** an inference settlement option or accepted escrow carries no amount
+  rate, or two
 - **THEN** the listing codec rejects the listing before publication, so no
-  published option is one a buyer cannot select
-
-#### Scenario: Buyer selects an option in another asset
-
-- **WHEN** a negotiation's settlement selection names an option whose asset is
-  not the rate card's
-- **THEN** pricing refuses the selection
+  published option is one a buyer cannot select and no escrow is priced by a
+  configured floor
 
 #### Scenario: Listing takes payment in a second asset
 
@@ -168,13 +163,24 @@ and that card MUST equal the listing's card.
 ### Requirement: Usage record and deterministic charge derivation
 
 A usage record MUST carry the model and key the request ran under, a request
-identity, prompt, completion, and cached-prompt token counts, and an outcome of
-`completed`, `cancelled`, or `failed`. The charge for a record MUST be derived
-only from that record and the grant's pinned rate card: the ceiling of the sum
-of each token count multiplied by its per-million rate, plus the flat request
-charge, for `completed` and `cancelled` outcomes; and zero for `failed`. Two
-independent implementations given the same record and card MUST derive the
-same integer charge.
+identity, prompt, completion, and cached-prompt token counts, a count of image
+units, and an outcome of `completed`, `cancelled`, or `failed`. Its prompt
+token count MUST exclude the cached prompt tokens it counts separately. The
+charge for a record MUST be derived only from that record and the grant's
+pinned rate card: the ceiling of the sum of each token count multiplied by its
+per-million rate, plus the image units multiplied by the per-unit image rate,
+plus the flat request charge, for `completed` and `cancelled` outcomes; and
+zero for `failed`. A cached-prompt or image rate the card does not name MUST
+be read as zero. Two independent implementations given the same record and
+card MUST derive the same integer charge.
+
+#### Scenario: Cached prompt tokens are priced at their own rate
+
+- **WHEN** a completed record carries 1,000,000 prompt tokens and 1,000,000
+  cached prompt tokens against a card of 500 credits per million prompt tokens
+  and a request charge of zero
+- **THEN** its charge is 500 credits where the card names no cached rate, and
+  600 where it names 100 credits per million cached prompt tokens
 
 #### Scenario: Streamed response is cancelled midway
 

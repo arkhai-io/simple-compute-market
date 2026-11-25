@@ -156,8 +156,8 @@ them.
   shape's validation), `domains/inference/src/arkhai_inference/schema.py` (the
   negotiation carriers bound from `arkhai-api-contracts`), two API-credits
   storefront tests that sent a string quantity,
-  `manifests/published-distributions.json`, `.github/workflows/publish-pypi.yml`
-  and `docs/guidance/repository/published-packages.md` (the wheel's release rows), `core/registry/Dockerfile` (one `COPY` per stage),
+  `manifests/release-components.json` and
+  `docs/guidance/repository/published-packages.md` (the wheel's release rows), `core/registry/Dockerfile` (one `COPY` per stage),
   `core/registry/tests/unit/test_filter_spec.py` (a load test beside
   `test_repo_api_credits_spec_loads`), `domains/Makefile`
   (`dist-inference-domain`, `test-inference`), and the root `Makefile`'s
@@ -171,8 +171,8 @@ them.
   nothing selects it until a deployment sets the path.
 - **Packaging.** One new wheel, `arkhai-inference-domain`, depending on
   `arkhai-api`, `arkhai-api-contracts`, `arkhai-core`, `arkhai-kit-identity`,
-  and `pydantic`, and published through `manifests/published-distributions.json`
-  and the PyPI workflow beside the API-credits domain wheel. `arkhai-api`
+  and `pydantic`, and declared for release in
+  `manifests/release-components.json` beside the API-credits domain wheel. `arkhai-api`
   changes without a version bump, because it has never been published.
 - **Contributor workflow.** None.
 

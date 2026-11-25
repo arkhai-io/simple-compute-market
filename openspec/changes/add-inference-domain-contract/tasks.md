@@ -282,8 +282,9 @@ fails the dry run on a numeric rate and on a card without its asset.
       clean environment and `market_domain().identity == "inference.v1"`.
 - [x] 6.4 Run `make dist-domains` and `make test-inference` from a clean `.dist`
       and record the result.
-- [x] 6.5 `.github/workflows/tests.yml`: an `inference-domain` matrix row with
-      `predist`, needing no hosted artifact.
+- [x] 6.5 `.github/workflows/tests.yml` runs the domain's suite: `test-inference`
+      is a member of `test-domains`, which the workflow's matrix runs, needing
+      no hosted artifact.
 - [x] 6.6 `make check-packaging` passes with the new project's lock and
       `reinit` target.
 
@@ -406,6 +407,54 @@ buyer-plugin text in `design.md`, `proposal.md`, and `tasks.md`, closeout parts
       units. Sections 2.1–2.3 and 5.2 carry the resulting work; the rate-bound
       pairing is a declared co-requirement in the filter specification.
 
+*Fix (pre-closeout review 01 F1–F7), outside the plan's sections.* This note
+governs where an earlier task or note above says otherwise:
+- F1: a registry serving the inference specification refuses a malformed card
+  at publication as well as in its dry run, as `registry-discovery` requires;
+  the delta, the promotion record and the test module say so, and section 5's
+  finding that the registry does not enforce the shape at publish no longer
+  holds. Proven by
+  `core/registry/tests/integration/test_inference_spec.py::test_a_malformed_card_is_refused_at_publication_and_not_stored`.
+- F2: `listings/pricing.py` keeps `validate_listing_rates`, the codec's check,
+  and `non_request_priced_rate`; the purchase-pricing helpers of tasks 2.2 and
+  2.3 (`selected_unit_price`, `extract_unit_price_from_order`,
+  `reference_payment`, `determine_strategy_from_order`) and
+  `resource_is_inference` of task 1.3 are removed, since a storefront prices a
+  purchase through the family selling library and nothing called them. An
+  accepted escrow advertises exactly one amount rate, naming its field and
+  unit as the selling library reads it, so no published escrow is priced by a
+  configured floor. "Buyer purchases a balance" is proven on the live path by
+  `compose-inference-domain-stack`'s storefront tests and its deal scenario.
+- F3: the charge requirement states the image term, that prompt tokens
+  exclude cached prompt tokens, and that an unnamed cached or image rate is
+  zero; D17 says which image use is priced.
+- F4: parts 8.5 and 8.6 are open again, part 8.10 is guidance placement, and
+  the index row is current.
+- F5: the removal of `endpoint` and `rate_card.asset` from the card is an
+  unowned gap in the change index, named under D4 and D17.
+- F6: `test_inference_spec.py::test_a_narrowed_vocabulary_refuses_another_model_identifier`.
+- F7: the proposal's release rows, the design's first risk and task 6.5 state
+  what the tree holds.
+
+Evidence, at the fix commit's tree, on an arm64 macOS host:
+- `make check-packaging`, `make check-repository` against `dev` for this
+  change and for `compose-inference-domain-stack`, and both changes' strict
+  OpenSpec validation passed.
+- Unit: the inference domain's suite, 181 passed.
+- Application integration: the registry's suite, 348 passed; the inference
+  storefront's, 77; the inference service's, 31; the gateway service's, 45;
+  the inference buyer's, 23; `kit/api/selling`, 239; the API-credits
+  storefront's, 277.
+- End to end, run locally and not by the pipeline: the inference lane, 1
+  passed. The other three lanes were not rerun.
+- A fresh-context check of the diff found eight points, all fixed: an escrow
+  rate naming no field passed the codec and was unrated to the selling
+  library; three task notes and one sentence of
+  `compose-inference-domain-stack`'s design still described the removed
+  helpers or the registry's earlier posture; a design sentence misplaced; the
+  registry test's escrow stating no rate; a return value nothing read; and
+  the producer rule's owner unnamed.
+
 ## 8. Closeout
 
 - [x] 8.1 **Comment hygiene.** Confirmed: `make check-comment-hygiene` passes,
@@ -435,10 +484,10 @@ buyer-plugin text in `design.md`, `proposal.md`, and `tasks.md`, closeout parts
 - [x] 8.4 **Narrative compression.** Compress completed-task notes to final
       behavior, validation evidence, and promotion destinations; keep rejected
       alternatives in `design.md`.
-- [x] 8.5 **Roadmap currency.** Update Goal 9's current-state prose in
+- [ ] 8.5 **Roadmap currency.** Update Goal 9's current-state prose in
       `docs/development/ROADMAP.md` (the vocabulary now exists) and remove this
       change's row from its gap table; name the update in the promotion record.
-- [x] 8.6 **Campaign index currency.** Update this change's row and the
+- [ ] 8.6 **Campaign index currency.** Update this change's row and the
       campaign graph in `openspec/changes/README.md`; confirm every campaign
       link resolves to an existing directory.
 - [x] 8.7 **Packaging.** `make check-packaging` passes: every lock matches
@@ -462,11 +511,15 @@ buyer-plugin text in `design.md`, `proposal.md`, and `tasks.md`, closeout parts
       `docs/development/ARCHITECTURE.md` one-name and Terms entries, and the
       one sentence in the API-credits companion that the record below names;
       then complete the design-promotion record, last.
-- [ ] 8.10 **Documentation citations.** After promotion, run
+- [ ] 8.10 **Guidance placement.** Confirm what this change wrote under
+      `docs/guidance/repository/` — the wheel's rows in
+      `published-packages.md` — sits in the layer and file its subject
+      belongs to, and run `make check-guidance`.
+- [ ] 8.11 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=add-inference-domain-contract` and
-      `openspec validate add-inference-domain-contract --strict` and resolve
+      `change-workflow openspec validate add-inference-domain-contract --strict` and resolve
       every match. Both pass on the pre-promotion tree.
-- [ ] 8.11 **Archival.** `openspec archive add-inference-domain-contract -y`
+- [ ] 8.12 **Archival.** `change-workflow openspec archive add-inference-domain-contract -y`
       once every part above is done; update the campaign row to `archived` and
       the dependency graph in `openspec/changes/README.md`.
 
@@ -479,7 +532,8 @@ buyer-plugin text in `design.md`, `proposal.md`, and `tasks.md`, closeout parts
 | One credit is one base unit of the settlement asset; the settlement rate is one; the rate card names its asset and prices in integers of it, carried as decimal-digit strings on the wire; every option and escrow on the listing identifies that asset | the `inference` capability's `spec.md` — "Purchase is priced in settlement-asset base units", "Rate card is integer-valued and carried to issuance"; rationale in its `architecture.md` |
 | The handoff to issuance carries the accepted listing's rate card; the grant records it and consumption is priced by it in the changes that build them | the `inference` capability's `spec.md` — "Rate card is integer-valued and carried to issuance"; the recording is `compose-inference-domain-stack`'s delta and the pricing `meter-inference-usage`'s, each promoting with its change |
 | The request charge is added to the ceiling of the token sum; a failed upstream costs nothing | the `inference` capability's `spec.md` — "Usage record and deterministic charge derivation" |
-| A malformed card is refused by the storefront's codec and the registry's dry run; a registry's publish boundary refuses only retired spellings | the `inference` capability's `spec.md` — "One listing is one served model" |
+| A malformed card is refused by the storefront's codec and by a registry serving the inference specification, at publication and in its dry run; the codec also holds the unit rate and the one-asset rule | the `inference` capability's `spec.md` — "One listing is one served model" |
+| A record's prompt tokens exclude its cached prompt tokens; the producer that fills a record from an upstream usage block is `meter-inference-usage`'s | the `inference` capability's `spec.md` — "Usage record and deterministic charge derivation"; the producer is `meter-inference-usage`'s delta and promotes with it |
 | Charge derivation is a pure function of record and card | the `inference` capability's `spec.md` — "Usage record and deterministic charge derivation" |
 | Usage evidence is secret-free by format, its attestation a digest reference, and verification binds it to the grant and the request; debiting each pair once is `meter-inference-usage`'s delta | the `inference` capability's `spec.md` — "Usage evidence is secret-free" |
 | Three identities; the bearer credential is delivery | rationale in the `inference` capability's `architecture.md`; the requirement is `compose-inference-domain-stack`'s delta and promotes with it |

@@ -16,7 +16,6 @@ from arkhai_inference.listings.models import (
     InferenceRateCard,
     MAX_BASE_UNIT_AMOUNT,
     coerce_resource_dict,
-    resource_is_inference,
 )
 from arkhai_inference.schema import InferenceListing
 
@@ -298,13 +297,13 @@ def test_each_option_advertises_exactly_one_amount_rate():
             InferenceListing.model_validate({"listing_resource": _card(), "settlement_options": [option]})
 
 
-def test_an_escrow_advertises_at_most_one_amount_rate():
-    escrow = _escrow()
-    escrow["rates"] = escrow["rates"] * 2
-    with pytest.raises(ValidationError, match="at most one amount rate"):
-        InferenceListing.model_validate({"listing_resource": _card(), "accepted_escrows": [escrow]})
+def test_an_escrow_advertises_exactly_one_amount_rate():
+    doubled = _escrow()
+    doubled["rates"] = doubled["rates"] * 2
     unrated = {k: v for k, v in _escrow().items() if k != "rates"}
-    InferenceListing.model_validate({"listing_resource": _card(), "accepted_escrows": [unrated]})
+    for escrow in (doubled, unrated, {**unrated, "rates": []}):
+        with pytest.raises(ValidationError, match="exactly one amount rate"):
+            InferenceListing.model_validate({"listing_resource": _card(), "accepted_escrows": [escrow]})
 
 
 def test_retired_offer_resource_key_is_rejected():
@@ -312,13 +311,9 @@ def test_retired_offer_resource_key_is_rejected():
         InferenceListing.model_validate({"offer_resource": _card()})
 
 
-def test_resource_helpers():
+def test_resource_coercion_reads_only_a_json_object():
     stored = InferenceModelCard.model_validate(_card()).model_dump(mode="json")
-    assert resource_is_inference(stored)
-    assert resource_is_inference(json.dumps(stored))
-    assert not resource_is_inference(_card())
-    assert resource_is_inference(InferenceModelCard.model_validate(_card()))
-    assert not resource_is_inference({"kind": "api_credits.v1"})
+    assert coerce_resource_dict(json.dumps(stored)) == stored
     assert coerce_resource_dict("not json") == {}
     assert coerce_resource_dict(None) == {}
 
