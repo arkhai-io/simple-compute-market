@@ -49,6 +49,7 @@ def _behind(path: Path) -> Path:
                 service=CHAIN.service,
                 command=CHAIN.command,
                 baselines=CHAIN.baselines[:-1],
+                floor=CHAIN.floor,
             ),
             SqliteMigrationConnection(connection),
         )

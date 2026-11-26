@@ -916,12 +916,22 @@ retires configuration settings is also cut over to a migrated configuration
 
 ### Supported databases
 
-A database the marketplace v0.3.0 release built, or one a later release
-migrated, is upgraded in place: compute provisioning's, the VM and bare-metal
-storefronts', and the registry's. A database from before v0.3.0 is refused as
-unsupported, and so is every existing API-credit storefront or service database:
-those services start from a fresh database, and the state in the old one is not
-carried. An image older than the database's last migration refuses it as ahead.
+A database the marketplace v0.3.0 release ran on, or one a later release
+migrated, is upgraded in place, whatever releases before v0.3.0 recorded in it.
+That covers the databases of compute provisioning, the VM, bare-metal and
+API-credit storefronts, the API-credit service, and the registry.
+
+A database from before v0.3.0 is refused as unsupported, naming marketplace 0.3.0
+and the migrations it lacks. The command cannot tell an older database of the
+service's own from another service's database sharing its history. So first
+confirm the database is that service's. Then upgrade it through marketplace 0.3.0,
+running that release's service on it, and then to this release.
+
+A database recording none of v0.3.0's migrations, or tables with no ledger, is
+refused as not the service's: check that the service is configured with its own
+database. Starting fresh is never the remedy for a database that can upgrade.
+
+An image older than the database's last migration refuses it as ahead.
 
 ### The procedure
 
@@ -934,13 +944,18 @@ For each service, in its own deployment:
    `compute-provisioning-migrate --check`. It changes nothing, exits 0 only for a
    database already compatible, and lists what the upgrade will do: the pending
    migration IDs, a v0.3.0 baseline to be adopted, or why the database is refused.
-   A database it reports as unsupported will not start under the new release;
-   decide before deploying whether that service starts fresh.
+   For a baseline to be adopted, it also names the release whose records adoption
+   replaces, and lists each record an earlier release wrote that adoption sets
+   aside. A database it reports as unsupported will not start under the new
+   release. Confirm the database is the service's own, and upgrade it through the
+   release the refusal names before deploying, as "Supported databases" says. Back
+   up and preview both API-credit databases before deploying either, and deploy
+   neither if either is refused.
 3. **Deploy.** Under Helm the init container runs the command before the
    application; under Compose the service's command runs it before the
-   application. A v0.3.0 database is adopted — its v0.3.0 records are replaced by
-   the baseline's, without running the baselines — and the migrations after the
-   baseline are applied. If the migration fails, the application does not start;
+   application. A v0.3.0 database is adopted: its v0.3.0 records, and any an
+   earlier release wrote, are replaced by the baseline's without running the
+   baselines, and the migrations after the baseline are applied. If the migration fails, the application does not start;
    the init container's or the container's log names the migration that failed,
    and the migrations before it stay applied.
 4. **Verify** with `--check`, which now exits 0, and the service's health.
@@ -1190,3 +1205,23 @@ sequence:
   a store first opened, where they are absent, and drops the inventory tables
   v0.3.0 kept frozen, with their rows; inventory is declared at provisioning
   ([`seller-quickstart.md`, "Upgrading from CSV inventory"](seller-quickstart.md#upgrading-from-csv-inventory)).
+  A database a release before v0.3.0 built also loses tables nothing has read since
+  v0.3.0, with their rows:
+  - the bare-metal storefront's `bare_metal_hosted_lifecycle`, each hosted-card
+    deal's binding and states;
+  - the VM storefront's `derived_compute_listings`, its listing-to-site mappings.
+    A database never put through v0.3.0's conversion to the common binding loses
+    its only copy of those mappings, which no release since v0.3.0 has read.
+- **API-credit databases are adopted as a pair.** The API-credit storefront's and
+  service's v0.3.0 databases are adopted in place, keeping their keys, grants,
+  balances and issued credentials. Back up and preview both before deploying either.
+  Under Compose the service migrates first, and the storefront only once the service
+  is healthy:
+  - if the service's migration fails, the storefront does not start and its
+    database is untouched;
+  - if the storefront's migration fails after the service's succeeded, the
+    storefront does not start, so no credential is issued against a mixed pair.
+    Roll back by running v0.3.0 over both backups.
+
+  The service also gains the site ledger's unique index on a capacity bucket's
+  host, which its v0.3.0 release left out.

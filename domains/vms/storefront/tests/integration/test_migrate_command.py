@@ -32,8 +32,11 @@ from market_storefront.utils.migrations import (
     migrate_storefront_database,
     require_compatible_storefront_database,
 )
+from tests.floor_database import create_floor_database
 
 _UNKNOWN_ID = "20991231_001_from_a_newer_image"
+#: A record no release of the chain lists, as a release before the floor left it.
+_EARLIER_RECORD = "20250101_001_recorded_by_an_earlier_release"
 
 
 def _behind(path: Path) -> Path:
@@ -41,7 +44,12 @@ def _behind(path: Path) -> Path:
     connection = sqlite3.connect(path)
     try:
         migrate(
-            Chain(service=CHAIN.service, command=CHAIN.command, baselines=CHAIN.baselines),
+            Chain(
+                service=CHAIN.service,
+                command=CHAIN.command,
+                baselines=CHAIN.baselines,
+                floor=CHAIN.floor,
+            ),
             SqliteMigrationConnection(connection),
         )
     finally:
@@ -110,6 +118,36 @@ def test_check_reports_a_behind_database_and_changes_nothing(tmp_path, command, 
         assert migration.id in output.out
     assert MIGRATION_COMMAND in output.err
     assert path.read_bytes() == before
+
+
+def test_check_previews_adopting_a_database_an_earlier_release_built(
+    tmp_path, command, capsys
+):
+    """A v0.3.0 database carrying a record an earlier release wrote: the
+    preview names what adoption records, replaces, sets aside, then applies."""
+    path = create_floor_database(tmp_path / "upgraded.db", earlier_records=(_EARLIER_RECORD,))
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute("CREATE TABLE earlier_release_extension (id TEXT PRIMARY KEY)")
+        connection.execute("INSERT INTO earlier_release_extension VALUES ('kept')")
+        connection.execute(
+            "INSERT INTO stage_events (ts, stage, event, data) "
+            "VALUES ('t', 'kept', 'kept', '{}')"
+        )
+    connection.close()
+    before = path.read_bytes()
+
+    assert command(path, "--check") == 1
+
+    output = capsys.readouterr().out
+    assert f"supported baseline to be adopted: {', '.join(CHAIN.baseline_ids)}" in output
+    assert "replacing the records of marketplace 0.3.0" in output
+    assert f"records set aside: {_EARLIER_RECORD}" in output
+    assert f"pending: {', '.join(m.id for m in CHAIN.migrations)}" in output
+    assert path.read_bytes() == before
+
+    assert command(path) == 0
+    assert command(path, "--check") == 0
 
 
 def test_check_on_no_database_creates_none(tmp_path, command):

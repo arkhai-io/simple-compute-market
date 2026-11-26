@@ -1176,12 +1176,16 @@ only, which is why `AGENTS.md`'s exceptions admit it to the public repository.
 
 What a service accepts of a stored representation, and what a cutover counts as live, is [`accepted-representations.md`](../guidance/repository/accepted-representations.md).
 
-Each stateful service's migration chain begins at a supported baseline, so a
-database is either built by that chain from empty or adopted at the baseline's
-release; any other existing database is refused, and the service starts from a
-fresh database instead. VM/bare-metal seller evidence/delivery and API-credit
-evidence/grant schemas require fresh owned databases when incompatible; startup
-rejects drift instead of silently copying/adopting old payment rows. Their
+Each stateful service's migration chain begins at a supported baseline and
+declares its floor release. A database is either built by that chain from empty, or
+adopted as one its floor release ran on, whatever earlier releases recorded in it. An
+older database is refused, to be upgraded through the floor release once confirmed
+as the service's. A database the chain did not build is refused as not the
+service's. No refusal directs a fresh database in place of one that can upgrade
+([`DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup"](DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)).
+VM/bare-metal seller evidence/delivery and API-credit evidence/grant schemas reach
+the current release only through their chains; startup rejects drift instead of
+silently copying/adopting old payment rows. Their
 capability architecture companions define quiesce, ownership and bootstrap
 boundaries.
 

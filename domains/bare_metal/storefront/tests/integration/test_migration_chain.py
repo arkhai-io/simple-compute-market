@@ -20,6 +20,7 @@ from market_schema_migrations import (
     MigrationFailed,
     MigrationRefused,
     SqliteMigrationConnection,
+    UnsupportedCause,
     check,
     check_sqlite_file,
     migrate,
@@ -33,6 +34,9 @@ from arkhai_bare_metal_storefront.migrations import (
 )
 
 _LATER = tuple(migration.id for migration in CHAIN.migrations)
+#: A record no release of the chain lists, as a release before the floor left it.
+_EARLIER_RECORD = "bare-metal-storefront-0000-recorded-by-an-earlier-release"
+_DROP_HOSTED_LIFECYCLE = "bare-metal-storefront-0021-drop-hosted-lifecycle"
 
 
 def _snapshot(path: Path) -> dict:
@@ -62,7 +66,7 @@ def test_the_baselines_reproduce_the_floor() -> None:
 
 
 def test_the_chain_floor_is_the_fixture_floor() -> None:
-    assert list(FLOOR_IDS) == floor_ids()
+    assert list(CHAIN.floor.recorded) == floor_ids()
 
 
 def test_a_fresh_database_gets_the_floor_and_every_later_migration(tmp_path) -> None:
@@ -96,6 +100,44 @@ def test_a_floor_database_is_adopted_and_only_the_later_migrations_run(tmp_path)
     connection = sqlite3.connect(path)
     try:
         assert connection.execute("SELECT stage FROM stage_events").fetchall() == [("kept",)]
+    finally:
+        connection.close()
+
+
+def test_a_floor_database_carrying_an_earlier_releases_record_and_table_is_adopted(
+    tmp_path,
+) -> None:
+    path = create_floor_database(tmp_path / "upgraded.db", earlier_records=(_EARLIER_RECORD,))
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute("CREATE TABLE earlier_release_extension (id TEXT PRIMARY KEY)")
+        connection.execute("INSERT INTO earlier_release_extension VALUES ('kept')")
+        connection.execute(
+            "INSERT INTO stage_events (ts, stage, event, data) "
+            "VALUES ('t', 'kept', 'kept', '{}')"
+        )
+    connection.close()
+
+    result = check_sqlite_file(CHAIN, path)
+    assert result.state is CheckState.BEHIND
+    assert result.floor == "marketplace 0.3.0"
+    assert result.adopting == CHAIN.baseline_ids
+    assert result.set_aside == (_EARLIER_RECORD,)
+    assert result.pending == _LATER
+
+    report = migrate_storefront_database(path)
+
+    assert report.adopted is True
+    assert report.set_aside == (_EARLIER_RECORD,)
+    assert report.applied == _LATER
+    assert check_sqlite_file(CHAIN, path).state is CheckState.COMPATIBLE
+    assert _recorded(path) == sorted(CHAIN.ids)
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("SELECT stage FROM stage_events").fetchall() == [("kept",)]
+        assert connection.execute("SELECT id FROM earlier_release_extension").fetchall() == [
+            ("kept",)
+        ]
     finally:
         connection.close()
 
@@ -144,7 +186,7 @@ def test_a_store_opened_cursor_is_tolerated_then_dropped_for_the_kits_page_posit
     report = migrate_storefront_database(path)
 
     assert report.applied == _LATER
-    assert _LATER[-1] == "bare-metal-storefront-0020-servicing-page-position"
+    assert "bare-metal-storefront-0020-servicing-page-position" in _LATER
     fresh = tmp_path / "fresh.db"
     migrate_storefront_database(fresh)
     assert _snapshot(path) == _snapshot(fresh)
@@ -159,7 +201,11 @@ def test_a_store_opened_cursor_is_tolerated_then_dropped_for_the_kits_page_posit
 
 
 def test_the_accepted_site_generations_table_is_dropped(tmp_path) -> None:
-    path = create_floor_database(tmp_path / "old.db")
+    """A build between v0.2.29 and v0.3.0 recorded the table's migration, which
+    v0.3.0 kept and no later chain lists: adoption sets the record aside, and
+    a migration after the baseline drops the table."""
+    record = "bare-metal-storefront-0011-accepted-site-generations"
+    path = create_floor_database(tmp_path / "old.db", earlier_records=(record,))
     connection = sqlite3.connect(path)
     with connection:
         connection.execute(
@@ -168,9 +214,69 @@ def test_the_accepted_site_generations_table_is_dropped(tmp_path) -> None:
         connection.execute("INSERT INTO bare_metal_accepted_site_generations VALUES ('site')")
     connection.close()
 
-    migrate_storefront_database(path)
+    report = migrate_storefront_database(path)
 
+    assert report.adopted is True
+    assert report.set_aside == (record,)
+    assert "bare-metal-storefront-0018-drop-accepted-site-generations" in report.applied
     assert "bare_metal_accepted_site_generations" not in _snapshot(path)["tables"]
+    assert _recorded(path) == sorted(CHAIN.ids)
+
+
+def test_the_hosted_lifecycle_an_earlier_release_created_is_dropped(tmp_path) -> None:
+    """Every v0.2.x release recorded the hosted lifecycle's migration under a
+    number v0.3.0 reused: adoption sets the record aside, and the table and its
+    rows are dropped by a migration after the baseline."""
+    record = "bare-metal-storefront-0008-hosted-physical-lifecycle"
+    path = create_floor_database(tmp_path / "hosted.db", earlier_records=(record,))
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "CREATE TABLE bare_metal_hosted_lifecycle (obligation_ref TEXT PRIMARY KEY, "
+            "physical_state TEXT NOT NULL DEFAULT 'accepted')"
+        )
+        connection.execute(
+            "CREATE INDEX idx_bare_metal_hosted_physical_state "
+            "ON bare_metal_hosted_lifecycle(physical_state)"
+        )
+        connection.execute(
+            "CREATE TRIGGER bare_metal_hosted_binding_immutable "
+            "BEFORE UPDATE OF obligation_ref ON bare_metal_hosted_lifecycle "
+            "BEGIN SELECT RAISE(ABORT, 'immutable'); END"
+        )
+        connection.execute("INSERT INTO bare_metal_hosted_lifecycle VALUES ('obligation', 'held')")
+    connection.close()
+    assert check_sqlite_file(CHAIN, path).set_aside == (record,)
+
+    report = migrate_storefront_database(path)
+
+    assert report.adopted is True
+    assert report.set_aside == (record,)
+    assert _DROP_HOSTED_LIFECYCLE in report.applied
+    fresh = tmp_path / "fresh.db"
+    migrate_storefront_database(fresh)
+    assert _snapshot(path) == _snapshot(fresh)
+    assert _recorded(path) == sorted(CHAIN.ids)
+
+
+def test_the_hosted_lifecycle_drop_changes_nothing_on_a_fresh_database(tmp_path) -> None:
+    without_drop = tuple(m for m in CHAIN.migrations if m.id != _DROP_HOSTED_LIFECYCLE)
+    assert len(without_drop) == len(CHAIN.migrations) - 1
+    path = tmp_path / "fresh.db"
+    connection = sqlite3.connect(path)
+    try:
+        migrate(
+            dataclasses.replace(CHAIN, migrations=without_drop),
+            SqliteMigrationConnection(connection),
+        )
+        before = schema_snapshot(connection)
+
+        report = migrate(CHAIN, SqliteMigrationConnection(connection))
+
+        assert report.applied == (_DROP_HOSTED_LIFECYCLE,)
+        assert schema_snapshot(connection) == before
+    finally:
+        connection.close()
 
 
 def test_a_database_missing_a_floor_id_is_refused_and_unchanged(tmp_path) -> None:
@@ -186,8 +292,10 @@ def test_a_database_missing_a_floor_id_is_refused_and_unchanged(tmp_path) -> Non
         migrate_storefront_database(path)
 
     assert refused.value.result.state is CheckState.UNSUPPORTED
+    assert refused.value.result.cause is UnsupportedCause.OLDER_OR_SHARED
     assert refused.value.result.missing == (missing,)
     assert missing in str(refused.value)
+    assert "marketplace 0.3.0" in str(refused.value)
     assert "bare-metal-storefront-migrate" in str(refused.value)
     assert path.read_bytes() == before
 

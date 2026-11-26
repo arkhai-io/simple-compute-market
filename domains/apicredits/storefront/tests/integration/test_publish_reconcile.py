@@ -675,8 +675,9 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
         seller_principal=SELLER_PRINCIPAL,
     )
 
-    with pytest.raises(RuntimeError, match="L-old.*fresh database"):
+    with pytest.raises(RuntimeError, match="L-old.*no durable listing binding") as refused:
         refuse_unbound_listings(path)
+    assert "fresh database" not in str(refused.value)
 
 
 class _PaymentComposition(_SettlementComposition):
