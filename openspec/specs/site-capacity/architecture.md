@@ -16,6 +16,8 @@ fulfillment scheduling
 
 Putting the ledger outside storefronts allows several sellers or processes to share supply without treating independently refreshed caches as locks. It also lets a reservation outlive the storefront process that initiated it.
 
+What a storefront asks the ledger to probe or reserve is a capacity claim, one mapping read in two ways. Its `dimensions` are quantities, each matched by sufficiency: the resource must have at least that much of the dimension free, and a dimension the resource does not declare has none. A claim carrying no `dimensions` map asks a unit count under one of the composition's unit keys, which is read as its mirror dimension. Every remaining key but the `offering_mode`, which the resource's pool must deliver, is matched by equality against the declaration's attributes and its own facts, in one namespace: the pool or resource a claim names, its `resource_type`, and each attribute such as a GPU model. A claim that names no `resource_type` matches any.
+
 ## Declared capacity and connection identity
 
 What a site sells is declared by capacity declarations: a Physical Resource's shape

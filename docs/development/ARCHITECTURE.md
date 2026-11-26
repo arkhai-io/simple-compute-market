@@ -834,6 +834,7 @@ key when signing is not configured.
 | **Market Agreement** | Commercial terms accepted after negotiation | Core/domain and storefront |
 | **Capacity Offering** | Market-facing representation of sellable capacity | Storefront |
 | **Capacity Projection** | Storefront view of capacity believed sellable | Storefront, sourced from sites |
+| **Capacity Claim** | What a storefront asks a site to probe or reserve: the quantities requested, as `dimensions`; the offering mode; and the pool or Physical Resource, resource type and attributes a declaration must match | Storefront builds it; site authority admits it |
 | **Capacity Reservation** | Admitted hold against authoritative capacity | Site authority |
 | **Physical Resource** | Real supply resource such as host, pod allocation, storage, power, or bandwidth | Site/provisioning |
 | **Capacity Declaration** | Authoritative statement of a Physical Resource's sellable shape and quantity, its pool, and the attributes claims match | Site authority |
