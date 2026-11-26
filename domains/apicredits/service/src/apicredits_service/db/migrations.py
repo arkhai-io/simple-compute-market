@@ -3,11 +3,19 @@
 The chain begins with one baseline per package whose tables the database
 holds, each fixed DDL, composed in foreign-key order: the resource pools, this
 service's keys, grants and consumption, and the site ledger it hosts as its
-quota ledger. The site ledger's later migrations follow. Its floor is
-``0.0.0``, recording no migration: no API-credit database from before its
-baseline is supported, so the migration command adopts none and refuses every
-non-empty database it did not build. A later change to any of these tables is
-a migration appended to :data:`CHAIN`, never an edit to a baseline.
+quota ledger. The site ledger's later migrations follow, then its repair of a
+bucket's host index. The baselines reproduce the database the marketplace
+v0.3.0 release's service built at startup, but for that index, which the site
+ledger's baseline names and the release, building the ledger from its models,
+left out; the repair creates it on an adopted database. The chain's floor is
+marketplace 0.3.0: a database recording every ID that release's service
+recorded (:data:`FLOOR_IDS`) is one the release ran on, and is adopted at the
+baseline without running it, whatever earlier releases recorded beside those
+IDs; one recording only some of them is older than the floor, or another
+service's, which its ledger cannot tell apart. The service's database is upgraded
+together with the API-credit storefront's, the service first, as their
+deployment orders them. A later change to any of these tables is a migration
+appended to :data:`CHAIN`, never an edit to a baseline.
 
 No migration seeds a row: the ``default`` pool is configuration-free but no
 schema constraint requires it, so the service's startup inserts it.
@@ -21,6 +29,7 @@ from sqlalchemy import Connection
 from market_resource_pools.migrations import BASELINE as POOLS_BASELINE
 from market_schema_migrations import Chain, Floor, Migration
 from market_site.migrations import BASELINE as SITE_BASELINE
+from market_site.migrations import CAPACITY_BUCKET_HOST_INDEX
 from market_site.migrations import MIGRATIONS as SITE_MIGRATIONS
 
 SERVICE = "the API-credit service"
@@ -91,10 +100,21 @@ SERVICE_BASELINE: Migration[Connection] = Migration(
 )
 """This service's keys, credit grants, and consumption events."""
 
+FLOOR_IDS: tuple[str, ...] = (
+    "20260731_001_apicredits_schema_baseline",
+    "20260811_002_canonical_owner_principals",
+    "20260815_003_fulfillment_grants",
+    "20260922_004_pool_advertisement_and_backing",
+    "20261005_005_reservation_release_requested_at",
+    "20261028_006_retired_reservation_states",
+    "20261106_007_reservation_activated_at",
+)
+"""Every ID the v0.3.0 release's API-credit service recorded on a database it built."""
+
 CHAIN: Chain[Connection] = Chain(
     service=SERVICE,
     command=COMMAND,
     baselines=(POOLS_BASELINE, SERVICE_BASELINE, SITE_BASELINE),
-    migrations=SITE_MIGRATIONS,
-    floor=Floor("0.0.0"),
+    migrations=(*SITE_MIGRATIONS, CAPACITY_BUCKET_HOST_INDEX),
+    floor=Floor("marketplace 0.3.0", FLOOR_IDS),
 )
