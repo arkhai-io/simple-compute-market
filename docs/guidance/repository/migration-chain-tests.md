@@ -26,7 +26,10 @@ real SQLite files
   API-credit service, and the registry. v0.3.0's runner kept records outside its
   chain, so the VM storefront also commits `upgraded/`: a database v0.2.29 built and
   v0.3.0 then ran on, with its `schema.json`, its `recorded_ids.json` in `rowid`
-  order, its `ddl.sql`, and a README giving how it was built. A new floor is a
+  order, its `ddl.sql`, and a README giving how it was built. Bare metal's records
+  v0.3.0 does not list, `bare-metal-storefront-0008-hosted-physical-lifecycle` and
+  `bare-metal-storefront-0011-accepted-site-generations`, are proven by its
+  synthetic case alone. A new floor is a
   release's decision
   ([the release handbook, "The migration floor"](../../release-handbook.md#the-migration-floor)).
 - **The chain.** Each service's `tests/integration/test_migration_chain.py` (the
