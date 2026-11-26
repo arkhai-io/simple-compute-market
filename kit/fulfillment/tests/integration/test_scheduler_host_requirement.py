@@ -26,7 +26,7 @@ from market_fulfillment import (
     SqlAlchemySchedulingTransaction,
     SqlAlchemySchedulingUnitOfWork,
 )
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import ResourcePoolFacts, ResourcePoolService
 from market_resource_pools_contracts import PoolCreate
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
@@ -74,7 +74,7 @@ def services():
         provider_config={},
     ))
     ledger = CapacityLedgerService(
-        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+        factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
     )
     scheduler = PhysicalSettlementScheduler(
         pools,

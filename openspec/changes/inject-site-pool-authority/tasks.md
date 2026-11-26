@@ -270,7 +270,7 @@ service, and the storefront tests that construct a ledger. The constructor chang
 reaches every caller at once, so this section crosses the layers in one slice: no
 caller can be left on the old constructor at a commit the functional checks pass.
 
-- [ ] 3.1 Rewire `kit/site/src/market_site/ledger.py` (D4): the constructor takes a
+- [x] 3.1 Rewire `kit/site/src/market_site/ledger.py` (D4): the constructor takes a
   required keyword `pool_facts: PoolFactsReader` and loses `host_requirement`; replace
   `_pool_declares_mode`, `_pool_provider` and `_pool_delivers` with one per-decision read
   of `pool_facts` per pool, used as `design.md` D4's table gives (registration `exists`;
@@ -281,7 +281,26 @@ caller can be left on the old constructor at a commit the functional checks pass
   and every docstring naming `market_resource_pools`. Remove every `market_resource_pools`
   and `market_resource_pools_contracts` import from `kit/site/src`. Verify: `grep -rn
   "market_resource_pools" kit/site/src` finds nothing.
-- [ ] 3.2 Give `kit/site`'s tests their own reader double (D9): a mapping from pool id to
+  Done; the grep finds nothing. `pool_facts` is the first keyword-only argument and
+  has no default. Each decision keeps one `PoolFacts` per pool in a local cache; the
+  mode check is a module-level `_pool_delivers_mode` (enabled, modes readable, mode in
+  them), which refuses a pool whose declaration cannot be read where the old helper
+  would have raised. Two judgements the plan did not spell out, for the round's review:
+  - the offered read now reads the deliverable-hosts report lazily, at most once and
+    only once a pool needs a host, since the ledger no longer knows whether a
+    requirement was supplied; before, it read it once whenever a requirement was
+    supplied and never otherwise, so the reads a composition with no requirement makes
+    are unchanged, and every `enabled` is the same;
+  - a declaration recording no pool is skipped before any port read in the offered
+    read too (D7), reported not offered and logged ("not offered"). Before, it was
+    judged as a missing pool: stored `enabled` with no requirement, or offered with a
+    usable host under one. Neither projection includes such a row, and admission
+    admits nothing against it, so no projected `enabled` and no refusal moves; the
+    snapshot (`GET /api/v1/capacity/snapshot`) no longer lists it. The fresh-context
+    check flagged this against the proposal's non-goal; it is kept as the only result
+    D7 allows without a port read for a poolless row, and is the owner's to confirm
+    or send back to design.
+- [x] 3.2 Give `kit/site`'s tests their own reader double (D9): a mapping from pool id to
   a test record, in `kit/site/tests/integration/conftest.py` and a unit-level fixture
   where the unit tests need one, replacing the `ResourcePool` rows and
   `market_resource_pools` imports in `test_ledger.py`, `test_ledger_host_requirement.py`,
@@ -292,7 +311,27 @@ caller can be left on the old constructor at a commit the functional checks pass
   read judging the declaration as backed and needing a host, with and without a report).
   Verify: `make -C kit/site test` passes, unit and library integration, including the
   one-report-read-per-decision and file-backed write-held-off cases.
-- [ ] 3.3 Add `kit/site/tests/unit/test_import_boundaries.py` forbidding
+  Done, differing from the plan in where the double lives: one module,
+  `kit/site/tests/pool_facts_double.py` (`PoolFactsDouble` over `PoolRecord`s, recording
+  each read and its session), which both levels import through `pythonpath = ["src",
+  "tests"]` in `kit/site/pyproject.toml`, as `kit/settlement-runtime` shares its test
+  helpers, rather than a copy in each conftest. A test changes a pool by replacing its
+  record. The host-requirement suite now states each pool's `needs_host` (and what a
+  missing pool reports) instead of a requirement; two of its cases tested how a provider
+  resolves against a requirement — a provider the requirement does not name, and
+  `{"test": False}` beside no requirement — which is now `pool_needs_host`'s, held by
+  `kit/resource-pools`' unit tests and `test_pool_facts.py`, so they collapsed into the
+  `needs_host` cases. The file-backed write probes update `capacity_buckets`, since the
+  site's database no longer holds `resource_pools`. Added: registration naming a missing
+  pool refused, reading only that pool; a declaration moved into a missing pool left
+  unchanged with the capacity version; the offered read meeting a missing pool, without
+  a report (offered only naming a host) and with one (only with a usable host), each
+  refused by admission; the offered read reading each pool once, in its session, beside
+  one report read, and never reading the report where no pool needs a host; admission
+  reading each pool once in the session that reserves; and a poolless row not offered,
+  with no read for it. `make -C kit/site test`: unit and library integration, 394
+  passed, the report-read and write-held-off cases among them.
+- [x] 3.3 Add `kit/site/tests/unit/test_import_boundaries.py` forbidding
   `market_resource_pools` and `market_resource_pools_contracts` in every module of
   `kit/site/src`, and `kit/resource-pools/tests/unit/test_import_boundaries.py`
   forbidding `market_site` in `kit/resource-pools/src` (D10), each walking every import
@@ -301,13 +340,28 @@ caller can be left on the old constructor at a commit the functional checks pass
   `kit/site/pyproject.toml`'s runtime dependencies, keeping either in its `dev` group
   only if a test still needs it (D4, D10). Verify: both boundary tests pass, and each
   fails against a planted import (checked by hand, not committed).
-- [ ] 3.4 Narrow `kit/resource-pools/src/market_resource_pools/host_requirement.py` to
+  Done: both walk every module (`rglob`) and every import node (`ast.walk`), absolute
+  imports only, since a relative one stays in its package. No `kit/site` test needs
+  either distribution, so neither stays in `dev`; `kit/site`'s lock drops the authority
+  and keeps the contracts package only through `arkhai-kit-site-client` in `dev`. By
+  hand: a function-local import of `market_resource_pools_contracts` planted in
+  `kit/site/src/market_site/_planted.py`, and a `TYPE_CHECKING` import of
+  `market_site.ledger` in `kit/resource-pools/src/market_resource_pools/_planted.py`,
+  each failed its test naming the file and line; both files were removed. `change-workflow
+  run test-before` of the site test at the section's starting commit (`5ee4ee910`):
+  failed there, on `ledger.py:55`, as it should. `kit/site/pyproject.toml` also gains
+  `"tests"` on its pytest path (3.2).
+- [x] 3.4 Narrow `kit/resource-pools/src/market_resource_pools/host_requirement.py` to
   `HostRequirement` and `pool_needs_host`, deleting `DeliverableHosts` and
   `declaration_has_usable_host` and their exports, and moving their docstring's account of
   the usable-host rule to `market_site.deliverable_hosts` (D5); trim
   `kit/resource-pools/tests/unit/test_host_requirement.py` to `pool_needs_host`'s cases.
   Verify: `make -C kit/resource-pools test` passes; the module imports no SQLAlchemy.
-- [ ] 3.5 Switch `kit/fulfillment/src/market_fulfillment/scheduler.py` to call
+  Done: the module's docstring keeps the provider mapping and points to
+  `market_site.deliverable_hosts` for the rule; it imports only `collections.abc`.
+  `make -C kit/resource-pools test`: unit and library integration, 115 passed (fourteen
+  predicate cases left with the predicate; the boundary test added).
+- [x] 3.5 Switch `kit/fulfillment/src/market_fulfillment/scheduler.py` to call
   `market_site`'s predicate with `needs_host=pool_needs_host(pool.provider,
   requirement)`, and `scheduling_persistence.py` to take `DeliverableHosts` from
   `market_site`; give the three ledger-constructing tests
@@ -318,12 +372,26 @@ caller can be left on the old constructor at a commit the functional checks pass
   `>=0.11.0` in `kit/fulfillment/pyproject.toml`, and bump it as `make
   check-version-bumps` requires (D11). Verify: `make -C kit/fulfillment test` passes,
   unit and library integration, its placement cases unchanged.
-- [ ] 3.6 Switch `provisioning/compute/src/compute_provisioning/relays/deliverability.py`
+  Done, differing from the plan: the three tests' ledgers get `ResourcePoolFacts()`
+  with no requirement, because none of them was ever given one — only the scheduler
+  was, and it keeps it — so passing the requirement to the reader would have made the
+  ledger refuse holds the placement cases need. `test_scheduler.py`'s pausing-ledger race
+  case builds its ledger through a subclass and was a fifth construction. The boundary
+  test's allowlist needed no change: `scheduler.py` and `scheduling_persistence.py` still
+  import both `market_resource_pools` and `market_site`. Bumped 0.9.0 → 0.9.1, the
+  change being internal; both floors carry a comment. `make -C kit/fulfillment test`:
+  unit and library integration, 213 passed.
+- [x] 3.6 Switch `provisioning/compute/src/compute_provisioning/relays/deliverability.py`
   to take `DeliverableHosts` from `market_site`; give
   `provisioning/compute/tests/integration/test_release.py` the real `ResourcePoolFacts`;
   raise `arkhai-kit-site` to `>=0.15.0` in `provisioning/compute/pyproject.toml` and bump
   it as required (D5, D11). Verify: `make -C provisioning/compute test` passes.
-- [ ] 3.7 Wire the provisioning service (D4, D11):
+  Done; `test_release.py`'s two ledgers get `ResourcePoolFacts()`, having had no
+  requirement. Bumped 0.30.0 → 0.30.1. Outside the plan: its `arkhai-kit-resource-pools`
+  floor rises to `>=0.11.0` too, the first version exporting the reader its tests
+  compose, as 3.5 does for fulfillment. `make -C provisioning/compute test`: unit and
+  library integration, 605 passed.
+- [x] 3.7 Wire the provisioning service (D4, D11):
   `provisioning/compute/service/src/compute_provisioning_service/container.py` builds a
   `ResourcePoolFacts` provider from the merged host requirement and passes it to
   `CapacityLedgerService` as `pool_facts`, no longer passing `host_requirement` to the
@@ -342,7 +410,20 @@ caller can be left on the old constructor at a commit the functional checks pass
   `test_relay_drain_api.py`; add to `test_capacity_api.py` a reserve through the typed
   client refused because its pool does not declare the claim's mode, if no case there
   does.
-- [ ] 3.8 Wire the API-credit service (D3, D11):
+  Done: the container's `pool_facts` provider is a `ResourcePoolFacts` over the merged
+  `host_requirement` provider, which the scheduler and the adapter composition also
+  take. The floors were raised in section 2 (2.4) and the service stays at 0.28.1.
+  `test_capacity_api.py` had no such case, so one was added: a reserve through
+  `SiteCapacityClient` against a declaration in a pool declaring no deliverable mode is
+  refused 409 naming the pool, with the declaration's availability and the capacity
+  version unchanged. In `test_authority_composition.py`, the deliverable-hosts test now
+  asserts the ledger's reader carries the scheduler's requirement object, and a new test
+  asserts the ledger holds the container's one `ResourcePoolFacts`, carrying the merged,
+  non-empty requirement. `make -C provisioning/compute/service test`: unit 641 passed;
+  application integration 580 passed, through the typed clients, `test_capacity_api.py`,
+  `test_host_requirement_api.py`, `test_deliverable_hosts_api.py` and
+  `test_relay_drain_api.py` among them.
+- [x] 3.8 Wire the API-credit service (D3, D11):
   `domains/apicredits/service/src/apicredits_service/container.py` passes
   `ResourcePoolFacts()` — no host requirement — as `pool_facts`; update
   `domains/apicredits/service/tests/integration/test_keys_service.py`; add a unit test
@@ -351,19 +432,44 @@ caller can be left on the old constructor at a commit the functional checks pass
   `pyproject.toml`; bump as required. The table, the seed and `load_pool_directory` stay
   unchanged. Verify: `make -C domains/apicredits/service test` passes, unit and
   application integration, including `test_default_pool.py` and `test_migrations.py`.
-- [ ] 3.9 Give the storefront tests that construct a ledger the real `ResourcePoolFacts`
+  Done, with one seam added: the container's ledger is built by a module-level
+  `build_capacity_ledger(session_factory)`, which `init()` calls, so
+  `tests/unit/test_composition.py` checks the composed reader (a `ResourcePoolFacts`
+  with `host_requirement is None`) without a migrated database; the comment that sat in
+  `init()` moved into its docstring. The service stays at 0.8.1, its floors raised with a
+  comment. `make -C domains/apicredits/service test`: unit and application integration,
+  92 passed, `test_default_pool.py` and `test_migrations.py` among them.
+- [x] 3.9 Give the storefront tests that construct a ledger the real `ResourcePoolFacts`
   (D9): `domains/vms/storefront/tests/integration/test_capacity_reservation_boundary.py`,
   `domains/vms/storefront/tests/integration/test_shape_feasibility.py`,
   `domains/bare_metal/storefront/tests/integration/test_site_reservation.py`, with
   `arkhai-kit-resource-pools` in each storefront's `dev` group where task 1.5 did not
   already keep it. Verify: those suites pass.
-- [ ] 3.10 Relock every project whose lock installs `arkhai-kit-site`,
+  Done; each ledger gets `ResourcePoolFacts()`, having had no requirement, and both
+  storefronts already kept the authority in `dev` (1.5). After the fresh-context check:
+  the VM storefront's runtime `arkhai-kit-site` floor and the bare-metal storefront's
+  `dev` one rise to `>=0.15.0`, the first version whose ledger takes `pool_facts`, and
+  their `dev` comments name the reader too; both stay at 0.29.1. `make -C
+  domains/vms/storefront test`: unit 1199 passed, 1 skipped; integration 653 passed.
+  `make -C domains/bare_metal/storefront test`: 694 passed.
+- [x] 3.10 Relock every project whose lock installs `arkhai-kit-site`,
   `arkhai-kit-resource-pools` or `kit/fulfillment` (`make lock PROJECTS="..."`), and
   check that no comment or docstring the section touched names `market_resource_pools`
   where it now means `market_site` (`grep -rn "market_resource_pools.declaration_has_usable_host\|market_resource_pools.host_requirement" --include=*.py .`
   outside virtual environments finds none). Verify: `make check-version-bumps` and
   `make check-packaging` pass.
-- [ ] 3.11 Verification point. Focused suites: `make -C kit/site test`, `make -C
+  Done: `make lock PROJECTS="..."` over the twelve projects whose lock names a changed
+  package (`domains/apicredits/service`, `domains/bare_metal/provisioning/adapter`,
+  `domains/bare_metal/storefront`, `domains/vms/provisioning/adapter`,
+  `domains/vms/storefront`, `e2e-tests`, `kit/fulfillment`, `kit/resource-pools`,
+  `kit/site`, `provisioning/compute`, `provisioning/compute/ansible`,
+  `provisioning/compute/service`), then the two storefronts and `e2e-tests` again for
+  the storefront floors. The grep finds none. Outside the plan:
+  `docs/guidance/repository/published-packages.md`'s row for `arkhai-kit-site` drops both
+  pool distributions, as `scripts/tests/test_publish_matrix.py` requires (`make
+  test-release-tooling TESTS=scripts/tests/test_publish_matrix.py`: 183 passed). `make
+  check-version-bumps`, `make check-locks` and `make check-packaging`: passed.
+- [x] 3.11 Verification point. Focused suites: `make -C kit/site test`, `make -C
   kit/resource-pools test`, `make -C kit/fulfillment test` (unit, library integration),
   `make -C provisioning/compute test`, `make -C provisioning/compute/service test` and
   `make -C domains/apicredits/service test` (unit, application integration through the
@@ -374,6 +480,35 @@ caller can be left on the old constructor at a commit the functional checks pass
   commit), `e2e_bare_metal_publication` (a disabled host's close and reopen, through the
   offered read's host rule), `e2e_bare_metal_deal`, and `e2e_credits_deal` (the API-credit
   ledger with no host requirement). No CI evidence is owed.
+  Done. Focused suites, as recorded in 3.2–3.9: `kit/site` 394, `kit/resource-pools`
+  115, `kit/fulfillment` 213, `provisioning/compute` 605, the provisioning service unit
+  641 and integration 580, the API-credit service 92, the VM storefront 1199 + 653, the
+  bare-metal storefront 694, all passed. `change-workflow run pre-commit
+  inject-site-pool-authority`: passed — `make check-packaging`, `make test` (every
+  suite) and `make check-repository`. After the fresh-context check's fixes (the
+  storefront floors and their relock, two `kit/site` tests): `kit/site` and both
+  storefront suites again, `make check-locks`, `make check-packaging`, `make
+  check-version-bumps` and `make check-repository` passed. End-to-end, confirmed as the
+  plan names them: `e2e_pool_declared_modes`, `e2e_buy`, `e2e_deal`,
+  `e2e_bare_metal_publication`, `e2e_bare_metal_deal` and `e2e_credits_deal`, which
+  reach the rewired ledger once deployed; none was run here, and validation runs them.
+  No CI evidence is owed.
+
+Section 3 notes: the docstrings section 2 left ahead of the wiring — `market_site.pool_facts`,
+`market_site.deliverable_hosts`, `market_resource_pools.pool_facts` — are now true of the
+code; three permanent documents still describe the old edge until closeout's 4.8 rewrites
+them, and the citations check does not report them: the site-capacity companion's
+"Declared capacity and connection identity" (cited by the new modules' docstrings and both
+boundary tests), its `testing.md`, and `ARCHITECTURE.md`'s kit-areas paragraph. The
+poolless-row change to the snapshot (3.1) is the one behaviour change; the round's review
+and the owner decide whether it stands, and if it does, closeout's 4.8 should say so in the
+site-capacity companion beside D7. The tests reach the double through `ledger._pool_facts`,
+as the suite already reaches `ledger._session_factory`; the fresh-context check suggested
+holding a reference instead, which was declined to keep `_make_ledger`'s many callers
+unchanged. A poolless row is now logged twice per projection read ("not offered" by the
+ledger, "not projected" by the projection), also declined, since D7 has the ledger log it.
+`PoolFactsDouble.declare` takes modes as one iterable, so `_declare_pool(ledger, id, *modes)`
+passes the tuple.
 
 ## 4. Closeout
 

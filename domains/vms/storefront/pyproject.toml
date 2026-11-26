@@ -36,7 +36,9 @@ dependencies = [
     "arkhai-kit-contact-exchange==0.5.1",
     "arkhai-kit-delivery==0.2.2",
     "arkhai-kit-delivery-apprise==0.1.2",
-    "arkhai-kit-site>=0.10.0",
+    # The first version whose ledger takes the pool reader its capacity-reservation
+    # and shape-feasibility integration tests build it with.
+    "arkhai-kit-site>=0.15.0",
     "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-bare-metal>=0.10.0",
     "arkhai-bare-metal-storefront==0.29.1",
@@ -95,7 +97,8 @@ dev = [
     # Reads the Helm values and the registry's filter specification.
     "pyyaml>=6.0",
     # The pool rows the capacity-reservation and shape-feasibility integration
-    # tests seed beneath their site ledger. Test-only.
+    # tests seed beneath their site ledger, and the pool reader that ledger
+    # reads them through. Test-only.
     "arkhai-kit-resource-pools>=0.11.0",
 ]
 

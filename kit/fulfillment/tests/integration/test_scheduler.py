@@ -23,7 +23,7 @@ from market_fulfillment import (
     SqlAlchemySchedulingTransaction,
     SqlAlchemySchedulingUnitOfWork,
 )
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import ResourcePoolFacts, ResourcePoolService
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_resource_pools.db import Base as PoolsBase, DEFAULT_POOL_ID
 from market_site.db import Base as SiteBase, CapacityBucket
@@ -60,7 +60,7 @@ def services():
     # This test suite's claims are VM-flavored ("gpu_count"); opt into
     # that alias explicitly the same way the VM composition root does
     # (kit/site's own default is domain-neutral -- see ledger.py).
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    ledger = CapacityLedgerService(factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     scheduler = PhysicalSettlementScheduler(
         pools, ledger, session_factory=factory, default_resource_kind="compute.gpu"
     )
@@ -621,7 +621,7 @@ def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_pat
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    ledger = CapacityLedgerService(factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a", units=10)
@@ -704,7 +704,7 @@ def test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer(t
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    ledger = CapacityLedgerService(factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "a1", "pool-a", units=10)
@@ -791,7 +791,7 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    ledger = CapacityLedgerService(factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
     _resource(ledger, "gpu-a", "pool-a", units=10)
@@ -1010,7 +1010,10 @@ def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
     ledger = PausingLedger(
-        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+        factory,
+        pool_facts=ResourcePoolFacts(),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
     )
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")

@@ -746,7 +746,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -760,7 +760,7 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -893,8 +893,6 @@ source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "pydantic" },

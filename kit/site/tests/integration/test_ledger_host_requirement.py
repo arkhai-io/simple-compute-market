@@ -1,10 +1,12 @@
 """Admission and the offered read apply the usable-host rule.
 
-The suite's pools name provider ``"test"``. Each case supplies the requirement
-the composition would and, where it matters, a report of the hosts taking new
+Each case gives its pools the need for a host that the composition's reader
+would report for them and, where it matters, a report of the hosts taking new
 delivery, then declares capacity naming a host or none, to prove that a
-declaration with no usable host is simply not a candidate in a backed pool
-whose provider needs one, and is not offered by the projections' read.
+declaration with no usable host is simply not a candidate in a backed pool that
+needs one, and is not offered by the projections' read. How a provider and a
+host requirement resolve into a pool's need is the pool authority's, proved
+beside its reader.
 """
 
 from __future__ import annotations
@@ -17,8 +19,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from market_resource_pools.db import Base as ResourcePoolBase
-from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from market_site.db import Base
 from market_site.ledger import (
     CapacityConflictError,
@@ -26,18 +26,10 @@ from market_site.ledger import (
     UndeclaredOfferingModeError,
 )
 from market_site.projections import SiteProjectionService
+from pool_facts_double import PoolFactsDouble
 
-BACKED_POOL_TAGS = {
-    "deliverable_modes": ["vm"],
-    "advertisable_modes": ["vm"],
-    "capacity_backing": "backed",
-}
+DEFAULT_POOL_ID = "default"
 UNBACKED_POOL_ID = "introductions"
-UNBACKED_POOL_TAGS = {
-    "deliverable_modes": [],
-    "advertisable_modes": ["vm"],
-    "capacity_backing": "unbacked",
-}
 
 
 class FakeDeliverableHosts:
@@ -68,7 +60,7 @@ class WriteProbingDeliverableHosts(FakeDeliverableHosts):
         # is refused at once.
         other = sqlite3.connect(self.path, timeout=0, isolation_level=None)
         try:
-            other.execute("UPDATE resource_pools SET label = label")
+            other.execute("UPDATE capacity_buckets SET enabled = enabled")
             self.writes_held_off.append(False)
         except sqlite3.OperationalError as exc:
             assert "locked" in str(exc)
@@ -79,8 +71,11 @@ class WriteProbingDeliverableHosts(FakeDeliverableHosts):
 
 
 def _make_ledger(
-    *, host_requirement, deliverable_hosts=None, pool_tags=None, database_path=None
+    *, needs_host, deliverable_hosts=None, modes=("vm",), database_path=None
 ):
+    """A ledger over the default pool, delivering ``modes`` (``None``: a
+    declaration that cannot be read), and an unbacked pool delivering none;
+    each pool, and a missing one, reports ``needs_host``."""
     if database_path is None:
         engine = create_engine(
             "sqlite:///:memory:",
@@ -95,32 +90,16 @@ def _make_ledger(
             connect_args={"check_same_thread": False, "timeout": 30},
         )
     Base.metadata.create_all(bind=engine)
-    ResourcePoolBase.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(bind=engine)
-    with session_factory() as db, db.begin():
-        db.add(
-            ResourcePool(
-                id=DEFAULT_POOL_ID,
-                label="Default Pool",
-                provider="test",
-                enabled=True,
-                policy_tags=dict(pool_tags or {"deliverable_modes": ["vm"]}),
-            )
-        )
-        db.add(
-            ResourcePool(
-                id=UNBACKED_POOL_ID,
-                label="Introductions",
-                provider="test",
-                enabled=True,
-                policy_tags=dict(UNBACKED_POOL_TAGS),
-            )
-        )
+    pools = PoolFactsDouble(missing_needs_host=needs_host)
+    pools.declare(DEFAULT_POOL_ID, modes or (), needs_host=needs_host)
+    if modes is None:
+        pools.change(DEFAULT_POOL_ID, deliverable_modes=None)
+    pools.declare(UNBACKED_POOL_ID, (), needs_host=needs_host)
     return CapacityLedgerService(
-        session_factory,
+        sessionmaker(bind=engine),
+        pool_facts=pools,
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
-        host_requirement=host_requirement,
         deliverable_hosts=deliverable_hosts,
     )
 
@@ -167,8 +146,8 @@ def _capacity_version(ledger) -> int:
     return ledger.events_after(0)[1]
 
 
-def test_a_declaration_naming_no_host_is_not_admitted_where_the_provider_needs_one():
-    ledger = _make_ledger(host_requirement={"test": True})
+def test_a_declaration_naming_no_host_is_not_admitted_where_the_pool_needs_one():
+    ledger = _make_ledger(needs_host=True)
     _declare(ledger, "no-host")
 
     assert ledger.probe(claim=VM_CLAIM) is None
@@ -177,7 +156,7 @@ def test_a_declaration_naming_no_host_is_not_admitted_where_the_provider_needs_o
 
 
 def test_the_claim_falls_through_to_a_declaration_naming_a_host():
-    ledger = _make_ledger(host_requirement={"test": True})
+    ledger = _make_ledger(needs_host=True)
     # Registered first, so it would be the first candidate if it were one.
     _declare(ledger, "no-host")
     _declare(ledger, "hosted", host_id="kvm1")
@@ -188,18 +167,8 @@ def test_the_claim_falls_through_to_a_declaration_naming_a_host():
     assert reserved["resource_id"] == "hosted"
 
 
-def test_a_provider_the_requirement_does_not_name_needs_a_host():
-    ledger = _make_ledger(host_requirement={"some-other-provider": False})
-    _declare(ledger, "no-host")
-
-    assert ledger.probe(claim=VM_CLAIM) is None
-
-
-@pytest.mark.parametrize("host_requirement", [None, {"test": False}])
-def test_a_declaration_naming_no_host_is_admitted_where_no_host_is_needed(
-    host_requirement,
-):
-    ledger = _make_ledger(host_requirement=host_requirement)
+def test_a_declaration_naming_no_host_is_admitted_where_no_host_is_needed():
+    ledger = _make_ledger(needs_host=False)
     _declare(ledger, "no-host")
 
     reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
@@ -208,9 +177,9 @@ def test_a_declaration_naming_no_host_is_admitted_where_no_host_is_needed(
     assert reserved["resource_id"] == "no-host"
 
 
-def test_with_no_requirement_a_report_refuses_nothing():
+def test_where_no_host_is_needed_a_report_refuses_nothing():
     ledger = _make_ledger(
-        host_requirement=None, deliverable_hosts=FakeDeliverableHosts()
+        needs_host=False, deliverable_hosts=FakeDeliverableHosts()
     )
     _declare(ledger, "named", host_id="disabled-host")
 
@@ -221,7 +190,7 @@ def test_with_no_requirement_a_report_refuses_nothing():
 
 def test_without_a_report_any_named_host_is_admitted():
     """A composition supplying no report has nothing to judge a host by."""
-    ledger = _make_ledger(host_requirement={"test": True})
+    ledger = _make_ledger(needs_host=True)
     _declare(ledger, "named", host_id="not-registered-anywhere")
 
     assert ledger.reserve(claim=VM_CLAIM, deal_ref={}) is not None
@@ -232,7 +201,7 @@ def test_without_a_report_any_named_host_is_admitted():
 )
 def test_probe_and_reserve_refuse_a_host_not_taking_delivery_and_fall_through(host_id):
     hosts = FakeDeliverableHosts({"kvm1"})
-    ledger = _make_ledger(host_requirement={"test": True}, deliverable_hosts=hosts)
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
     # Registered first, so it would be the first candidate if it were one.
     _declare(ledger, "undeliverable", host_id=host_id)
     _declare(ledger, "hosted", host_id="kvm1")
@@ -245,7 +214,7 @@ def test_probe_and_reserve_refuse_a_host_not_taking_delivery_and_fall_through(ho
 
 def test_each_admission_reads_the_report_once_in_its_own_session():
     hosts = FakeDeliverableHosts({"kvm1"})
-    ledger = _make_ledger(host_requirement={"test": True}, deliverable_hosts=hosts)
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
     _declare(ledger, "first", host_id="kvm1")
     _declare(ledger, "second", host_id="kvm1-other")
 
@@ -259,12 +228,30 @@ def test_each_admission_reads_the_report_once_in_its_own_session():
     assert hosts.sessions[0] is not hosts.sessions[1]
 
 
+def test_each_admission_reads_each_pool_once_in_the_session_that_reserves():
+    """Admission reads a pool's facts in the transaction that creates the
+    reservation, beside the host report, once per pool however many of its
+    declarations it walks."""
+    hosts = FakeDeliverableHosts({"kvm1"})
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
+    _declare(ledger, "undeliverable", host_id="kvm-other")
+    _declare(ledger, "hosted", host_id="kvm1")
+    pools = ledger._pool_facts
+    pools.reads.clear()
+
+    reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
+
+    assert reserved["resource_id"] == "hosted"
+    assert [pool_id for _, pool_id in pools.reads] == [DEFAULT_POOL_ID]
+    assert pools.reads[0][0] is hosts.sessions[-1]
+
+
 @pytest.mark.parametrize(
     "host_id", ["disabled-host", "never-registered"], ids=["disabled", "unregistered"]
 )
 def test_a_claim_only_a_host_not_taking_delivery_could_serve_gets_no_capacity(host_id):
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts({"kvm1"}),
     )
     _declare(ledger, "undeliverable", host_id=host_id)
@@ -276,7 +263,7 @@ def test_a_claim_only_a_host_not_taking_delivery_could_serve_gets_no_capacity(ho
 
 def test_a_host_returned_to_the_report_is_matched_again():
     hosts = FakeDeliverableHosts()
-    ledger = _make_ledger(host_requirement={"test": True}, deliverable_hosts=hosts)
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
     _declare(ledger, "named", host_id="kvm1")
     assert ledger.probe(claim=VM_CLAIM) is None
 
@@ -288,9 +275,8 @@ def test_a_host_returned_to_the_report_is_matched_again():
 def test_a_disabled_declaration_stays_unmatched_and_unoffered_when_its_host_returns():
     hosts = FakeDeliverableHosts()
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=hosts,
-        pool_tags=BACKED_POOL_TAGS,
     )
     _declare(ledger, "named", host_id="kvm1", enabled=False)
 
@@ -302,7 +288,7 @@ def test_a_disabled_declaration_stays_unmatched_and_unoffered_when_its_host_retu
 
 
 def test_resize_applies_the_same_rule():
-    ledger = _make_ledger(host_requirement={"test": True})
+    ledger = _make_ledger(needs_host=True)
     _declare(ledger, "hosted", host_id="kvm1", units=2)
     _declare(ledger, "no-host", units=8)
     reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
@@ -321,7 +307,7 @@ def test_resize_applies_the_same_rule():
 
 def test_resize_refuses_a_declaration_whose_host_is_disabled():
     hosts = FakeDeliverableHosts({"kvm1"})
-    ledger = _make_ledger(host_requirement={"test": True}, deliverable_hosts=hosts)
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
     _declare(ledger, "hosted", host_id="kvm1", units=2)
     _declare(ledger, "big", host_id="kvm2", units=8)
     reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
@@ -343,7 +329,7 @@ def test_resize_refuses_a_declaration_whose_host_is_disabled():
 )
 def test_resize_falls_through_to_a_declaration_with_a_usable_host(host_id):
     hosts = FakeDeliverableHosts({"kvm1", "kvm3"})
-    ledger = _make_ledger(host_requirement={"test": True}, deliverable_hosts=hosts)
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
     _declare(ledger, "hosted", host_id="kvm1", units=2)
     # Registered before the usable one, so it would be the first candidate.
     _declare(ledger, "undeliverable", host_id=host_id, units=8)
@@ -362,7 +348,7 @@ def test_resize_falls_through_to_a_declaration_with_a_usable_host(host_id):
 
 
 def test_assignment_refuses_a_destination_naming_no_host():
-    ledger = _make_ledger(host_requirement={"test": True})
+    ledger = _make_ledger(needs_host=True)
     _declare(ledger, "hosted", host_id="kvm1")
     _declare(ledger, "no-host")
     reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
@@ -376,7 +362,7 @@ def test_assignment_refuses_a_destination_naming_no_host():
 
 def test_assignment_refuses_a_destination_whose_host_is_disabled_and_keeps_the_debit():
     hosts = FakeDeliverableHosts({"kvm1", "kvm2"})
-    ledger = _make_ledger(host_requirement={"test": True}, deliverable_hosts=hosts)
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
     _declare(ledger, "hosted", host_id="kvm1")
     _declare(ledger, "other", host_id="kvm2")
     reserved = ledger.reserve(claim=VM_CLAIM, deal_ref={})
@@ -404,9 +390,8 @@ def test_assignment_refuses_a_destination_whose_host_is_disabled_and_keeps_the_d
 )
 def test_the_offered_read_reports_a_declaration_with_no_usable_host_not_enabled(host_id):
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts({"kvm1"}),
-        pool_tags=BACKED_POOL_TAGS,
     )
     _declare(ledger, "undeliverable", host_id=host_id)
     _declare(ledger, "hosted", host_id="kvm1")
@@ -421,9 +406,8 @@ def test_the_offered_read_reports_a_declaration_with_no_usable_host_not_enabled(
 
 def test_the_offered_read_differs_from_the_stored_one_only_in_enabled():
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts(),
-        pool_tags=BACKED_POOL_TAGS,
     )
     _declare(ledger, "named", host_id="kvm1")
 
@@ -439,9 +423,8 @@ def test_a_host_leaving_the_report_records_no_event_and_projections_advance():
     evidence."""
     hosts = FakeDeliverableHosts({"kvm1"})
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=hosts,
-        pool_tags=BACKED_POOL_TAGS,
     )
     _declare(ledger, "named", host_id="kvm1")
     projections = SiteProjectionService(ledger)
@@ -466,9 +449,8 @@ def test_a_host_leaving_the_report_records_no_event_and_projections_advance():
 @pytest.mark.parametrize("host_id", ["disabled-host", None], ids=["disabled", "no-host"])
 def test_an_unbacked_pools_declaration_keeps_its_own_enabled(host_id):
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts(),
-        pool_tags=BACKED_POOL_TAGS,
     )
     _declare(ledger, "introduction", host_id=host_id, pool_id=UNBACKED_POOL_ID)
 
@@ -479,21 +461,20 @@ def test_a_pool_delivering_a_mode_is_judged_by_its_modes_not_its_backing_label()
     """The site reads no backing: delivering a mode is what puts a pool under
     the rule, as it is what lets admission reach it."""
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts(),
-        pool_tags={"deliverable_modes": ["vm"]},
     )
     _declare(ledger, "named", host_id="kvm1")
 
     assert _offered(ledger)["named"]["enabled"] is False
 
 
-def test_a_pool_whose_deliverable_modes_do_not_parse_is_judged_to_deliver():
+def test_a_pool_whose_deliverable_modes_cannot_be_read_is_judged_to_deliver():
     """Startup and every write refuse such a pool; the offered read fails closed."""
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts(),
-        pool_tags={**BACKED_POOL_TAGS, "deliverable_modes": "vm"},
+        modes=None,
     )
     _declare(ledger, "named", host_id="kvm1")
 
@@ -505,13 +486,9 @@ def test_a_pool_delivering_no_mode_keeps_its_declarations_own_enabled():
     it can be listed or admitted; its declarations are judged as an unbacked
     pool's are."""
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=FakeDeliverableHosts(),
-        pool_tags={
-            "deliverable_modes": [],
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-        },
+        modes=(),
     )
     _declare(ledger, "named", host_id="kvm1")
 
@@ -520,11 +497,80 @@ def test_a_pool_delivering_no_mode_keeps_its_declarations_own_enabled():
         ledger.probe(claim=VM_CLAIM)
 
 
-def test_with_no_requirement_the_offered_read_is_the_stored_one():
+def _remove_pool(ledger, pool_id: str) -> None:
+    """Make the reader stop finding a pool the ledger's declarations name."""
+    del ledger._pool_facts.pools[pool_id]
+
+
+@pytest.mark.parametrize(
+    ("host_id", "enabled"),
+    [("kvm1", True), ("not-registered-anywhere", True), (None, False)],
+    ids=["named", "unregistered", "no-host"],
+)
+def test_without_a_report_a_missing_pools_declaration_is_offered_only_naming_a_host(
+    host_id, enabled
+):
+    """A missing pool is judged backed and, under a host requirement, needing a
+    host: with no report, a named host is usable."""
+    ledger = _make_ledger(needs_host=True)
+    _declare(ledger, "orphan", host_id=host_id)
+    _remove_pool(ledger, DEFAULT_POOL_ID)
+
+    assert _offered(ledger)["orphan"]["enabled"] is enabled
+    assert ("orphan" in _snapshot_ids(ledger)) is enabled
+
+
+@pytest.mark.parametrize(
+    ("host_id", "enabled"),
+    [("kvm1", True), ("disabled-host", False), (None, False)],
+    ids=["deliverable", "disabled", "no-host"],
+)
+def test_with_a_report_a_missing_pools_declaration_is_offered_only_with_a_usable_host(
+    host_id, enabled
+):
     ledger = _make_ledger(
-        host_requirement=None,
+        needs_host=True, deliverable_hosts=FakeDeliverableHosts({"kvm1"})
+    )
+    _declare(ledger, "orphan", host_id=host_id)
+    _remove_pool(ledger, DEFAULT_POOL_ID)
+
+    assert _offered(ledger)["orphan"]["enabled"] is enabled
+    # Admission refuses it whatever its host: a missing pool delivers nothing.
+    with pytest.raises(UndeclaredOfferingModeError):
+        ledger.probe(claim=VM_CLAIM)
+
+
+def test_the_offered_read_reads_each_pool_once_in_its_own_session():
+    hosts = FakeDeliverableHosts({"kvm1"})
+    ledger = _make_ledger(needs_host=True, deliverable_hosts=hosts)
+    _declare(ledger, "first", host_id="kvm1")
+    _declare(ledger, "second", host_id="kvm2")
+    _declare(ledger, "introduction", pool_id=UNBACKED_POOL_ID)
+    ledger._pool_facts.reads.clear()
+
+    ledger.list_offered_resources()
+
+    reads = ledger._pool_facts.reads
+    assert sorted(pool_id for _, pool_id in reads) == [DEFAULT_POOL_ID, UNBACKED_POOL_ID]
+    assert reads[0][0] is reads[1][0]
+    assert len(hosts.sessions) == 1
+    assert hosts.sessions[0] is reads[0][0]
+
+
+def test_where_no_pool_needs_a_host_the_offered_read_never_reads_the_report():
+    hosts = FakeDeliverableHosts()
+    ledger = _make_ledger(needs_host=False, deliverable_hosts=hosts)
+    _declare(ledger, "named", host_id="kvm1")
+
+    ledger.list_offered_resources()
+
+    assert hosts.sessions == []
+
+
+def test_where_no_host_is_needed_the_offered_read_is_the_stored_one():
+    ledger = _make_ledger(
+        needs_host=False,
         deliverable_hosts=FakeDeliverableHosts(),
-        pool_tags=BACKED_POOL_TAGS,
     )
     _declare(ledger, "no-host")
     _declare(ledger, "named", host_id="kvm1")
@@ -537,9 +583,8 @@ def _file_backed_ledger(tmp_path):
     path = tmp_path / "site.db"
     hosts = WriteProbingDeliverableHosts(path, {"kvm1", "kvm2"})
     ledger = _make_ledger(
-        host_requirement={"test": True},
+        needs_host=True,
         deliverable_hosts=hosts,
-        pool_tags=BACKED_POOL_TAGS,
         database_path=path,
     )
     _declare(ledger, "hosted", host_id="kvm1", units=2)
@@ -591,6 +636,6 @@ def test_a_write_is_not_held_off_once_the_decision_ends(tmp_path):
 
     other = sqlite3.connect(hosts.path, timeout=0, isolation_level=None)
     try:
-        other.execute("UPDATE resource_pools SET label = label")
+        other.execute("UPDATE capacity_buckets SET enabled = enabled")
     finally:
         other.close()

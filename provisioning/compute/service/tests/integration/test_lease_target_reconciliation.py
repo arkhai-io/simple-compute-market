@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from market_fulfillment import ProviderRegistry, SettlementRecordState, SettlementRepository
 from market_fulfillment.db import SettlementRecord
-from market_resource_pools import ResourcePool
+from market_resource_pools import ResourcePool, ResourcePoolFacts
 from market_site.db import CapacityReservation
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
@@ -57,7 +57,10 @@ def world():
             },
         ))
     ledger = CapacityLedgerService(
-        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+        factory,
+        pool_facts=ResourcePoolFacts(),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
     )
     ledger.register_resource(
         resource_id="kvm1-gpus", total_units=16, host_id="kvm1", attributes={}, pool_id="default"

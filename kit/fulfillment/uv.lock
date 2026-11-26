@@ -73,7 +73,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.9.0"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-core" },
@@ -97,10 +97,10 @@ dev = [
 requires-dist = [
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.9.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.11.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.1.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.10.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.15.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uuid6", specifier = ">=2024.7.10" },
@@ -172,8 +172,6 @@ source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "pydantic" },

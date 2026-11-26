@@ -13,7 +13,7 @@ import textwrap
 from types import SimpleNamespace
 
 import pytest
-from market_resource_pools import ResourcePool
+from market_resource_pools import ResourcePool, ResourcePoolFacts
 from market_site import CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -71,6 +71,7 @@ class _Deployment:
         """Bring the service up again against the same database and document."""
         ledger = CapacityLedgerService(
             self.session_factory,
+            pool_facts=ResourcePoolFacts(),
             unit_claim_keys=("units", "gpu_count"),
             mirror_dimension="gpu_count",
         )
@@ -167,7 +168,9 @@ def test_a_refused_document_applies_nothing_and_records_no_digest(
         deployment.restart(monkeypatch)
 
     assert deployment.recorded_digest() is None
-    ledger = CapacityLedgerService(deployment.session_factory)
+    ledger = CapacityLedgerService(
+        deployment.session_factory, pool_facts=ResourcePoolFacts()
+    )
     assert ledger.list_resources() == []
 
 

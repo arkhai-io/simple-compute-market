@@ -20,7 +20,7 @@ returns the host to new delivery.
 
 from __future__ import annotations
 
-from market_resource_pools import DeliverableHosts
+from market_site import DeliverableHosts
 from market_site.db import CapacityBucket
 from sqlalchemy.orm import Session
 

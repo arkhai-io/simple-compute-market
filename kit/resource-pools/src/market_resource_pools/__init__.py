@@ -11,12 +11,7 @@ from market_resource_pools_contracts.asking_rates import (
 )
 
 from .db import DEFAULT_POOL_ID, ResourcePool
-from .host_requirement import (
-    DeliverableHosts,
-    HostRequirement,
-    declaration_has_usable_host,
-    pool_needs_host,
-)
+from .host_requirement import HostRequirement, pool_needs_host
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
 from .pool_facts import ResourcePoolFacts, StoredPoolFacts
 from .service import (
@@ -31,8 +26,6 @@ from .service import (
 
 __all__ = [
     "DEFAULT_POOL_ID",
-    "DeliverableHosts",
-    "declaration_has_usable_host",
     "pool_needs_host",
     "DocumentValidationResult",
     "HostRequirement",

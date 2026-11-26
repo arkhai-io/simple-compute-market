@@ -46,7 +46,7 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
     FulfillmentServiceTeardownPort,
 )
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import ResourcePoolFacts, ResourcePoolService
 from market_site.authority import LedgerSiteAuthority
 from market_site.ledger import CapacityLedgerService
 
@@ -478,10 +478,19 @@ class Container(containers.DeclarativeContainer):
         hosts=host_authority,
     )
 
+    # The site ledger reads every pool fact through this reader, which resolves
+    # each pool's provider against the merged host requirement the scheduler
+    # applies too, so admission and placement judge a pool's need for a host
+    # alike.
+    pool_facts = providers.Singleton(
+        ResourcePoolFacts,
+        host_requirement=host_requirement,
+    )
+
     capacity_ledger_service = providers.Singleton(
         CapacityLedgerService,
         session_factory=session_factory,
-        host_requirement=host_requirement,
+        pool_facts=pool_facts,
         deliverable_hosts=deliverable_hosts,
         # "gpu_count" is this domain's alias for the generic "units" claim
         # key and the dimension its legacy scalar mirrors — kept explicit here

@@ -94,7 +94,7 @@ uninstallable. Each package's version is the one its `pyproject.toml` declares.
 | `arkhai-core-storefront-client` | `core/storefront-client/` | `arkhai-injected-time`, `arkhai-kit-identity` |
 | `arkhai-core-registry-client` | `core/registry-client/` | `arkhai-core`, `arkhai-injected-time`, `arkhai-kit-identity` |
 | `arkhai-core-registry` | `core/registry/` | `arkhai-core`, `arkhai-injected-time`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations` |
-| `arkhai-kit-site` | `kit/site/` | `arkhai-injected-time`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-schema-migrations` |
+| `arkhai-kit-site` | `kit/site/` | `arkhai-injected-time`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations` |
 | `arkhai-kit-site-client` | `kit/site-client/` | `arkhai-injected-time`, `arkhai-kit-identity`, `arkhai-kit-resource-pools-contracts` |
 | `arkhai-kit-capability-shape` | `kit/capability-shape/` | none |
 | `arkhai-kit-capability-admissibility` | `kit/capability-admissibility/` | `arkhai-kit-capability-shape` |

@@ -35,7 +35,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning"
-version = "0.30.0"
+version = "0.30.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -68,10 +68,10 @@ requires-dist = [
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.3.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.11.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.3.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.10.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.15.0" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -180,7 +180,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-fulfillment"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -194,7 +194,7 @@ dependencies = [
     { name = "uuid6" },
 ]
 wheels = [
-    { path = "arkhai_kit_fulfillment-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_fulfillment-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -273,8 +273,6 @@ source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "pydantic" },

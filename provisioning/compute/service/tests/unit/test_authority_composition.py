@@ -234,7 +234,8 @@ def test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts():
     """Admission, the site's offered read, and scheduling all judge a
     declaration's host by one report of the hosts taking new delivery: the
     host authority's, less the hosts of pools on a disabled relay, with the
-    same host requirement beside it. A ledger or unit of work built without it
+    same host requirement beside it — the scheduler's own, and the ledger's
+    through its pool reader. A ledger or unit of work built without the report
     would accept any named host, and one built over the host authority alone
     would keep placing deliveries on a relay being drained."""
     container = _container()
@@ -249,8 +250,23 @@ def test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts():
     assert ledger._deliverable_hosts is deliverable_hosts
     assert unit_of_work.deliverable_hosts is deliverable_hosts
     assert scheduler._unit_of_work is unit_of_work
-    assert ledger._host_requirement is scheduler._host_requirement
-    assert ledger._host_requirement == container.host_requirement()
+    assert ledger._pool_facts.host_requirement is scheduler._host_requirement
+
+
+def test_the_ledger_reads_pools_through_the_containers_one_reader():
+    """The ledger learns every pool fact from the pool authority's reader, one
+    instance, resolving each provider against the merged requirement: a
+    reader with none would let every declaration in a host-delivering pool be
+    admitted without a host."""
+    container = _container()
+    pool_facts = container.pool_facts()
+
+    ledger = container.capacity_ledger_service()
+
+    assert isinstance(pool_facts, ResourcePoolFacts)
+    assert ledger._pool_facts is pool_facts
+    assert pool_facts.host_requirement == container.host_requirement()
+    assert pool_facts.host_requirement
 
 
 def test_the_release_effect_registry_is_the_ledgers_and_composition_fills_it():

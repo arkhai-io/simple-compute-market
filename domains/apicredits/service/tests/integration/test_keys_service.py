@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from market_identity import Identity, IdentityScheme
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolFacts
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
@@ -99,7 +99,7 @@ def ledger_and_service() -> tuple[CapacityLedgerService, KeysService, object]:
             )
         )
     session_factory = sessionmaker(bind=engine)
-    ledger = CapacityLedgerService(session_factory)
+    ledger = CapacityLedgerService(session_factory, pool_facts=ResourcePoolFacts())
     ledger.register_resource(
         resource_id="svc-quota",
         total_units=1000,

@@ -33,7 +33,7 @@ from market_identity import (
     canonical_body_hash,
     sign_response,
 )
-from market_resource_pools import ResourcePool
+from market_resource_pools import ResourcePool, ResourcePoolFacts
 from market_resource_pools.db import Base as ResourcePoolBase
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
@@ -86,7 +86,10 @@ def _site_app() -> tuple[FastAPI, CapacityLedgerService]:
             )
         )
     ledger = CapacityLedgerService(
-        session_factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+        session_factory,
+        pool_facts=ResourcePoolFacts(),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
     )
     ledger.register_resource(
         resource_id=RESOURCE,

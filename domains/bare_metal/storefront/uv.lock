@@ -280,7 +280,7 @@ dev = [
     { name = "arkhai-core-storefront-client", specifier = ">=0.30.0" },
     { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.2.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.11.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.10.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.15.0" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "pytest", specifier = ">=8.3.4,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.25,<2.0" },
@@ -768,8 +768,6 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "pydantic" },

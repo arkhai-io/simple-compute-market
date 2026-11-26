@@ -1,32 +1,22 @@
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from market_resource_pools.db import (
-    Base as ResourcePoolBase,
-    DEFAULT_POOL_ID,
-    ResourcePool,
-)
 
 from market_site.db import Base, CapacityReservationDebit
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
+from pool_facts_double import PoolFactsDouble
 
 
 def _ledger(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path/'ledger.db'}")
     Base.metadata.create_all(engine)
-    ResourcePoolBase.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db, db.begin():
-        db.add(
-            ResourcePool(
-                id=DEFAULT_POOL_ID,
-                label="Default Pool",
-                provider="test",
-                enabled=True,
-                policy_tags={"deliverable_modes": ["vm"]},
-            )
-        )
-    return CapacityLedgerService(session_factory=session_factory), engine
+    pools = PoolFactsDouble()
+    pools.declare("default", ("vm",))
+    return (
+        CapacityLedgerService(session_factory=session_factory, pool_facts=pools),
+        engine,
+    )
 
 
 def test_assignment_moves_existing_capacity_without_double_counting(tmp_path):

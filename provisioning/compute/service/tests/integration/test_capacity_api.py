@@ -1192,6 +1192,31 @@ async def test_a_registration_naming_an_unknown_pool_is_refused(capacity: Capaci
     assert await capacity.snapshot() == []
 
 
+async def test_a_reserve_in_a_pool_not_declaring_the_claims_mode_is_a_conflict(
+    capacity: CapacityApi, client_and_queue,
+):
+    """The site reads the pool's deliverable modes through the composition's
+    pool reader, in the reservation's own transaction: a claim for a mode the
+    matching declaration's pool does not deliver is refused as a conflict
+    before any hold is written, though the declaration has capacity and a
+    usable host."""
+    await _create_pool(client_and_queue[0], "pool-b")
+    await capacity.register_hosts("kvm-b")
+    await capacity.register("in-b", pool_id="pool-b", host_id="kvm-b", total_units=4)
+    _, version = await capacity.events()
+
+    with pytest.raises(SiteCapacityClientError) as refused:
+        await capacity.reserve(
+            {"offering_mode": "vm", "gpu_count": 1, "resource_id": "in-b"}, {}
+        )
+
+    assert refused.value.status_code == 409
+    assert "pool-b" in str(refused.value)
+    (listed,) = await capacity.admin.list_resources()
+    assert listed["available_units"] == 4
+    assert (await capacity.events())[1] == version
+
+
 async def test_a_declaration_naming_no_compute_dimension_is_stored_as_declared(
     capacity: CapacityApi,
 ):
