@@ -701,8 +701,12 @@ One migration per service drops the 0.4.0 replay table: a core storefront migrat
 old reservations protect nothing; replay rows are not evidence. `kit/schema-migrations`
 lets a migration declare that it frees space, and the migrate command then runs
 `VACUUM` on a SQLite database after applying the chain, outside any transaction, in the
-deployment phase; the registry's PostgreSQL returns the space on `DROP TABLE`. The first
-backup after the upgrade is small.
+deployment phase. The registry runs SQLite by default (its chart's `databaseUrl`) and
+migrates through Alembic rather than that engine, so its migrate command applies the
+same rule itself: once the revision dropping `publisher_replay_reservations` has
+applied on SQLite, it runs `VACUUM` after the upgrade, outside any transaction; on
+PostgreSQL, `DROP TABLE` returns the space. The first backup after the upgrade is
+small.
 
 Rejected: accepting both versions for a release, with its compatibility path and
 retirement row, which no deployed party needs; carrying the reservation hashes forward;
@@ -905,8 +909,11 @@ found the evidence form undesigned, before any of the cutover was implemented:
   tags, the one accepted spelling, `Market-Resource` only where the operation has a
   target, the evidence records, the two evidence verifiers reading either version,
   and the version 3 capture seam (D2, D21–D23). The admission core: the request record
-  on the admission and both records on the signed outcome, and the resource-absence
-  check (D11, D23). Unit tests, the record round trip under both schemes among them;
+  on the admission and both records on the signed outcome, the resource-absence
+  check, and the signed 503 `admission_unavailable` (D7, D11, D23). The replay
+  component: the concluding write before `exact_retry_outcome_unknown`, in both stores
+  (D7, design review 61 F1). Unit and library integration tests, the record round trip
+  under both schemes and a retry behind a handler's held write lock among them;
   reviewed before the cutover depends on it.
 - **Round 3, the cutover, in three sessions.** Session 1: the registry, with
   `publication` and `updates` and their column rename (D21), the provisioning

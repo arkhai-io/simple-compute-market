@@ -250,12 +250,15 @@ Engineering guidance, shared across repositories, gains a messaging file and a
   are planning state.
 - D20: no permanent destination — the cadence is the plan's, not current behaviour.
 - D21 signed messages retained as records of their signed values: `marketplace-identity`
-  spec and `architecture.md`; `registry-discovery` spec (`publication`, `updates`);
-  `deal-lifecycle` spec (the end-delivery acknowledgement); to the new engineering
+  spec, and its `architecture.md`, a new section "Signed messages retained as evidence";
+  `registry-discovery` spec and its `architecture.md`, "Seller publication evidence"
+  (`publication`, `updates`); `deal-lifecycle` spec (the end-delivery acknowledgement)
+  and its `architecture.md`, "Buyer surrender and cases"; to the new engineering
   `messaging.md`, two principles the owner stated: each kind of message carries exactly
   the fields some message of that kind needs, its fields' presence fixed by the kind and
   never by one message's values; and a retained signed message is stored as its signed
   values, readable as data, not as its transport form.
-- D22 evidence verifiers: `marketplace-identity` spec and `architecture.md`.
+- D22 evidence verifiers: `marketplace-identity` spec and its `architecture.md`, "Signed
+  messages retained as evidence".
 - D23 capture carrying records: `marketplace-identity` `architecture.md`, beside the
   admission core; `deal-lifecycle` spec, its capture requirements.
