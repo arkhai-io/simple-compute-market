@@ -7,14 +7,19 @@ requires-python = ">=3.12"
 dependencies = [
     # The job view carrying execution_started_at and finished_at.
     "arkhai-compute-provisioning-contracts>=0.17.0",
-    "arkhai-kit-resource-pools-contracts>=0.2.0",
+    # The first version exporting the site-declaration reader its tests read the
+    # projection through.
+    "arkhai-kit-resource-pools-contracts>=0.5.0",
     "arkhai-core>=0.4.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-config",
-    # These minimums are the first versions exporting each package's table
-    # baseline, which the migration chain composes.
-    "arkhai-kit-site>=0.14.0",
-    "arkhai-kit-resource-pools>=0.10.0",
+    # The first versions exporting the site's pool-facts port and the pool
+    # authority's reader answering it, which this root composes; each also
+    # exports its table baseline, which the migration chain composes.
+    "arkhai-kit-site>=0.15.0",
+    "arkhai-kit-resource-pools>=0.11.0",
+    # The first version exporting its table baseline, which the migration
+    # chain composes.
     "arkhai-kit-fulfillment>=0.8.0",
     # The host registry's key-adoption flag, migration and authority.
     "arkhai-compute-provisioning>=0.30.0",

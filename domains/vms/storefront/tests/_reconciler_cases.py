@@ -16,6 +16,7 @@ from core_storefront.domain_registry import (
     build_storefront_derivation_key,
 )
 from market_identity import Ed25519Signer
+from market_resource_pools_contracts import ResolvedPool, read_site_declarations
 from market_site.projections import resource_pool_projection
 from arkhai_vms_listings.pricing_resolution import GpuPricingFields
 from arkhai_vms_listings.reconciler import (
@@ -170,8 +171,6 @@ def _projected_pool_rows(pool, **kwargs):
     per-site rule, so a test pool carrying no declarations reads under the
     compatibility rule exactly as a lone pool from an older producer would.
     """
-    from market_resource_pools import ResolvedPool, read_site_declarations
-
     pool_id = str(pool.get("pool_id") or "").strip()
     declaration = read_site_declarations([pool]).resolved.get(pool_id) or ResolvedPool(
         "backed", frozenset(), True

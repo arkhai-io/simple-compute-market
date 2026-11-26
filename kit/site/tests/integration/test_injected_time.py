@@ -11,14 +11,15 @@ from datetime import datetime, timezone
 
 import pytest
 from injected_time import InjectedTime
-from market_resource_pools import migrations as pool_migrations
-from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from market_site import migrations as site_migrations
 from market_site.db import CapacityBucket, CapacityReservation, LeaseEndedEvent
 from market_site.ledger import CapacityLedgerService
+from pool_facts_double import PoolFactsDouble
+
+DEFAULT_POOL_ID = "default"
 
 #: The instant a hold expires at.
 EXPIRY = 1794822300
@@ -43,22 +44,13 @@ def ledger(source: InjectedTime, tmp_path) -> CapacityLedgerService:
     source.set(START)
     engine = create_engine(f"sqlite:///{tmp_path / 'site.db'}")
     with engine.begin() as connection:
-        pool_migrations.BASELINE.apply(connection)
         site_migrations.BASELINE.apply(connection)
         for migration in site_migrations.MIGRATIONS:
             migration.apply(connection)
     sessions = sessionmaker(bind=engine)
-    with sessions() as db, db.begin():
-        db.add(
-            ResourcePool(
-                id=DEFAULT_POOL_ID,
-                label="Default Pool",
-                provider="test",
-                enabled=True,
-                policy_tags={"deliverable_modes": ["vm"]},
-            )
-        )
-    service = CapacityLedgerService(sessions)
+    pools = PoolFactsDouble()
+    pools.declare(DEFAULT_POOL_ID, ("vm",))
+    service = CapacityLedgerService(sessions, pool_facts=pools)
     service.register_resource(
         host_id="host-1",
         resource_id="resource-1",

@@ -204,8 +204,8 @@ dev = [
 requires-dist = [
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
-    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.11.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.5.0" },
     { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.2.0" },
     { name = "arkhai-kit-site", specifier = ">=0.15.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
@@ -375,7 +375,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -386,12 +386,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.10.1-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -399,7 +399,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -438,8 +438,6 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "pydantic" },

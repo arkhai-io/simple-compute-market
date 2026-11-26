@@ -13,6 +13,7 @@ from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.release import ReleaseAction, ReleaseDecision
 from compute_provisioning_contracts import LeaseForceRelease, LeaseTermination, verify_lease_end
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_resource_pools import ResourcePoolFacts
 from market_site.authority import LedgerSiteAuthority
 from market_site.db import Base as SiteBase, CapacityReservation
 from market_site.ledger import CapacityLedgerService
@@ -41,7 +42,10 @@ async def main():
         factory = sessionmaker(bind=engine)
         reports = LeaseEndReports(factory, signer=site, peer="fixture-storefront")
         ledger = CapacityLedgerService(
-            factory, site_id="fixture-site", lease_end_effect=reports.record,
+            factory,
+            pool_facts=ResourcePoolFacts(),
+            site_id="fixture-site",
+            lease_end_effect=reports.record,
         )
         now = datetime.now(timezone.utc)
         with factory() as db, db.begin():

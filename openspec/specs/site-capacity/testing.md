@@ -17,22 +17,47 @@ provisioning service a "disabled" or "unregistered" host is an id a fake
 `DeliverableHosts` report leaves out, one case to the layer; that the host
 authority leaves both out is proved where it lives.
 
-- `kit/resource-pools` unit tests own the predicates:
-  - `pool_needs_host`: no requirement supplied, a declared need, a provider the
-    requirement does not name, a value that is not a `bool`;
-  - `declaration_has_usable_host`: a host in the report, a host absent from it,
-    no host named, an empty report, an unbacked pool, a provider needing no
-    host, no requirement, and a requirement with no report.
+- `kit/site` unit tests own `declaration_has_usable_host`
+  (`kit/site/tests/unit/test_deliverable_hosts.py`): a host in the report, a host
+  absent from it, no host named, an empty report, an unbacked pool, a pool needing no
+  host, and named hosts usable with no report.
+- `kit/resource-pools` unit tests own `pool_needs_host`: no requirement supplied, a
+  declared need, a provider the requirement does not name, a value that is not a
+  `bool`.
+- `kit/resource-pools` library integration tests own the reader of pool facts
+  (`kit/resource-pools/tests/integration/test_pool_facts.py`): a provider needing a
+  host, no requirement supplied, a provider the requirement does not name or says
+  needs no host, a missing pool with and without a requirement, a disabled pool, a
+  pool declaring no mode, an unreadable deliverable declaration, and a read seeing
+  the caller's own uncommitted write.
+- The provisioning service's unit tests own the reader's conformance to the port
+  (`provisioning/compute/service/tests/unit/test_authority_composition.py`): every
+  member of `PoolFacts` is a field of `StoredPoolFacts`, and `ResourcePoolFacts`'
+  read takes the port's parameters, so a fact added to the port alone fails there.
+- Each authority's boundary test holds the edge away:
+  `kit/site/tests/unit/test_import_boundaries.py` forbids both pool distributions in
+  `kit/site`, and `kit/resource-pools/tests/unit/test_import_boundaries.py` forbids
+  `market_site` in the pool authority, each walking every import form.
 - `kit/fulfillment` unit tests own the provider declaration, including a
   registry that refuses a provider declaring none.
-- `kit/site` library integration tests own admission and the offered read:
+- `kit/site` library integration tests own admission and the offered read, against
+  their own reader double (`kit/site/tests/pool_facts_double.py`), which states each
+  pool's `needs_host` and records each read and its session; no permissive reader
+  exists outside the tests:
+  - registration naming a missing pool refused, and a declaration moved into one
+    left unchanged with the capacity version;
+  - the offered read meeting a missing pool judged as a backed pool needing a host,
+    with and without a report, and admission refusing it;
+  - each pool read once per decision, in the decision's session, and a declaration
+    recording no pool reported not offered with no read for it;
   - probe, reserve, and resize refusing a declaration with no usable host, with
     fall-through to one that has one, and matching it again once its host
     returns to the report;
   - the rebind recheck refusing such a destination with the debit and the
     capacity version unchanged;
-  - no refusal without a requirement, and named hosts usable with no report;
-  - one report read per decision, in the decision's own session, and, on a
+  - no refusal where no pool needs a host, and named hosts usable with no report;
+  - one report read per decision, in the decision's own session, none where no
+    pool needs a host, and, on a
     file-backed database, a write from another connection held off for the
     whole decision;
   - the offered read and the snapshot reporting a declaration with no usable
@@ -56,9 +81,14 @@ authority leaves both out is proved where it lives.
   it, and it reads the caller's own uncommitted disable.
 - Provisioning unit tests own composition: refusal of a requirement that
   disagrees with the registered providers; the ledger and the scheduling unit
-  of work receiving the host authority as the same report; and a declaration
+  of work receiving the host authority as the same report; the ledger holding the
+  container's one `ResourcePoolFacts`, carrying the merged requirement the scheduler
+  applies; and a declaration
   handed in not enabled projecting not enabled, with its bare-metal view
   unavailable.
+- The API-credit service's unit tests own its composition: its ledger's reader is a
+  `ResourcePoolFacts` carrying no requirement
+  (`domains/apicredits/service/tests/unit/test_composition.py`).
 - Provisioning integration tests prove the deployed surface through the typed
   clients:
   - admission and scheduling refusals with the executor boundary asserted

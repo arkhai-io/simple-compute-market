@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from market_resource_pools import ResolvedPool
+from market_resource_pools_contracts import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED, CapacityBacking
 
 from apicredits_storefront.domain_runtime import get_market_domain_contract

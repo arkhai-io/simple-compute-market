@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from market_resource_pools import (
+from market_resource_pools_contracts import (
     ASKING_RATE_SOURCE_HINT,
     ASKING_RATE_SOURCE_NONE,
     ASKING_RATE_SOURCE_OVERRIDE,

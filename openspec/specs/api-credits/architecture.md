@@ -132,7 +132,8 @@ binding from this record, never from the published `listing_resource`.
 
 The pool is read from the credits service's resource-pool projection, which
 carries each pool's declarations because the service hands its pool directory
-to the site's capacity router, through `read_site_declarations`. Both credit
+to the site's capacity router, through `read_site_declarations` in the resource-pool
+contracts package. Both credit
 seller stages declare `fulfils_through_capacity`, since each issues against
 quota, so a pool declaring itself unbacked leaves no option to publish and yields
 no listing through the delegate rather than an API-credit branch. No listing

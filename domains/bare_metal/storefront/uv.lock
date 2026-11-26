@@ -204,7 +204,6 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-pool-overrides" },
-    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -224,6 +223,7 @@ dev = [
     { name = "arkhai-core-buyer" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-deal-lifecycle-buyer" },
+    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
     { name = "jsonschema" },
     { name = "pytest" },
@@ -260,8 +260,7 @@ requires-dist = [
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.6.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.6.0" },
     { name = "arkhai-kit-pool-overrides", specifier = "==0.3.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
-    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.5.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.2.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.8.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.11.0" },
@@ -280,7 +279,8 @@ dev = [
     { name = "arkhai-core-buyer", specifier = ">=0.6.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.30.0" },
     { name = "arkhai-kit-deal-lifecycle-buyer", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.10.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.11.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.15.0" },
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "pytest", specifier = ">=8.3.4,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.25,<2.0" },
@@ -710,7 +710,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -721,12 +721,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.10.1-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -734,7 +734,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -768,8 +768,6 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
-    { name = "arkhai-kit-resource-pools" },
-    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "fastapi" },
     { name = "pydantic" },
