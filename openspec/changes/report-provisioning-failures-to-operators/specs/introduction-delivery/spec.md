@@ -25,7 +25,12 @@ A signing webhook MUST take the role and operation it signs as from the composit
 
 ### Requirement: Configured sinks receive the events their routes select
 
-The delivery kit's event-sink consumer MUST hand each event its routes select to each selected sink, recording each sink's outcome as that destination's delivery state, and MUST hand an event whose delivery to a sink is abandoned to the configured finally sink.
+The delivery kit's event-sink consumer MUST hand each event its routes select to each selected sink, recording each sink's outcome as that destination's delivery state, and MUST hand an event whose delivery to a sink is abandoned to the configured finally sink. A sink no longer enabled, whose routes are no longer configured, MUST have every event its consumer had not read when it was retired handed to the finally sink for it.
+
+#### Scenario: A sink is replaced before the consumer reads an event
+
+- **WHEN** an event commits under a route naming one sink, and before the consumer reads it the service starts with that sink and its route replaced by another sink and a route naming it
+- **THEN** the event is abandoned to the finally sink for the replaced sink, and the new sink receives only events committed after it
 
 #### Scenario: An event matches a route
 

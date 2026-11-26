@@ -75,9 +75,9 @@ A named consumer MUST hold a durable position and, for each destination, a deliv
 - **WHEN** a delivery succeeds and the process stops before recording the outcome
 - **THEN** the event is delivered again under the same `id`
 
-### Requirement: A destination is parked and resumed explicitly, and a new destination receives no earlier event
+### Requirement: A destination is parked and resumed explicitly, and a destination added to a consumer that has had destinations receives no earlier event
 
-A consumer MUST be able to park a destination, after which nothing is delivered to it until it is resumed, and resuming MUST deliver, in order, the events it missed that are still retained. The destinations a consumer is first registered with MUST start at its position. Once a consumer has had destinations, a change to them MUST take effect at the latest committed event: each event committed before it MUST go to the destinations as they were, whether or not the consumer had read it, and a destination added MUST NOT receive any event committed before it was added. A destination its consumer no longer has configured MUST be retired: each event still undelivered to it, read or not, MUST be marked abandoned and handed to the consumer's finally sink, and nothing more is delivered to it.
+A consumer MUST be able to park a destination, after which nothing is delivered to it until it is resumed, and resuming MUST deliver, in order, the events it missed that are still retained. The destinations a consumer first has MUST start at its position, whenever they are added: a consumer is registered at the latest committed event, or where its service registers it, and a running consumer with no destination still reads each event, keeping its position at the last event it read. Once a consumer has had destinations, a change to them MUST take effect at the latest committed event: each event committed before it MUST go to the destinations as they were, whether or not the consumer had read it, and a destination added MUST NOT receive any event committed before it was added. A destination its consumer no longer has configured MUST be retired: each event still undelivered to it, read or not, MUST be marked abandoned and handed to the consumer's finally sink, and nothing more is delivered to it. A consumer that can no longer tell which of its unread events a retired destination would have received MUST hand every one of them to the finally sink for it, rather than lose one.
 
 #### Scenario: A destination is parked and resumed
 
@@ -103,6 +103,11 @@ A consumer MUST be able to park a destination, after which nothing is delivered 
 
 - **WHEN** an event commits, and before the consumer reads it the consumer starts with one destination replaced by another
 - **THEN** the event is not delivered to the new destination, and is abandoned to the finally sink for the replaced one
+
+#### Scenario: A first destination is added to a consumer that had none
+
+- **WHEN** a consumer has read events with no destination, another event commits, and the consumer then starts with a destination configured
+- **THEN** none of the events it read is delivered to the destination, and the event committed since its last read is
 
 ### Requirement: A route selects events with an SQL condition validated against the catalogue
 

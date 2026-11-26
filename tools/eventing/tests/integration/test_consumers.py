@@ -356,6 +356,8 @@ def test_the_destinations_a_consumer_is_first_registered_with_start_at_its_posit
         store: Store, recorder: Recorder, clock: Clock) -> None:
     peer = Collect()
     consumer(store, clock).run_cycle()
+    record(store, recorder, "j-0")
+    consumer(store, clock).run_cycle()
     record(store, recorder, "j-1")
 
     consumer(store, clock, peer=peer).run_cycle()

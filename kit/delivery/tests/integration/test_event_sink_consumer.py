@@ -198,3 +198,38 @@ def test_a_route_naming_a_sink_not_enabled_is_refused(store, clock) -> None:
 def test_a_finally_sink_naming_no_enabled_sink_is_refused(store, clock) -> None:
     with pytest.raises(DeliveryConfigurationError, match="ops-mail"):
         _consumer(store, clock, {"ops-push": _Sink()}, [], finally_sink="ops-mail")
+
+
+def test_a_sink_replaced_before_the_consumer_reads_abandons_its_event_to_the_finally_sink(
+        store, clock, caplog) -> None:
+    old, new = _Sink(), _Sink()
+    _consumer(store, clock, {"old": old}, [Route("all", "TRUE", ("old",))]).run_cycle()
+    _record(store, clock, note="unread")
+
+    replaced = _consumer(store, clock, {"new": new}, [Route("all", "TRUE", ("new",))])
+    with caplog.at_level(logging.WARNING, logger="eventing.finally"):
+        report = replaced.run_cycle()
+    _record(store, clock, note="later")
+    replaced.run_cycle()
+
+    assert report.retired == ["old"]
+    assert report.abandoned == 1
+    assert any("delivery abandoned" in record.getMessage() for record in caplog.records)
+    assert old.received == []
+    assert [reference for reference, _, _ in new.received] == ["job:later"]
+    assert _states(store, clock)["old"]["abandoned"] == 1
+
+
+def test_a_sink_removed_beside_a_kept_one_abandons_its_unread_event_to_the_finally_sink(
+        store, clock) -> None:
+    kept, gone, audit = _Sink(), _Sink(), _Sink()
+    _consumer(store, clock, {"kept": kept, "gone": gone, "audit": audit},
+              [Route("all", "TRUE", ("kept", "gone"))]).run_cycle()
+    _record(store, clock, note="unread")
+
+    _consumer(store, clock, {"kept": kept, "audit": audit},
+              [Route("all", "TRUE", ("kept",))], finally_sink="audit").run_cycle()
+
+    assert [reference for reference, _, _ in kept.received] == ["job:unread"]
+    assert [reference for reference, _, _ in audit.received] == ["job:unread"]
+    assert gone.received == []

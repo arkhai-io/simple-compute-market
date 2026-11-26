@@ -160,8 +160,10 @@ the position into pending deliveries, then delivers what is due:
   delivering — is delivered again. A failed delivery is retried after the policy's
   backoff, doubling from `initial` to `maximum`, and the destination's later events
   wait behind it; another destination is not held up.
-- A new consumer starts at the latest event, and the destinations it is first
-  registered with at its position. Once a consumer has had destinations, a change to
+- A new consumer starts at the latest event. A consumer with no destination still
+  reads each event, advancing its position, and the destinations it first has start
+  at its position whenever they are added. Once a consumer has had destinations, a
+  change to
   them takes effect at the latest committed event: the cycle first reads every
   committed event with the destinations as stored, then adds each new destination,
   which receives no event committed before it, and retires each departing one.

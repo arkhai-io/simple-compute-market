@@ -275,6 +275,36 @@ def test_a_peer_replaced_before_its_report_is_read_never_sends_it_to_the_new_pee
     assert len(LeaseEndReports(session_factory).read(unread)) == 1
 
 
+def test_a_first_peer_receives_a_report_recorded_since_the_consumer_last_read(
+        session_factory):
+    """A site runs with no storefront peer, its consumer reading each event
+    with no destination, then a lease end commits and the service restarts with
+    a peer configured: the first peer starts at the consumer's position, so it
+    receives that report and what is recorded after it, but nothing the
+    consumer read before."""
+    ledger = _ledger(session_factory)
+    nobody = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    consumer, peer = _consumer(session_factory, nobody, url="")
+    read = _leased(ledger, "escrow-read")
+    ledger.release(capacity_reservation_id=read)
+    consumer.run_cycle()
+    peer.close()
+    unread = _leased(ledger, "escrow-unread")
+    ledger.release(capacity_reservation_id=unread)
+
+    configured = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    restarted, peer = _consumer(session_factory, configured)
+    restarted.run_cycle()
+    later = _leased(ledger, "escrow-later")
+    ledger.release(capacity_reservation_id=later)
+    restarted.run_cycle()
+    peer.close()
+
+    assert nobody.requests == []
+    assert [sent.resource for sent in configured.taken(LEASE_ENDED)] == [unread, later]
+    assert len(LeaseEndReports(session_factory).read(read)) == 1
+
+
 # ---------------------------------------------------------------------------
 # Application integration: through the service's typed clients
 # ---------------------------------------------------------------------------

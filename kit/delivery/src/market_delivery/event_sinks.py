@@ -6,8 +6,11 @@ it, at least once each, under its own identity; each sink's outcome is that
 destination's delivery state. A sink failing an event is retried with backoff,
 until the delivery's age passes the consumer's maximum, when the delivery is
 abandoned and the event handed to the finally sink: the log, or a sink instance
-named for it. Introduction delivery, which claims at most once, does not pass
-through here.
+named for it. A stored sink the configuration does not enable is retired, and no
+configured route names it, so every event the consumer had not read when it is
+retired is abandoned to the finally sink for it, whatever the routes that once
+named it would have selected.
+Introduction delivery, which claims at most once, does not pass through here.
 
 A sink is handed an ``EventDeliverable``: the event's summary as its rendering,
 its envelope as its payload, and its subject (``<type>:<id>``) as its
@@ -119,7 +122,16 @@ def build_event_sink_consumer(
     """
 
     destinations = {configured.name: SinkDestination(configured) for configured in sinks}
-    selection = Routes(routes, catalogue, enabled=tuple(destinations))
+    routing = Routes(routes, catalogue, enabled=tuple(destinations))
+
+    def select(envelope: Envelope, candidates: frozenset[str]) -> frozenset[str]:
+        # A candidate that is not an enabled sink is one being retired, which no
+        # configured route names: every event it has not read is chosen for it,
+        # so its retirement abandons each to the finally sink rather than losing
+        # one a route that once named it would have selected.
+        departing = candidates - frozenset(destinations)
+        return routing.select(envelope, candidates) | departing
+
     final: FinallySink
     if finally_sink == LOG_FINALLY_SINK:
         final = LogFinallySink(logger)
@@ -137,7 +149,7 @@ def build_event_sink_consumer(
         destinations=destinations,
         clock=clock,
         retry=RetryPolicy(max_age=max_age),
-        select=selection.select,
+        select=select,
         finally_sink=final,
         runner=runner,
         hold=hold,

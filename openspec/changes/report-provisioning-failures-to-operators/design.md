@@ -372,15 +372,36 @@ lets a long park grow the events table without bound. Expiring a delivery with i
 hook row, which narrows the recovery promise.
 
 **A change of destinations** (implementation review 37 F1). The destinations a
-consumer is first registered with start at its position. After that, a change to its
+consumer first has start at its position, whenever they are added. A consumer is
+registered at the latest committed event, or where its service's migration registers
+it — the storefront peer consumers are registered past the events the outboxes moved,
+so the first report and callback after an upgrade or install reach the destinations
+their first cycle adds — and a running consumer with no destination still reads each
+event, keeping its position at the last one it read. After that, a change to its
 destinations takes effect at the latest committed event: a cycle first reads every
-committed event with the destinations as stored, the selection given the candidate
-destinations so it can choose for one no longer configured, then adds each new
-destination there and retires each departing one, whose undelivered events — read
-just now or earlier — go to the finally sink. An event committed before a restart with
-another peer therefore never reaches the new peer. *Rejected:* binding each report to
-its peer when recorded, which puts domain state in the report table and still leaves
-the departing peer's unread work.
+committed event with the destinations as stored, the selection given the candidate destinations so it can choose for one no
+longer configured, then adds each new destination there and retires each departing
+one, whose undelivered events — read just now or earlier — go to the finally sink. An
+event committed before a restart with another peer therefore never reaches the new
+peer. A first peer does receive what was recorded since the consumer's last read, the
+events of a restart's window (implementation review 52 F2, revisited: taking a first
+destination at the latest committed event, as the review proposed, would drop the
+first report after an upgrade, which the migration's registration exists to deliver).
+A report from that window sent to a storefront that does not own its reservation can
+park that peer until an administrator resumes it; the window is a commit to the next
+cycle. The routed event-sink consumer cannot judge a departing sink by its former routes, which are no longer configured, so it chooses every unread
+event for that sink, and its retirement hands each to the finally sink
+(implementation review 52 F1, the owner's choice A): the finally sink may record an
+event the former route would not have selected, within the few events unread at a
+restart that removes a sink, but none it would have is lost. *Rejected:* binding each
+report to its peer when recorded, which puts domain state in the report table and
+still leaves the departing peer's unread work; storing the route set at registration
+so a departing sink is judged by its former routes, exact but adding selection state
+the generic consumer keeps without understanding and a new interface on it; recording
+each event's chosen sinks when it is recorded, which couples recording to delivery
+configuration; marking whether a consumer has been registered with a configuration,
+so a first destination of one that ran empty starts at the latest committed event: exact
+for the restart window, but state in the generic component for that window alone.
 
 **Failed delivery.** Each consumer has a retry policy. The peer consumers (D15)
 retry with backoff without limit and park a destination on "unsupported" until it is

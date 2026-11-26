@@ -7,8 +7,9 @@ its attempt count and last error. A cycle does three things, each in its own
 transactions:
 
 1. **Registers** the consumer and its configured destinations. A new consumer starts
-   at the latest event, and the destinations it is first registered with at its
-   position. Once a consumer has had destinations, a change to them takes effect at
+   at the latest event. A consumer with no destination still reads each event,
+   advancing its position, and the destinations it first has start at its position
+   whenever they are added. Once a consumer has had destinations, a change to them takes effect at
    the latest committed event: the cycle first reads every committed event with the
    destinations as stored, then adds each new destination there — so it receives no
    event recorded before it — and retires each stored destination absent from the
