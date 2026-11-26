@@ -19,6 +19,7 @@ import pytest
 import pytest_asyncio
 from injected_time import InjectedTime
 from market_identity import TrustedIdentitySet, canonical_json
+from market_resource_pools import ResourcePoolFacts
 from market_site.ledger import CapacityLedgerService
 
 from compute_provisioning_contracts import (
@@ -83,6 +84,7 @@ def source() -> Iterator[InjectedTime]:
 def _ledger(session_factory, signer=SERVICE_SIGNER) -> CapacityLedgerService:
     ledger = CapacityLedgerService(
         session_factory,
+        pool_facts=ResourcePoolFacts(),
         site_id=SITE,
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",

@@ -1,13 +1,27 @@
 """The migration engine: chains, the startup check, and applying a chain.
 
 A chain begins with baseline migrations, whose fixed DDL reproduces the schema
-the chain is supported from, followed by every later migration in order. A
-database recording every ID of the chain's floor -- the chain an earlier
-release recorded -- is adopted: its floor records are replaced by the
-baseline's in one transaction, without running the baselines, and the later
-migrations then apply. Each migration runs in its own transaction with its
-record, so a failure leaves the migrations before it recorded and no trace of
-itself. Compatibility is the exact set of recorded IDs.
+of the release the chain is supported from -- its floor -- followed by every
+later migration in order. Every chain declares its floor, a :class:`Floor`
+naming that release and the IDs its chain recorded; a chain with no earlier
+history declares ``Floor("0.0.0")``, recording nothing, and adopts no
+database.
+
+A database recording every ID of the floor and none of the baselines is one
+the floor release ran on, and is adopted whatever else it records: in one
+transaction, without running the baselines, every recorded ID the chain does
+not list is forgotten -- the floor's and any an earlier release wrote -- and
+the baselines are recorded; the later migrations then apply. That is sound
+because no image of this engine leaves a ledger without the baselines, so an
+extra record beside the floor's was written by the floor release or before it,
+never by a newer image. A database recording some of the floor's IDs but not
+all is older than the floor, or another service's sharing its history, and
+upgrades through the floor release first; one recording none of them is not
+the chain's.
+
+Each migration runs in its own transaction with its record, so a failure
+leaves the migrations before it recorded and no trace of itself.
+Compatibility is the exact set of recorded IDs.
 
 A migration runs inside the engine's transaction, where SQLite ignores
 ``PRAGMA foreign_keys``: a migration that rebuilds a referenced table cannot
@@ -20,10 +34,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Collection, Iterable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Generic, Protocol, TypeVar
 
-from market_schema_migrations.result import CheckResult, CheckState, refusal_message
+from market_schema_migrations.result import (
+    CheckResult,
+    CheckState,
+    UnsupportedCause,
+    refusal_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,23 +104,39 @@ class MigrationConnection(Protocol[C_co]):
 
 
 @dataclass(frozen=True)
+class Floor:
+    """The release a chain is supported from, and the IDs its chain recorded.
+
+    ``release`` is the whole name every refusal of an older database gives --
+    the product and its version, since the engine names no product -- or
+    ``"0.0.0"`` for a chain with no earlier history. ``recorded`` lists the IDs
+    that release's chain recorded on every database it built; with none, the
+    chain adopts no database and refuses every non-empty one it did not build.
+    """
+
+    release: str
+    recorded: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Chain(Generic[C]):
     """A service's migrations, in the order they apply.
 
     ``service`` and ``command`` name the service and its migration command in
     every refusal. ``baselines`` begin the chain and ``migrations`` follow them.
-    ``floor_ids`` are the IDs the chain of the release it is supported from
-    recorded; a chain with none adopts no database, so it refuses every
-    non-empty database it did not build.
+    ``floor`` is required, so no chain can be built without declaring the
+    release it is supported from.
     """
 
     service: str
     command: str
     baselines: tuple[Migration[C], ...]
     migrations: tuple[Migration[C], ...] = ()
-    floor_ids: tuple[str, ...] = ()
+    floor: Floor = field(kw_only=True)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.floor, Floor):
+            raise TypeError(f"{self.service}'s chain declares no Floor")
         if not self.baselines:
             raise ValueError(f"{self.service}'s chain names no baseline migration")
         ids = self.ids
@@ -111,15 +146,14 @@ class Chain(Generic[C]):
                 f"{self.service}'s chain lists migrations more than once: "
                 + ", ".join(duplicates)
             )
-        floor_duplicates = sorted(
-            {i for i in self.floor_ids if self.floor_ids.count(i) > 1}
-        )
+        recorded = self.floor.recorded
+        floor_duplicates = sorted({i for i in recorded if recorded.count(i) > 1})
         if floor_duplicates:
             raise ValueError(
                 f"{self.service}'s floor lists migrations more than once: "
                 + ", ".join(floor_duplicates)
             )
-        overlap = sorted(set(self.floor_ids) & set(ids))
+        overlap = sorted(set(recorded) & set(ids))
         if overlap:
             # A floor ID is deleted at adoption; one the chain also lists would
             # be forgotten and never run.
@@ -139,10 +173,13 @@ class Chain(Generic[C]):
 
 @dataclass(frozen=True)
 class MigrateReport:
-    """What one run did: whether it adopted the database, and what it applied."""
+    """What one run did: whether it adopted the database, the records earlier
+    releases wrote that the adoption forgot beyond the floor's, and what it
+    applied."""
 
     adopted: bool
     applied: tuple[str, ...]
+    set_aside: tuple[str, ...] = ()
 
 
 class MigrationRefused(RuntimeError):
@@ -173,14 +210,21 @@ def classify(
     ``None`` when the database has no ledger. A database records the chain once
     it records any baseline: then an ID the chain does not list is unknown and
     makes it ahead, whatever else it lacks. A database recording no baseline
-    but every floor ID is behind, its adoption pending. Anything else holding
-    tables or records predates the baseline and is unsupported.
+    but every floor ID is behind, its adoption pending, and every other ID it
+    records that the chain does not list is set aside. A ledger recording some
+    of the floor's IDs is older than the floor, or another service's; anything
+    else holding tables or records is not the chain's.
     """
 
+    floor = chain.floor
     if not recorded:
         if not set(tables or ()) - {LEDGER_TABLE}:
-            return CheckResult(CheckState.ABSENT)
-        return CheckResult(CheckState.UNSUPPORTED, missing=chain.floor_ids)
+            return CheckResult(CheckState.ABSENT, floor=floor.release)
+        return CheckResult(
+            CheckState.UNSUPPORTED,
+            floor=floor.release,
+            cause=UnsupportedCause.NOT_THIS_CHAIN,
+        )
 
     known = set(recorded)
     ids = chain.ids
@@ -190,24 +234,38 @@ def classify(
         current = next((i for i in reversed(ids) if i in known), None)
         if unknown:
             return CheckResult(
-                CheckState.AHEAD, pending=pending, unknown=unknown, current=current
+                CheckState.AHEAD,
+                pending=pending,
+                unknown=unknown,
+                current=current,
+                floor=floor.release,
             )
         if pending:
-            return CheckResult(CheckState.BEHIND, pending=pending, current=current)
-        return CheckResult(CheckState.COMPATIBLE, current=current)
+            return CheckResult(
+                CheckState.BEHIND, pending=pending, current=current, floor=floor.release
+            )
+        return CheckResult(CheckState.COMPATIBLE, current=current, floor=floor.release)
 
-    floor = set(chain.floor_ids)
-    if floor and floor <= known:
-        unknown = tuple(sorted(known - floor - set(ids)))
-        pending = tuple(m.id for m in chain.migrations if m.id not in known)
-        state = CheckState.AHEAD if unknown else CheckState.BEHIND
+    floor_ids = set(floor.recorded)
+    if floor_ids and floor_ids <= known:
         return CheckResult(
-            state, pending=pending, unknown=unknown, adopting=chain.baseline_ids
+            CheckState.BEHIND,
+            pending=tuple(m.id for m in chain.migrations if m.id not in known),
+            adopting=chain.baseline_ids,
+            set_aside=tuple(sorted(known - floor_ids - set(ids))),
+            floor=floor.release,
         )
-
+    if floor_ids & known:
+        return CheckResult(
+            CheckState.UNSUPPORTED,
+            missing=tuple(i for i in floor.recorded if i not in known),
+            floor=floor.release,
+            cause=UnsupportedCause.OLDER_OR_SHARED,
+        )
     return CheckResult(
         CheckState.UNSUPPORTED,
-        missing=tuple(i for i in chain.floor_ids if i not in known),
+        floor=floor.release,
+        cause=UnsupportedCause.NOT_THIS_CHAIN,
     )
 
 
@@ -231,10 +289,12 @@ def migrate(chain: Chain[C], connection: MigrationConnection[C]) -> MigrateRepor
     An ahead database is refused, since applying pending migrations over
     unknown ones deepens a divergence only the image that wrote them can
     judge; an unsupported one is refused, since no chain step reaches it.
+    Adopting a floor database forgets every record the chain does not list,
+    so the adopted database records exactly the chain's IDs.
     """
 
     # The state is read, and a floor database adopted, in one transaction, so
-    # the floor records adoption replaces are the ones the check found.
+    # the records adoption forgets are the ones the check found.
     with connection.transaction():
         tables = connection.table_names()
         recorded = connection.recorded_ids() if LEDGER_TABLE in tables else None
@@ -244,16 +304,20 @@ def migrate(chain: Chain[C], connection: MigrationConnection[C]) -> MigrateRepor
         if result.state is CheckState.ABSENT:
             connection.create_ledger()
         if result.adoption_pending:
-            connection.forget(chain.floor_ids)
+            connection.forget((*chain.floor.recorded, *result.set_aside))
             connection.record(chain.baseline_ids)
     if result.state is CheckState.COMPATIBLE:
         return MigrateReport(adopted=False, applied=())
 
     if result.adoption_pending:
         logger.info(
-            "%s: adopted the supported baseline (%s)",
+            "%s: adopted the supported baseline (%s), replacing the records of %s%s",
             chain.service,
             ", ".join(chain.baseline_ids),
+            chain.floor.release,
+            "; set aside records earlier releases wrote: " + ", ".join(result.set_aside)
+            if result.set_aside
+            else "",
         )
 
     pending = set(chain.ids if result.state is CheckState.ABSENT else result.pending)
@@ -271,4 +335,8 @@ def migrate(chain: Chain[C], connection: MigrationConnection[C]) -> MigrateRepor
             ) from exc
         applied.append(migration.id)
         logger.info("%s: applied migration %s", chain.service, migration.id)
-    return MigrateReport(adopted=result.adoption_pending, applied=tuple(applied))
+    return MigrateReport(
+        adopted=result.adoption_pending,
+        applied=tuple(applied),
+        set_aside=result.set_aside,
+    )

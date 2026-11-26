@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from market_fulfillment.fulfillment_persistence import SqlAlchemyFulfillmentTransaction
 from market_fulfillment.settlement_repository import begin_sqlite_write_transaction
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import ResourcePoolFacts, ResourcePoolService
 from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools_contracts import PoolCreate
 from market_site.db import Base as SiteBase, CapacityReservation
@@ -28,7 +28,7 @@ def ledger_services(tmp_path):
     SiteBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     ledger = CapacityLedgerService(
-        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+        factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
     )
 
     class _Handler:
@@ -127,7 +127,7 @@ def contended_ledger_services(tmp_path):
     PoolsBase.metadata.create_all(bind=engine)
     SiteBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
-    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    ledger = CapacityLedgerService(factory, pool_facts=ResourcePoolFacts(), unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
 
     class _Handler:
         provider = "ansible"

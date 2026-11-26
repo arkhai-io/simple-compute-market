@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import injected_time
 import pytest
 from eventing import SCHEMA_STEPS, Catalogue, EventReader, Recorder, Reference, Source
+from market_resource_pools import ResourcePoolFacts
 from market_resource_pools.migrations import BASELINE as POOLS_BASELINE
 from market_site.authority import LedgerSiteAuthority
 from market_site.db import CapacityReservation
@@ -279,7 +280,9 @@ class _Status:
 def _lifecycle(
     sessions, recorder, engine, status: _Status, *, deliver_events=None
 ) -> tuple[LeaseLifecycleService, CapacityLedgerService]:
-    ledger = CapacityLedgerService(sessions, site_id="fixture-site", event_recorder=recorder)
+    ledger = CapacityLedgerService(
+        sessions, pool_facts=ResourcePoolFacts(), site_id="fixture-site", event_recorder=recorder
+    )
     settings = type("Settings", (), {"lease_watchdog_grace_period_seconds": 3600})()
     return LeaseLifecycleService(
         settings, LedgerSiteAuthority(ledger),
@@ -348,7 +351,9 @@ async def test_a_lease_whose_teardown_times_out_records_the_lease_release_failed
 async def test_a_stale_release_failure_is_refused_and_records_no_event(database, recorder, source):
     engine = _engine(database, recorder, _Executor(JobSuccess(result=None)))
     _releasing(database, requested_at=injected_time.now_datetime())
-    ledger_for_operator = CapacityLedgerService(database, site_id="fixture-site", event_recorder=recorder)
+    ledger_for_operator = CapacityLedgerService(
+        database, pool_facts=ResourcePoolFacts(), site_id="fixture-site", event_recorder=recorder
+    )
     # The operator force-releases the lease after the lifecycle read it as releasing.
     status = _Status(
         ReleaseStatus(ReleaseProgress.FAILED, reason="teardown_failed", error="teardown failed"),

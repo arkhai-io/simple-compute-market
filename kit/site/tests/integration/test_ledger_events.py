@@ -1,8 +1,9 @@
 """The ledger records the site's events in its transitions' transactions.
 
 Library integration: the real ledger and the real event recorder over one
-SQLite database, built by the pool and site baselines and the eventing
-component's own schema steps.
+SQLite database, built by the site's baseline and migrations and the eventing
+component's own schema steps; the ledger reads its pool's facts through the
+suite's pool-facts double.
 """
 
 from __future__ import annotations
@@ -13,8 +14,6 @@ import injected_time
 import pytest
 from eventing import SCHEMA_STEPS, Catalogue, EventReader, Kind, Recorder, Reference, Severity, Source
 from injected_time import InjectedTime
-from market_resource_pools import migrations as pool_migrations
-from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -24,8 +23,10 @@ from market_site import CapacityLedgerService, LedgerSiteAuthority
 from market_site import migrations as site_migrations
 from market_site.db import CapacityReservation
 from market_site.events import SITE_KINDS, lease_reference
+from pool_facts_double import PoolFactsDouble
 
 LEASE = "fixture-lease"
+DEFAULT_POOL_ID = "default"
 
 
 class _FailureDetails(BaseModel):
@@ -58,18 +59,12 @@ def store(source: InjectedTime) -> Iterator[tuple[sessionmaker, Recorder]]:
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     with engine.begin() as connection:
-        for migration in (
-            pool_migrations.BASELINE, site_migrations.BASELINE, *site_migrations.MIGRATIONS
-        ):
+        for migration in (site_migrations.BASELINE, *site_migrations.MIGRATIONS):
             migration.apply(connection)
         for step in SCHEMA_STEPS:
             step.apply(connection)
     sessions = sessionmaker(bind=engine)
     with sessions() as db, db.begin():
-        db.add(ResourcePool(
-            id=DEFAULT_POOL_ID, label="Default Pool", provider="test", enabled=True,
-            policy_tags={"deliverable_modes": ["vm"]},
-        ))
         db.add(CapacityReservation(capacity_reservation_id=LEASE, state="leased", offering_mode="vm"))
     recorder = Recorder(
         Catalogue((*SITE_KINDS, CALLER_KIND)),
@@ -81,7 +76,11 @@ def store(source: InjectedTime) -> Iterator[tuple[sessionmaker, Recorder]]:
 
 
 def _ledger(sessions, recorder, **kwargs) -> CapacityLedgerService:
-    return CapacityLedgerService(sessions, site_id="fixture-site", event_recorder=recorder, **kwargs)
+    pools = PoolFactsDouble()
+    pools.declare(DEFAULT_POOL_ID, ("vm",))
+    return CapacityLedgerService(
+        sessions, pool_facts=pools, site_id="fixture-site", event_recorder=recorder, **kwargs
+    )
 
 
 def _events(sessions, kind: str | None = None):

@@ -1,8 +1,8 @@
 [project]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.4.0"
+version = "0.5.0"
 license = "MIT"
-description = "Resource-pool wire models, declaration vocabulary, and route declarations, without the pool authority's persistence."
+description = "Resource-pool wire models, declaration vocabulary, route declarations, and the readers of a site's projected pool declarations and asking rates, without the pool authority's persistence."
 requires-python = ">=3.12"
 # Models and declarations only, so a pool client or a projection reader never
 # installs the authority's persistence.

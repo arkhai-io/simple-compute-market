@@ -10,11 +10,6 @@ from injected_time import InjectedTime
 from sqlalchemy import Column, MetaData, String, Table, create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
-from market_resource_pools.db import (
-    Base as ResourcePoolBase,
-    DEFAULT_POOL_ID,
-    ResourcePool,
-)
 
 from market_site import CapacityDeclaration
 from market_site.db import (
@@ -32,6 +27,9 @@ from market_site.ledger import (
     UnknownPoolError,
 )
 from market_site.projections import SiteProjectionService
+from pool_facts_double import PoolFactsDouble
+
+DEFAULT_POOL_ID = "default"
 
 
 def _make_ledger(**kwargs) -> CapacityLedgerService:
@@ -41,18 +39,10 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    ResourcePoolBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db, db.begin():
-        db.add(
-            ResourcePool(
-                id=DEFAULT_POOL_ID,
-                label="Default Pool",
-                provider="test",
-                enabled=True,
-                policy_tags={"deliverable_modes": ["bare_metal", "vm"]},
-            )
-        )
+    pools = PoolFactsDouble()
+    pools.declare(DEFAULT_POOL_ID, ("bare_metal", "vm"))
+    kwargs.setdefault("pool_facts", pools)
     # This suite exercises VM-flavored claim shapes ("gpu_count"-only
     # reservations, "compute-kvm1-001"-style resource ids), so it opts into
     # the "gpu_count" unit-claim alias explicitly the same way the VM
@@ -62,21 +52,17 @@ def _make_ledger(**kwargs) -> CapacityLedgerService:
     kwargs.setdefault("mirror_dimension", "gpu_count")
     return CapacityLedgerService(session_factory, **kwargs)
 
+def _pools(ledger: CapacityLedgerService) -> PoolFactsDouble:
+    """The pool facts the ledger was built with."""
+    return ledger._pool_facts
+
+
 def _declare_pool(
     ledger: CapacityLedgerService,
     pool_id: str,
     *modes: str,
 ) -> None:
-    with ledger._session_factory() as db, db.begin():
-        db.add(
-            ResourcePool(
-                id=pool_id,
-                label=pool_id,
-                provider="test",
-                enabled=True,
-                policy_tags={"deliverable_modes": list(modes)},
-            )
-        )
+    _pools(ledger).declare(pool_id, modes)
 
 
 @pytest.fixture
@@ -258,15 +244,13 @@ def test_pool_mode_permission_does_not_replace_cross_mode_physical_conflict(
         "allocation_mode": ALLOCATION_MODE_EXCLUSIVE,
     }
 
-    with ledger._session_factory() as db, db.begin():
-        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
-        pool.policy_tags = {"deliverable_modes": ["vm"]}
+    _pools(ledger).change(DEFAULT_POOL_ID, deliverable_modes=frozenset({"vm"}))
     with pytest.raises(UndeclaredOfferingModeError, match="'bare_metal'"):
         ledger.reserve(claim=bare_metal_claim, deal_ref={})
 
-    with ledger._session_factory() as db, db.begin():
-        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
-        pool.policy_tags = {"deliverable_modes": ["bare_metal", "vm"]}
+    _pools(ledger).change(
+        DEFAULT_POOL_ID, deliverable_modes=frozenset({"bare_metal", "vm"})
+    )
     assert ledger.reserve(claim=bare_metal_claim, deal_ref={}) is None
 
 
@@ -380,9 +364,7 @@ def test_missing_offering_mode_is_never_inferred_from_vm_resource(
 def test_absent_or_mismatched_pool_declaration_delivers_nothing(
     seeded: CapacityLedgerService,
 ):
-    with seeded._session_factory() as db, db.begin():
-        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
-        pool.policy_tags = {}
+    _pools(seeded).change(DEFAULT_POOL_ID, deliverable_modes=frozenset())
 
     with pytest.raises(UndeclaredOfferingModeError, match="'vm'"):
         seeded.reserve(
@@ -391,9 +373,7 @@ def test_absent_or_mismatched_pool_declaration_delivers_nothing(
         )
     assert seeded.snapshot()[0]["available_units"] == 8
 
-    with seeded._session_factory() as db, db.begin():
-        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
-        pool.policy_tags = {"deliverable_modes": ["bare_metal"]}
+    _pools(seeded).change(DEFAULT_POOL_ID, deliverable_modes=frozenset({"bare_metal"}))
 
     with pytest.raises(UndeclaredOfferingModeError, match="'vm'"):
         seeded.reserve(
@@ -413,9 +393,7 @@ def test_undeclared_mode_refusal_is_independent_of_live_availability(
     assert reserved is not None
     assert seeded.snapshot()[0]["available_units"] == 0
 
-    with seeded._session_factory() as db, db.begin():
-        pool = db.get(ResourcePool, DEFAULT_POOL_ID)
-        pool.policy_tags = {"deliverable_modes": ["bare_metal"]}
+    _pools(seeded).change(DEFAULT_POOL_ID, deliverable_modes=frozenset({"bare_metal"}))
 
     with pytest.raises(UndeclaredOfferingModeError, match="'vm'"):
         seeded.reserve(
@@ -960,14 +938,14 @@ def test_truncate_lease_refuses_an_uncommitted_hold_and_the_lifecycle_states(
 # ----------------------------------------------------------------------
 
 
-def _file_ledger(path) -> CapacityLedgerService:
+def _file_ledger(path, pools: PoolFactsDouble) -> CapacityLedgerService:
     """A ledger over a database file, so a second instance reads what the first
     wrote, as a restarted site does."""
     engine = create_engine(f"sqlite:///{path}", poolclass=NullPool)
     Base.metadata.create_all(bind=engine)
-    ResourcePoolBase.metadata.create_all(bind=engine)
     return CapacityLedgerService(
         sessionmaker(bind=engine),
+        pool_facts=pools,
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
     )
@@ -996,12 +974,9 @@ def test_a_first_activation_records_the_site_s_instant_and_moves_nothing(
 
 def test_a_retried_activation_returns_the_first_instant_after_a_restart(tmp_path):
     path = tmp_path / "site.db"
-    first = _file_ledger(path)
-    with first._session_factory() as db, db.begin():
-        db.add(ResourcePool(
-            id=DEFAULT_POOL_ID, label="Default Pool", provider="test", enabled=True,
-            policy_tags={"deliverable_modes": ["vm"]},
-        ))
+    pools = PoolFactsDouble()
+    pools.declare(DEFAULT_POOL_ID, ("vm",))
+    first = _file_ledger(path, pools)
     first.register_resource(
         host_id="kvm1", resource_id="compute-kvm1-001", total_units=8,
         resource_subtype="h200", attributes={"gpu_model": "H200"}, pool_id="default",
@@ -1010,7 +985,7 @@ def test_a_retried_activation_returns_the_first_instant_after_a_restart(tmp_path
     recorded = first.activate_lease(reservation_id)["activated_at_utc"]
 
     assert first.activate_lease(reservation_id)["activated_at_utc"] == recorded
-    restarted = _file_ledger(path)
+    restarted = _file_ledger(path, pools)
     assert restarted.activate_lease(reservation_id)["activated_at_utc"] == recorded
     assert restarted.get_reservation(reservation_id)["activated_at_utc"] == recorded
 
@@ -1925,6 +1900,28 @@ def test_a_row_with_no_stored_pool_is_in_neither_projection(caplog):
     assert stored["pool_id"] is None
 
 
+def test_a_row_with_no_stored_pool_is_not_offered_and_no_pool_is_read_for_it(caplog):
+    """The offered read, and the snapshot built from it, offer the row nowhere,
+    as admission admits it nowhere, and ask the pool reader nothing for it."""
+    ledger = _make_ledger()
+    _declare_pool(ledger, "pool-a", "vm")
+    ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
+    ledger.register_resource(resource_id="r2", total_units=4, pool_id="pool-a")
+    _strip_stored_pool(ledger, "r1")
+    _pools(ledger).reads.clear()
+
+    with caplog.at_level("WARNING", logger="market_site.ledger"):
+        offered = {row["resource_id"]: row for row in ledger.list_offered_resources()}
+
+    assert offered["r1"]["enabled"] is False
+    assert offered["r2"]["enabled"] is True
+    assert [pool_id for _, pool_id in _pools(ledger).reads] == ["pool-a"]
+    assert "'r1' records no pool and is not offered" in caplog.text
+    assert [row["resource_id"] for row in ledger.snapshot()] == ["r2"]
+    (stored,) = [row for row in ledger.list_resources() if row["resource_id"] == "r1"]
+    assert stored["enabled"] is True
+
+
 def test_a_row_with_no_stored_pool_is_neither_scheduled_nor_assigned(caplog):
     ledger = _make_ledger()
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
@@ -2462,17 +2459,12 @@ def test_a_reservation_racing_a_pool_move_never_survives_against_the_moved_resou
         poolclass=NullPool,
     )
     Base.metadata.create_all(bind=engine)
-    ResourcePoolBase.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine)
-    with session_factory() as db, db.begin():
-        db.add_all([
-            ResourcePool(id=DEFAULT_POOL_ID, label="Default", provider="test",
-                         enabled=True, policy_tags={"deliverable_modes": ["vm"]}),
-            ResourcePool(id="pool-b", label="B", provider="test",
-                         enabled=True, policy_tags={"deliverable_modes": []}),
-        ])
+    pools = PoolFactsDouble()
+    pools.declare(DEFAULT_POOL_ID, ("vm",))
+    pools.declare("pool-b", ())
     ledger = CapacityLedgerService(
-        session_factory, unit_claim_keys=("units", "gpu_count"),
+        session_factory, pool_facts=pools, unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
     )
     ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
@@ -2525,6 +2517,20 @@ def test_a_declaration_naming_an_unknown_pool_is_refused():
         ledger.register_resource(resource_id="r1", pool_id="no-such-pool", total_units=1)
 
     assert ledger.snapshot() == []
+    assert [pool_id for _, pool_id in _pools(ledger).reads] == ["no-such-pool"]
+
+
+def test_moving_a_declaration_into_a_pool_the_reader_does_not_find_changes_nothing():
+    ledger = _make_ledger()
+    ledger.register_resource(resource_id="r1", pool_id="default", total_units=4)
+    before = ledger.list_resources()
+    version = ledger.events_after(0)[1]
+
+    with pytest.raises(UnknownPoolError, match="no-such-pool"):
+        ledger.register_resource(resource_id="r1", pool_id="no-such-pool", total_units=8)
+
+    assert ledger.list_resources() == before
+    assert ledger.events_after(0)[1] == version
 
 
 def test_a_settlement_assignment_outside_the_serialized_region_is_refused():

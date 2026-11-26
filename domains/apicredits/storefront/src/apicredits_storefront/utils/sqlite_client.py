@@ -184,8 +184,9 @@ def refuse_unbound_listings(db_path: str) -> None:
     Every capacity effect, reconciliation, and recheck reads a listing's
     durable binding, and a listing created before bindings were recorded has
     none to read. There is no record to derive one from, so such a database is
-    refused rather than served. The refusal concerns data, not schema, so it
-    runs at startup on a migrated database.
+    refused rather than served, as marketplace 0.3.0 refused it too. The
+    refusal concerns data, not schema, so it runs at startup on a migrated
+    database.
     """
     conn = sqlite3.connect(db_path)
     try:
@@ -201,8 +202,9 @@ def refuse_unbound_listings(db_path: str) -> None:
         conn.close()
     if unbound is not None:
         raise RuntimeError(
-            f"API-credit listing {unbound[0]!r} has no durable listing binding; "
-            "this storefront requires a fresh database"
+            f"API-credit listing {unbound[0]!r} has no durable listing binding, and "
+            "none can be derived: the storefront serves only listings created with "
+            "one, and marketplace 0.3.0 refused this database too"
         )
 
 

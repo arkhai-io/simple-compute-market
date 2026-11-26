@@ -5,10 +5,17 @@ looks up hosts, must hold those same instances: a second engine would keep its
 own terminal signals and retry schedule, and a second host authority would miss
 the other domain's pool-change hooks. Asserted by identity on a real container
 whose persistence is an in-memory database.
+
+This root also composes the site authority and the pool authority, which no
+type relates, so it holds the pool authority's reader to the site's pool-facts
+port.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
+import typing
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -27,6 +34,8 @@ from compute_provisioning.release import (
 
 from compute_provisioning.relays import RelayDeliverableHosts, release_reservation_ports
 from compute_provisioning.relays.rebinding import relay_host_pool_change
+from market_resource_pools import ResourcePoolFacts, StoredPoolFacts
+from market_site import PoolFacts, PoolFactsReader
 
 from compute_provisioning_service.container import Container
 
@@ -225,7 +234,8 @@ def test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts():
     """Admission, the site's offered read, and scheduling all judge a
     declaration's host by one report of the hosts taking new delivery: the
     host authority's, less the hosts of pools on a disabled relay, with the
-    same host requirement beside it. A ledger or unit of work built without it
+    same host requirement beside it — the scheduler's own, and the ledger's
+    through its pool reader. A ledger or unit of work built without the report
     would accept any named host, and one built over the host authority alone
     would keep placing deliveries on a relay being drained."""
     container = _container()
@@ -240,8 +250,23 @@ def test_the_ledger_and_the_scheduler_read_one_report_of_deliverable_hosts():
     assert ledger._deliverable_hosts is deliverable_hosts
     assert unit_of_work.deliverable_hosts is deliverable_hosts
     assert scheduler._unit_of_work is unit_of_work
-    assert ledger._host_requirement is scheduler._host_requirement
-    assert ledger._host_requirement == container.host_requirement()
+    assert ledger._pool_facts.host_requirement is scheduler._host_requirement
+
+
+def test_the_ledger_reads_pools_through_the_containers_one_reader():
+    """The ledger learns every pool fact from the pool authority's reader, one
+    instance, resolving each provider against the merged requirement: a
+    reader with none would let every declaration in a host-delivering pool be
+    admitted without a host."""
+    container = _container()
+    pool_facts = container.pool_facts()
+
+    ledger = container.capacity_ledger_service()
+
+    assert isinstance(pool_facts, ResourcePoolFacts)
+    assert ledger._pool_facts is pool_facts
+    assert pool_facts.host_requirement == container.host_requirement()
+    assert pool_facts.host_requirement
 
 
 def test_the_release_effect_registry_is_the_ledgers_and_composition_fills_it():
@@ -255,3 +280,26 @@ def test_the_release_effect_registry_is_the_ledgers_and_composition_fills_it():
 
     assert ledger._release_effect is effects
     assert effects.frozen
+
+
+def test_the_pool_authoritys_reader_answers_the_sites_pool_facts_port():
+    """The pool authority answers the site's pool-facts port structurally and
+    imports nothing from the site, so no type relates the two: this root, which
+    composes both, holds the reader to the port. A fact added to the port
+    alone, with no field on the reader's value, fails here rather than at the
+    first decision that reads it."""
+    port_members = typing.get_protocol_members(PoolFacts)
+    stored_fields = {field.name for field in dataclasses.fields(StoredPoolFacts)}
+
+    assert port_members
+    assert port_members <= stored_fields
+
+    def _parameters(method):
+        return [
+            (parameter.name, parameter.kind)
+            for parameter in inspect.signature(method).parameters.values()
+        ]
+
+    assert _parameters(ResourcePoolFacts.pool_facts) == _parameters(
+        PoolFactsReader.pool_facts
+    )

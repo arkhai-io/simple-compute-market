@@ -20,7 +20,7 @@ from core_storefront.domain_registry import (
 )
 from market_capacity_publication import PublicationBinding, publication_binding
 from market_core import MarketDomainContract
-from market_resource_pools import ResolvedPool, read_site_declarations
+from market_resource_pools_contracts import ResolvedPool, read_site_declarations
 
 API_CREDITS_OFFERING_MODE = "api_credits"
 API_CREDITS_CONTRIBUTION_ID = "apicredits"

@@ -15,6 +15,7 @@ from compute_provisioning.release import ReleaseAction, ReleaseDecision
 from compute_provisioning_contracts import LeaseForceRelease, LeaseTermination, verify_lease_end
 from injected_time import InjectedTime
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_resource_pools import ResourcePoolFacts
 from market_site.authority import LedgerSiteAuthority
 from market_site.db import CapacityReservation
 from market_site.ledger import CapacityLedgerService
@@ -71,7 +72,9 @@ async def main():
         migrate_database(engine)
         factory = sessionmaker(bind=engine)
         ledger = CapacityLedgerService(
-            factory, site_id="fixture-site",
+            factory,
+            pool_facts=ResourcePoolFacts(),
+            site_id="fixture-site",
             event_recorder=event_recorder(event_catalogue(site), instance="fixture-site"),
         )
         reports = LeaseEndReports(factory)

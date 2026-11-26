@@ -91,7 +91,7 @@ def check_sqlite_file(chain: Chain[Any], path: str | Path) -> CheckResult:
     """
 
     if not Path(path).is_file():
-        return CheckResult(CheckState.ABSENT)
+        return CheckResult(CheckState.ABSENT, floor=chain.floor.release)
     connection = connect_read_only(path)
     try:
         return check(chain, SqliteMigrationConnection(connection))

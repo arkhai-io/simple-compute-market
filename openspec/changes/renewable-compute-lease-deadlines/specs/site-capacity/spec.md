@@ -1,116 +1,178 @@
 ## ADDED Requirements
 
-### Requirement: Commit snapshots an activation deadline when the pool resolves a delivery deadline
+### Requirement: Commit records an activation deadline from the deal's accepted deadline, else the pool's
 
-> **Stale.** It writes `renew_by_utc` and `renewal_phase`, which do not exist: the landed activation added only `activated_at_utc`, from which whether a lease is activated is derived and stored nowhere else. Intended replacement: the commit writes this change's own nullable activation-deadline column (its name is open in `design.md`) and no phase; the anchor, the pool ceiling and the refusals are unchanged.
+The first commit of a reservation MUST record an activation deadline where the commit carries the deal's accepted `delivery_deadline_seconds` or the reservation's pool resolves a delivery deadline: the later of the deal's commitment instant, as the commit supplies it, and the lease start, plus the accepted value where the commit carries one, on every pool, else plus the value the pool resolves. A commit that carries none, to a pool that resolves none, MUST record none. A recorded deadline MUST NOT be rewritten by a repeated commit, by activation, by truncation, or by a later change to the pool. A reservation committed before the site recorded deadlines MUST carry none. The site's reservation view MUST show the deadline, null where none is recorded.
 
-On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time.
+#### Scenario: A commit carries the deal's accepted deadline
 
-#### Scenario: The full policy is enforced
+- **WHEN** a reservation in a pool resolving 1800 seconds is first committed with an accepted deadline of 1800 seconds, a commitment instant of 10:00 and a lease starting at 10:00
+- **THEN** the site records an activation deadline of 10:30
 
-- **WHEN** the site first commits a reservation with effective pool deadline policy
-- **THEN** On first commit, the site MUST set renew_by_utc to max(committed_at_utc, lease_start_utc) plus the deal's accepted delivery_deadline_seconds supplied with the commit, and renewal_phase to awaiting_activation; committed_at_utc is the deal's commitment instant supplied with the commit and MUST NOT be later than the site's commit time. The site MUST refuse a commit whose accepted deadline exceeds the pool's current effective delivery deadline or carries one where the pool resolves none. A commit supplying no accepted deadline MUST take the pool's current effective deadline when one resolves. Such a commit MUST require a finite end. Recommit MUST preserve both fields. No effective delivery deadline MUST leave the phase and due instant as the activation change's migration left them: null, with end-only expiry.
+#### Scenario: A lease starts after the deal's commitment
 
-#### Scenario: A compute reservation is committed
+- **WHEN** a lease starting at 12:00 is committed with a commitment instant of 10:00 and an accepted deadline of 1800 seconds
+- **THEN** its activation deadline is 12:30, and its agreed window is unchanged
 
-- **WHEN** a reservation in a pool resolving a delivery deadline is first committed with a finite agreed end
-- **THEN** the site records the provisional deadline from max(commitment instant, lease start) and the awaiting-activation phase without receiving payment terms
+#### Scenario: A commit carries no accepted deadline
 
-#### Scenario: A storefront supplies a future commitment instant
+- **WHEN** a commit carrying no accepted deadline names a reservation in a pool resolving 1800 seconds
+- **THEN** the site records a deadline from the pool's 1800 seconds
 
-- **WHEN** a commit carries a commitment instant later than the site's clock
-- **THEN** the site refuses the commit
+#### Scenario: A commit carries a deadline to a pool that resolves none
 
-#### Scenario: The pool was lengthened after acceptance
+- **WHEN** a commit carrying an accepted deadline of 1200 seconds names a reservation in a pool that resolves none
+- **THEN** the site records the deadline from 1200 seconds
 
-- **WHEN** a deal accepted with a 1800-second deadline is committed after the pool's deadline was raised to 3600
-- **THEN** the site enforces 1800 seconds from the anchor
+#### Scenario: A commit carries no deadline to a pool that resolves none
 
-#### Scenario: The pool was shortened below the accepted deadline
+- **WHEN** a commit carrying no accepted deadline names a reservation in a pool that resolves none
+- **THEN** the reservation is committed with no activation deadline
 
-- **WHEN** a deal accepted with an 1800-second deadline is committed after the pool's deadline was lowered to 900, or after the pool stopped enforcing one
-- **THEN** the site refuses the commit, the storefront classifies the refusal as seller failure before dispatch with no provisioning issued, and the reservation it already holds is released through the storefront's no-dispatch release path rather than left to its expiry
+#### Scenario: The pool was lengthened after the deal was accepted
 
-#### Scenario: A commit is retried after the pool policy changes
+- **WHEN** a deal accepted with 1800 seconds is committed after its pool's deadline was raised to 3600
+- **THEN** the site records the deadline from 1800 seconds
 
-- **WHEN** a committed reservation is committed again after its pool delivery deadline changes
-- **THEN** its original deadline, phase and agreed window remain unchanged
+#### Scenario: A commit is repeated after the pool changes
 
-#### Scenario: An existing lease or quota hold has no delivery deadline
+- **WHEN** a committed reservation is committed again after its pool's delivery deadline changed
+- **THEN** its recorded deadline is unchanged
 
-- **WHEN** the site migrates an existing lease or commits a quota hold whose pool resolves no delivery deadline
-- **THEN** its deadline and phase are null and its previous expiry semantics remain unchanged
+#### Scenario: A lease predates the deadline
 
-#### Scenario: A protected pool receives an unbounded commit
+- **WHEN** the site's schema is migrated over a lease committed before it recorded deadlines
+- **THEN** the lease carries no activation deadline
 
-- **WHEN** a pool resolving a delivery deadline is asked to commit with no finite end
-- **THEN** the site refuses without committing the lease
+### Requirement: An unactivated lease is due at its activation deadline
 
-#### Scenario: A future lease starts after commit
+A lease with an activation deadline and no recorded activation MUST be due at the earlier of that deadline and its lease end. A lease with a recorded activation, and a lease with no activation deadline, MUST be due only at its lease end; a null `activated_at_utc` MUST NOT by itself make a lease due. Admission MUST account a lease's agreed window whatever its deadline, and its capacity MUST stay held until release succeeds.
 
-- **WHEN** a lease starting at 12:00 is committed at 10:00, commitment instant 10:00, with a 30-minute delivery deadline
-- **THEN** its provisional deadline is 12:30, not 10:30
-- **AND** its agreed window and admission accounting are unchanged
+#### Scenario: A storefront stops before delivery
 
-### Requirement: Activation replaces the provisional deadline with the agreed end
+- **WHEN** a lease's activation deadline passes with no activation recorded and its lease end still ahead
+- **THEN** the lease is due
 
-> **Stale.** The landed activation writes only `activated_at_utc` and changes nothing else, so it cannot replace a deadline. Intended replacement: "an activated lease is due only at its agreed end, and an elapsed deadline expiry has not claimed does not prevent activation"; the two scenarios keep their outcomes.
+#### Scenario: A lease was activated before its deadline
 
-Activation, as `activate-compute-leases-at-the-site` defines it, MUST replace an awaiting_activation lease's provisional deadline with its current lease_end_utc. An elapsed unclaimed deadline MUST NOT itself prevent activation.
+- **WHEN** an activated lease's activation deadline passes with its lease end still ahead
+- **THEN** the lease is not due
 
-#### Scenario: Activation arrives after the deadline but before expiry claims it
+#### Scenario: A lease with no deadline was never activated
 
-- **WHEN** the deadline has elapsed and the reservation remains leased and awaiting activation
-- **THEN** activation may claim the transition and replace the deadline with the agreed end
+- **WHEN** a lease with no activation deadline and no recorded activation is read before its lease end
+- **THEN** the lease is not due
 
-#### Scenario: Expiry already claimed the lease
+#### Scenario: A reservation overlaps a lease past its deadline
 
-- **WHEN** activation arrives after the reservation entered releasing
-- **THEN** it is refused and neither release nor its deadline is undone
+- **WHEN** a new reservation overlaps the agreed window of a lease whose activation deadline has passed and whose release has not succeeded
+- **THEN** admission still accounts the lease against capacity
 
-### Requirement: Deadline expiry claims the exact observed lease tuple
+## MODIFIED Requirements
 
-> **Stale.** The observed tuple names a stored phase; with the phase derived, the intended tuple is the `leased` state, the agreed end, the deadline and whether `activated_at_utc` was null.
+### Requirement: The lease lifecycle's writes are conditional transitions
 
-A due query MUST return the observed end, deadline and phase. Expiry MUST claim `leased` state and equality of that tuple atomically before any release effect. A mismatch MUST cause no mutation, event, outbox item or provider call. The due instant MUST be the earlier non-null deadline or agreed end; ordinary term end MUST win ties. Successful claims MUST use the existing guarded release path without holding a transaction over provider I/O.
+Each write the lease lifecycle makes to a reservation MUST be a transition conditioned on
+the reservation's current state, refused, with nothing written, from any other state, so
+that a lifecycle acting on a stale read cannot undo what an operator or a completed release
+recorded:
 
-#### Scenario: Activation wins against a stale expiry read
+- Entering `releasing` MUST be allowed from `reserved`, `leased`, and `release_failed` (a
+  retry). A reservation already `releasing` under the same release handle MUST be returned
+  unchanged; one releasing under another handle MUST be refused.
+- Entering `releasing` because a lease became due MUST also be conditioned on what the due
+  read observed of the lease: its lease end, any deadline the site enforces on it, and
+  whether an activation was recorded. Where any of them has changed, the transition MUST be
+  refused, with no event, no report and no provider call.
+- Recording a release failure MUST be allowed from `reserved`, `leased`, and `releasing`. A
+  `releasing` reservation MUST still be releasing under the handle the failure was
+  observed for.
+- Handing a reservation to an operator (`unmanaged`) MUST be allowed only from `leased`.
+- Only a forced release MAY free an `unmanaged` reservation.
 
-- **WHEN** expiry reads an awaiting-activation deadline and activation changes the phase before expiry claims it
-- **THEN** the stale claim fails with no release effect and a later cycle reevaluates the lease
+No interface MAY set a reservation's state other than through these transitions, commit,
+release, expiry, and forced release.
+
+#### Scenario: A stale cycle meets a lease an operator took over
+
+- **WHEN** a lease cycle that read a lease as `leased` asks to begin releasing it after an
+  operator has taken it over
+- **THEN** the transition is refused, and the reservation stays `unmanaged`
+
+#### Scenario: A stale failure meets a force-released lease
+
+- **WHEN** a release failure observed before an operator force-released the lease is
+  recorded afterwards
+- **THEN** it is refused, the reservation stays `force_released`, and its capacity stays free
+
+#### Scenario: A caller asks to set a state directly
+
+- **WHEN** a caller wants a reservation in a given state
+- **THEN** no ledger operation writes a state it names; the reservation reaches the state
+  only through the lifecycle's transitions
+
+#### Scenario: Activation wins against a stale due read
+
+- **WHEN** a cycle reads a lease due at its activation deadline, and the lease is activated
+  before the cycle asks to begin releasing it
+- **THEN** the transition is refused with nothing written, and the lease stays `leased`
+  until its lease end
 
 #### Scenario: Expiry wins against activation
 
-- **WHEN** expiry claims the unchanged due tuple before activation
-- **THEN** the reservation enters releasing once and activation cannot resurrect it
+- **WHEN** a cycle begins releasing a lease it read as due and unactivated, and activation
+  is requested afterwards
+- **THEN** the lease is `releasing` once, and the activation is refused
 
-#### Scenario: Truncation changes the tuple after a due read
+#### Scenario: A truncation falls between the due read and the claim
 
-- **WHEN** the agreed end changes between expiry's due read and claim
-- **THEN** the stale claim fails without effects and a new due read determines the correct cause
+- **WHEN** a lease's end is truncated after a cycle read it as due and before the cycle asks
+  to begin releasing it
+- **THEN** the transition is refused with nothing written, and a later cycle reads the lease
+  again
 
-#### Scenario: Deadline and agreed end coincide
+### Requirement: Commit begins a lease once and never resurrects one
 
-- **WHEN** a lease becomes due at both its deadline and agreed end
-- **THEN** expiry records ordinary term end rather than activation lapse
+The first commit of a reservation MUST leave it `leased` with its window: the start named,
+else the time of the commit, and the end named. A lease with no negotiated start therefore
+begins at commit. A repeated commit of a `leased` reservation MUST return it unchanged and
+MUST NOT move its lease start or end, whatever window it names. Committing a reservation
+MUST be refused when the reservation is `releasing`, `release_failed`, or `unmanaged`, and
+MUST NOT change its state. A commit MAY name the deal it serves; an escrow it names MUST be
+recorded where the reservation records none, on a repeated commit too, and MUST NOT replace
+a recorded one. A commit MAY carry the deal's accepted `delivery_deadline_seconds` and its
+commitment instant. A first commit whose accepted deadline exceeds the delivery deadline
+its pool resolves MUST be refused, leaving the reservation's state unchanged and recording
+nothing; a pool that resolves none MUST refuse no commit on the deadline's account. A
+commit MUST answer with the reservation as the authority recorded it,
+through every client layer between the caller and the authority.
 
-### Requirement: Activation deadlines do not shorten admission windows
+#### Scenario: A resume pass commits a lease again
 
-> **Stale.** "Truncation MUST cap any non-null deadline to the new end" assumes a copied deadline; the due instant of an unactivated lease is computed as the earlier of the deadline and the agreed end, so truncation moves only the end. Intended replacement: truncation stays earlier-only and the due instant follows the new end.
+- **WHEN** a storefront's resume pass commits a `leased` reservation with a window it
+  computed from the current time
+- **THEN** the reservation is returned unchanged, with the window its first commit recorded
 
-Capacity admission MUST account the full agreed lease window, not the activation deadline. Truncation MUST remain earlier-only and MUST cap any non-null deadline to the new end. Capacity MUST remain unavailable until the ordinary guarded release succeeds, regardless of an elapsed activation deadline.
+#### Scenario: A truncated lease is committed again
 
-#### Scenario: A forward reservation overlaps the agreed term
+- **WHEN** a lease committed until T2 is truncated to T1 and a commit then names T2
+- **THEN** the reservation is returned unchanged and the lease ends at T1
 
-- **WHEN** a new reservation overlaps a leased reservation's agreed window but starts after its provisional activation deadline
-- **THEN** admission still accounts the existing lease against capacity
+#### Scenario: A hold placed before the deal had an escrow is committed
 
-#### Scenario: An activation deadline is earlier or later than a truncated end
+- **WHEN** a reservation that records no escrow is committed with a deal reference naming
+  one
+- **THEN** the reservation records that escrow, and an operator finds it through the site's
+  escrow filter
 
-- **WHEN** a leased reservation is truncated to an earlier end
-- **THEN** its deadline is no later than the new end and truncation never extends the agreed window
+#### Scenario: A releasing lease is committed again
 
-#### Scenario: A create remains in flight at expiry
+- **WHEN** a commit names a reservation whose release is in flight
+- **THEN** it is refused, and the reservation stays `releasing` with its release handle
 
-- **WHEN** an activation deadline is claimed while fulfillment creation is in flight
-- **THEN** the existing release guard prevents capacity returning until delivery is resolved and safe release is proven
+#### Scenario: The pool was shortened below the deal's accepted deadline
+
+- **WHEN** a deal accepted with 1800 seconds is first committed after its pool's delivery
+  deadline was lowered to 900
+- **THEN** the commit is refused, and the reservation stays `reserved` with no deadline
+  recorded

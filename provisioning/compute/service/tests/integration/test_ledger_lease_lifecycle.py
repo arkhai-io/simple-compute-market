@@ -42,7 +42,12 @@ from market_fulfillment import (
     SettlementRepository,
     SqlAlchemyFulfillmentUnitOfWork,
 )
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolService
+from market_resource_pools import (
+    DEFAULT_POOL_ID,
+    ResourcePool,
+    ResourcePoolFacts,
+    ResourcePoolService,
+)
 from market_site.authority import LedgerSiteAuthority
 from market_site.db import CapacityReservation, LeaseEndedEvent
 from market_site.ledger import CapacityLedgerService
@@ -91,6 +96,7 @@ def session_factory():
 def ledger(session_factory) -> CapacityLedgerService:
     svc = CapacityLedgerService(
         session_factory,
+        pool_facts=ResourcePoolFacts(),
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),

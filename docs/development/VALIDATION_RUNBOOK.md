@@ -1325,7 +1325,8 @@ that boundary. Take no shortcut.
 
 ## 28. Prepare And Operate Buyer Relays
 
-Use a buyer-only relay per operator, distinct from any management relay. Buyer
+Each operator runs its own buyer-only relay, distinct from any management relay;
+a buyer relay is not shared between operators. Buyer
 frps and frpc use the verified **0.61.1** pin. The family installs binaries at
 `/usr/local/lib/frp/0.61.1/{frps,frpc}` after checking the archive SHA-256.
 The default archive is linux_amd64; another platform requires an operator-supplied
@@ -1456,7 +1457,14 @@ configuration simply to bypass the refusal during normal operation.
 ### Container relay
 
 Use the plugin image built from its Dockerfile and pin the deployment reference
-to the intended revision/immutable digest. Run it as a sidecar in frps's network
+to the intended revision/immutable digest. For a marketplace release, the digest
+to pin is the one the release's bill of materials records for
+`frp-grant-admission`: the SHA-256 of the component `image/frp-grant-admission`
+in `manifests/release-bom.cdx.json` at the tag `marketplace-v<semver>`, on the
+branch `releases/<semver>`
+([`ARCHITECTURE.md`, "The bill of materials"](ARCHITECTURE.md#the-bill-of-materials)).
+The record names no registry, so pin that digest wherever the image is pulled
+from. Run it as a sidecar in frps's network
 namespace: the same Kubernetes pod, Compose `network_mode: service:frps`, or
 explicit host networking. Mount its configuration directory read-only at `/etc/frp-grant-admission`
 so replacing `config.toml` is visible on reload; do not publish its loopback
@@ -1560,16 +1568,96 @@ until registration/reconnect: HUP is not revocation. Adding a key/issuer or
 widening a range is non-destructive, but still requires the deployed refusal
 check.
 
-For a compromised signing key, choose explicitly: remove it immediately and
-refuse affected tenants at their next reconnect until their leases end, or keep
-it until the leases it signed have ended, as its `grants_valid_until` reports,
-while the attacker can sign within that issuer's range and audience. Neither
-choice reissues live grants. A leaked client token has no live-rotation
-shortcut: disable the relay in every operator's provisioning service that
-registers this server, wait until each reads `drained: true`, rotate the token
-on frps and every client baseline, send each service the signed
-`POST /api/v1/relays/{relay_id}/token`, verify, then enable the relays again.
-Coordinated live credential reissue is not provided.
+### Respond to a compromised relay credential
+
+No operation reissues a live lease's grant, and the provisioning service accepts
+no token change while the relay holds a lease. A compromise is therefore answered
+by letting the relay's leases end, or by ending them. A grant expires at its
+lease's scheduled end plus `relay_grant_expiry_grace_seconds`, and an on-demand
+or spot deal's lease runs to its term end unless a stop ends the deal sooner, so
+letting the leases end takes as long as the longest deal on the relay.
+
+**See what the relay holds.** As the provisioning service's administrator,
+through the signed client:
+
+- `GET /api/v1/relays/{relay_id}` reports `active_lease_count`, `drained`, and
+  under `grant_keys` the active key and each retired key's `kid`, `retired_at`
+  and `grants_valid_until`.
+- `GET /api/v1/relays/{relay_id}/leases` lists every lease row. A row with no
+  `released_at` is held: `owner_id` is the capacity reservation holding it,
+  `allocated_at` when it was leased, `grant_expires_at` when its grants expire,
+  and `grant_key_id` the key that signed its latest grant.
+- `GET /api/v1/contract/leases/{owner_id}` reads that reservation's lease, whose
+  `deal_ref.negotiation_id` names the storefront's deal.
+
+**End a deal that holds a lease.** A deal ends by itself at its agreed end, and
+an on-demand or spot deal at its buyer's stop or when its funds run out. To end
+one sooner:
+
+- A spot deal settled through Arkhai payments ends by its seller's notice:
+  `market-storefront deals preempt <negotiation-id> --operation-key <key>`, or
+  the storefront administrator's
+  `POST /api/v1/admin/deals/{negotiation_id}/interrupt` with
+  `{"interruption_kind": "preemption", "reason": "<why>"}`. The deal stops once
+  its notice has run, and its delivery ends with it. This is the right the deal's
+  terms give the seller.
+- Any deal settled through Arkhai payments ends at once by the same route with
+  `{"interruption_kind": "failure", "reason": "<why>"}`: the storefront ends
+  delivery and files `delivery_end` with the deal's dispute authority as the
+  payee.
+- A lease whose storefront cannot end it is terminated at the site, as the
+  provisioning service's administrator:
+  `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` with
+  `{"reason": "<why>"}`. The storefront files the payee's `delivery_end` when it
+  learns of the termination.
+
+A failure end and a termination are the seller's own end of the deal, priced by
+the deal's terms: on any on-demand deal, and on a spot deal ended without its
+notice, the seller owes the option's premature-stop penalty, collectible from
+the earnings the payments service still holds
+([buyer quickstart, "On-demand and spot"](../buyer-quickstart.md#7-on-demand-and-spot)).
+The relay's lease is released with its reservation's capacity, once the teardown
+is proven or an operator force-releases the lease
+([operator handbook, "Serving rate deals"](../operator-handbook.md#serving-rate-deals)).
+
+**A leaked client token.** Whoever holds the token can log in to the relay from
+anywhere and open connections; without a grant it registers no proxy.
+
+1. Disable the relay in every provisioning service that registers this server,
+   `POST /api/v1/relays/{relay_id}/disable`. No new delivery is leased a port on
+   it; running deliveries are untouched.
+2. Let the deals holding its leases end, or end them as above, until each relay
+   read reports `drained: true`.
+3. Rotate the token on frps and every client baseline, and send each service the
+   signed `POST /api/v1/relays/{relay_id}/token` with
+   `{"token": "<replacement>"}`. The service refuses that request while the relay
+   holds an unreleased lease, and the old token admits logins until frps restarts
+   with the replacement.
+4. Run the admission check under "Prove admission before enabling a pool", then
+   enable the relays again with `POST /api/v1/relays/{relay_id}/enable`.
+
+**A compromised signing key.** Whoever holds the key can sign grants within its
+issuer's range and audience. Stage and activate a new key first, as "Rotate keys
+and change admission policy" says, so that every later grant is signed by a key
+the attacker does not hold; the compromised key is then listed under
+`grant_keys.retired`. Then choose explicitly:
+
+- **Remove the key at once.** Remove its public key from the issuer's TOML and
+  reload the plugin. A registered proxy is not rechecked, so each delivery whose
+  grant the key signed keeps its access until its client registers the proxy
+  again, at a client restart, an frps restart or a reconnect, and is then
+  refused as `key_unknown`. Nothing gives a live lease another grant, so a
+  delivery refused this way stays unreachable through the relay until its lease
+  ends: end its deal as above.
+- **Keep the key until its leases end.** The key stays in the plugin until its
+  `grants_valid_until` has passed or reads null, and the attacker can sign for
+  that long. `grants_valid_until` is the latest `grant_expires_at` among the
+  relay's unreleased leases allocated at or before the key's `retired_at`;
+  ending those deals as above brings it forward.
+
+The service stores the token and the grant keys under its `ssh_decryption_key`.
+Rotating that key, and recovering a relay after it changes, is the operator
+handbook's ["Rotating the key that protects stored secrets"](../operator-handbook.md#rotating-the-key-that-protects-stored-secrets).
 
 ### Retire a relay
 

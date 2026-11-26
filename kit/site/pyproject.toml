@@ -8,12 +8,10 @@ dependencies = [
     # The site records its events in its transitions' transactions.
     "arkhai-eventing>=0.1.0",
     "arkhai-injected-time>=0.1.0",
-    "arkhai-kit-resource-pools-contracts>=0.3.0",
     # The site authority signs its own responses and verifies its callers'
     # requests, so the identity primitives are a runtime dependency of the
     # router package, not only of its clients.
     "arkhai-kit-identity>=0.5.0",
-    "arkhai-kit-resource-pools>=0.9.0",
     # The migration type the ledger's baseline and later migrations are
     # exported as.
     "arkhai-kit-schema-migrations>=0.1.0",
@@ -32,7 +30,7 @@ build-backend = "hatchling.build"
 packages = ["src/market_site"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]

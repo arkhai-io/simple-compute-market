@@ -252,17 +252,24 @@ nothing; most of what it lists is the repository's development fixtures
 ## The migration floor
 
 When a marketplace release is cut, weigh whether it becomes a
-new migration floor: each stateful service's chain begins at baselines
-reproducing the schema of the floor release, adopts a database that release's
-chain built, and refuses an older one
+new migration floor: each stateful service's chain declares the floor release,
+begins at baselines reproducing its schema, adopts a database that release ran on
+whatever earlier releases recorded in it, and refuses an older one, directing it
+through the floor release
 ([`DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup);
 the floor fixtures' rule is
 [`migration-chain-tests.md`](guidance/repository/migration-chain-tests.md)).
-A new floor replaces each chain's baselines and floor IDs with the new release's,
-deletes the migrations it absorbs, regenerates each service's floor fixture from
-the release's published packages as the fixtures' READMEs describe, and leaves
-deployments older than the new floor to start from a fresh database. Moving the
-floor is a decision about which deployments stay upgradeable, so it is made for
+A new floor replaces each chain's baselines and `Floor` with the new release's,
+deletes the migrations it absorbs, and regenerates each service's floor fixture
+from the release's published packages as the fixtures' READMEs describe. A real
+upgraded database is committed beside a fixture only where the floor release kept
+records outside its chain, which no release of the current engine does.
+Deployments older than the new floor upgrade through the floor release first;
+none is left to start from a fresh database. Setting aside the records earlier
+releases wrote is a permanent rule of every floor, so it has no row in
+["Compatibility to retire"](#compatibility-to-retire), and a new floor carries
+nothing forward from the old one. Moving the floor decides which deployments
+upgrade in one step and which go through the floor release, so it is made for
 each release, not by default.
 
 ## Compatibility to retire

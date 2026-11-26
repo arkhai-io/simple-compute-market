@@ -375,6 +375,93 @@ original: configure the key the host's key was protected under, which recovers
 every host it protected, or configure a new one and submit each affected host's
 private key again.
 
+#### Rotating the key that protects stored secrets
+
+`ssh_decryption_key` protects three kinds of secret the provisioning service
+stores: a private key registered with a host, each relay's admission token, and
+each relay's grant-signing keys, active and staged. A stored value carries no key
+id, the service reads every one under the single configured key, and nothing
+re-encrypts a stored value. After the key changes, each secret stays unreadable
+until it is submitted again. Changing the key ends no session, since it touches
+no host and no relay, but every job that needs an unreadable secret fails.
+
+What stops under another key:
+
+- **A host registered with its own key** is refused as the section above says.
+  A host reached with the deployment's shared key file is unaffected.
+- **A relay's token** is read by every job of a delivery leased on that relay
+  before the job runs, its teardown and reclaim included. Each such job fails
+  unretried before any playbook starts, with the error `Internal error:` and
+  no text after it; with no key configured the error is `Internal error: No
+  at-rest encryption key is configured.` and the rest of that message. A
+  teardown that fails this way counts as never started: it runs again up to
+  `teardown_rerun_limit` times, failing each time, and its lease then reaches
+  `release_failed`. A new delivery on a pool whose relay is enabled fails at
+  fulfillment, where the pool's configuration is read for execution.
+- **A relay's grant keys** cannot sign, so a job adding a proxy fails the same
+  way. Grants signed earlier are unaffected: they are on the hosts, and the
+  relay's plugin checks them against public keys.
+- **No read reports a relay's secrets unreadable.** A relay's read answers
+  `token_configured: true` and lists each key's `kid` and public half under any
+  `ssh_decryption_key`, and system status reads no relay secret.
+
+How each is submitted again:
+
+- **A host's key**: as the section above says, at any time.
+- **A relay's grant key**: stage and activate a new key, at any time
+  ([`VALIDATION_RUNBOOK.md`, "Rotate keys and change admission policy"](development/VALIDATION_RUNBOOK.md#rotate-keys-and-change-admission-policy)).
+  A relay refuses to stage a key it holds or has held, so the key it cannot
+  read is replaced, not staged again. Once the new key is active the
+  unreadable one is listed as retired; keep its public key in the plugin until
+  its `grants_valid_until` has passed or reads null.
+- **A relay's token**: `POST /api/v1/relays/{relay_id}/token` with
+  `{"token": "<value>"}`. The route compares nothing with the stored value, so
+  the token frps already holds may be submitted again. It is refused while the
+  relay holds an unreleased lease, whatever the value.
+
+That refusal sets the order. A relay's lease is released by its delivery's
+teardown, and the teardown reads the token. A relay that holds a lease when the
+key changes therefore recovers in only two ways: the earlier key is restored, or
+each of its leases is force-released by hand. A deliberate rotation drains every
+relay first.
+
+To rotate the key:
+
+1. Gather what must be submitted again: the private key of every host
+   registered with its own key, and each relay's token.
+2. Under the current key, drain every relay: disable it with
+   `POST /api/v1/relays/{relay_id}/disable`, then let the deals holding its
+   leases end, or end them, until its read reports `drained: true`
+   ([`VALIDATION_RUNBOOK.md`, "Respond to a compromised relay credential"](development/VALIDATION_RUNBOOK.md#respond-to-a-compromised-relay-credential)
+   gives the routes and what ending a deal costs). Every delivery leased on a
+   relay ends before the key changes; a delivery reached without a relay keeps
+   running.
+3. Configure the new `ssh_decryption_key` and restart the provisioning service.
+4. Submit every such host's private key again, and read system status until the
+   `ansible` component names none of them. A job against one of these hosts
+   fails unretried until its key is submitted.
+5. For each relay, submit its token, stage a new grant key, add the staged
+   public key to the relay's issuer in the plugin's TOML and reload the plugin,
+   then activate the key. A drained relay's retired key reads
+   `grants_valid_until: null`, so remove its public key from the plugin.
+6. Run the admission check under the runbook's "Prove admission before enabling
+   a pool", then enable each relay.
+
+When the key has changed while a relay holds leases, restore the earlier key if
+it exists: every stored secret is readable again, and the rotation starts over
+from step 1. Otherwise end each deal that holds a lease, as the runbook section
+says. Its teardown cannot run, so once its lease reaches `release_failed`,
+remove from the host what the teardown would have removed and force-release the
+lease
+(["Teardowns that never started are run again"](#what-the-upgrade-from-v030-changes)
+gives the steps). Once the relay holds no unreleased lease, continue from step
+5.
+
+A key rotated because it leaked protects nothing it encrypted from whoever also
+holds the database. Submit new host keys, a new token and new grant keys in
+place of the earlier values; a new token is also set on frps and on every
+client baseline, as the runbook section says.
+
 #### Capturing and rotating a host key
 
 The Ansible executor reaches a host only when the key it presents matches the
@@ -737,6 +824,38 @@ waits for an operator's `retry-release` or `force-release`. A storefront that la
 learns of the termination from the site's report classifies it as the seller's own
 withdrawal and files the payee's `delivery_end`, as its deadline would have.
 
+### A deal ending on a pending release
+
+A deal listed `ending` with `release_pending` has a recorded end whose resource the
+site has not yet reported released. For a delivered deal the storefront records the
+release when the site's provisioning service delivers its capacity-released event. The
+service sends that event once the lease's teardown is proven, or once an operator
+force-releases the lease, and sends it again on every lease-watchdog cycle until the
+storefront acknowledges it. No storefront command clears the code, so clear it at the
+site, as the provisioning service's administrator. A site that has stopped serving listings
+clears its leases the same way: its provisioning service must be running to answer
+these requests and to deliver the event.
+
+Find the deal's lease among the site's leases; its `deal_ref.negotiation_id` names
+the storefront's deal:
+
+```text
+GET /api/v1/contract/leases
+```
+
+Then act on the lease's `status`:
+
+| Lease `status` | What it means | What to do |
+|---|---|---|
+| `active` | The recorded end is still ahead, or the storefront's termination has not reached the site | Once the end has passed, run a servicing cycle at the storefront, `POST /api/v1/admin/lifecycle/deal-servicing/run-cycle`, or terminate the lease at the site as under "End a lease its storefront cannot service" above |
+| `releasing` | The teardown is running, or is being run again | Wait: a lease still `releasing` past `lease_watchdog_grace_period_seconds` becomes `release_failed` |
+| `release_failed` | The teardown failed or timed out; `failure_reason` and `failure_message` say which | If the teardown has since finished, `POST /api/v1/contract/leases/<reservation>/retry-release` re-observes it and releases the lease. Otherwise verify the host holds nothing of the deal, removing what the teardown would have removed, then `POST /api/v1/contract/leases/<reservation>/force-release` with a `reason` and `evidence` saying what you checked ([What the upgrade from v0.3.0 changes](#what-the-upgrade-from-v030-changes) gives the steps for a teardown that never started) |
+| `released` or `force_released` | The site has released the lease and the storefront has not acknowledged the event | Run one lease-watchdog cycle, `POST /api/v1/system/check-leases`, which delivers every release still unacknowledged. The provisioning service logs a delivery that fails (`Could not deliver capacity-released event`): restore its route to the storefront and run the cycle again |
+
+A force-release returns the capacity on your word, without a teardown's proof, so make
+it only after checking the host. Once the storefront acknowledges the event, its next
+list shows the deal without `release_pending`.
+
 ### Draining payment deals before a receipt key change
 
 Each environment's payments receipt identity is assumed stable for a deal's life. A
@@ -781,7 +900,7 @@ outstanding:
 
 | Code | What is outstanding | What the operator does |
 |---|---|---|
-| `release_pending` | The resource is not yet proven released | Follow the lease at the site |
+| `release_pending` | The resource is not yet proven released | Clear it at the site: [A deal ending on a pending release](#a-deal-ending-on-a-pending-release) |
 | `payment_running` | A payment part has no verified stop or end at the payment authority | See the ruled end with no stop below; otherwise wait for the stop the deal's terms give |
 | `case_open` | A case is open at the dispute authority | Nothing: the authority rules or dismisses it |
 | `case_unobserved` | The dispute authority has not yet been read | Wait for the next servicing cycle; if it persists, prove the storefront's reach of the authority with `check-mediation` ("Payments access" above) |
@@ -916,12 +1035,22 @@ retires configuration settings is also cut over to a migrated configuration
 
 ### Supported databases
 
-A database the marketplace v0.3.0 release built, or one a later release
-migrated, is upgraded in place: compute provisioning's, the VM and bare-metal
-storefronts', and the registry's. A database from before v0.3.0 is refused as
-unsupported, and so is every existing API-credit storefront or service database:
-those services start from a fresh database, and the state in the old one is not
-carried. An image older than the database's last migration refuses it as ahead.
+A database the marketplace v0.3.0 release ran on, or one a later release
+migrated, is upgraded in place, whatever releases before v0.3.0 recorded in it.
+That covers the databases of compute provisioning, the VM, bare-metal and
+API-credit storefronts, the API-credit service, and the registry.
+
+A database from before v0.3.0 is refused as unsupported, naming marketplace 0.3.0
+and the migrations it lacks. The command cannot tell an older database of the
+service's own from another service's database sharing its history. So first
+confirm the database is that service's. Then upgrade it through marketplace 0.3.0,
+running that release's service on it, and then to this release.
+
+A database recording none of v0.3.0's migrations, or tables with no ledger, is
+refused as not the service's: check that the service is configured with its own
+database. Starting fresh is never the remedy for a database that can upgrade.
+
+An image older than the database's last migration refuses it as ahead.
 
 ### The procedure
 
@@ -934,13 +1063,18 @@ For each service, in its own deployment:
    `compute-provisioning-migrate --check`. It changes nothing, exits 0 only for a
    database already compatible, and lists what the upgrade will do: the pending
    migration IDs, a v0.3.0 baseline to be adopted, or why the database is refused.
-   A database it reports as unsupported will not start under the new release;
-   decide before deploying whether that service starts fresh.
+   For a baseline to be adopted, it also names the release whose records adoption
+   replaces, and lists each record an earlier release wrote that adoption sets
+   aside. A database it reports as unsupported will not start under the new
+   release. Confirm the database is the service's own, and upgrade it through the
+   release the refusal names before deploying, as "Supported databases" says. Back
+   up and preview both API-credit databases before deploying either, and deploy
+   neither if either is refused.
 3. **Deploy.** Under Helm the init container runs the command before the
    application; under Compose the service's command runs it before the
-   application. A v0.3.0 database is adopted — its v0.3.0 records are replaced by
-   the baseline's, without running the baselines — and the migrations after the
-   baseline are applied. If the migration fails, the application does not start;
+   application. A v0.3.0 database is adopted: its v0.3.0 records, and any an
+   earlier release wrote, are replaced by the baseline's without running the
+   baselines, and the migrations after the baseline are applied. If the migration fails, the application does not start;
    the init container's or the container's log names the migration that failed,
    and the migrations before it stay applied.
 4. **Verify** with `--check`, which now exits 0, and the service's health.
@@ -1190,3 +1324,23 @@ sequence:
   a store first opened, where they are absent, and drops the inventory tables
   v0.3.0 kept frozen, with their rows; inventory is declared at provisioning
   ([`seller-quickstart.md`, "Upgrading from CSV inventory"](seller-quickstart.md#upgrading-from-csv-inventory)).
+  A database a release before v0.3.0 built also loses tables nothing has read since
+  v0.3.0, with their rows:
+  - the bare-metal storefront's `bare_metal_hosted_lifecycle`, each hosted-card
+    deal's binding and states;
+  - the VM storefront's `derived_compute_listings`, its listing-to-site mappings.
+    A database never put through v0.3.0's conversion to the common binding loses
+    its only copy of those mappings, which no release since v0.3.0 has read.
+- **API-credit databases are adopted as a pair.** The API-credit storefront's and
+  service's v0.3.0 databases are adopted in place, keeping their keys, grants,
+  balances and issued credentials. Back up and preview both before deploying either.
+  Under Compose the service migrates first, and the storefront only once the service
+  is healthy:
+  - if the service's migration fails, the storefront does not start and its
+    database is untouched;
+  - if the storefront's migration fails after the service's succeeded, the
+    storefront does not start, so no credential is issued against a mixed pair.
+    Roll back by running v0.3.0 over both backups.
+
+  The service also gains the site ledger's unique index on a capacity bucket's
+  host, which its v0.3.0 release left out.

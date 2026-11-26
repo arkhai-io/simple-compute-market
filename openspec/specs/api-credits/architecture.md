@@ -106,12 +106,12 @@ versioned request/response models, and centralized authentication,
 timeout, and error-translation behavior.
 
 The service tracks its own schema evolution in a `schema_migrations`
-table, applied in-process at application startup before the service is
-ready to serve requests. The service has no separate deployment step
-(no Kubernetes init container, no standalone migration CLI) to run
-migrations ahead of the application process — in-process startup
-migration is the current, non-provisional mechanism for the current
-deployment topology, not a placeholder for a future one.
+table. Its packaged command, `apicredits-service-migrate`, applies its chain,
+and the service's startup only checks the database. The service runs only under
+Compose, so the command runs before the application in one container. The chain,
+its marketplace 0.3.0 floor, and the order in which the storefront and service
+upgrade are `deployment-state`'s
+["The baseline and adoption"](../deployment-state/architecture.md#the-baseline-and-adoption).
 
 Every API-credit package resolves its internal dependencies from built
 wheels, not repository-relative editable paths or `pythonpath`
@@ -132,7 +132,8 @@ binding from this record, never from the published `listing_resource`.
 
 The pool is read from the credits service's resource-pool projection, which
 carries each pool's declarations because the service hands its pool directory
-to the site's capacity router, through `read_site_declarations`. Both credit
+to the site's capacity router, through `read_site_declarations` in the resource-pool
+contracts package. Both credit
 seller stages declare `fulfils_through_capacity`, since each issues against
 quota, so a pool declaring itself unbacked leaves no option to publish and yields
 no listing through the delegate rather than an API-credit branch. No listing
@@ -240,9 +241,10 @@ payment escrow rows or grant aliases. Startup rejects missing/current-marker
 schema drift and old grant shapes instead of copying/translating them. Rebuild
 `.dist` and reinit both producer and authority consumers together.
 The storefront also refuses to start against a database holding a listing with
-no durable listing binding, naming the listing and that a fresh database is
-required. There is no backfill, because a listing written without a binding
-records no pool to bind it to.
+no durable listing binding, naming the listing and saying that no binding can be
+derived and that marketplace 0.3.0 refused such a database too. There is no
+backfill, because a listing written without a binding records no pool to bind it
+to.
 `docs/attachments/apicredits-dispatch/first_use.py` creates and cleans fresh
 file-backed databases with controlled payment I/O and real typed credits HTTP;
 it does not qualify a live payment ledger.

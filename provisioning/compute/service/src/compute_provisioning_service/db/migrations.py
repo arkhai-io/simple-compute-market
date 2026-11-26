@@ -5,9 +5,14 @@ holds, each fixed DDL reproducing what the marketplace v0.3.0 release built on
 a fresh database, composed in foreign-key order: the resource pools every
 pool-scoped table names, the relays, VM's pool configuration, the hosts, the
 jobs, this service's own tables, the fulfillment aggregate, and the site
-ledger. Every migration merged after that release follows, in order. A
-database recording every ID the v0.3.0 chain recorded is adopted at the
-baseline; any other database the chain did not build is refused.
+ledger. Every migration merged after that release follows, in order. The
+chain's floor is marketplace 0.3.0: a database recording every ID the v0.3.0
+chain recorded is one that release ran on, and is adopted at the baseline
+whatever earlier releases recorded beside those IDs; one recording only some
+of them is older than the floor, or another service's sharing its history --
+the API-credit service holds the same resource pools and site ledger -- and,
+once confirmed as this service's, is upgraded through marketplace 0.3.0 first;
+any other database the chain did not build is refused.
 
 Every migration takes only the database connection, never the service's
 configuration, so one database migrates to one schema and one set of rows
@@ -48,7 +53,7 @@ from eventing import SCHEMA_STEPS as EVENTING_SCHEMA_STEPS
 from eventing import schema as event_schema
 from market_fulfillment.migrations import BASELINE as FULFILLMENT_BASELINE
 from market_resource_pools.migrations import BASELINE as POOLS_BASELINE
-from market_schema_migrations import Chain, Migration
+from market_schema_migrations import Chain, Floor, Migration
 from market_site.events import (
     SITE_CAPACITY_RELEASED,
     SITE_KINDS,
@@ -720,5 +725,5 @@ CHAIN: Chain[Connection] = Chain(
         *EVENTING_MIGRATIONS,
         OUTBOXES_TO_EVENT_STORE,
     ),
-    floor_ids=FLOOR_IDS,
+    floor=Floor("marketplace 0.3.0", FLOOR_IDS),
 )

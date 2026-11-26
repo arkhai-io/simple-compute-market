@@ -98,6 +98,7 @@ from compute_provisioning_service.db.database import (
 
 from compute_provisioning_ansible.host_import import AnsibleHostImportClient
 from compute_provisioning_client import ComputeProvisioningClient, MockRuleClient
+from market_resource_pools import ResourcePoolFacts
 from market_resource_pools_client import ResourcePoolClient
 from market_site_client import SiteCapacityAdminClient, SiteCapacityClient
 from compute_provisioning_contracts import (
@@ -739,7 +740,9 @@ async def client_and_queue(
         session_factory=session_factory,
         site_id=identity_context.storefront_site_id,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
-        host_requirement=host_requirement,
+        # Each pool's need for a host resolved from the merged requirement, as
+        # the production container's reader resolves it.
+        pool_facts=ResourcePoolFacts(host_requirement),
         # So a declaration naming a disabled or unregistered host, or a host
         # on a disabled relay, is refused and not offered here as it is there.
         deliverable_hosts=deliverable_hosts,
