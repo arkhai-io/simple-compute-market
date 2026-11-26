@@ -61,12 +61,27 @@ clock. Otherwise the VM storefront records the Agreement's acceptance instant
 storefront records its database's clock at evidence verification
 (`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/sqlite_client.py`).
 
-**Pool facts.** The site ledger reads pool rows from `kit/resource-pools` directly.
-`inject-site-pool-authority` replaces that with pool facts the site's composition
-injects, read in the caller's session, and is in design. This change needs one more
-fact through that port: the pool's resolved delivery deadline, readable in the commit's
-own transaction. The port's names, its typing and how a missing fact fails follow that
-change's recorded design.
+**Pool facts.** The site ledger reads none of a pool's storage. It requires a
+`PoolFactsReader` at construction (`kit/site/src/market_site/pool_facts.py`), whose one
+operation, `pool_facts(db, pool_id)`, returns a pool's `PoolFacts` in the caller's
+session: whether the pool exists, whether it is enabled, the offering modes it
+delivers, and whether its declarations need a host. Both are structural protocols, and
+`kit/site` imports neither pool distribution, which its boundary test holds
+(`kit/site/tests/unit/test_import_boundaries.py`), so the site cannot parse a pool's
+tags itself. The pool authority answers the port with `ResourcePoolFacts`, which
+returns a `StoredPoolFacts` read from the stored pool and takes the composition's host
+requirement (`kit/resource-pools/src/market_resource_pools/pool_facts.py`). The
+provisioning service composes it with the merged requirement; the API-credits service
+composes it with none. The provisioning service's composition test fails a member of
+`PoolFacts` that `StoredPoolFacts` lacks
+(`provisioning/compute/service/tests/unit/test_authority_composition.py`), and
+`kit/site`'s tests read pool facts from their own double
+(`kit/site/tests/pool_facts_double.py`). Commit reads no pool fact today.
+
+**Readers of the projection.** The readers of a site's projected pool declarations are
+in `kit/resource-pools-contracts`
+(`kit/resource-pools-contracts/src/market_resource_pools_contracts/site_declarations.py`),
+which both compute storefronts import without the pool authority.
 
 **Released.** `marketplace-v0.4.0` carries all of the above. Its supported VM
 configuration sets the clause's `delivery_deadline_seconds`, and its operator handbook
@@ -178,9 +193,15 @@ decide whether a deadline a deal accepted is enforced (D1).
   configures one, and that is the only delivery promise the buyer reads. The storefront
   enforces it, and so does the site once the commit carries it. Stating none costs only
   the site, which gives up its safeguard for commits that carry no deadline.
+- **The resolved value is a pool fact.** `PoolFacts` gains the pool's resolved delivery
+  deadline, `StoredPoolFacts` carries it, and `ResourcePoolFacts` resolves it from the
+  stored pool's tag and provider. Commit reads it through the port in its own
+  transaction, so the site learns the resolved value and nothing of the tag or the
+  default.
 - **Providers declare their default as data.** Each provisioning adapter exports its
-  declaration and the composition merges them, as with the host requirement. The VM and
-  bare-metal providers declare one. The API-credits provider declares none and its
+  declaration, and the composition merges them and hands the result to
+  `ResourcePoolFacts`, as it does the host requirement. The VM and bare-metal providers
+  declare one. The API-credits service composes the reader with no declaration and its
   commits carry no deadline, so its quota holds get none by the same rule, with no
   exemption in the site.
 - **A pool edit changes no recorded deadline** (D1).
@@ -319,7 +340,12 @@ convergence's design settles that such rows run in both lanes.
 ### Q2 — How the resolved deadline reaches publication
 
 D6 has each composition return the pool's resolved deadline. A storefront reads the
-tag from the projection but not the provider's default. Today's projected pool:
+tag from the projection but not the provider's default. `kit/site` builds the
+projection from a pool directory its hosting service supplies
+(`provisioning/compute/service/src/compute_provisioning_service/services/capacity_inventory.py`,
+`load_capacity_pool_metadata`) and cannot resolve the tag itself, so under (a) or (b)
+the hosting service supplies the number and the site allowlists it. Today's projected
+pool:
 
 ```json
 {"pool_id": "vm-default",
@@ -458,10 +484,12 @@ moved in the design session.
   provider's commits have no lease end, which a recorded deadline needs.
 - **Which specification states what.** `resource-pool-management` states the tag and
   what a pool resolves; `site-capacity` states what the ledger does with the resolved
-  value. The tag is documented with the pool document's format, in the operator
-  handbook and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+  value. Each also names the facts the port carries, in "The pool authority answers the
+  site's pool facts" and "The site authority reads pool facts through an injected
+  port", and each gains this one. The tag is documented with the pool document's
+  format, in the operator handbook and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - **One publication function.** Both compositions pass the same function, which reads
-  the pool through the resolver every reader of the pool projection already uses.
+  the pool through the readers of the pool projection in `kit/resource-pools-contracts`.
 - **The handbook.** "Leases the storefront has not delivered" is rewritten: the site
   reclaims a lease that has a recorded deadline. The manual procedure remains for a
   lease with none: one committed before the site recorded deadlines, and one whose
@@ -474,14 +502,17 @@ moved in the design session.
 - **The anchor.** The later of the commitment instant and the lease start, as
   `deal-lifecycle` defines the term; delivery dispatches nothing before the start.
 - **Test levels.** The claim in both orders and the pool-edit and anchor cases are
-  library integration in `kit/site`; the tag is unit in `kit/resource-pools-contracts`
-  and library integration in `kit/resource-pools`; the migration is each hosting
-  service's chain test; the commit's fields and the refused commit are the delivery
-  path's integration suite.
+  library integration in `kit/site`, whose reader double gains the fact; the tag is unit
+  in `kit/resource-pools-contracts` and library integration in `kit/resource-pools`,
+  where the reader's resolution joins
+  `kit/resource-pools/tests/integration/test_pool_facts.py`; the provisioning service's
+  composition test holds the reader to the port's new member; the migration is each
+  hosting service's chain test; the commit's fields and the refused commit are the
+  delivery path's integration suite.
 
 ### Q8 — Implementation cadence
 
-Recommended: two rounds, after `inject-site-pool-authority` lands. First the site: the
+Recommended: two rounds. First the site: the
 tag and its resolution, the column, the commit, the due read, the claim, the report and
 the views, one session. Then the storefront: the commit's fields, publication, the
 classification, the handbook and whatever Q1 settles, one session.

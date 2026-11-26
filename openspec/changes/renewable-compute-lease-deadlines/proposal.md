@@ -72,11 +72,11 @@ What the design leaves open is in its "Open Questions".
 
 ### Modified Capabilities
 
-- `site-capacity`: the activation deadline, the commit's refusal, the due instant and
-  the expiry claim. Its "Resource-pool projection metadata" changes too if the design
+- `site-capacity`: the activation deadline, the commit's refusal, the due instant, the
+  expiry claim, and the pool fact the port gains. Its "Resource-pool projection metadata" changes too if the design
   settles that the resolved deadline is projected.
 - `resource-pool-management`: the tag's three states, provider defaults and the resolved
-  value.
+  value its reader reports.
 - `physical-provisioning`: the watchdog releasing a lease at its deadline, and the lapse
   report.
 - `compute-delivery`: the commit carrying the accepted deadline and commitment instant.
@@ -105,15 +105,16 @@ None.
 
 ## Dependencies and Related Changes
 
-- **`inject-site-pool-authority` gates implementation.** The site ledger reads pool rows
-  directly today; that change replaces the read with pool facts its composition injects,
-  read in the caller's session. This change needs one more fact through it: the pool's
-  resolved delivery deadline, readable in the commit's own transaction, resolved by the
-  pool authority from the pool's tag and the provider defaults the composition supplies.
-  The port's names, its typing and how a missing fact fails follow that change's
-  recorded design.
-- **Builds on**, all archived: `activate-compute-leases-at-the-site` (the activation
-  instant), `agreed-evidence-and-early-termination` (the `lease_ended` report with its
+- **Nothing gates this change.** The site ledger reads pool facts through the
+  `PoolFactsReader` port its composition injects, which the pool authority's
+  `ResourcePoolFacts` answers in the caller's session
+  (`kit/site/src/market_site/pool_facts.py`;
+  `kit/resource-pools/src/market_resource_pools/pool_facts.py`). This change adds one
+  fact to it: the pool's resolved delivery deadline, a member of `PoolFacts` and a field
+  of `StoredPoolFacts`, resolved from the pool's tag and the provider defaults the
+  composition hands the reader, and read in the commit's own transaction.
+- **Builds on**, all archived: `inject-site-pool-authority` (the pool-facts port),
+  `activate-compute-leases-at-the-site` (the activation instant), `agreed-evidence-and-early-termination` (the `lease_ended` report with its
   claimed deadline and phase), `unify-compute-delivery-path` (one commit step, the
   refused-commit classification and the activation-lapse hand-off),
   `negotiate-open-ended-compute-terms` (the term, the port and the precedence),
@@ -130,12 +131,13 @@ None.
 
 ## Impact
 
-`kit/site` (schema, ledger, commit request, reservation view), `kit/site-client`,
-`kit/capacity-publication`, `kit/resource-pools-contracts` and `kit/resource-pools` (the
-tag, its validation, the resolved value), the VM and bare-metal provisioning adapters
-(their declarations), `provisioning/compute` (the lease lifecycle, the lease view, the
-service's composition), `domains/compute/delivery` (the commit), `domains/compute` (the
-classification of a site's end), both compute storefronts' settlement compositions,
+`kit/site` (schema, ledger, commit request, reservation view, the pool-facts port),
+`kit/site-client`, `kit/capacity-publication`, `kit/resource-pools-contracts` and
+`kit/resource-pools` (the tag, its validation, the reader's resolved value), the VM and
+bare-metal provisioning adapters (their declarations), `provisioning/compute` (the
+lease lifecycle, the lease view, the service's composition),
+`domains/compute/delivery` (the commit), `domains/compute` (the classification of a
+site's end), both compute storefronts' settlement compositions,
 `kit/settlement-runtime` (the publication report), `docs/operator-handbook.md` and
 `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 
@@ -161,8 +163,8 @@ every form below as it stands on the development branch.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md`: "Site authority", "Resource pools" and
-  "Recovery workers".
+- [x] `docs/development/ARCHITECTURE.md`: "Kit areas", "Site authority", "Resource
+  pools" and "Recovery workers".
 - [x] Existing subsystem specification: the capabilities above.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
@@ -173,7 +175,10 @@ every form below as it stands on the development branch.
   deadline; `docs/development/ARCHITECTURE.md`, "Site authority".
 - D2: `openspec/specs/site-capacity/spec.md` and its companion;
   `docs/development/ARCHITECTURE.md`, "Recovery workers".
-- D3: `openspec/specs/resource-pool-management/spec.md` and its companion;
+- D3: `openspec/specs/resource-pool-management/spec.md` and its companion; the
+  `site-capacity` companion, "Declared capacity and connection identity", and
+  `docs/development/ARCHITECTURE.md`, "Kit areas", which name the facts the port
+  carries; `openspec/specs/site-capacity/testing.md`;
   `docs/development/ARCHITECTURE.md`, "Resource pools";
   `docs/development/DEPLOYMENT_AND_CONFIG.md`; `docs/operator-handbook.md`, "Pool
   definitions", "Leases the storefront has not delivered" and the upgrade steps.
