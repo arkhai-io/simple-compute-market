@@ -145,12 +145,12 @@ payment authority's recorded stop, as `deal-lifecycle`'s companion states under
 Rejected: a seller's opt-in timer for rate deals here. It would be one of several
 mechanisms each ending delivery for its own category of deal.
 
-### D5 — The late-anchor row is `renewable-compute-lease-deadlines`'
+### D5 — The late-anchor row is `enforce-delivery-deadlines-at-the-site`'
 
 The row in which a storefront commits with a later anchor than the payment authority's
 approval, the site enforces the longer physical deadline, and the buyer's case is ruled
 non-delivery at the accepted deadline needs a delivery deadline the site enforces.
-`renewable-compute-lease-deadlines` builds that, so it runs the row. Here the row would
+`enforce-delivery-deadlines-at-the-site` builds that, so it runs the row. Here the row would
 make this change wait on another.
 
 ## Open Questions
@@ -322,7 +322,7 @@ Rows no longer here:
 | 4 | A stop between start and disclosure | Proven at integration (Q7) |
 | 6 | Funds running out | Runs in both lanes. Its variants under a funding timer left with the timer (D4) |
 | 11 | Receipt key rotation across a running deal | No change owns it: a key change is a drained cutover, and re-anchoring is tabled in Goal 8's unowned work |
-| 12a | A late anchor against a site-enforced deadline | `renewable-compute-lease-deadlines` (D5) |
+| 12a | A late anchor against a site-enforced deadline | `enforce-delivery-deadlines-at-the-site` (D5) |
 
 A row that holds a ruling at the double's gate steps no storefront servicing while the
 ruling waits: the storefront ends delivery on a ruling's delivery end whatever its

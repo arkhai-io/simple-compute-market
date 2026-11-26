@@ -1,4 +1,4 @@
-# Design: renewable-compute-lease-deadlines
+# Design: enforce-delivery-deadlines-at-the-site
 
 ## Context
 

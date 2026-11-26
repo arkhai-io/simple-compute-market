@@ -139,7 +139,7 @@ differs.
 
 ## Related decision recorded by Goal 8
 
-Goal 8's `renewable-compute-lease-deadlines` bounds every compute lease's provisioning
+Goal 8's `enforce-delivery-deadlines-at-the-site` bounds every compute lease's provisioning
 window with a per-pool provisioning allowance the site reads at commit, unpriced; `billable-capacity-reservations`'
 design records the revisit. When the hold moves to negotiation time here, the hold, the
 provisioning window, and the running lease become three consecutive priced-or-bounded
