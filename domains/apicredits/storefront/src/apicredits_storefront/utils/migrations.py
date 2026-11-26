@@ -1,11 +1,17 @@
 """The API-credit storefront's migration chain.
 
 The chain composes core storefront's baseline, the settlement runtime's, and
-the API-credit domain's own, in that order. The chain names no floor: no
-API-credit database from before its baseline is supported, so the migration
-command refuses every non-empty database it did not build. A later change to
-any of these tables is a migration appended to :data:`CHAIN`, never an edit to
-a baseline.
+the API-credit domain's own, in that order, then every migration after the
+baseline. The baselines reproduce the database the marketplace v0.3.0
+release's storefront built at construction, the chain's floor. A database
+recording every ID that release's chain recorded (:data:`FLOOR_IDS`) is one the
+release ran on, and is adopted at the baseline without running it, whatever
+earlier releases recorded beside those IDs; a database recording only some of
+them is older than the floor, or another storefront's, which shares core
+storefront's history. The storefront's database is upgraded together with the
+API-credit service's, the service first, as their deployment orders them. A
+later change to any of these tables is a migration appended to :data:`CHAIN`,
+never an edit to a baseline.
 See openspec/specs/deployment-state/spec.md.
 """
 
@@ -18,6 +24,7 @@ from core_storefront import migrations as core_migrations
 from market_schema_migrations import (
     Chain,
     CheckResult,
+    Floor,
     MigrateReport,
     Migration,
     SqliteMigrationConnection,
@@ -120,6 +127,30 @@ BASELINE: Migration[sqlite3.Connection] = Migration(
 """The API-credit domain's tables: accepted credit terms, settlement evidence,
 issuance progress and evidence, and private delivery results."""
 
+FLOOR_IDS: tuple[str, ...] = (
+    "20260604_000_listing_resource_timestamps",
+    "20260604_004_negotiation_amount_text_columns",
+    "20260604_005_escrows_and_listings",
+    "20260722_001_capacity_holds_reservation_id",
+    "20260810_003_negotiation_provision_terms",
+    "20260811_001_marketplace_principals_v2",
+    "20260811_002_replay_attempt_leases",
+    "20260815_001_storefront_domain_bindings",
+    "20260911_001_listing_resource_column",
+    "20260923_001_listing_binding_capacity_backing",
+    "20260923_002_listing_binding_capacity_backing_required",
+    "20260923_003_listing_closed_by",
+    "20261001_001_listing_rate_structure",
+    "20260810_001_settlement_obligation_lifecycle",
+    "20260810_002_settlement_servicing_runtime",
+    "20260811_003_settlement_principal_authorization",
+    "20260815_004_settlement_mechanism_materialization_params",
+    "20261028_005_settlement_operation_awaiting_delivery",
+    "20260810_001_escrow_settlement_identity",
+    "20260815_002_issuance_evidence",
+)
+"""Every ID the v0.3.0 release's API-credit storefront chain recorded."""
+
 CHAIN: Chain[sqlite3.Connection] = Chain(
     service="the API-credit storefront",
     command=MIGRATION_COMMAND,
@@ -129,6 +160,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         BASELINE,
     ),
     migrations=core_migrations.MIGRATIONS,
+    floor=Floor("marketplace 0.3.0", FLOOR_IDS),
 )
 
 

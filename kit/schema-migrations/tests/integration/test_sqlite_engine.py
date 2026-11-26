@@ -11,16 +11,20 @@ import pytest
 from market_schema_migrations import (
     Chain,
     CheckState,
+    Floor,
     Migration,
     MigrationFailed,
     MigrationRefused,
     SqliteMigrationConnection,
+    UnsupportedCause,
     check,
     check_sqlite_file,
     connect_read_only,
     migrate,
     schema_snapshot,
 )
+
+_FLOOR = Floor("example 1.0.0", ("floor_hosts", "floor_jobs"))
 
 
 def _create_hosts(connection: sqlite3.Connection) -> None:
@@ -47,7 +51,7 @@ def _chain(
     *,
     baselines: tuple[Migration[sqlite3.Connection], ...] | None = None,
     migrations: tuple[Migration[sqlite3.Connection], ...] | None = None,
-    floor: tuple[str, ...] = ("floor_hosts", "floor_jobs"),
+    floor: Floor = _FLOOR,
 ) -> Chain[sqlite3.Connection]:
     return Chain(
         service="example-service",
@@ -60,7 +64,7 @@ def _chain(
             Migration("later_port_default", _add_port_default),
             Migration("later_jobs_index", _add_index),
         ),
-        floor_ids=floor,
+        floor=floor,
     )
 
 
@@ -81,7 +85,8 @@ def _recorded(connection: sqlite3.Connection) -> set[str]:
 
 
 def _floor_database(connection: sqlite3.Connection, *extra_ids: str) -> None:
-    """A database an earlier release's chain built: its tables and its records."""
+    """A database an earlier release's chain built: its tables and its records,
+    with any ``extra_ids`` beside them, as a release before the floor left."""
 
     connection.executescript(
         """
@@ -164,15 +169,82 @@ def test_a_floor_database_with_a_later_migration_keeps_it_and_applies_the_rest(
     assert "later_port_default" in _recorded(connection)
 
 
+def test_a_floor_database_carrying_earlier_records_is_adopted_with_them_forgotten(
+    connection: sqlite3.Connection, database: Path
+) -> None:
+    _floor_database(connection, "zeta_retired", "alpha_retired")
+    connection.execute("CREATE TABLE retired_lifecycle (id TEXT)")
+    connection.execute("INSERT INTO retired_lifecycle VALUES ('kept')")
+    connection.commit()
+
+    report = migrate(_chain(), SqliteMigrationConnection(connection))
+
+    assert report.adopted is True
+    assert report.set_aside == ("alpha_retired", "zeta_retired")
+    assert report.applied == ("later_port_default", "later_jobs_index")
+    assert _recorded(connection) == set(_chain().ids)
+    assert connection.execute("SELECT port FROM hosts").fetchall() == [(22,)]
+    assert connection.execute("SELECT id FROM retired_lifecycle").fetchall() == [("kept",)]
+    assert check_sqlite_file(_chain(), database).state is CheckState.COMPATIBLE
+
+    before = database.read_bytes()
+    assert migrate(_chain(), SqliteMigrationConnection(connection)).applied == ()
+    assert database.read_bytes() == before
+
+
+def test_the_check_of_a_floor_database_carrying_earlier_records_changes_nothing(
+    connection: sqlite3.Connection, database: Path
+) -> None:
+    _floor_database(connection, "retired_1")
+    connection.close()
+    before = database.read_bytes()
+    siblings = set(database.parent.iterdir())
+
+    result = check_sqlite_file(_chain(), database)
+
+    assert result.state is CheckState.BEHIND
+    assert result.set_aside == ("retired_1",)
+    assert result.floor == "example 1.0.0"
+    assert database.read_bytes() == before
+    assert set(database.parent.iterdir()) == siblings
+
+
+def test_a_zero_floor_chain_builds_a_fresh_database_and_refuses_a_foreign_one(
+    tmp_path: Path,
+) -> None:
+    chain = _chain(floor=Floor("0.0.0"))
+    fresh = sqlite3.connect(tmp_path / "fresh.db")
+    assert migrate(chain, SqliteMigrationConnection(fresh)).applied == chain.ids
+    fresh.close()
+
+    foreign_path = tmp_path / "foreign.db"
+    foreign = sqlite3.connect(foreign_path)
+    _floor_database(foreign)
+    before = foreign_path.read_bytes()
+
+    with pytest.raises(MigrationRefused) as refused:
+        migrate(chain, SqliteMigrationConnection(foreign))
+
+    assert refused.value.result.cause is UnsupportedCause.NOT_THIS_CHAIN
+    assert refused.value.result.adopting == ()
+    foreign.close()
+    assert foreign_path.read_bytes() == before
+
+
 @pytest.mark.parametrize(
-    ("records", "state"),
+    ("records", "state", "cause"),
     [
-        (("floor_hosts", "floor_jobs", "newer"), CheckState.AHEAD),
-        (("floor_hosts",), CheckState.UNSUPPORTED),
+        (("base_hosts", "base_jobs", "newer"), CheckState.AHEAD, None),
+        (("floor_hosts",), CheckState.UNSUPPORTED, UnsupportedCause.OLDER_OR_SHARED),
+        (("other_service",), CheckState.UNSUPPORTED, UnsupportedCause.NOT_THIS_CHAIN),
     ],
+    ids=["ahead", "older-or-shared", "not-this-chain"],
 )
-def test_an_ahead_or_unsupported_database_is_refused_with_nothing_applied(
-    database: Path, records: tuple[str, ...], state: CheckState
+def test_an_ahead_or_unsupported_database_is_refused_byte_identical(
+    database: Path,
+    records: tuple[str, ...],
+    state: CheckState,
+    cause: UnsupportedCause | None,
 ) -> None:
     connection = sqlite3.connect(database)
     connection.executescript(
@@ -185,15 +257,16 @@ def test_an_ahead_or_unsupported_database_is_refused_with_nothing_applied(
     for migration_id in records:
         connection.execute("INSERT INTO schema_migrations (id) VALUES (?)", (migration_id,))
     connection.commit()
-    before = (schema_snapshot(connection), _recorded(connection))
+    before = database.read_bytes()
 
     with pytest.raises(MigrationRefused) as refused:
         migrate(_chain(), SqliteMigrationConnection(connection))
 
     assert refused.value.result.state is state
+    assert refused.value.result.cause is cause
     assert "example-service-migrate" in str(refused.value)
-    assert (schema_snapshot(connection), _recorded(connection)) == before
     connection.close()
+    assert database.read_bytes() == before
 
 
 def test_tables_without_a_ledger_are_refused_and_no_ledger_is_created(
@@ -206,7 +279,7 @@ def test_tables_without_a_ledger_are_refused_and_no_ledger_is_created(
         migrate(_chain(), SqliteMigrationConnection(connection))
 
     assert refused.value.result.state is CheckState.UNSUPPORTED
-    assert refused.value.result.missing == ("floor_hosts", "floor_jobs")
+    assert refused.value.result.cause is UnsupportedCause.NOT_THIS_CHAIN
     assert set(schema_snapshot(connection)["tables"]) == {"hosts"}
     assert connection.execute(
         "SELECT count(*) FROM sqlite_master WHERE name = 'schema_migrations'"

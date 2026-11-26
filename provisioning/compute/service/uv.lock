@@ -273,7 +273,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.28.0"
+version = "0.29.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -342,7 +342,7 @@ requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.1.0" },
+    { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.2.0" },
     { name = "arkhai-kit-site", specifier = ">=0.14.0" },
     { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.21.0" },
     { name = "cachetools", specifier = ">=5.3" },
@@ -605,10 +605,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-schema-migrations"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_schema_migrations-0.2.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -634,7 +634,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -648,7 +648,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
