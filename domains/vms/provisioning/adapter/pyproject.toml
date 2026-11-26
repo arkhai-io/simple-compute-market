@@ -1,15 +1,16 @@
 [project]
 name = "arkhai-vms-provisioning-adapter"
-version = "0.21.0"
+version = "0.22.0"
 license = "MIT"
 description = "VM and Ansible adapter for the compute provisioning service"
 requires-python = ">=3.12"
 dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-core>=0.4.0",
-    # The teardown rerun policy the job-backed provider dispatches by.
-    "arkhai-compute-provisioning>=0.30.0",
-    "arkhai-compute-provisioning-ansible>=0.9.0",
+    # ConfigurationRefusedError, which the codec refuses a preparation with.
+    "arkhai-compute-provisioning>=0.31.0",
+    # The codec protocol's classify and the failure record it reads.
+    "arkhai-compute-provisioning-ansible>=0.10.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-vms-provisioning-operator-client>=0.12.0",
     "arkhai-vms>=0.6.0",

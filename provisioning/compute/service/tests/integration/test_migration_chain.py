@@ -145,6 +145,28 @@ def test_a_v0_3_0_job_gains_execution_instants_that_read_null(tmp_path):
     assert {"execution_started_at", "finished_at"} <= columns
 
 
+def test_a_released_job_keeps_its_error_and_reads_no_structured_failure(tmp_path):
+    """Nothing is backfilled: a job recorded before structured failures were
+    kept reads ``failure`` null, its ``error`` text unchanged."""
+    path = create_floor_database(tmp_path / "provisioning.db")
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO ansible_jobs (id, status, params, retry_count, max_retries, error) "
+            "VALUES ('j-failed', 'failed', '{}', 3, 3, "
+            "'Job failed (max retries exceeded): Playbook failed')"
+        ))
+
+    migrate_database(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT id, error, failure FROM ansible_jobs"
+        )).all() == [
+            ("j-failed", "Job failed (max retries exceeded): Playbook failed", None)
+        ]
+
+
 def test_every_mapped_table_and_column_is_one_the_chain_creates(tmp_path):
     """The models are read against the migrated schema and create none of it,
     so a column added to a model without a migration fails here."""

@@ -70,6 +70,7 @@ from .jobs import (
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
+    ProvisioningErrorEnvelope,
 )
 from .mock_rules import (
     MockJobEvaluation,
@@ -190,6 +191,7 @@ __all__ = [
     "JobLogsResponse",
     "JobStatusResponse",
     "JobSubmitResponse",
+    "ProvisioningErrorEnvelope",
     "MockJobEvaluation",
     "MockRouteMount",
     "MockRuleAdded",

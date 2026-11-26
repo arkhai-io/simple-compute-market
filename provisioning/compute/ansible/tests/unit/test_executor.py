@@ -2,8 +2,9 @@
 
 The codec here is a stand-in: what the executor must do — render the plan,
 run the playbook against the job's host under the codec's group, report the
-handle, the codec's result, and redacted logs, classify failures, and leave no
-file behind — holds for any domain's codec.
+handle, the codec's result, and redacted logs, classify failures from the
+records the runner attaches, and leave no file behind — holds for any domain's
+codec.
 """
 
 from __future__ import annotations
@@ -26,9 +27,12 @@ from cryptography.fernet import Fernet
 from market_config import encrypt_secret
 
 from compute_provisioning_ansible import (
+    TASK_FAILED_CLASS,
     AnsibleJobExecutor,
     AnsibleJobInterpretation,
     AnsibleJobPlan,
+    FailureClass,
+    FailureRecord,
     ProtectedKeyUnreadableError,
     SshConnectionCodec,
 )
@@ -63,8 +67,10 @@ class _Codec:
     variables: dict = field(default_factory=lambda: {"host_id": "node-1", "token": "t0k"})
     extra_variables: dict = field(default_factory=dict)
     playbook_path: Path | None = None
-    retryable: bool = True
+    #: The class the codec gives any task failure it is asked about.
+    failure_class: FailureClass = TASK_FAILED_CLASS
     interpreted: list = field(default_factory=list)
+    classified: list = field(default_factory=list)
 
     def prepare(self, run: JobRun) -> AnsibleJobPlan:
         return AnsibleJobPlan(
@@ -87,8 +93,9 @@ class _Codec:
             ),
         )
 
-    def is_retryable(self, message: str) -> bool:
-        return self.retryable
+    def classify(self, run, failure) -> FailureClass:
+        self.classified.append(failure)
+        return self.failure_class
 
 
 def _runner(*, failure: Exception | None = None, seen: dict | None = None):
@@ -220,31 +227,181 @@ def test_a_plan_may_name_its_own_playbook() -> None:
     assert runner.start_playbook.call_args.kwargs["playbook_path"] == Path("/custom.yaml")
 
 
-@pytest.mark.parametrize(
-    "message,codec_retryable,operator,retryable",
-    [
-        ("host UNREACHABLE", True, (), False),
-        ("Permission denied (publickey)", True, (), False),
-        ("disk quota exceeded", True, ("quota exceeded",), False),
-        ("domain refused", False, (), False),
-        ("connection reset", True, (), True),
-    ],
-    ids=["transport", "authentication", "operator", "codec", "retryable"],
-)
-def test_a_failure_is_classified(message, codec_retryable, operator, retryable) -> None:
-    run, _, _ = _run()
-    executor = _executor(
-        _runner(failure=AnsibleError(message, stdout="token: x", stderr="")),
-        _Codec(retryable=codec_retryable),
-        additional_non_retryable_errors=operator,
+def _record(**overrides) -> FailureRecord:
+    values = dict(
+        host="node-1",
+        play="Operate",
+        role="access",
+        task="Do the thing",
+        module="ansible.builtin.command",
+        rc=1,
+        msg="non-zero return code",
+        stderr="something broke",
+    )
+    values.update(overrides)
+    return FailureRecord(**values)
+
+
+def _failed(*records: FailureRecord, outcome: str = "failed", returncode: int | None = 2):
+    return AnsibleError(
+        "Playbook failed", stdout="token: x", stderr="",
+        outcome=outcome, returncode=returncode, failures=records,
     )
 
-    outcome = asyncio.run(executor.execute(run))
 
+def _classified(error: AnsibleError, codec: _Codec | None = None, **kwargs):
+    run, _, _ = _run()
+    codec = codec or _Codec()
+    outcome = asyncio.run(_executor(_runner(failure=error), codec, **kwargs).execute(run))
     assert isinstance(outcome, JobFailure)
-    assert outcome.error.message == message
-    assert outcome.error.retryable is retryable
     assert "token: x" not in outcome.logs
+    return outcome.error, codec
+
+
+def test_a_task_failure_is_classified_by_the_codec_from_the_deciding_record() -> None:
+    """The last record neither ignored nor rescued decides; the codec classes it."""
+    codec = _Codec(failure_class=FailureClass("domain_class", retryable=False))
+    deciding = _record(task="Real failure", msg="the real reason")
+
+    error, codec = _classified(
+        _failed(
+            _record(task="Ignored", ignored=True),
+            deciding,
+            _record(task="Rescued later", rescued=True),
+        ),
+        codec,
+    )
+
+    assert codec.classified == [deciding]
+    assert error.code == "domain_class"
+    assert error.retryable is False
+    assert error.message == 'node-1: task "Real failure" failed: the real reason'
+    assert error.details == {
+        "host": "node-1", "task": "Real failure", "play": "Operate", "role": "access",
+        "module": "ansible.builtin.command", "rc": 1,
+    }
+
+
+def test_a_task_failure_with_no_domain_class_is_task_failed_and_retried() -> None:
+    error, _ = _classified(_failed(_record(msg="")))
+
+    assert (error.code, error.retryable) == ("task_failed", True)
+    # With no message, the first line of the task's error output says what failed.
+    assert error.message == 'node-1: task "Do the thing" failed: something broke'
+
+
+def test_a_codecs_summary_and_detail_reach_the_message_and_details_redacted() -> None:
+    codec = _Codec(
+        failure_class=FailureClass(
+            "refused", retryable=True, summary="refused a foreign entry; password: hunter2",
+            detail={"error": "Refusal", "token": "t0k"},
+        )
+    )
+
+    error, _ = _classified(_failed(_record()), codec)
+
+    assert error.message == (
+        'node-1: task "Do the thing" failed: refused a foreign entry; password: [REDACTED]'
+    )
+    assert error.details["domain_detail"] == {"error": "Refusal", "token": "[REDACTED]"}
+
+
+def test_a_host_that_stops_answering_is_unreachable_and_retried() -> None:
+    codec = _Codec()
+
+    error, codec = _classified(
+        _failed(_record(unreachable=True, rc=None, msg="Data could not be sent to remote host")),
+        codec,
+    )
+
+    assert (error.code, error.retryable) == ("unreachable", True)
+    assert error.message.startswith('node-1: unreachable at task "Do the thing"')
+    assert codec.classified == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Failed to connect to the host via ssh: ops@10.0.0.1: Permission denied (publickey).",
+        "Authentication failed.",
+        "Received disconnect: Too many authentication failures",
+    ],
+)
+def test_a_refused_login_is_authentication_refused_and_not_retried(message) -> None:
+    error, _ = _classified(_failed(_record(unreachable=True, rc=None, msg=message)))
+
+    assert (error.code, error.retryable) == ("authentication_refused", False)
+
+
+def test_a_playbook_that_records_no_failed_task_is_a_playbook_error_and_not_retried() -> None:
+    error, _ = _classified(_failed(_record(ignored=True), returncode=4))
+
+    assert (error.code, error.retryable) == ("playbook_error", False)
+    assert error.details == {"host": "node-1", "rc": 4}
+    assert error.message == "node-1: Playbook failed; no failed task was recorded (exit status 4)"
+
+
+def test_a_run_the_runner_could_not_watch_is_an_internal_error_and_not_retried() -> None:
+    error, _ = _classified(_failed(outcome="error", returncode=None))
+
+    assert (error.code, error.retryable) == ("internal_error", False)
+    assert error.details == {"host": "node-1", "rc": None}
+
+
+@pytest.mark.parametrize(
+    "outcome,code,retryable",
+    [("timed_out", "timed_out", True), ("cancelled", "cancelled", False)],
+)
+def test_the_runners_own_outcome_comes_before_any_record(outcome, code, retryable) -> None:
+    codec = _Codec()
+
+    error, codec = _classified(_failed(_record(), outcome=outcome, returncode=None), codec)
+
+    assert (error.code, error.retryable) == (code, retryable)
+    assert codec.classified == []
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        _record(msg="disk quota exceeded on /var"),
+        _record(stdout="write failed: Disk Quota Exceeded"),
+        _record(stderr="disk quota exceeded"),
+    ],
+    ids=["message", "stdout", "stderr"],
+)
+def test_an_operators_substring_in_the_record_stops_the_retry(record) -> None:
+    error, _ = _classified(
+        _failed(record), additional_non_retryable_errors=("quota exceeded",)
+    )
+
+    assert (error.code, error.retryable) == ("task_failed", False)
+
+
+def test_an_operators_substring_in_the_classified_message_stops_the_retry() -> None:
+    """Whatever the class: here the runner's timeout, with no record at all."""
+    error, _ = _classified(
+        _failed(outcome="timed_out", returncode=None),
+        additional_non_retryable_errors=("timed out after",),
+    )
+
+    assert (error.code, error.retryable) == ("timed_out", False)
+
+
+def test_a_failure_matching_no_operator_substring_keeps_its_retry() -> None:
+    error, _ = _classified(
+        _failed(_record(msg="connection reset")),
+        additional_non_retryable_errors=("quota exceeded",),
+    )
+
+    assert error.retryable is True
+
+
+def test_a_records_secret_is_redacted_from_the_message_and_details() -> None:
+    error, _ = _classified(_failed(_record(msg="token: t0k", task="password: hunter2")))
+
+    assert "t0k" not in error.message and "hunter2" not in error.message
+    assert "hunter2" not in str(error.details)
 
 
 def test_a_job_the_codec_refuses_to_prepare_records_no_start() -> None:

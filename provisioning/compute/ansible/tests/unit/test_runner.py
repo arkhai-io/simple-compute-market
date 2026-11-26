@@ -27,6 +27,7 @@ from compute_provisioning_ansible import (
     ProtectedKeyUnreadableError,
     SshConnectionCodec,
 )
+from compute_provisioning_ansible.failures import CALLBACK_PLUGINS_DIR, FAILURE_RECORDS_ENV
 from compute_provisioning_ansible.runner import (
     AnsibleRun,
     AnsibleRunner,
@@ -34,6 +35,7 @@ from compute_provisioning_ansible.runner import (
     extract_fact,
     extract_json_block,
     inventory_target,
+    playbook_environment,
     read_fact,
     redact_ansible_output,
 )
@@ -577,3 +579,25 @@ def test_an_error_running_the_check_is_returned_redacted(tmp_path, monkeypatch) 
     assert result.reachable is False
     assert result.detail.startswith("Failed to run ansible ping: ")
     assert result.detail == redact_ansible_output(result.detail)
+
+
+def test_a_playbook_runs_with_the_callback_first_and_the_paths_already_given_after(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("ANSIBLE_CALLBACK_PLUGINS", "/operator/callbacks")
+    monkeypatch.setenv("ANSIBLE_CONFIG", "/operator/ansible.cfg")
+
+    environment = playbook_environment(tmp_path / "records.jsonl")
+
+    assert environment["ANSIBLE_CALLBACK_PLUGINS"].split(os.pathsep) == [
+        str(CALLBACK_PLUGINS_DIR),
+        "/operator/callbacks",
+        "~/.ansible/plugins/callback",
+        "/usr/share/ansible/plugins/callback",
+    ]
+    assert environment[FAILURE_RECORDS_ENV] == str(tmp_path / "records.jsonl")
+    # Nothing else of the process's environment changes.
+    assert environment["ANSIBLE_CONFIG"] == "/operator/ansible.cfg"
+    assert "ANSIBLE_CALLBACKS_ENABLED" not in environment or (
+        environment["ANSIBLE_CALLBACKS_ENABLED"] == os.environ["ANSIBLE_CALLBACKS_ENABLED"]
+    )

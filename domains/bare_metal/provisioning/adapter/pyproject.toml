@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-bare-metal-provisioning-adapter"
-version = "0.15.0"
+version = "0.16.0"
 license = "MIT"
 description = "Bare-metal adapter for the compute provisioning service"
 requires-python = ">=3.12"
@@ -8,9 +8,10 @@ dependencies = [
     "arkhai-compute-provisioning-contracts>=0.11.0",
     "arkhai-core>=0.4.0",
     "arkhai-bare-metal>=0.13.0",
-    # The teardown rerun policy the job-backed provider dispatches by.
-    "arkhai-compute-provisioning>=0.30.0",
-    "arkhai-compute-provisioning-ansible>=0.9.0",
+    # ConfigurationRefusedError, which the codec refuses a preparation with.
+    "arkhai-compute-provisioning>=0.31.0",
+    # The codec protocol's classify and the failure record it reads.
+    "arkhai-compute-provisioning-ansible>=0.10.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-fulfillment>=0.5.0",
     "arkhai-kit-resource-pools>=0.3.0",
@@ -34,6 +35,8 @@ dev = [
     # The tests generate throwaway Fernet keys.
     "cryptography>=42.0",
     "pytest>=9.0.2",
+    # The role's task files are read as YAML, as Ansible reads them.
+    "pyyaml>=6.0",
     # The integration tests' embedded database.
     "sqlalchemy>=2.0",
     "pytest-asyncio>=0.23",

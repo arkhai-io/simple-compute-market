@@ -8,6 +8,14 @@ executor says whether a failure is retryable), cancellation through the
 executor's opaque handle, and storing the logs, result, and credentials the
 executor reports. It never reads a job's parameters: they are the executor's.
 
+A failed attempt's classified failure, a ``ProvisioningErrorEnvelope``, is
+kept on the job as ``failure`` beside ``error``, whose text carries the
+failure's message. The executor classifies what it ran; the engine classifies
+only what no executor reached, none of it retried: a job it cannot dispatch
+(``not_dispatchable``), a preparation the executor refused as
+``ConfigurationRefusedError`` (``configuration_refused``), and anything an
+executor raised (``internal_error``).
+
 State changes are conditional ``UPDATE``s on the job's current status, so they
 hold across sessions and worker processes. A job runs only from ``queued``; once
 a job is cancelled, no outcome its executor reports afterwards changes its
@@ -47,13 +55,22 @@ from compute_provisioning.jobs.action_request import JobActionRequest
 from compute_provisioning.hosts.execution import ExecutionHost
 
 from .db import TERMINAL_JOB_STATUSES, JobCredential, JobRecord, JobStatus
-from .executor import JobRetryPolicy, JobRun, JobSuccess
+from .executor import (
+    CONFIGURATION_REFUSED,
+    INTERNAL_ERROR,
+    NOT_DISPATCHABLE,
+    ConfigurationRefusedError,
+    JobRetryPolicy,
+    JobRun,
+    JobSuccess,
+)
 from compute_provisioning_contracts import (
     JobCredentialsResponse,
     JobListResponse,
     JobLogsResponse,
     JobStatusResponse,
     JobSubmitResponse,
+    ProvisioningErrorEnvelope,
 )
 
 logger = logging.getLogger(__name__)
@@ -500,6 +517,7 @@ class JobEngine:
                     db, job,
                     "job names no host, so it cannot be dispatched; submit it again "
                     "naming a registered host",
+                    code=NOT_DISPATCHABLE,
                 )
                 return
             host = self._host_lookup(job.host_id)
@@ -508,6 +526,7 @@ class JobEngine:
                     db, job,
                     f"host {job.host_id!r} is not registered; register or import it "
                     "before dispatching work to it",
+                    code=NOT_DISPATCHABLE,
                 )
                 return
             try:
@@ -515,7 +534,7 @@ class JobEngine:
                     str(job.offering_mode), str(job.executor_action)
                 )
             except UnsupportedExecutorActionError as exc:
-                self._fail(db, job, str(exc))
+                self._fail(db, job, str(exc), code=NOT_DISPATCHABLE)
                 return
 
             loop = asyncio.get_running_loop()
@@ -576,6 +595,7 @@ class JobEngine:
                         else None
                     ),
                     error=None,
+                    failure=None,
                     logs=outcome.logs,
                     credentials=outcome.credentials,
                 )
@@ -584,6 +604,7 @@ class JobEngine:
                 return
 
             message = outcome.error.message
+            failure = outcome.error.model_dump(mode="json")
             if job.retry_count < job.max_retries and outcome.error.retryable:
                 next_retry_at = _utcnow() + timedelta(
                     seconds=self._retry_policy.delay_seconds(job.retry_count)
@@ -595,6 +616,7 @@ class JobEngine:
                     status=JobStatus.queued.value,
                     error=f"Attempt {job.retry_count + 1} failed: {message}. "
                     f"Retrying at {next_retry_at}",
+                    failure=failure,
                     logs=outcome.logs,
                     retry_count=job.retry_count + 1,
                     next_retry_at=next_retry_at,
@@ -615,25 +637,37 @@ class JobEngine:
                 expected=(JobStatus.running.value,),
                 status=JobStatus.failed.value,
                 error=f"Job failed ({reason}): {message}",
+                failure=failure,
                 logs=outcome.logs,
             ):
                 logger.error("Job %s failed permanently: %s", job_id, message)
 
+        except ConfigurationRefusedError as exc:
+            logger.error("Job %s refused by its executor's preparation: %s", job_id, exc)
+            self._fail_after_error(
+                db, job_id, f"Configuration refused: {exc}", code=CONFIGURATION_REFUSED
+            )
         except Exception as exc:
             logger.exception("Unexpected error processing job %s: %s", job_id, exc)
-            try:
-                # A failed flush leaves the session in an aborted transaction;
-                # roll back so the job can still be marked failed.
-                db.rollback()
-                job = db.get(JobRecord, job_id)
-                if job is not None:
-                    self._fail(db, job, f"Internal error: {exc}")
-            except Exception:
-                logger.exception(
-                    "Failed to mark job %s as failed after an unexpected error", job_id
-                )
+            self._fail_after_error(db, job_id, f"Internal error: {exc}", code=INTERNAL_ERROR)
         finally:
             db.close()
+
+    def _fail_after_error(self, db: Session, job_id: str, message: str, *, code: str) -> None:
+        """Fail a job whose attempt raised, unless it has left ``running``.
+
+        A job cancelled meanwhile stays cancelled: ``_fail`` expects ``queued``
+        or ``running``.
+        """
+        try:
+            # A failed flush leaves the session in an aborted transaction;
+            # roll back so the job can still be marked failed.
+            db.rollback()
+            job = db.get(JobRecord, job_id)
+            if job is not None:
+                self._fail(db, job, message, code=code)
+        except Exception:
+            logger.exception("Failed to mark job %s as failed after an error", job_id)
 
     # ------------------------------------------------------------------
     # Internals
@@ -648,6 +682,7 @@ class JobEngine:
         status: str,
         result: object = _UNSET,
         error: object = _UNSET,
+        failure: object = _UNSET,
         logs: object = _UNSET,
         execution_handle: object = _UNSET,
         execution_started_at: object = _UNSET,
@@ -672,6 +707,7 @@ class JobEngine:
         for name, value in (
             ("result", result),
             ("error", error),
+            ("failure", failure),
             ("logs", logs),
             ("execution_handle", execution_handle),
             ("execution_started_at", execution_started_at),
@@ -703,13 +739,17 @@ class JobEngine:
             self._finished(job.id, status)
         return True
 
-    def _fail(self, db: Session, job: JobRecord, message: str) -> None:
+    def _fail(self, db: Session, job: JobRecord, message: str, *, code: str) -> None:
+        """Fail a job the engine itself classified, without a retry."""
         if self._transition(
             db,
             job,
             expected=(JobStatus.queued.value, JobStatus.running.value),
             status=JobStatus.failed.value,
             error=message,
+            failure=ProvisioningErrorEnvelope(
+                code=code, message=message, retryable=False
+            ).model_dump(mode="json"),
         ):
             logger.error("Job %s failed: %s", job.id, message)
 
@@ -757,6 +797,7 @@ class JobEngine:
             host_id=job.host_id,
             result=job.result,
             error=job.error,
+            failure=job.failure,
             retry_count=job.retry_count,
             max_retries=job.max_retries,
             next_retry_at=job.next_retry_at,

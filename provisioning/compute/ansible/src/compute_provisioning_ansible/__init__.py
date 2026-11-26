@@ -3,7 +3,8 @@
 It implements execution for the compute family over Ansible and SSH: the
 ``ssh`` connection codec, Ansible inventories as an input format, the runner,
 and ``AnsibleJobExecutor``, which runs any domain's jobs through the
-``AnsibleJobCodec`` that domain contributes. It depends on
+``AnsibleJobCodec`` that domain contributes, classifying a failed run from the
+task failures Ansible itself recorded. It depends on
 ``compute_provisioning``; nothing in ``compute_provisioning`` depends on it.
 """
 
@@ -28,6 +29,19 @@ from .connection import (
     ssh_connection,
 )
 from .executor import TRANSPORT_FAILURES, AnsibleJobExecutor
+from .failures import (
+    AUTHENTICATION_REFUSED,
+    CANCELLED,
+    FAILURE_CLASS_TAG_PREFIX,
+    HOST_KEY_REFUSED,
+    PLAYBOOK_ERROR,
+    TASK_FAILED,
+    TASK_FAILED_CLASS,
+    TIMED_OUT,
+    UNREACHABLE,
+    FailureClass,
+    FailureRecord,
+)
 from .inventory import DEFAULT_KEY_PATH, parse_inventory_ini
 from .mock import DefaultOutput, MockAnsibleRunner, MockPlaybook
 from .probes import probe_connectivity
@@ -45,7 +59,18 @@ from .runner import read_fact
 DEFAULT_ANSIBLE_CONFIG = Path(__file__).with_name("ansible.cfg")
 
 __all__ = [
+    "AUTHENTICATION_REFUSED",
+    "CANCELLED",
     "DEFAULT_ANSIBLE_CONFIG",
+    "FAILURE_CLASS_TAG_PREFIX",
+    "FailureClass",
+    "FailureRecord",
+    "HOST_KEY_REFUSED",
+    "PLAYBOOK_ERROR",
+    "TASK_FAILED",
+    "TASK_FAILED_CLASS",
+    "TIMED_OUT",
+    "UNREACHABLE",
     "AnsibleJobCodec",
     "ANSIBLE_COMPONENT",
     "AnsibleReadinessDetail",

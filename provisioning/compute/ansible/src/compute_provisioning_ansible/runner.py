@@ -9,6 +9,13 @@ and what its output means belong to the domain whose playbook runs.
 
 No inventory file is ever read as an execution source, and nothing else in the
 codebase spawns ``ansible`` or ``ansible-playbook``.
+
+Every playbook runs with the notification callback of ``failures`` on its
+callback plugin path, recording each failed or unreachable task to an
+owner-only file named for the run. ``wait_for_playbook`` reads those records
+once the process has ended, attaches them to the result it returns or the
+error it raises, and removes the file however the run ends: the records reach
+their reader on the run's outcome, never through the file.
 """
 
 from __future__ import annotations
@@ -34,9 +41,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 from compute_provisioning.hosts import ExecutionHost
+from compute_provisioning.jobs import ConfigurationRefusedError
 from compute_provisioning_contracts import ConnectivityResult
 
 from .connection import PRIVATE_KEY, SSH_CONNECTION_KIND, SshConnectionCodec
+from .failures import (
+    CALLBACK_PLUGINS_DIR,
+    FAILURE_RECORDS_ENV,
+    FailureRecord,
+    read_failure_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,24 +236,56 @@ class AnsibleRun:
     process_id: int
     vars_path: Path
     job_parameters: Mapping[str, Any] | None = None
+    #: The file the notification callback appends this run's failure records
+    #: to; ``None`` for a run that records none.
+    failures_path: Path | None = None
 
 
 @dataclass
 class AnsibleResult:
-    """Captured output from a completed ansible-playbook invocation."""
+    """Captured output from a completed ansible-playbook invocation.
+
+    ``failures`` are the run's recorded task failures; a successful run's are
+    all ignored or rescued.
+    """
 
     stdout: str
     stderr: str
     process_id: int
+    failures: tuple[FailureRecord, ...] = ()
+
+
+#: How a failed run ended, as ``AnsibleError.outcome`` reports it.
+#: ``failed``: the playbook exited non-zero. ``timed_out``: it ran past its
+#: timeout and was killed. ``cancelled``: it was stopped through its
+#: cancellation handle. ``error``: running or watching it raised.
+RUN_OUTCOMES = frozenset({"failed", "timed_out", "cancelled", "error"})
 
 
 class AnsibleError(RuntimeError):
-    """Raised when ansible-playbook exits non-zero or times out."""
+    """Raised when ansible-playbook exits non-zero, times out, or is cancelled.
 
-    def __init__(self, message: str, stdout: str, stderr: str):
+    ``outcome`` says how the run ended (one of ``RUN_OUTCOMES``),
+    ``returncode`` is the process's exit status where it ended by itself, and
+    ``failures`` are the task failures it recorded before it ended.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        stdout: str,
+        stderr: str,
+        *,
+        outcome: str = "failed",
+        returncode: int | None = None,
+        failures: tuple[FailureRecord, ...] = (),
+    ):
         super().__init__(message)
         self.stdout = stdout
         self.stderr = stderr
+        self.outcome = outcome
+        self.returncode = returncode
+        self.failures = failures
 
 
 @dataclass(frozen=True)
@@ -262,10 +308,14 @@ class InventoryTarget:
 
 
 def inventory_target(host: ExecutionHost, *, include_host_keys: bool = True) -> InventoryTarget:
-    """What the runner needs from a host reached over an ``ssh`` connection."""
+    """What the runner needs from a host reached over an ``ssh`` connection.
+
+    A host the runner cannot reach as registered — another kind of connection,
+    or no key — is refused as ``ConfigurationRefusedError``.
+    """
     connection = host.connection
     if connection.kind != SSH_CONNECTION_KIND:
-        raise ValueError(
+        raise ConfigurationRefusedError(
             f"host {host.host_id!r} has a {connection.kind!r} connection; "
             "an Ansible job reaches its host over ssh"
         )
@@ -276,7 +326,7 @@ def inventory_target(host: ExecutionHost, *, include_host_keys: bool = True) -> 
     elif private_key is not None:
         key_type, key_value = "embedded", private_key.ciphertext
     else:
-        raise ValueError(f"host {host.host_id!r} has an ssh connection naming no key")
+        raise ConfigurationRefusedError(f"host {host.host_id!r} has an ssh connection naming no key")
     return InventoryTarget(
         host_id=host.host_id,
         ssh_host=ssh.ssh_host,
@@ -318,6 +368,47 @@ class MaterializedInventory:
         self.cleanup()
 
 
+#: Ansible's default callback plugin directories, which an explicit
+#: ``ANSIBLE_CALLBACK_PLUGINS`` would otherwise replace.
+_DEFAULT_CALLBACK_PATHS = (
+    "~/.ansible/plugins/callback",
+    "/usr/share/ansible/plugins/callback",
+)
+
+
+def _create_records_file() -> Path:
+    """Create an empty, owner-only file for one run's failure records.
+
+    It stays writable, since the callback appends to it, and is created before
+    the playbook starts, so the callback never creates it with wider
+    permissions.
+    """
+    path = Path(tempfile.gettempdir()) / f"ansible_failures_{uuid.uuid4().hex}.jsonl"
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    return path
+
+
+def playbook_environment(failures_path: Path) -> dict[str, str]:
+    """The environment a playbook runs in: this process's, with the callback.
+
+    ``ANSIBLE_CALLBACK_PLUGINS`` outranks an ``ansible.cfg``'s
+    ``callback_plugins``, so the callback is found whatever configuration an
+    operator names. The variable replaces Ansible's own default directories
+    too, so they follow the callback's, after any path this process's
+    environment already gives; a directory only an operator's ``ansible.cfg``
+    names is outranked, while a collection's callback is found as before. The
+    callback needs no enabling, so the configuration's enabled callbacks and
+    stdout callback are left as they are.
+    """
+    environment = dict(os.environ)
+    existing = environment.get("ANSIBLE_CALLBACK_PLUGINS")
+    environment["ANSIBLE_CALLBACK_PLUGINS"] = os.pathsep.join(
+        [str(CALLBACK_PLUGINS_DIR), *([existing] if existing else []), *_DEFAULT_CALLBACK_PATHS]
+    )
+    environment[FAILURE_RECORDS_ENV] = str(failures_path)
+    return environment
+
+
 def _write_owner_only(path: Path, text: str) -> None:
     """Create ``path`` readable only by its owner, then write ``text``.
 
@@ -343,6 +434,13 @@ class AnsibleRunner:
         self._ssh_codec = ssh_codec or SshConnectionCodec(
             getattr(settings, "ssh_decryption_key", "") or None
         )
+        # Process ids of the playbooks this runner is waiting on, and those of
+        # them it signalled through ``cancel``, so the wait on each reports
+        # its run as cancelled rather than failed. Only a pid being waited on
+        # is marked, and the wait forgets it, so a later process reusing the
+        # pid is never taken for a cancelled run.
+        self._waiting: set[int] = set()
+        self._cancelled: set[int] = set()
 
     # ------------------------------------------------------------------
     # Playbook execution — async streaming interface
@@ -360,8 +458,9 @@ class AnsibleRunner:
         """Spawn ansible-playbook and return immediately with a process handle.
 
         The caller must pass the returned handle to ``await wait_for_playbook``
-        to collect the result.  ``extra_vars_path`` is cleaned up inside
-        ``wait_for_playbook``.
+        to collect the result.  ``extra_vars_path`` and the run's failure
+        records file are cleaned up inside ``wait_for_playbook``; if the
+        process cannot be spawned, the records file is removed here.
         """
         cmd = [
             "ansible-playbook",
@@ -373,12 +472,18 @@ class AnsibleRunner:
         for k, v in (extra_cli_vars or {}).items():
             cmd += ["-e", f"{k}={v}"]
 
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        failures_path = _create_records_file()
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=playbook_environment(failures_path),
+            )
+        except BaseException:
+            failures_path.unlink(missing_ok=True)
+            raise
 
         logger.info(
             "Started ansible-playbook: PID=%d cmd=%s", process.pid, " ".join(cmd)
@@ -389,6 +494,7 @@ class AnsibleRunner:
             process_id=process.pid,
             vars_path=extra_vars_path,
             job_parameters=job_parameters,
+            failures_path=failures_path,
         )
 
     @staticmethod
@@ -399,18 +505,22 @@ class AnsibleRunner:
     async def cancel(self, handle: Mapping[str, Any]) -> None:
         """Stop the playbook a handle from ``execution_handle`` names.
 
-        The process is sent ``SIGTERM``; its wait then ends as a failed run.
-        A process id of zero or less names a process group (zero is this
-        service's own), never a playbook, and is refused.
+        The process is sent ``SIGTERM``; its wait then ends as a cancelled
+        run, unless it had already exited successfully. A process id of zero
+        or less names a process group (zero is this service's own), never a
+        playbook, and is refused.
         """
         pid = int(handle["pid"])
         if pid <= 0:
             logger.warning("Refusing to signal process id %d for handle %s", pid, dict(handle))
             return
+        if pid in self._waiting:
+            self._cancelled.add(pid)
         try:
             os.kill(pid, signal.SIGTERM)
             logger.info("Sent SIGTERM to process %d", pid)
         except ProcessLookupError:
+            self._cancelled.discard(pid)
             logger.warning("Process %d not found (already terminated)", pid)
 
     async def wait_for_playbook(
@@ -426,11 +536,15 @@ class AnsibleRunner:
         that knows its playbook's secret fields. What ``log_callback`` and the
         result receive is raw: their consumer redacts it.
 
-        Cleans up ``run.vars_path`` on exit regardless of success or failure.
-        Raises ``AnsibleError`` on non-zero exit or timeout.
+        The run's failure records are read once the process has ended and
+        attached to the result or the error. ``run.vars_path`` and the records
+        file are removed on exit however the run ends: success, failure,
+        timeout, or cancellation, the wait's own included. Raises
+        ``AnsibleError`` on non-zero exit, timeout, or cancellation.
         """
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
+        self._waiting.add(run.process_id)
 
         async def _stream() -> None:
             # The log flush interval is a duration of this wait, on the
@@ -504,6 +618,12 @@ class AnsibleRunner:
 
                 await asyncio.sleep(0.1)
 
+        def _records() -> tuple[FailureRecord, ...]:
+            # Read only once the process has ended, so every record is written.
+            if run.failures_path is None:
+                return ()
+            return read_failure_records(run.failures_path)
+
         try:
             await asyncio.wait_for(_stream(), timeout=timeout_seconds)
 
@@ -516,15 +636,28 @@ class AnsibleRunner:
                 except Exception as exc:
                     logger.warning("Final log callback failed: %s", exc)
 
-            if run.process.returncode != 0:
-                raise AnsibleError("Playbook failed", stdout, stderr)
+            failures = _records()
+            returncode = run.process.returncode
+            if returncode != 0 and run.process_id in self._cancelled:
+                raise AnsibleError(
+                    "Playbook cancelled", stdout, stderr,
+                    outcome="cancelled", returncode=returncode, failures=failures,
+                )
+            if returncode != 0:
+                raise AnsibleError(
+                    "Playbook failed", stdout, stderr,
+                    outcome="failed", returncode=returncode, failures=failures,
+                )
 
         except asyncio.TimeoutError:
             run.process.kill()
             run.process.wait()
             stdout = "".join(stdout_lines)
             stderr = "".join(stderr_lines)
-            raise AnsibleError("Playbook timed out", stdout, stderr)
+            raise AnsibleError(
+                "Playbook timed out", stdout, stderr,
+                outcome="timed_out", failures=_records(),
+            )
         except AnsibleError:
             raise
         except Exception as exc:
@@ -536,20 +669,25 @@ class AnsibleRunner:
             stdout = "".join(stdout_lines)
             stderr = "".join(stderr_lines)
             raise AnsibleError(
-                f"Playbook error: {exc}", stdout, stderr or str(exc)
+                f"Playbook error: {exc}", stdout, stderr or str(exc),
+                outcome="error", failures=_records(),
             ) from exc
         finally:
-            try:
-                run.vars_path.unlink(missing_ok=True)
-            except Exception:
-                logger.warning(
-                    "Failed to delete temp vars file: %s", run.vars_path
-                )
+            self._waiting.discard(run.process_id)
+            self._cancelled.discard(run.process_id)
+            for leftover in (run.vars_path, run.failures_path):
+                if leftover is None:
+                    continue
+                try:
+                    leftover.unlink(missing_ok=True)
+                except Exception:
+                    logger.warning("Failed to delete temporary file: %s", leftover)
 
         return AnsibleResult(
             stdout="".join(stdout_lines),
             stderr="".join(stderr_lines),
             process_id=run.process_id,
+            failures=failures,
         )
 
     # ------------------------------------------------------------------
@@ -584,7 +722,9 @@ class AnsibleRunner:
             lines = [f"[{group}]"]
             for index, host in enumerate(hosts):
                 if re.search(r"[^a-zA-Z0-9.:%_-]", host.ssh_host):
-                    raise ValueError(f"host {host.host_id!r} has an invalid SSH endpoint")
+                    raise ConfigurationRefusedError(
+                        f"host {host.host_id!r} has an invalid SSH endpoint"
+                    )
                 endpoint = f"[{host.ssh_host}]:{host.ssh_port}"
                 pins_path = directory / f"known_hosts_{nonce}_{index}"
                 inventory.known_hosts_paths.append(pins_path)
@@ -713,9 +853,11 @@ __all__ = [
     "InventoryTarget",
     "GENERIC_SECRET_FIELDS",
     "MaterializedInventory",
+    "RUN_OUTCOMES",
     "extract_fact",
     "extract_json_block",
     "inventory_target",
+    "playbook_environment",
     "read_fact",
     "redact_ansible_output",
 ]

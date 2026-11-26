@@ -45,18 +45,21 @@ from typing import Any
 from market_config import decrypt_secret
 from pydantic import BaseModel
 
+from compute_provisioning.jobs.executor import ConfigurationRefusedError
+
 from .db import Relay, RelayPortLease
 from .grants import sign_grant
 from .keys import GrantKey
 
 
-class RelayUnusableAtExecutionError(RuntimeError):
+class RelayUnusableAtExecutionError(ConfigurationRefusedError):
     """The referenced relay is absent, or lacks what the job needs of it.
 
     A job needs the relay's admission token, and a job adding a proxy needs an
     active grant key and a lease for its own reservation on its port.
 
-    Raised as a configuration error rather than a transient one. A retry runs
+    Raised as a configuration refusal rather than a transient failure, so the
+    job authority fails the job as ``configuration_refused``. A retry runs
     against the same configuration and fails identically, so burning the retry
     budget only delays the same outcome behind a misleading `running` state.
     """
