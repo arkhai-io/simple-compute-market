@@ -72,10 +72,10 @@ and three servicing fixes; it builds no funding timer and no operator recovery
 command), `discover-open-ended-compute-listings` (discovery),
 `renewable-compute-lease-deadlines` (the pool's delivery deadline, which the full
 product publishes and the site enforces in place of the MVP's storefront-enforced
-clause deadline) and `offer-a-seller-chosen-payout-hold` (the seller-chosen payout
-hold and the penalty's collectibility rule; this change qualifies hosted whatever
-hold that change offers, such as a `for` hold shorter than the stop plus the dispute
-window). The foundation (`agreed-evidence-and-early-termination`), the payment and
+clause deadline) and `offer-a-seller-chosen-payout-hold` (a hold shape an option
+may state, and what the premature-stop penalty can reach under it; this change
+qualifies hosted whatever shape that change offers, such as a rate part's earnings
+released the dispute window after each period is earned). The foundation (`agreed-evidence-and-early-termination`), the payment and
 mediation doubles (`add-arkhai-payments-lane-double`), unified delivery
 (`unify-compute-delivery-path`), the terms (`negotiate-open-ended-compute-terms`)
 and the rate mechanics, presets, seller notice and buyer end
