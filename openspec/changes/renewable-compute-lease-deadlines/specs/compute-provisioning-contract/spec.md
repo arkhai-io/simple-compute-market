@@ -11,5 +11,5 @@ The compute contract's lease view MUST carry a nullable activation deadline, the
 
 #### Scenario: A lease with no deadline is read
 
-- **WHEN** a caller reads a lease whose pool resolved no delivery deadline, or one committed before the site recorded deadlines
+- **WHEN** a caller reads a lease whose commit carried no deadline to a pool that resolved none, or one committed before the site recorded deadlines
 - **THEN** the view's activation deadline is null

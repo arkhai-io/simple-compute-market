@@ -2,7 +2,7 @@
 
 ### Requirement: A pool states its delivery deadline, nothing, or none
 
-A Resource Pool's policy metadata MUST support a `delivery_deadline_seconds` tag with three states: a positive whole number of seconds; absent; or a statement that the pool enforces none. A pool stating a number MUST resolve that number. A pool stating nothing MUST resolve its provider's declared default, and none where its provider declares none. A pool stating none MUST resolve none. No service-level or site-wide setting MAY turn a pool's resolved deadline on or off. Every surface that persists a pool's policy tags MUST validate the tag through one shared check and refuse any other value without changing the pool.
+A Resource Pool's policy metadata MUST support a `delivery_deadline_seconds` tag with three states: a positive whole number of seconds; absent; or a statement of none. The pool MUST resolve one value from it, which is what the site contributes: the delivery deadline publication reads for the pool, the ceiling on a commit's accepted deadline, and the deadline of a commit that carries none. A pool stating a number MUST resolve that number. A pool stating nothing MUST resolve its provider's declared default, and none where its provider declares none. A pool stating none MUST resolve none, contributing none of the three, and MUST NOT stop the site enforcing a deadline a commit carries. No service-level or site-wide setting MAY turn a pool's resolved deadline on or off. Every surface that persists a pool's policy tags MUST validate the tag through one shared check and refuse any other value without changing the pool.
 
 #### Scenario: A pool states a number
 
@@ -16,8 +16,8 @@ A Resource Pool's policy metadata MUST support a `delivery_deadline_seconds` tag
 
 #### Scenario: A pool states none
 
-- **WHEN** an operator writes a pool of a provider declaring a default, stating that it enforces none
-- **THEN** the pool resolves no delivery deadline
+- **WHEN** an operator writes a pool of a provider declaring a default, stating none
+- **THEN** the pool resolves no delivery deadline, whatever its provider's default
 
 #### Scenario: Two pools of one site differ
 

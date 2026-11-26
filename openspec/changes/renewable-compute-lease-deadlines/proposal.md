@@ -33,20 +33,22 @@ published deadline is the clause's, and nothing ties it to what a site would enf
 
 ## What Changes
 
-- **The site records an activation deadline at commit.** Where the reservation's pool
-  resolves a delivery deadline, the first commit records the later of the deal's
-  commitment instant and the lease start, plus the deal's accepted
-  `delivery_deadline_seconds`, or plus the pool's value where the commit carries none.
-  A commit asking for more than the pool resolves is refused. A pool that resolves none
-  records none. Existing leases have none and behave as before.
+- **The site records an activation deadline at commit.** The first commit records the
+  later of the deal's commitment instant and the lease start, plus the deal's accepted
+  `delivery_deadline_seconds`, on every pool. A commit that carries none takes the value
+  its pool resolves, and records none where the pool resolves none. A commit asking for
+  more than a value its pool resolves is refused. Existing leases have none and behave
+  as before.
 - **An unactivated lease is due at its deadline.** A lease with a deadline and no
   recorded activation is due at the earlier of the deadline and its agreed end. Expiry
   claims the lease as its due read saw it, so an activation that arrives first defeats a
   stale claim and a claim that arrives first is not undone.
 - **A pool states its delivery deadline.** The pool's `delivery_deadline_seconds` tag
   has three states: a number of seconds; nothing, which resolves the provider's declared
-  default; or none, which enforces no deadline. Enforcement varies by pool. No service
-  setting turns it on or off.
+  default; or none. The resolved value is what the site contributes: the hint the
+  listing publishes, the ceiling on a commit, and the deadline of a commit that carries
+  none. A pool that states none contributes none of the three, and the site still
+  enforces a deadline the deal accepted. No service setting turns enforcement on or off.
 - **Providers declare a default.** The VM and bare-metal providers declare one; the
   API-credits provider declares none, so a quota hold gets no deadline by the same rule.
 - **The storefront supplies the deal's facts with the commit.** The one compute delivery
@@ -60,8 +62,9 @@ published deadline is the clause's, and nothing ties it to what a site would enf
   intended end, not of completed teardown or of anything owed.
 - **Both lease views show the deadline**, beside `activated_at_utc`.
 - **The operator handbook** gains the upgrade step for a site whose storefronts still
-  run 0.4.0, and its "Leases the storefront has not delivered" is rewritten for a pool
-  that enforces a deadline and kept for one that states none.
+  run 0.4.0, and its "Leases the storefront has not delivered" is rewritten: the site
+  reclaims a lease with a recorded deadline, and the manual procedure remains for a
+  lease with none.
 
 What the design leaves open is in its "Open Questions".
 
@@ -90,8 +93,8 @@ None.
   delivery calculated from what a deal has funded: `lapse-billing-with-the-site-lease`
   (design D4).
 - Retiring the clause-configured deadline (D7).
-- A service-level or site-wide setting for enforcement, and a way for a committer to
-  opt a lease out (D3).
+- A service-level or site-wide setting for enforcement, a way for a pool to decline a
+  deadline a deal accepted, and a way for a committer to opt a lease out (D3).
 - A buyer's guarantee. The site's deadline is the seller's capacity safeguard; the
   buyer's deadline is judged by the dispute authority (D1).
 - A refund triggered by a site event. End service classifies a failed delivery and the
@@ -141,7 +144,7 @@ every form below as it stands on the development branch.
   committed has none and is due only at its end.
 - **The commit request.** Two optional fields. A 0.4.0 site ignores them and enforces
   nothing, as today. A 0.4.0 storefront sends neither, and the site then applies the
-  pool's value (D1).
+  value its pool resolves, and none where the pool resolves none (D1).
 - **The pool tag.** A pool written under 0.4.0 states nothing, so on upgrade it resolves
   its provider's default for new commits. A 0.4.0 storefront published its clause's
   deadline, and a shorter pool value would reclaim its lease early. The handbook's

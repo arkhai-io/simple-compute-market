@@ -1,8 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: Commit records an activation deadline where the pool resolves a delivery deadline
+### Requirement: Commit records an activation deadline from the deal's accepted deadline, else the pool's
 
-The first commit of a reservation whose pool resolves a delivery deadline MUST record an activation deadline: the later of the deal's commitment instant, as the commit supplies it, and the lease start, plus the deal's accepted `delivery_deadline_seconds` where the commit carries one, else plus the value the pool resolves. A commit to a pool that resolves none MUST record none, whatever the commit carries. A recorded deadline MUST NOT be rewritten by a repeated commit, by activation, by truncation, or by a later change to the pool. A reservation committed before the site recorded deadlines MUST carry none. The site's reservation view MUST show the deadline, null where none is recorded.
+The first commit of a reservation MUST record an activation deadline where the commit carries the deal's accepted `delivery_deadline_seconds` or the reservation's pool resolves a delivery deadline: the later of the deal's commitment instant, as the commit supplies it, and the lease start, plus the accepted value where the commit carries one, on every pool, else plus the value the pool resolves. A commit that carries none, to a pool that resolves none, MUST record none. A recorded deadline MUST NOT be rewritten by a repeated commit, by activation, by truncation, or by a later change to the pool. A reservation committed before the site recorded deadlines MUST carry none. The site's reservation view MUST show the deadline, null where none is recorded.
 
 #### Scenario: A commit carries the deal's accepted deadline
 
@@ -19,9 +19,14 @@ The first commit of a reservation whose pool resolves a delivery deadline MUST r
 - **WHEN** a commit carrying no accepted deadline names a reservation in a pool resolving 1800 seconds
 - **THEN** the site records a deadline from the pool's 1800 seconds
 
-#### Scenario: The pool states that it enforces none
+#### Scenario: A commit carries a deadline to a pool that resolves none
 
-- **WHEN** a commit carrying an accepted deadline names a reservation in a pool that resolves none
+- **WHEN** a commit carrying an accepted deadline of 1200 seconds names a reservation in a pool that resolves none
+- **THEN** the site records the deadline from 1200 seconds
+
+#### Scenario: A commit carries no deadline to a pool that resolves none
+
+- **WHEN** a commit carrying no accepted deadline names a reservation in a pool that resolves none
 - **THEN** the reservation is committed with no activation deadline
 
 #### Scenario: The pool was lengthened after the deal was accepted
@@ -138,7 +143,8 @@ recorded where the reservation records none, on a repeated commit too, and MUST 
 a recorded one. A commit MAY carry the deal's accepted `delivery_deadline_seconds` and its
 commitment instant. A first commit whose accepted deadline exceeds the delivery deadline
 its pool resolves MUST be refused, leaving the reservation's state unchanged and recording
-nothing. A commit MUST answer with the reservation as the authority recorded it,
+nothing; a pool that resolves none MUST refuse no commit on the deadline's account. A
+commit MUST answer with the reservation as the authority recorded it,
 through every client layer between the caller and the authority.
 
 #### Scenario: A resume pass commits a lease again

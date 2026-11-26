@@ -80,24 +80,28 @@ A reservation gains one nullable activation deadline, in the shared site schema 
 ledger-hosting services apply. Existing rows have none. No phase is stored: an
 unactivated lease is one whose `activated_at_utc` is null.
 
-- **What is written.** On the first commit of a reservation whose pool resolves a
-  delivery deadline (D3), the site records the later of the deal's commitment instant
-  and the lease start, plus a number of seconds. The seconds are the deal's accepted
-  `delivery_deadline_seconds`, which the commit carries as a fact of the deal like its
-  window. A commit that carries none takes the pool's resolved value, as the site's own
-  safeguard: an option whose mechanism has no lifecycle adapter, a buyer who waived the
-  term, and a storefront that predates this change all commit so.
-- **The pool's value is a ceiling.** A commit whose accepted deadline exceeds what the
-  pool now resolves is refused with nothing written: a seller cannot ask its site for
-  more time than the site gives. Delivery records a refused commit of a reservation it
-  holds as seller failure before dispatch and releases the reservation through end
-  service's no-dispatch path (`compute-delivery`'s "An undelivered deal is handed to the
-  end operation with classified evidence"). A pool lengthened after acceptance changes
-  nothing for the deal; a pool shortened below the accepted value refuses the deal
-  instead of reclaiming it early.
-- **A pool that resolves none records none**, and refuses nothing on the deadline's
-  account, whatever the commit carries. The storefront still enforces the deadline the
-  deal accepted (D7).
+- **What is written.** On the first commit that carries the deal's accepted
+  `delivery_deadline_seconds`, the site records the later of the deal's commitment
+  instant and the lease start, plus that many seconds, on every pool. The commit carries
+  the accepted value as a fact of the deal, like its window. A commit that carries none
+  takes the value its pool resolves (D3), as the site's own safeguard: an option whose
+  mechanism has no lifecycle adapter, a buyer who waived the term, and a storefront that
+  predates this change all commit so. A commit that carries none, to a pool that
+  resolves none, records none.
+- **A value the pool resolves is a ceiling.** A commit whose accepted deadline exceeds
+  what the pool now resolves is refused with nothing written: a seller cannot ask its
+  site for more time than the site gives. A pool that resolves none sets no ceiling.
+  Delivery records a refused commit of a reservation it holds as seller failure before
+  dispatch and releases the reservation through end service's no-dispatch path
+  (`compute-delivery`'s "An undelivered deal is handed to the end operation with
+  classified evidence"). A pool lengthened after acceptance changes nothing for the
+  deal; a pool shortened below the accepted value refuses the deal instead of
+  reclaiming it early.
+- **The site enforces the deadline it is told, on every pool.** A pool that resolves
+  none contributes no value of the site's own (D3). It does not stop the site reclaiming
+  a lease at the deadline the deal accepted. The storefront makes the delivery promise
+  and enforces it; once the site is told the deadline, leaving an operator to end the
+  lease by hand would protect nothing.
 - **The record does not move.** A repeated commit leaves it unchanged, whatever the pool
   now resolves. Activation writes only `activated_at_utc`. Truncation moves only the
   agreed end.
@@ -149,29 +153,36 @@ Rejected: provider calls under a row lock; refusing activation by the clock alon
 
 ### D3 — A pool states a deadline, nothing, or none
 
-`delivery_deadline_seconds` is a Resource Pool policy tag with three states.
+`delivery_deadline_seconds` is a Resource Pool policy tag with three states. The pool
+resolves one value from it, and that value is what the site contributes. It does not
+decide whether a deadline a deal accepted is enforced (D1).
 
-| The pool states | It resolves |
-|---|---|
-| A number of seconds | That deadline |
-| Nothing | Its provider's declared default, or none where the provider declares none |
-| None | No deadline |
+| The pool states | Hint to the listing | Ceiling on a commit | Deadline for a commit that carries none |
+|---|---|---|---|
+| A number of seconds | That number | That number | That number |
+| Nothing | Its provider's declared default, or none where the provider declares none | The same | The same |
+| None | No hint | No ceiling | No deadline |
 
-- **Enforcement varies by pool.** A site may enforce a deadline on its VM pools and none
-  on its bare-metal pools. No service-level or site-wide setting exists, and nothing is
-  shipped off to be turned on.
-- **Per lease, the deadline is the one the deal accepted**, never above the pool's (D1).
-  A committer cannot opt a lease out. The deadline protects the site from a storefront
-  that stops before delivery, so the choice not to enforce is the site's, made on the
-  pool.
+- **What the site contributes varies by pool; enforcement does not.** A site may give
+  its VM pools a deadline and its bare-metal pools none. On those bare-metal pools a
+  seller's clause deadline is still enforced by the site once committed, and a deal that
+  accepted no deadline gets none. No service-level or site-wide setting exists, and
+  nothing is shipped off to be turned on.
+- **Per lease, the deadline is the one the deal accepted**, never above a value the pool
+  resolves (D1). A committer cannot opt a lease out: the commit carries what the deal
+  accepted (D6), and the pool's value applies where the deal accepted none.
 - **None is the site's omission.** Under `docs/development/ARCHITECTURE.md`, "Omission
-  states no commitment", a pool that states none gives publication no value. The option
-  then carries the clause's deadline where the seller configures one, enforced by the
-  storefront, and that is the only delivery promise the buyer reads.
+  states no commitment", a pool that states none commits the site to nothing of its own:
+  publication gets no hint, a commit meets no ceiling, and a commit that carries no
+  deadline gets none. The option then carries the clause's deadline where the seller
+  configures one, and that is the only delivery promise the buyer reads. The storefront
+  enforces it, and so does the site once the commit carries it. Stating none costs only
+  the site, which gives up its safeguard for commits that carry no deadline.
 - **Providers declare their default as data.** Each provisioning adapter exports its
   declaration and the composition merges them, as with the host requirement. The VM and
-  bare-metal providers declare one. The API-credits provider declares none, so its quota
-  holds get no deadline by the same rule, with no exemption in the site.
+  bare-metal providers declare one. The API-credits provider declares none and its
+  commits carry no deadline, so its quota holds get none by the same rule, with no
+  exemption in the site.
 - **A pool edit changes no recorded deadline** (D1).
 - **Upgrading.** A pool written before this change states nothing, so it resolves its
   provider's default for new commits once the provisioning service is upgraded. A 0.4.0
@@ -180,16 +191,23 @@ Rejected: provider calls under a row lock; refusing activation by the clock alon
   before the storefront's own deadline, and the storefront's activation attempt is
   handed to end service as an activation lapse. The operator handbook's upgrade step
   covers it: upgrade the storefronts first, or state none, or a value at least the
-  clause's, on the pools they sell until they are upgraded.
+  clause's, on the pools they sell until they are upgraded. A 0.4.0 storefront's commit
+  carries no deadline, so on a pool that states none its leases record none.
 
 Rejected:
 
 - A composition switch shipped off and turned on after qualification. Every compute
   commit passes one step, so there are no callers left to wait for.
-- A permanent site-wide setting. Enforcement is a property of a pool.
+- A permanent site-wide setting. What a site contributes differs by pool, and enforcing
+  a deadline a deal accepted needs no setting.
 - The tag's presence as the opt-in. A pool that states nothing takes its provider's
-  default, so every compute commit gets a deadline by one rule.
+  default, so a compute commit that carries no deadline still gets one.
 - A per-lease opt-out. The party the deadline protects is not the committer.
+- A pool stating none recording the deal's deadline for an operator to act on by hand.
+  Nothing is protected by holding capacity past a deadline at which the storefront's own
+  rule already counts the deal as not delivered.
+- A pool stating none discarding the deadline the commit carries. The site would hold
+  capacity for a deal it was told how long to wait for.
 
 ### D4 — An end calculated from what a deal has funded is `lapse-billing-with-the-site-lease`'s
 
@@ -253,8 +271,9 @@ Publication takes the pool's value where the port gives one, else the payments c
 `delivery_deadline_seconds`. `deal-lifecycle`'s "The delivery deadline is the
 availability term the site or the clause sets" and `storefront-publication`'s "A compute
 option's delivery deadline is its pool's, else its clause's" already state that, and
-this change modifies neither. A pool that states none (D3) is the site that enforces
-none, for which the clause's deadline remains.
+this change modifies neither. A pool that states none (D3) gives publication no value,
+so the clause's deadline is what its options promise. The storefront enforces it, and
+the site does too once the commit carries it (D1).
 
 Where a pool's value replaces a different value a clause configures, publication reports
 it, naming the clause and both values, so a seller's configured promise is never
@@ -346,7 +365,8 @@ compares it with its own process's time source. A commit that follows approval q
 from a payment service a few seconds ahead, carries an instant the site reads as future.
 An instant later than the true approval lengthens only the seller's own safeguard (D1).
 A commit from a 0.4.0 storefront, and a deal whose delivery record holds none, carry no
-instant.
+instant. That matters only where a deadline is recorded: the pool resolves a value, or
+the commit carries a deadline with no instant.
 
 For an instant after the site's clock:
 
@@ -385,7 +405,8 @@ Two things follow whichever is chosen. The packaged seed pools state nothing, so
 follow a default that changes later. The lanes' listings compose their deadline from
 `PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, which `test-compatibility`'s "VM payment
 scenarios declare their configured delivery allowance" requires; the lanes' pools state
-that same value, or none, so the requirement stays true.
+that same value, or none, so the requirement stays true. Either way the site enforces
+the value the deal accepted.
 
 Recommended: (a), with the lanes' pools stating the lanes' value.
 
@@ -422,21 +443,28 @@ moved in the design session.
 - **How none is spelled.** The word `none`. An explicit null is hard to tell from
   absence in a patch and in a pool document, and zero reads as "immediately".
 - **Validation.** One shared check on every pool write surface, as the hold and SLA
-  preferences have: a stated value is a positive whole number of seconds or none. A
-  number stated for a provider that declares no default is refused.
+  preferences have: a stated value is a positive whole number of seconds or none.
+- **A number stated for a provider that declares no default.** Doubtful, and the least
+  settled item here. It was to be refused while a provider with no default meant one
+  whose leases take no deadline. The site now enforces a carried deadline on every pool,
+  so declaring no default says only that the provider contributes none, and a pool of
+  its own stating a number is not obviously wrong. Against accepting it: the one such
+  provider's commits have no lease end, which a recorded deadline needs.
 - **Which specification states what.** `resource-pool-management` states the tag and
   what a pool resolves; `site-capacity` states what the ledger does with the resolved
   value. The tag is documented with the pool document's format, in the operator
   handbook and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - **One publication function.** Both compositions pass the same function, which reads
   the pool through the resolver every reader of the pool projection already uses.
-- **The handbook.** "Leases the storefront has not delivered" is rewritten for a pool
-  that enforces a deadline, where the site reclaims the lease, and kept for a pool that
-  states none.
+- **The handbook.** "Leases the storefront has not delivered" is rewritten: the site
+  reclaims a lease that has a recorded deadline. The manual procedure remains for a
+  lease with none: one committed before the site recorded deadlines, and one whose
+  commit carried no deadline to a pool that resolves none.
 - **A tie.** A lease due at its deadline and its agreed end at one instant reports the
   ordinary term end.
-- **A finite end.** A pool that resolves a deadline requires a lease end at commit. The
-  only commits with no end are API credits' quota holds, which resolve none.
+- **A finite end.** A commit that would record a deadline requires a lease end. The only
+  commits with no end are API credits' quota holds, which carry no deadline to a pool
+  that resolves none.
 - **The anchor.** The later of the commitment instant and the lease start, as
   `deal-lifecycle` defines the term; delivery dispatches nothing before the start.
 - **Test levels.** The claim in both orders and the pool-edit and anchor cases are
