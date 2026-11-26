@@ -545,9 +545,10 @@ signed column of today's outbox without its delivery columns — which the
 authenticated lease read serves, retained under its own setting (unlimited by
 default). Delivery to the storefront is a consumer of `site.lease_ended` with one
 destination per configured peer: a peer answering "unsupported" parks its
-destination until it is resumed, and a newly configured peer is a new destination
-starting at the latest committed event, so an old event never reaches a later peer,
-and the replaced peer's destination is retired (D8).
+destination until it is resumed; a peer configured beside or in place of another is
+a new destination starting at the latest committed event, so no event recorded before
+it reaches it, while a first peer receives what was recorded since the consumer's last
+read; and the replaced peer's destination is retired (D8).
 `capacity_release_callback_outbox` is retired for a consumer of
 `site.capacity_released`, now recorded in the release's own transaction rather than
 reserved in a session before it. The callback goes only for the releases the lease
