@@ -1,107 +1,269 @@
-# Design — the site ledger reads pools through an injected authority
+# Design — the site ledger reads pools through an injected port
 
 ## Context
 
-See `proposal.md` for the four reads and how the edge accumulated. This document
-records the decision already taken and the questions this change's discussion
-must settle before it is planned.
+`docs/development/ARCHITECTURE.md`'s kit areas place `kit/site` and
+`kit/resource-pools` side by side as authority capabilities that build on foundation
+capabilities only. The site ledger does not: `kit/site/src/market_site/ledger.py`
+imports the pool authority and its contracts package and reads `ResourcePool` rows in
+its decision session for four facts:
+
+- **Existence**, at registration (`register_declaration_in_session`), refusing a
+  declaration naming a pool the site does not have.
+- **Enabled and delivers the requested offering mode**, at probe, reserve, resize and
+  the rebind recheck (`_pool_declares_mode`, through the contracts package's
+  `pool_delivers_offering_mode`).
+- **The pool's provider** (`_pool_provider`), which the ledger feeds with its injected
+  `HostRequirement` into `declaration_has_usable_host`.
+- **Whether the pool declares any deliverable mode** (`_pool_delivers`), in the offered
+  read, judging a missing or unparseable pool as delivering so the host rule fails
+  closed.
+
+Beside `ResourcePool`, the ledger imports `DeliverableHosts`, `HostRequirement` and
+`declaration_has_usable_host` from `market_resource_pools.host_requirement`, and
+`declared_deliverable_modes` and `pool_delivers_offering_mode` from
+`market_resource_pools_contracts`. `make check-architecture` cannot see the edge — both
+kits have empty scope and it forms no cycle — and `kit/site` has had no boundary test of
+its own since the repository check subsumed it.
+
+The default-pool fallback this change was first opened to retire is already gone: since
+`marketplace-v0.3.0` the ledger reads a declaration with no pool as belonging to no pool
+(`_log_poolless_declaration`), as `site-capacity`'s "Operator-administered capacity
+declarations" requires.
+
+`renewable-compute-lease-deadlines` depends on this change: it adds the pool's effective
+delivery deadline at commit as a further fact through the port.
+
+Two read-only modules also remain in the authority rather than its contracts package,
+`site_declarations.py` and `asking_rates.py`, so every reader of a site's pool
+declarations — the VM, bare-metal and API-credit storefronts and `arkhai_vms_listings` —
+installs the authority, SQLAlchemy and PyYAML for a function that imports neither.
+`docs/guidance/repository/package-layers.md`, "Where the current tree diverges", records
+both divergences against this change.
+
+The deployment record read for this design is the release tags; the newest is
+`marketplace-v0.4.0`.
 
 ## Decisions
 
-### Inject a port rather than sanction the edge
+### D1 — Remove the edge through an injected port rather than sanction it
 
-Two remedies were considered.
+The site ledger receives pool facts from its composition root through a port `kit/site`
+defines, and `kit/site` imports nothing from the pool capability.
 
-- **Sanction the edge.** Amend `ARCHITECTURE.md` to allow `kit/site → kit/resource-pools`
-  as a one-way edge between authority capabilities and forbid the reverse in a
-  boundary test. It is acyclic and both tables share one database per site, so
-  the design is defensible. But it retires the rule that authority capabilities
-  depend on foundation only, and it leaves the API-credits service holding a pool
-  table it does not administer.
-- **Inject a port.** The ledger receives pool facts from its composition root.
-  The rule holds, the diagram stays true, and a service with no pool
-  administration need not store pools to run a ledger.
+The deciding consideration is that this direction complies with the layering guidance:
+a kit-to-kit edge the kit-area order forbids is removed, by moving code or injecting a
+port, rather than sanctioned by amending the order. It also gives the site's pool facts
+one interface the composition answers, which matters for the next fact: the delivery
+deadline `renewable-compute-lease-deadlines` adds resolves from a pool tag, a provider's
+default and a composition switch, which only the composition knows.
 
-The port is chosen. The deciding consideration is that it removes an
-unnecessary dependency rather than documenting one.
+*Rejected.* Sanctioning the edge — amending `ARCHITECTURE.md` to allow
+`kit/site → kit/resource-pools` one way and forbidding the reverse — is the least code,
+but retires the rule that authorities build on foundation only and leaves every new
+fact half a row read and half an injected value, as the host requirement is today.
+Deferring leaves `renewable-compute-lease-deadlines` either adding a fifth row read,
+which `ARCHITECTURE.md` forbids while the edge stands, or waiting. An earlier argument
+for the port — that API credits would no longer need a pool table — does not hold: its
+pool row feeds its resource-pool projection and its storefront (D3).
 
-### The port is session-scoped
+### D2 — The pool authority stays a repository-wide kit
 
-Admission reads pool facts inside the same transaction that creates the
-reservation, under the ledger's serialization. Reading them from a separate
-session would let a pool's deliverable set narrow between the check and the
-reservation. Every port operation therefore takes the caller's session, as the
-ledger's current reads do.
+`kit/resource-pools` keeps an empty scope. It is provider-neutral: it stores `provider`
+as an opaque string and validates configuration through the `PoolConfigHandler`
+protocol, playbooks live in the domain adapters and the service's configuration, API
+credits — a domain with no family — runs a pool through it, and `kit/fulfillment`, a
+repository-wide kit whose specification forbids depending on the compute family kit,
+depends on it. It passes `family-kits.md`'s first placement test, "Outside the family".
+`ARCHITECTURE.md`'s statement that the authority is compute-family knowledge is
+corrected, and no scope divergence is recorded for it.
 
-### Enforcement is a boundary test
+*Rejected.* A compute family-kit distribution would put `kit/fulfillment` and both
+API-credit packages out of scope — two new findings to fix one — and add
+`align-package-paths-with-layers` as a prerequisite. Splitting the host-requirement
+module under compute is not separable: `kit/site` and `kit/fulfillment` both use its
+protocol and predicate (D5). Leaving the claim in place keeps a permanent document
+describing the authority as something it is not.
 
-The edge grew because nothing failed when it was added. The change is accepted
-only when `kit/site`'s boundary test forbids `market_resource_pools` and
-`kit/site/pyproject.toml` no longer declares the pool kit.
+A future pool behaviour that is intrinsically compute belongs to a provider's handler or
+to the compute family kit, never to `kit/resource-pools`.
+
+### D3 — API credits keeps its pool table and composes the real reader
+
+The API-credit service keeps `resource_pools`, its startup seed of the `default` pool,
+and `load_pool_directory`, which feeds the pool's metadata into the site's resource-pool
+projection; the API-credit storefront resolves its listing's advertisement and backing
+from that projection. Its composition root passes `ResourcePoolFacts()` with no host
+requirement, so no pool needs a host and its admission stays host-agnostic.
+
+*Rejected.* A static single-pool reader with the table dropped would leave the
+projection and the storefront without the pool's declarations, and dropping a deployed
+table is a non-additive schema change.
+
+### D4 — The port reads one pool's facts in the caller's session, as structural values
+
+`kit/site` defines two protocols in `market_site/pool_facts.py`:
+
+```python
+class PoolFacts(Protocol):
+    @property
+    def exists(self) -> bool: ...
+    @property
+    def enabled(self) -> bool: ...
+    @property
+    def deliverable_modes(self) -> frozenset[str] | None: ...  # None: unreadable
+    @property
+    def needs_host(self) -> bool: ...
+
+class PoolFactsReader(Protocol):
+    def pool_facts(self, db: Session, pool_id: str) -> PoolFacts: ...
+```
+
+`kit/resource-pools` implements them in `market_resource_pools/pool_facts.py` with its
+own frozen dataclass, `StoredPoolFacts`, and `ResourcePoolFacts`, which takes the
+composition's `HostRequirement` and resolves the pool's provider into `needs_host`. It
+imports nothing from `market_site`; the composition root, which imports both, is where
+the type checker confirms the implementation satisfies the port. A port's returned
+values are structural for the same reason its methods are: a concrete class owned by
+`kit/site` would make the implementation import `market_site`, recreating the edge in
+reverse.
+
+The ledger uses the facts as follows:
+
+| Decision | Facts |
+|---|---|
+| Registration | `exists`; otherwise `UnknownPoolError` |
+| Probe, reserve, resize, rebind | `enabled` and the requested mode in `deliverable_modes`; then the usable-host predicate with `needs_host`, judged backed |
+| Offered read | backed when `deliverable_modes is None or bool(deliverable_modes)`; then the predicate with `needs_host` |
+
+A missing pool is reported `exists=False`, `enabled=False`, `deliverable_modes=None`,
+with `needs_host` true exactly when a requirement is supplied, which keeps today's
+missing-provider rule and the offered read's fail-closed judgement. An unreadable
+deliverable declaration refuses admission rather than raising; startup and every write
+already refuse such a pool, so the case is unreachable.
+
+Every operation takes the caller's session: admission reads pool facts inside the
+transaction that creates the reservation, under the ledger's serialization and its
+`BEGIN IMMEDIATE`, so a pool's deliverable set cannot narrow between the check and the
+reservation. The ledger reads each pool once per decision, as it caches today.
+
+The ledger loses its `host_requirement` argument and takes a required `pool_facts`
+argument. `kit/site` drops both `arkhai-kit-resource-pools` and
+`arkhai-kit-resource-pools-contracts`.
+
+A later fact adds a member to `PoolFacts` and a field to `StoredPoolFacts` in the change
+that introduces it; an implementation lacking it fails type-checking at the composition
+root. `renewable-compute-lease-deadlines` adds `delivery_deadline_seconds` this way, with its
+switch and provider defaults configured on `ResourcePoolFacts`.
+
+*Rejected.* One method per fact keeps each caller's intent at its call site but moves
+the site's admission rules — enabled and declared, fail-closed — into the implementation,
+and reads per fact rather than per pool. A raw row view (provider, enabled, policy tags)
+is the smallest diff but keeps `kit/site` interpreting tags through the contracts
+package, keeps the host requirement injected into the ledger, and would need the
+deadline's switch and defaults injected separately. A concrete `PoolFacts` class, a
+per-composition adapter (two copies of one mapping), and handing the implementation the
+class to construct were rejected as the representation of the value.
+
+### D5 — The site owns the deliverable-hosts report and the usable-host predicate
+
+`kit/site` defines, in `market_site/deliverable_hosts.py`, the `DeliverableHosts`
+protocol and the predicate, taking the pool's need for a host as a boolean:
+
+```python
+def declaration_has_usable_host(
+    host_id: str | None, *, needs_host: bool, backed: bool,
+    deliverable: frozenset[str] | None,
+) -> bool: ...
+```
+
+Its behaviour is unchanged: usable when the pool needs no host or is unbacked;
+otherwise the declaration must name a host, and that host must be in the report when one
+is supplied. `kit/resource-pools` keeps `HostRequirement` and `pool_needs_host`, which
+its `ResourcePoolFacts` and `kit/fulfillment`'s scheduler apply. The scheduler and
+`scheduling_persistence.py` take the protocol and the predicate from `market_site`, as
+does `compute_provisioning`'s `RelayDeliverableHosts`. This is the shape of
+`CapacityReleaseGuard`: a narrow interface the lower layer defines and consumes, without
+naming the upper one.
+
+*Rejected.* Moving the module into the contracts package would strip its `Session` type
+and keep `kit/site` depending on contracts, and a session-scoped in-process protocol is
+not an API contract. A new foundation kit would cost a distribution for about a hundred
+lines and put a provider mapping in the foundation area. Redefining the protocol in
+`kit/site` while the predicate stayed would leave two copies of one rule.
+
+### D6 — The declaration and asking-rate readers move into the contracts package
+
+`site_declarations.py` and `asking_rates.py` move from `kit/resource-pools` into
+`kit/resource-pools-contracts`, beside the `listing_terms` and `capacity_bounds`
+resolvers it already holds; both import only the standard library and the contracts
+package, within its allowlist. The authority does not re-export them. The VM, bare-metal
+and API-credit storefronts and `arkhai_vms_listings` import them from contracts and drop
+`arkhai-kit-resource-pools` from their runtime dependencies, keeping it in their `dev`
+group only where tests seed pool rows. `host_requirement.py` stays with the authority as
+its provider mapping (D5). `package-layers.md` loses both pool divergences.
+
+*Rejected.* A separate change would cost a design, reviews, validation and closeout for a
+mechanical move. Leaving the modules would strand the recorded divergence without an
+owner.
+
+### D7 — `capacity_buckets.pool_id` stays nullable
+
+No migration is built. A stored declaration with no pool stays inert as `site-capacity`
+already requires: it is not projected, admitted against, or moved, and the ledger logs
+it. `marketplace-v0.2.29` wrote declarations with an optional pool, so a deployment whose
+rows date from it may hold such rows; their reading is current, specified behaviour, not
+a compatibility path. The ledger skips a poolless row before consulting the port.
+
+*Rejected.* Backfilling `default` reverses the specified rule, and points at a missing
+pool on every provisioning site, whose seed declares `vm-default` and
+`bare-metal-default`. Deleting the rows, or refusing the migration while any exists,
+spends a non-additive table rebuild in both service chains, and data loss or an operator
+upgrade step, on a state already inert.
+
+*Revisit when* a writer of `capacity_buckets` other than the ledger appears, so that the
+database itself must refuse a poolless row.
+
+### D8 — `DEFAULT_POOL_ID` stays in the pool authority
+
+It stays in `market_resource_pools.db` for the API-credit service's seed and the tests
+that seed that pool. The ledger never needed it, and nothing outside the pool capability
+reads it.
+
+### D9 — The ledger requires its reader; `kit/site`'s tests use their own double
+
+`pool_facts` has no default, so a composition cannot omit it and no permissive reader
+exists in production code. `kit/site`'s tests use a double in their own conftest — a
+mapping from pool id to a test record — as they already use a fake `DeliverableHosts`
+report. Tests in `kit/fulfillment`, the provisioning service, the storefronts and API
+credits pass the real `ResourcePoolFacts` over the pool rows they seed.
+
+*Rejected.* A permissive default reader in `kit/site` is exactly what could leak into a
+composition.
+
+### D10 — Two boundary tests guard the edge
+
+`kit/site/tests/unit/test_import_boundaries.py` forbids `market_resource_pools` and
+`market_resource_pools_contracts` in `kit/site/src`, and
+`kit/resource-pools/tests/unit/test_import_boundaries.py` forbids `market_site`, since
+nothing else would catch a reverse edge once the forward one is gone: the repository
+check cannot see the kit-area order, and acyclicity fails only once both directions
+exist. No `ARCHITECTURE.toml` row is added; the edge is invisible to the layer and scope
+rules.
+
+### D11 — Implementation cadence
+
+One round of two sessions, reviewed together, then closeout:
+
+1. **The contracts split (D6):** move the two modules and their unit tests, switch the
+   four readers' imports, move test-only dependencies to `dev`, bump versions, relock.
+2. **The port (D3, D4, D5, D9, D10):** the two `kit/site` modules, `ResourcePoolFacts`
+   and its tests, the ledger rewired, fulfillment's and the relay report's imports, both
+   composition roots, every test constructing the ledger, both boundary tests, and
+   `kit/site/pyproject.toml` dropping both pool distributions.
+
+The sessions touch disjoint code, and the split is mechanical, so one review reads both.
 
 ## Open questions
 
-- **Port granularity.** One call returning a small value object (exists, enabled,
-  deliverable modes, needs host), or one call per fact. A value object reads a
-  pool once per decision; separate calls keep each caller's intent visible.
-- **API-credits pool storage.** Keep the pool table and pass the real
-  implementation, or pass a static single-pool authority and drop the table. The
-  second removes storage a service does not administer, but its pool then has no
-  row to carry advertisement and backing declarations, so the service would need
-  another way to satisfy the rule that every pool carries them.
-- **Non-null `pool_id` migration.** Whether any stored capacity row has a null
-  `pool_id` in practice, and whether the backfill belongs in each service's
-  migration or in a shared helper each calls. The migration-ownership precedent
-  in `pool-declared-advertisement-and-backing` keeps migrations service-local.
-- **Where `DEFAULT_POOL_ID` lives.** Once the ledger no longer needs it, whether it
-  stays in `kit/resource-pools` or moves to a foundation home for the services
-  that still seed a default pool.
-- **Test construction.** 26 files construct `CapacityLedgerService`. Whether tests
-  that do not exercise pool facts receive a permissive test authority, and if so
-  how it is kept out of production composition.
-- **Finish the split the contracts package started.** *Gates planning.* This design
-  predates `kit/resource-pools-contracts` and `kit/resource-pools-client`. The
-  contracts package took `hints`, `pools`, and `routes`, but three read-side
-  modules stayed with the authority: `asking_rates.py` (imports only
-  `market_capability_shape`), `site_declarations.py` (imports only
-  `market_resource_pools_contracts.hints`), and `host_requirement.py` (no imports).
-  Because they stayed, every reader of pool declarations still installs the
-  authority and its SQLAlchemy and PyYAML dependencies — the VM storefront's
-  `listing_sources.py`, the bare-metal storefront's `site_reading.py`,
-  `arkhai_vms_listings` in three modules, and `kit/site/ledger.py`, which imports
-  both distributions. Moving the three modules to the contracts package is
-  mechanical and leaves `kit/resource-pools` as `db`, `service`, and
-  `pool_config_handler`: the authority alone. After that, the port this design
-  defines is the *only* thing `kit/site` needs from pools, and the import is
-  deleted rather than injected around.
-- **What the authority is, once it is alone.** `db.py`, `service.py`, and
-  `pool_config_handler.py` speak provider, playbook, and host. Outside the compute
-  family only `apicredits_service` touches them, and only because the site ledger it
-  composes reads pool rows: `db/database.py` imports `market_resource_pools.db` to
-  create the table the ledger needs. Under
-  `package-layers.md`'s scope rule a kit may know no family, and under the family-kit
-  placement tests the authority fails the third-domain test as a repository-wide
-  kit. Decide whether it becomes a compute family-kit distribution
-  (`provisioning-pools` beside `hosts/` and `jobs/`, once
-  `align-package-paths-with-layers` has placed the family kit) or stays
-  repository-wide with that finding recorded in `package-layers.md`'s "Where the
-  current tree diverges".
-  If it moves, the ledger's pool-facts port is what keeps `kit/site`
-  repository-wide, and `apicredits_service` — which imports
-  `market_resource_pools.db` directly in `db/database.py` — takes the port's
-  implementation by injection or uses the static single-pool authority the
-  "API-credits pool storage" question above already contemplates. That question and
-  this one are one decision.
-- **Where the boundary test lives.** The repository check `enforce-package-layers`
-  adds cannot see `kit/site` → `kit/resource-pools` as the tree stands: both are
-  kits of empty scope and the edge forms no cycle, so no exception row can excuse
-  it and none is seeded. Whether it becomes visible is this design's own decision:
-  if the pool authority becomes a compute family-kit distribution, the edge is a
-  kit depending on family knowledge and the scope rule fails it; if the authority
-  stays repository-wide, the port removes the import and the per-package test this
-  design plans (`kit/site` forbids `market_resource_pools`) is added as the guard
-  and kept, since it asserts what the repository check cannot. `kit/site` has no
-  boundary test of its own today: the repository check subsumed the one it had,
-  which forbade only lifecycle, executor, and domain imports. `apicredits_service` →
-  `kit/resource-pools` is a composition depending on a kit and is legal until the
-  authority is scoped, at which point the same scope rule reports it.
+None.
