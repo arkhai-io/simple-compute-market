@@ -8,7 +8,7 @@ Every authenticated request MUST use the `arkhai.market-request.v3` profile of R
 
 The receiving authority MUST reserve `(principal, request_id)` with the request's hash, origin included, before dispatch, enforce configured clock skew on `created` — on every operation but a time-setting operation mounted under injected time, which "The time-setting operation is exempt from request freshness" governs — and reject changed reuse, missing fields, unsupported protocols, or invalid proofs. An exact reuse of the same canonical request MUST resolve as its route declares under "Each route declares how an exact retry is resolved", and MUST NOT execute a conflicting mutation.
 
-Every response an authority returns on an authenticated route MUST use the `arkhai.market-response.v3` profile, covering its status and content digest and, from the request, its method, operation, resource and request ID. This MUST hold for refusals as well as acknowledgements, and for a refusal raised while authenticating the request as well as one raised after, including a request no route serves, signed over the operation, resource and request ID the request states. A caller MUST verify the proof, body, request binding, and exact expected authority before accepting any of them.
+Every response an authority returns on an authenticated route MUST use the `arkhai.market-response.v3` profile, covering its status and content digest and, from the request, its method, operation, resource and request ID. This MUST hold for refusals as well as acknowledgements, and for a refusal raised while authenticating the request as well as one raised after, including a request no route serves, signed over the operation, resource and request ID the request states, whether the authority authenticates in middleware or inside its routes. A request that fails after it was authenticated — a route raising an unexpected error — MUST be answered with a signed 500 carrying a fixed detail that reveals nothing of the error, and the error MUST be logged; on a `RECORDED` route that answer MUST be recorded as the request's outcome, and on a `RERUN` route nothing is recorded. A caller MUST verify the proof, body, request binding, and exact expected authority before accepting any of them.
 
 An authority MUST NOT withhold response authentication because trust has not been established. An answer MAY be unauthenticated only when the request carried no request identity, and an authority MUST NOT invent one in order to sign.
 
@@ -35,6 +35,16 @@ An authority MUST refuse a request under `arkhai.market-request-signature.v2` as
 
 - **WHEN** a request carrying a request identity states an operation for a path or method the authority does not serve
 - **THEN** the authority answers a signed 404, or 405 with `Allow`, whose body code is `operation_not_served`, bound over the stated operation, resource and request ID
+
+#### Scenario: An authority authenticating inside its routes receives an unmatched request
+
+- **WHEN** a request carrying a request identity reaches the registry on a path no route serves
+- **THEN** the registry answers a signed 404 whose body code is `operation_not_served`, although no route's authentication ran
+
+#### Scenario: A storefront route raises after authentication
+
+- **WHEN** an authenticated request reaches a storefront route that raises an unexpected error
+- **THEN** the caller receives a signed 500 with a fixed detail that its typed client verifies, and the error is logged by the storefront
 
 #### Scenario: The route binds another operation
 
@@ -106,7 +116,7 @@ An authority MUST refuse a request under `arkhai.market-request-signature.v2` as
 
 ### Requirement: Each route declares how an exact retry is resolved
 
-Every authenticated route MUST declare its exact-retry resolution in its route contract: `RERUN`, under which an exact retry runs the handler again and no response body is recorded; `RECORDED`, under which the outcome is kept for the authority's retention and an exact retry is answered with it; or `REFUSE`, under which an exact retry is refused and nothing is recorded. An authority MUST refuse to start when an authenticated route declares none. A concurrent exact retry while the first attempt holds its lease MUST be refused as in progress whatever the route declares, and one attempt MAY reclaim an expired lease. A handler serving an exact retry under `RERUN` MUST be told it is a retry. A route MUST be `RERUN` only where its domain converges, so that a second run changes nothing the first did not and its answer tells the caller what happened; each such mutation MUST be proven by a test that dispatches the same request twice.
+Every authenticated route MUST declare its exact-retry resolution in its route contract: `RERUN`, under which an exact retry runs the handler again and no response body is recorded; or `RECORDED`, under which the outcome is kept for the authority's retention, committed in the same transaction as the handler's domain write, and an exact retry is answered with it. An authority MUST refuse to start, naming the route, when any route in its application carries neither a declaration nor an explicit mark that it is unauthenticated, whether the authority authenticates in middleware or inside its routes. A concurrent exact retry while the first attempt holds its lease MUST be refused as in progress whatever the route declares, and one attempt MAY reclaim an expired lease. A handler serving an exact retry under `RERUN` MUST be told it is a retry. A route MUST be `RERUN` only where its domain recognises the retry as already applied, so that a re-run after any later write changes nothing and its answer tells the caller what happened; an absolute setter or a delete MUST NOT be `RERUN`. Each `RERUN` mutation MUST be proven by a test that dispatches a request, then a later write to the same resource, then the request's exact retry, and finds the later write intact.
 
 #### Scenario: A read is retried exactly
 
@@ -124,10 +134,20 @@ Every authenticated route MUST declare its exact-retry resolution in its route c
 - **WHEN** a buyer repeats an exact `negotiate_new` request after losing its acknowledgement, within the retention
 - **THEN** the authority answers the recorded outcome under a fresh response signature and no second negotiation is created
 
+#### Scenario: A delayed retry of an absolute setter follows a later write
+
+- **WHEN** a storefront publishes a listing and loses the acknowledgement, an operator then sets a status override on it, and the storefront's exact retry of the publish arrives within the retention
+- **THEN** the registry answers the publish's recorded outcome and the operator's override remains
+
 #### Scenario: A route declares no resolution
 
 - **WHEN** an authority is composed with an authenticated route whose contract declares no exact-retry resolution
 - **THEN** the authority refuses to start, naming the route
+
+#### Scenario: A route authenticating inside its handler carries no declaration
+
+- **WHEN** the registry is composed with a route that neither admits requests through the admission core with a declaration nor is marked unauthenticated
+- **THEN** the registry refuses to start, naming the route
 
 #### Scenario: An exact retry arrives while the first attempt runs
 
@@ -136,14 +156,29 @@ Every authenticated route MUST declare its exact-retry resolution in its route c
 
 ### Requirement: Replay state is bounded by the request
 
-Every reservation MUST carry an expiry computed from the request alone on the authority's process time source: for a `RERUN` route, its origin plus twice the configured skew; for a `RECORDED` route, its origin plus the greater of the retention plus the skew and twice the skew. An authority MUST delete expired reservations, and MUST NOT keep replay state indefinitely or only in process memory. The retention of recorded outcomes MUST be operator-configurable per authority and MUST default to 24 hours when unset.
+Every reservation MUST carry an expiry on the authority's process time source: the later of its lease deadline and a bound computed from the request alone — for a `RERUN` route, its origin plus twice the configured skew; for a `RECORDED` route, its origin plus the greater of the retention plus the skew and twice the skew — raised whenever its lease is reclaimed. An expired reservation MUST affect no answer: it is treated as absent, and a reservation under its key replaces it. An authority MUST delete expired reservations by a periodic sweep, run when it starts and then at an interval, so that each is deleted within one interval of its expiry, and MUST NOT keep replay state indefinitely or only in process memory. The retention of recorded outcomes and the sweep's interval MUST each be operator-configurable per authority and MUST default to 24 hours when unset.
 
 On a `RERUN` route a request whose reservation has expired MUST be dispatched as its route declares. On a `RECORDED` route a first use MUST carry an origin within the skew of the authority's instant, and an exact retry whose origin is older than the retention, or whose reservation is gone within it, MUST be answered with a signed `410 Gone` whose body code is `exact_retry_expired`.
 
 #### Scenario: A reservation passes its expiry
 
-- **WHEN** a `RERUN` route's reservation is older than its origin plus twice the skew and another request is reserved
+- **WHEN** a `RERUN` route's reservation's expiry has passed and the authority's sweep runs
 - **THEN** the expired reservation is deleted
+
+#### Scenario: An expired reservation awaits the sweep
+
+- **WHEN** a `RERUN` route's reservation has expired but no sweep has run since, and a request under the same principal and request ID with changed content arrives
+- **THEN** the request is reserved and dispatched as a first use, not refused as a replay conflict
+
+#### Scenario: An old-origin request is still running when expired rows are swept
+
+- **WHEN** a `RERUN` request whose origin is older than twice the skew holds its lease, the sweep runs, and its exact retry arrives
+- **THEN** its reservation survives the sweep and the retry is refused as in progress without dispatching a second operation
+
+#### Scenario: The sweep's interval is not configured
+
+- **WHEN** an authority starts with no sweep interval configured
+- **THEN** it sweeps expired reservations at startup and every 24 hours
 
 #### Scenario: A recorded outcome expires
 
@@ -162,12 +197,13 @@ On a `RERUN` route a request whose reservation has expired MUST be dispatched as
 
 #### Scenario: An authority restarts
 
-- **WHEN** an authority restarts between a request and its replay inside the skew
-- **THEN** the replay is refused, because its reservation was durable
+- **WHEN** the API-credits service restarts between a `credits_key_adjust` request's completion and its exact retry inside the retention
+- **THEN** the retry is answered with the recorded outcome and no second adjustment is applied, because its reservation was durable
+- **AND** a reuse of the same request identity with changed content is refused as a replay conflict
 
 ### Requirement: A secret is never recorded for replay
 
-A response carrying a secret — access material, an API-key secret, a password, a private or staged key, or a token — MUST NOT be recorded as a replay outcome. Its route MUST be `RERUN` where running again supersedes the secret the lost answer held, and `REFUSE` otherwise.
+A response carrying a secret — access material, an API-key secret, a password, a private or staged key, or a token — MUST NOT be recorded as a replay outcome. Its route MUST be `RERUN`, and only where running again supersedes the secret the lost answer held; an authority MUST NOT serve a secret-bearing route whose secret a re-run cannot supersede.
 
 #### Scenario: An issuance answer is lost
 

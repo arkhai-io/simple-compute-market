@@ -81,9 +81,9 @@ changed signed content MUST NOT dispatch a second operation.
 
 ### Requirement: A failure after authentication is answered signed
 
-A provisioning authority, and every service authenticating through the shared
-admission core, MUST answer a request that fails after it was authenticated — a
-route raising an unexpected error — with a signed 500 response carrying a fixed
+A provisioning authority, and the services the site kit hosts, MUST answer a
+request that fails after it was authenticated — a route raising an unexpected
+error — as `marketplace-identity` requires of every authority: with a signed 500 response carrying a fixed
 detail that reveals nothing of the error, and MUST log the error itself. On a
 route declared `RECORDED`, that response MUST be recorded as the request's
 outcome, so an exact retry receives the same signed answer rather than an

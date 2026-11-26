@@ -56,19 +56,22 @@ release may stop accepting the version before
 ## What Changes
 
 - **One authenticated-request layer for every authority.** A standalone replay
-  component under `tools/` (reserve, lease, resolve, record, expire, prune, with
+  component under `tools/` (reserve, lease, resolve, record, expire, sweep, with
   `sqlite3` and SQLAlchemy stores) and a thin foundation kit,
   `kit/authenticated-requests`, over it: version 3 verification, audience, trust,
-  signed refusals and a signed-outcome hook. The storefronts, the registry, the
+  signed refusals and 500s, a signed-outcome hook, a fallback that signs answers to
+  requests no route serves, and a route inventory checked at startup. The storefronts, the registry, the
   provisioning service, the site kit (the API-credits service) and the deal-lifecycle
   routes all move onto it (design D3, D4).
-- **Every route declares how an exact retry is resolved**: `RERUN`, `RECORDED` or
-  `REFUSE`, required, with no default, each `RERUN` mutation proven by a
-  double-dispatch test (D5). Reads and convergent mutations re-run and record no body;
-  a short list of non-convergent mutations keeps its outcome (D6). A response carrying
-  a secret is never recorded.
+- **Every route declares how an exact retry is resolved**: `RERUN` or `RECORDED`,
+  required, with no default, each `RERUN` mutation proven by a double-dispatch test
+  with a later write between the request and its retry (D5). Reads and the mutations
+  whose domain recognises a retry as applied re-run and record no body; every other
+  mutation, absolute setters and deletes included, keeps its outcome (D6). A response
+  carrying a secret is never recorded.
 - **Every row is bounded.** Each request carries a signed origin; a row expires at a
-  time computed from the request, and is pruned on write. Recorded outcomes are kept
+  time computed from the request, never before its lease ends, and a periodic sweep
+  the admission core runs, daily by default, deletes it. Recorded outcomes are kept
   for an operator-configurable retention, 24 h by default; an exact retry after it gets
   a signed 410 (D7, D8).
 - **A version 3 envelope, an RFC 9421 profile.** It binds the caller's
@@ -117,8 +120,6 @@ None.
 
 - Skew enforcement on first use, which conforms and is unchanged.
 - The introduction record's retention, which `contact-payload-retention` owns.
-- A signed answer to a route that raises after authentication, which
-  `unbacked-bare-metal-listings` owns.
 - The storefront role middleware set, its administrator route contracts and how the
   shell applies them, which `kit-owned-storefront-auth-and-persistence` keeps.
 - The identity-lifecycle remainder, which `complete-service-identity-lifecycle` owns.
@@ -128,13 +129,17 @@ None.
 
 No change gates it; `unify-compute-delivery-path`, whose credential-capable
 declaration this generalizes, is archived. `retain-authenticated-request-outcomes` is
-superseded by it (D18), and `sign-multi-language-credits-middleware` waits on it (D19).
+superseded by it (D18), and `sign-multi-language-credits-middleware` and
+`contract-driven-authenticated-routing` wait on it (D19).
 
 Acceptance: every authority authenticates through the one admission core under version
 3; every authenticated route declares its exact-retry resolution and every `RERUN`
-mutation passes its double-dispatch case; no replay row outlives its computed expiry;
-no recorded outcome holds a contact or a secret; the 0.4.0 tables are gone and the
-SQLite files compacted after the upgrade; every refusal that names a request is signed;
+mutation passes its double-dispatch case; no expired replay row affects an answer, and
+every expired row is deleted within one sweep interval; no recorded outcome holds a
+contact or a secret; the 0.4.0 tables are gone and the
+SQLite files compacted after the upgrade; every refusal that names a request is signed,
+on a path no route serves too, and an unexpected failure after authentication is a
+signed 500;
 version 2 requests are refused and version 2 evidence still verifies.
 
 ## Impact
@@ -144,8 +149,8 @@ evidence reader); a new standalone component under `tools/`; a new
 `kit/authenticated-requests`; `kit/schema-migrations` (space-freeing migrations); every
 authority's authentication code listed in the design's findings; every typed client;
 `kit/delivery`'s webhook sink; each service's migration chain and the registry's
-Alembic revisions; the API-credits consume models. Configuration: one retention key on
-every authority, in its settings and Helm values schema. Packages: `arkhai-kit-identity`
+Alembic revisions; the API-credits consume models. Configuration: a retention key and a
+sweep-interval key on every authority, in its settings and Helm values schema. Packages: `arkhai-kit-identity`
 takes an incompatible minor bump and every dependent's bound moves (D17).
 
 ## Permanent documentation impact
@@ -184,7 +189,8 @@ Engineering guidance, shared across repositories, gains a messaging file and a
   `architecture.md`; `introduction-delivery` and `api-credits` specs; the rule that a
   message carrying a secret is never stored or logged as it stands, and is stripped
   before any persistence, to the new engineering `messaging.md`.
-- D7 bounds, on-write pruning, database stores and the retention key:
+- D7 bounds, the lease floor, expired rows treated as absent, the periodic sweep,
+  database stores and the retention and sweep-interval keys:
   `marketplace-identity` `architecture.md` and `configuration.md`;
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
 - D8 request origin, retention and the 410: `marketplace-identity` spec.

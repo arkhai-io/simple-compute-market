@@ -169,8 +169,9 @@ the standard to a version 4, which costs a second cutover.
 One authority-neutral component (D4) does, for every authority: verify a version 3
 request (signature, audience, freshness, role and principal against an injected trust
 set); reserve it; resolve an exact retry as its route declares (D5); record an outcome
-where the route declares one; sign every answer, refusals and unroutable requests
-included (D11); and prune (D7). All seven arrangements move onto it, storefront routes
+where the route declares one; sign every answer, refusals, unroutable requests and an
+unexpected failure after authentication included (D11); and prune (D7). All seven
+arrangements move onto it, storefront routes
 included. Each authority keeps its own wiring: which roles and principals each route
 admits, and where its trust comes from.
 
@@ -186,7 +187,39 @@ The component's interface, walked through every caller:
   `capture_negotiation`, deal-servicing's `lifecycle_response`);
 - a middleware form for authorities that route by a contract table (provisioning, the
   site kit) and a request-dependency form for authorities that authenticate inside the
-  route (registry, storefront controllers, deal-servicing), over one core.
+  route (registry, storefront controllers, deal-servicing), over one core;
+- whichever form an authority uses, an application-level fallback the core installs
+  around the whole application: a request carrying request identity (the profile's
+  `Market-Request-ID` and signature fields) that no route admitted — a path or method
+  no route serves, answered 404 or 405 by the router before any dependency runs — is
+  verified and answered with D11's signed refusal, its body naming only what the
+  caller stated;
+- a route inventory, checked when the core is constructed over the application: every
+  route in the application's route table carries an exact-retry declaration through
+  its admission, in either form, or an explicit unauthenticated mark (health, the
+  OpenAPI document, the injected time route), and the authority refuses to start
+  naming any route that has neither (D5). If the round 1 gate finds the framework's
+  route table cannot tell an admitted route from one that is not, the dependency form
+  registers each declaration in an explicit table at import, and the inventory reads
+  that;
+- a signed 500 for an unexpected failure after authentication: a handler that raises
+  is answered with a signed 500 carrying a fixed detail that reveals nothing of the
+  error, and the error is logged; on a `RECORDED` route the 500 is the recorded
+  outcome, recorded once the domain write has rolled back, so an exact retry learns
+  that nothing applied; on a `RERUN` route nothing is recorded. This
+  generalizes `physical-provisioning`'s existing requirement, which
+  `unbacked-bare-metal-listings` delivered for provisioning and the site kit, to every
+  authority on the core.
+
+The fallback and the inventory settle design review 16's F2: the request-dependency
+form alone never runs for an unmatched request, so the registry's handler, which signs
+only when route authentication left its object on `request.state`
+(`core/registry/src/core_registry/main.py`), answers an unmatched path unsigned, and a
+core reached only through the routes that call it cannot see one that forgot to. Moving
+every authenticated route onto a contract-driven router would remove the two forms and
+is the cleaner long-term shape, but it rewrites seven routers; the owner recorded it as
+its own change, `contract-driven-authenticated-routing` (D19). The signed 500 settles
+16 F5.
 
 `kit-owned-storefront-auth-and-persistence` keeps the storefront role set, the
 administrator route contracts, how the shell applies them, and persistence; it
@@ -203,12 +236,13 @@ chain still in design.
 
 ```text
 standalone component under tools/   no internal dependencies; stdlib, optional SQLAlchemy and Starlette
-  reserve, lease, resolve (RERUN/RECORDED/REFUSE), record, expire, prune over an opaque key and hash;
+  reserve, lease, resolve (RERUN/RECORDED), record, expire, sweep over an opaque key and hash;
   sqlite3 and SQLAlchemy stores; its DDL as published statements; ASGI and dependency wrappers
         ▲
 kit/authenticated-requests          foundation kit; authorities only
   the admission core: version 3 verification through kit/identity, audience, trust,
-  Market-* fields, signed refusals, the signed-outcome hook;
+  Market-* fields, signed refusals and 500s, the signed-outcome hook, the unmatched-request
+  fallback, the route inventory, the sweep's lifespan task;
   wraps the component's DDL into kit/schema-migrations migrations
         ▲
 kit/identity                        foundation kit; every client and contract may use it
@@ -247,9 +281,13 @@ Each route's contract carries a required `exact_retry` field, from `kit/identity
 vocabulary:
 
 - `RERUN` — the handler runs again; no body is recorded;
-- `RECORDED` — the outcome is kept for the retention (D8);
-- `REFUSE` — an exact retry is refused with nothing recorded, for an outcome that
-  cannot be recorded. No route uses it today.
+- `RECORDED` — the outcome is kept for the retention (D8).
+
+There is no third mode. A `REFUSE` mode — an exact retry refused with nothing recorded,
+for an outcome that can neither be recorded nor run again — had no expiry, no
+first-use rule and no answer to a retry once its row was gone, after which a retry is
+indistinguishable from a first use, and no route used it (design review 16, F4). A
+route that needs it is designed with its whole lifecycle when it arrives (D6).
 
 ```python
 _contract(
@@ -274,10 +312,12 @@ flag.
 
 Each `RERUN` declaration on a mutation is proven by a double-dispatch harness in the
 standalone component, which each authority's integration suite drives with one case
-per operation: the request, then its exact retry re-signed later, through the real
-admission core and application, asserting that the domain state after both equals
-the state after the first (the replay table excluded) and that the second answer is
-the route's current answer. A completeness test per authority fails when a `RERUN`
+per operation: the request, then a later write to the same resource, then the first
+request's exact retry re-signed, through the real admission core and application,
+asserting that the domain state after the retry equals the state before it (the replay
+table excluded) — the retry undoes nothing the later write did — and that the retry's
+answer is the route's current answer. The interleaved write is what tests D6's
+criterion (16 F3); a retry straight after its request proves only idempotence. A completeness test per authority fails when a `RERUN`
 operation has no case. Test level: integration, the lowest at which the real handler
 and database exist (`docs/guidance/engineering/test-levels.md`).
 
@@ -288,12 +328,41 @@ declaration only as a runtime 409; proof by review alone.
 
 ### D6 — Which routes keep a recorded outcome
 
-A route is `RERUN` where its domain converges and a re-run's answer still tells a
-caller who lost its acknowledgement what happened — a 404 after a delete, "time is
-already later", a stale heartbeat. Everything else is `RECORDED`. A response carrying a
-secret is never `RECORDED`: it is `RERUN` where the re-run supersedes the lost answer
-(issuance rotates an unused key's secret, `grant-keys/stage` stages a new key, relay
-`token`, VM `reset-password`), and `REFUSE` otherwise.
+A route is `RERUN` only where its domain recognises the retry as already applied, so
+that a re-run after any later write changes nothing, and its answer still tells a
+caller who lost its acknowledgement what happened. That holds for keyed and monotonic
+operations: consume carries its idempotency key, terminate and the capacity-released
+notification name the lease they act on, a heartbeat or time-set only moves forward.
+Idempotence alone is not enough: an absolute setter is idempotent against itself but
+does not commute with a later write, so a delayed retry, or one from another client
+under the same principal, would re-assert an older value over a newer one. Everything
+else is `RECORDED`, whose outcome answers the retry within the retention and whose
+signed 410 answers it after (D8); the replay layer remembers what the domain cannot
+recognise. A response carrying a secret is never `RECORDED`: its route is `RERUN`
+where the re-run supersedes the lost answer (issuance rotates an unused key's secret,
+`grant-keys/stage` stages a new key, relay `token`, VM `reset-password`), and a route
+whose secret a re-run cannot supersede is not admitted until a design gives it a mode
+with its whole lifecycle (D5).
+
+The plan checks every authenticated route on every authority against this criterion
+and names its declaration; the table below is the set known at design.
+
+*Design review 16, F3:* D6 first made the absolute setters `RERUN` on the ground that
+an exact retry re-asserts what the same caller asked for, bounding the harm to a caller
+that retries without waiting for its acknowledgement. The authority cannot rely on that
+premise: the lease admits a retry at any time, the origin rule admits a `RERUN` retry
+hours later, and another client may share the principal. The registry's publish
+replaces `published_document` and pops the status and oracle overrides, so a delayed
+retry clears an operator's later override; its delete removes whatever listing holds
+the ID, so a delayed retry deletes a listing republished since
+(`core/registry/src/core_registry/api/listing_routes.py`). The owner considered
+ordering writes by the signed origin and request ID and chose the criterion above:
+the origin is the caller's clock, admitted within the skew, so it orders
+deterministically but not causally across clients and principals, and it would make a
+client's clock an input to domain state (the concern D8 rejects a UUIDv7 request ID
+on). Ordering distinct concurrent writes is domain concurrency control, whose standard
+form is a conditional request refused when stale; no change takes it on now, and a
+setter that gains it may then be `RERUN`.
 
 Two small domain fixes come with this: `idempotency_key` becomes required on
 `credits_key_consume` and `consume-batch` in the version 3 wire models (every gate
@@ -305,33 +374,51 @@ The `RECORDED` set:
 
 | Authority | Routes |
 |---|---|
-| VM, bare-metal and API-credits storefronts | `negotiate_new`, `negotiate_continue`, `admin_advance_negotiation`, `admin_force_accept_negotiation`, `admin_reserve_capacity`, `admin_release_reservations`, `admin_run_lifecycle_cycle`, `admin_refresh_site_projections` |
+| VM, bare-metal and API-credits storefronts | `negotiate_new`, `negotiate_continue`, `admin_advance_negotiation`, `admin_force_accept_negotiation`, `admin_reserve_capacity`, `admin_release_reservations`, `admin_run_lifecycle_cycle`, `admin_refresh_site_projections`; trading and listing pause and resume |
 | VM storefront | `refund_listing`, `arbitrate_listing` |
 | API-credits storefront | `publish-from-quota` |
-| Provisioning service | `POST relays`; the VM-domain job routes but `reset-password`; the `check-leases`, convergence `run-cycle` and `advance-cycle` routes |
+| Registry | listing publish, update and delete |
+| Provisioning service | `POST relays`; host and pool upserts and deletes; the VM-domain job routes but `reset-password`; the `check-leases`, convergence `run-cycle` and `advance-cycle` routes |
 | API-credits service | `credits_key_adjust` |
 
 Every other authenticated route on every authority is `RERUN`, reads included. None of
-the `RECORDED` responses carries a contact or a secret. The absolute setters —
-pause and resume, registry publish and update, host and pool upserts — are `RERUN`: an
-exact retry re-asserts what the same caller asked for. A retry that arrives after the
-same caller's later write re-applies the older value; a retried registry publish
-clears status overrides set since (`core/registry/src/core_registry/api/listing_routes.py`).
-Only a caller that retries without waiting for its own acknowledgement meets this.
+the `RECORDED` responses carries a contact or a secret. The absolute setters and
+deletes are `RECORDED`: their bodies are small, and 24 hours of them is bounded, where
+the growth this change removes was not.
 
 Rejected: `RERUN` only where the answer is identical, which keeps bodies whose re-run
-answer already tells the caller what happened; making every unsafe route idempotent in
-its domain now, which pulls negotiation, relays, refund and admin reserve into designs
-of their own; recording the successful introduction start's body; recording consume,
-the highest-volume route; giving `credits_key_adjust` an idempotency key now.
+answer already tells the caller what happened; `RERUN` for every idempotent route,
+absolute setters included, which lets a delayed retry clobber a later write (16 F3);
+ordering writes by the signed origin, which is deterministic but not causal; making
+every unsafe route idempotent in its domain now, which pulls negotiation, relays,
+refund, admin reserve and every setter into designs of their own; recording the
+successful introduction start's body; recording consume, the highest-volume route;
+giving `credits_key_adjust` an idempotency key now.
 
 ### D7 — Bounds, pruning and stores
 
-Every row stores an `expires_at`, computed at insert from the request alone on the
-authority's process time source:
+Every row stores an `expires_at` on the authority's process time source: the later of
+its bound, computed at insert from the request alone, and its lease deadline, raised
+whenever a lease is reclaimed:
 
 - `RERUN`: origin + 2 × skew;
 - `RECORDED`: origin + max(retention + skew, 2 × skew).
+
+The lease floor keeps a row while its attempt runs (design review 16, F1). A `RERUN`
+request with an old origin — the capacity-released notification below — has a bound
+already in the past; without the floor, a sweep could delete its row while its handler
+ran, and a concurrent exact retry, finding no row, would dispatch a second time. A
+first use with a fresh origin is unaffected: its bound is at least arrival + skew,
+beyond any lease.
+
+An expired row is treated as absent: it answers nothing and refuses nothing, and a
+reservation under its key replaces it. Expired rows wait for the sweep, so this is what
+keeps a leftover row from refusing a request that should be served (16 F6).
+
+A `RECORDED` outcome commits in the same transaction as the handler's domain write, so
+a crash between them cannot leave a write applied with no outcome for a reclaimed lease
+to find. Where a handler's effect is outside the authority's database, its route's
+recovery is the domain's, as today.
 
 The origin rule depends on the route's kind. On a `RERUN` route the origin decides only
 when the row is pruned; a re-signed retry that finds no row is dispatched, which its
@@ -342,20 +429,35 @@ with the signed 410 (D8). A provisioner retrying a capacity-released notificatio
 hours under one request identity (`compute-provisioning-contract`) is therefore
 dispatched again and converges.
 
-Pruning runs on write: every reservation deletes a bounded batch of expired rows,
-through an index on `expires_at`, in its own transaction, so authorities without a
-loop controller need none. The component has no in-memory backend for production;
+Pruning is a periodic sweep the admission core owns. The core starts it from the
+lifespan each authority already composes, so no authority writes a loop of its own: it
+runs once at startup, then every `authenticated_requests.replay_prune_interval_seconds`,
+deleting expired rows through an index on `expires_at` in bounded batches, each its own
+transaction, so a backlog never holds SQLite's write lock for long. Replicas or workers
+each sweeping is harmless; the delete is idempotent. Between sweeps a store holds at
+most one interval of `RERUN` rows beside the retention's `RECORDED` rows, small rows
+either way; the startup sweep covers an upgrade or restart. Expired rows are therefore
+deleted within one interval of their expiry, and none affects an answer meanwhile
+(16 F6). The component has no in-memory backend for production;
 every authority binds the store to its own database — the API-credits service its
 credits database, the provisioning-hosted site provisioning's — replacing `kit/site`'s
 `InMemoryReplayStore` default, which accepted a replay across a restart and could not
 hold a `RECORDED` outcome. An in-memory backend remains a test double only.
 
-The retention is `authenticated_requests.recorded_outcome_retention_seconds`, a
+The retention is `authenticated_requests.recorded_outcome_retention_seconds`, and the
+sweep's interval `authenticated_requests.replay_prune_interval_seconds`; each is a
 positive integer defaulting to 86400 when absent, in each authority's layered settings
 and Helm values schema, following `contact-exchange`'s `retention_seconds`.
 
-Rejected: a sweep loop per authority, which most authorities would have to gain; an
-in-memory production store.
+*Design review 16, F6:* D7 first pruned on write — every reservation deleting a batch
+in its own transaction, which under steady traffic is an extra write commit per request
+— and rejected a sweep because most authorities would have to gain a loop. The owner
+judged per-request pruning the wrong trade: growth only needs keeping in check, which a
+daily sweep does, and the core can own the loop through the lifespan, so no authority
+gains one.
+
+Rejected: pruning on every reservation, which costs a commit per request for no
+urgency; a loop written in each authority; an in-memory production store.
 
 ### D8 — Recorded outcomes: a signed request origin, a configurable retention, a signed 410
 
@@ -469,11 +571,15 @@ remain.
 ### D14 — The restated requirements
 
 - `marketplace-identity`: the version 3 profile with audience, stated operation and
-  origin; the three jobs and their lifetimes; per-route exact-retry resolution; the
-  retention and the 410; secrets never recorded; the signed-refusal table; version 2 as
-  an evidence format.
+  origin; the three jobs and their lifetimes, the lease floor, expired rows treated as
+  absent, and the periodic sweep; per-route exact-retry resolution, `RERUN` only where
+  the domain recognises a retry; the retention and the 410; secrets never recorded; the
+  signed-refusal table, unmatched requests included, and the signed 500 after
+  authentication on every authority; the route inventory refusing to start; version 2
+  as an evidence format.
 - `physical-provisioning`: the authenticated provisioning boundary's exact retry per
-  declaration; a failure after authentication recorded only on a `RECORDED` route.
+  declaration; a failure after authentication recorded only on a `RECORDED` route, the
+  general rule now `marketplace-identity`'s.
 - `registry-discovery`: durable replay reservation per declaration.
 - `storefront-publication`: version 3, and exact retry per declaration.
 - `introduction-delivery`: an exact replay of a failed start completes it; signed
@@ -528,6 +634,13 @@ in the service-to-service trust lesser goal, depending on
 - `replace-polling-with-authenticated-push` uses version 3 and the admission core;
 - the campaign text records where the `service-identity-signing` remainder went.
 
+`contract-driven-authenticated-routing` is proposed beside it, `ready for design`,
+depending on this change: every authenticated route on every authority moves onto a
+router driven by its route contract, so the request-dependency form, the
+unmatched-request fallback and the route inventory (D3) give way to one form that sees
+every route. Design review 16's F2 found the two-form seam; the owner judged the
+migration the cleaner long-term solution and too large for this change.
+
 The change keeps its name.
 
 ### D20 — Implementation cadence
@@ -538,12 +651,14 @@ Two rounds:
   profile, opening with D2's EIP-191 and ASGI gate, the wire names (D13), the declaration
   vocabulary (D5), and the version 2 evidence reader (D12). Session 2: the standalone
   replay component, `kit/authenticated-requests`, both stores, its migrations, the
-  migration engine's `VACUUM` (D9), and the double-dispatch harness (D5). Unit and
+  sweep, the unmatched-request fallback, the route inventory and the signed 500 (D3,
+  D7), the migration engine's `VACUUM` (D9), and the double-dispatch harness with its
+  interleaved write (D5). Unit and
   conformance tests; reviewed before anything depends on it.
 - **Round 2, the cutover, in three sessions.** Session 1: the registry, the provisioning
   service, the site kit and the API-credits service, and deal-servicing, with their typed
   clients, route declarations and double-dispatch cases, the table drops, the consume key
-  and the retention setting. Session 2: the three storefronts, with their declarations and
+  and the retention and sweep-interval settings. Session 2: the three storefronts, with their declarations and
   cases, the introduction change, and the VM callback's signed refusals. Session 3: the
   buyers' clients, the signed-delivery binding (D10a), the end-to-end lanes, and the
   documentation closeout promotes. Reviewed, then closeout.
@@ -564,3 +679,4 @@ The cutover is atomic (D9), so round 2 lands whole before any end-to-end lane pa
 - `retain-authenticated-request-outcomes` is superseded (D18).
 - `kit-owned-storefront-auth-and-persistence` composes the admission core (D3, D19).
 - `sign-multi-language-credits-middleware` waits on this change (D19).
+- `contract-driven-authenticated-routing` is proposed, depending on this change (D19).
