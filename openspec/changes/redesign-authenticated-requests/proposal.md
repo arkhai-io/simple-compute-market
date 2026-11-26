@@ -56,7 +56,7 @@ release may stop accepting the version before
 ## What Changes
 
 - **One authenticated-request layer for every authority.** A standalone replay
-  component under `tools/` (reserve, lease, renew, resolve, record, expire, sweep, with
+  component under `tools/` (reserve, lease, renew, resolve, conclude, record, expire, sweep, with
   `sqlite3` and SQLAlchemy stores) and a thin foundation kit,
   `kit/authenticated-requests`, over it: version 3 verification, audience, trust,
   signed refusals and 500s, a signed-outcome hook, a fallback that signs answers to
@@ -69,10 +69,12 @@ release may stop accepting the version before
   whose domain recognises a retry as applied re-run and record no body; every other
   mutation, absolute setters and deletes included, keeps its outcome (D6), and is
   dispatched once: the core renews a running attempt's lease, and an exact retry
-  finding no outcome after the attempt's lease has ended, which means the attempt
-  ended without recording, is answered with a signed "outcome unknown"; a recorded
-  500's effect is likewise unknown, and the caller reads current state before writing
-  again (D3, D7). A response carrying a secret is
+  finding no outcome after the attempt's lease has ended concludes the attempt by a
+  write in the store, which cannot overtake a transaction the attempt still holds, and
+  is then answered with a signed "outcome unknown"; a recorded 500's effect is likewise
+  unknown, and the caller reads current state before writing again (D3, D7). A replay
+  store failing while it admits a request is a signed 503, after which the caller
+  retries the same request (D7). A response carrying a secret is
   never recorded.
 - **Every row is bounded.** Each request carries a signed origin; a row expires at a
   time computed from the request, never before its lease ends, and a periodic sweep
@@ -92,8 +94,9 @@ release may stop accepting the version before
   end-delivery receipt keep, beside the exact body, a record readable as data —
   protocol, principal, role, method, operation, resource where present, request ID,
   timestamp, origin, audience, proof — which `kit/identity`'s evidence verifiers check
-  offline under either version; the listing read's evidence fields become
-  `publication` and `updates` (D21–D23).
+  offline under either version, a response bound by its exact trusted principals; the
+  listing read's evidence fields become `publication` and `updates`, names a seller's
+  publication may not carry (D21–D23).
 - **One cutover.** Version 3 replaces version 2 in the release that introduces it; the
   three 0.4.0 replay tables are dropped and the SQLite space reclaimed by the migrate
   command (D9). Version 2 stays readable as an evidence format (D12).
@@ -159,7 +162,8 @@ every expired row is deleted within one sweep interval; no recorded outcome hold
 contact or a secret; the 0.4.0 tables are gone and the
 SQLite files compacted after the upgrade; every refusal that names a request is signed,
 on a path no route serves too, and an unexpected failure after authentication is a
-signed 500;
+signed 500, a replay store's failure while admitting a request a signed 503; no
+`exact_retry_outcome_unknown` answer precedes the end of a transaction its attempt holds;
 version 2 requests are refused and version 2 evidence still verifies; version 3
 evidence verifies offline from its record and body alone.
 

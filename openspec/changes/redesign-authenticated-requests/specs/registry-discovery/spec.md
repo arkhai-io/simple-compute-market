@@ -21,13 +21,18 @@ The registry MUST durably reserve `(principal, request_id)` before dispatch. Reu
 
 ### Requirement: Seller publication evidence is independently verifiable
 
-The registry MUST retain and return, as a listing's `publication`, the exact publication HTTP body bytes as base64 and the record of the seller's signed request, carrying every value its signature covers, its seller proof included. Its ordinary response signature MUST cover that evidence. Mutable lifecycle/oracle updates MUST retain distinct seller evidence, returned as `updates`, mapping each changed field to its update's body and request record, and MUST NOT rewrite the publication proof. The evidence MUST let a consumer verify the seller's body, context and identity rather than treating the registry's signature as the seller's commitment: the registry attests what it served and which keys belong to the publisher; the seller's proof attests the terms. Evidence the registry retained under version 2 MUST be returned as it was retained, its record the version 2 request envelope, and MUST remain verifiable.
+The registry MUST retain and return, as a listing's `publication`, the exact publication HTTP body bytes as base64 and the record of the seller's signed request, carrying every value its signature covers, its seller proof included. Its ordinary response signature MUST cover that evidence. Mutable lifecycle/oracle updates MUST retain distinct seller evidence, returned as `updates`, mapping each changed field to its update's body and request record, and MUST NOT rewrite the publication proof. The evidence MUST let a consumer verify the seller's body, context and identity rather than treating the registry's signature as the seller's commitment: the registry attests what it served and which keys belong to the publisher; the seller's proof attests the terms. Evidence the registry retained under version 2 MUST be returned as it was retained, its record the version 2 request envelope, and MUST remain verifiable. Because the read lays this evidence over the seller's published document, the registry MUST refuse by name, as reserved registry metadata, a publication carrying `publication`, `updates`, `publisher_publication` or `publisher_updates`.
 
 #### Scenario: A consumer verifies a listing's commercial term
 
 - **WHEN** a consumer decodes `publication.body_base64` and verifies its request record with the listing's publisher principals
 - **THEN** the body digest and seller signature bind the listing's published terms
 - **AND** historical verification is distinct from live request freshness and publisher trust
+
+#### Scenario: A seller publishes a term named like the evidence
+
+- **WHEN** a seller's publication carries a field named `updates` or `publication`
+- **THEN** the registry refuses it as reserved registry metadata, naming the field, rather than accepting it and overwriting it with evidence on read
 
 #### Scenario: A listing published before the cutover is read
 

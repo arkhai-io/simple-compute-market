@@ -263,7 +263,8 @@ The component's interface, walked through every caller:
   handler committed, so a write may have applied before it (`KeysService.adjust`
   commits before it builds its answer), and the caller reads current state before any
   new write, as after `exact_retry_outcome_unknown` (D7); on a `RERUN` route nothing
-  is recorded. This
+  is recorded. A failure of the replay store while admitting a request is not this
+  500 but the signed 503 `admission_unavailable` (D7, design review 61 F1). This
   generalizes `physical-provisioning`'s existing requirement, which
   `unbacked-bare-metal-listings` delivered for provisioning and the site kit, to every
   authority on the core;
@@ -511,25 +512,43 @@ attempt's lease: a task beside the handler, in either form, extends the lease ev
 third of its period and stops when the handler returns or raises, so a live attempt
 keeps its lease however long it runs while its store can be written, and otherwise only
 an attempt whose process is gone loses it. An exact retry that finds the row with no
-outcome is refused as in progress while the attempt's lease is held; once the lease has
-ended it is answered with a signed 409 whose body code is
-`exact_retry_outcome_unknown`, and is never dispatched. That answer therefore means,
-but in the cases below, that the attempt ended without recording: none of its local
-writes can still commit. A lease is reclaimed only on a `RERUN` route, where a second run is
-proven safe (D5). A caller told the outcome is unknown, or answered a recorded 500
-(D3), learns what applied by reading current state, as it does after the 410 (D8), and
-sends any further write under a new request ID. Renewal writes the store only for an
-attempt running longer than a third of its lease, so an ordinary request costs nothing
-more. Three cases stay outside it: a handler that blocks the event loop past the whole
-lease, which stalls its renewal and is a defect of that handler; a store that refuses
-every renewal for the whole lease while the handler outlasts it — under SQLite, where
-the replay table shares its authority's database and one writer holds it at a time, a
-handler holding its own write transaction that long, again a defect of that handler —
-which the renewal logs as an error naming the request, since its retry is then told the
-outcome is unknown while the attempt can still commit; and a call to another authority
-that an ended attempt had already sent, which that authority's state settles, as the
-plan's route check below covers. The route check of an authority on SQLite also names
-any `RECORDED` route holding a write transaction near its lease period.
+outcome is refused as in progress while the attempt's lease is held. Once the lease has
+ended, the retry concludes the attempt before it is answered: one conditional write in
+the store marks the row concluded where it still has no outcome and its lease has
+ended, keeping the attempt's owner, so that the attempt's outcome is still recorded
+when its handler returns and a later exact retry receives it. Only a retry whose
+concluding write applied, or that finds the row already concluded, is answered with a
+signed 409 whose body code is `exact_retry_outcome_unknown`, and it is never
+dispatched. The concluding write takes the store's write lock, so on the authority's
+own database the answer cannot overtake a transaction the attempt still holds: under
+SQLite, whose one writer the handler's transaction is, a handler writing in one
+transaction has committed or rolled back before its retry is told the outcome is
+unknown, whichever store the authority uses, the SQLAlchemy store's plain read
+included. That answer therefore means, but in the cases below, that the attempt ended
+without recording: none of its local writes can still commit. A lease is reclaimed only
+on a `RERUN` route, where a second run is proven safe (D5). A caller told the outcome is
+unknown, or answered a recorded 500 (D3), learns what applied by reading current state,
+as it does after the 410 (D8), and sends any further write under a new request ID.
+
+A failure to reserve, resolve or conclude a request — its store refusing or timing
+out, as a store locked by a long transaction does — is answered with a signed 503 whose
+body code is `admission_unavailable`, on either route kind. It tells the caller that
+nothing about the request was concluded, so the caller retries the same request rather
+than reading state and replacing it; the first attempt may still be running. It is
+never the signed 500, which means only that a route raised after it was admitted (D3).
+
+Renewal writes the store only for an attempt running longer than a third of its lease,
+so an ordinary request costs nothing more. Four cases stay outside the guarantee: a
+handler that blocks the event loop past the whole lease, which stalls its renewal and
+is a defect of that handler; a store unwritable for the whole lease while the handler
+outlasts it, after which the handler's first write commits after its retry concluded
+the attempt; a handler that writes across several transactions, a later one committing
+after the conclusion — each of these two logged by the renewal as an error naming the
+request when it finds the lease lost; and a call to another authority that an ended
+attempt had already sent, which that authority's state settles, as the plan's route
+check below covers. The route check of an authority on SQLite also names any
+`RECORDED` route holding a write transaction near its lease period, and any writing in
+more than one transaction.
 
 *Implementation review 45, F1:* the renewal retried a store's every failure and stopped
 when a renewal found the lease ended, and neither stopped the handler, so a store
@@ -540,6 +559,25 @@ handler when its lease is lost, which narrows the window only for an async handl
 its next await and adds a cancellation path every `RECORDED` handler must tolerate, and
 over answering in progress until a recorded outcome or the 410, rejected under 35 F3,
 or recording the outcome in the handler's transaction, rejected under 27 F1.
+
+*Design review 61, F1:* the 45 F1 resolution still told a retry the outcome was unknown
+while the attempt could commit, and a log reaches the operator, not the caller, so a
+caller following the instruction to read state and replace could be overtaken by the
+original's late commit, the 35 F3 sequence in a case the design admitted. The
+`sqlite3` store already ordered the answer, every step opening with `BEGIN IMMEDIATE`,
+but the registry's SQLAlchemy store answered a retry older than the skew through a
+plain read while its handler held the write lock; and the core answered a failed
+reservation with the route-failure 500, so a retry meeting a busy or failing store was
+told to read state while a healthy attempt still ran. The owner chose that a retry
+conclude the attempt by a write before it is told the outcome is unknown, and that a
+failed admission be a signed 503, narrowing the residual to an outage spanning a whole
+lease and a handler writing in several transactions, over restating the guarantee as
+holding except after a logged lease loss, which left the registry's case open; over
+answering in progress until an outcome or the 410, rejected under 35 F3; and over a
+shared unit of work, rejected under 27 F1. The plan proves it with a retry arriving
+while a handler holds the database's write lock, answered only after that handler's
+commit, then a read and a replacement write that the original no longer overtakes, in
+both stores; and a retry whose reservation fails, answered the 503.
 
 *Design review 35, F3:* the 27 F1 triage answered `exact_retry_outcome_unknown` once a
 fixed lease ended, and told the caller to read current state. A handler still running
@@ -614,7 +652,8 @@ urgency; a loop written in each authority; an in-memory production store; commit
 `RECORDED` outcome in the handler's domain transaction through a shared unit of work
 (27 F1); reclaiming a `RECORDED` attempt's expired lease for a second dispatch; a fixed
 `RECORDED` lease with callers polling the exact retry until an outcome or the 410
-(35 F3).
+(35 F3); answering `exact_retry_outcome_unknown` from a read, and holding the guarantee
+only outside a logged lease loss (61 F1).
 
 ### D8 — Recorded outcomes: a signed request origin, a configurable retention, a signed 410
 
@@ -754,7 +793,8 @@ compatibility path with a retirement
 ### D13 — `kit/identity` owns the wire names
 
 `kit/identity` owns every version 3 field name, the profile tags, the refusal codes of
-D11, `exact_retry_expired` and `exact_retry_outcome_unknown` (D7), and the field names
+D11, `exact_retry_expired`, `exact_retry_outcome_unknown` and `admission_unavailable`
+(D7), and the field names
 of the evidence record (D21). Every client and authority imports them; no copies
 remain.
 
@@ -936,10 +976,21 @@ beside the exact body bytes. A seller's publication, in a listing read:
   and its own `protocol`, `arkhai.market-request-signature.v2`, tells a reader which
   verifier applies.
 
+The record is for a message bound to an authority: a version 3 request carrying
+`Market-Audience`, and the response that answers it, which is every carrier above. A
+signed delivery to an endpoint that is not an authority covers `@target-uri` in place
+of the audience (D10a), so this record cannot rebuild its signature base; no party
+keeps one as evidence today, and the change that first keeps one defines its record
+(design review 61, F3).
+
 The listing read's evidence fields are `publication` and `updates`, renamed from
 `publisher_publication` and `publisher_updates`: `updates` maps each field a signed
-update changed (`status`, `oracle_address`) to that update's publication. The
-registry renames its columns in the Alembic revision that adds its replay table, and
+update changed (`status`, `oracle_address`) to that update's publication. The read
+lays these fields over the seller's published document, whose shape admits any extra
+field, so `publication` and `updates` join the registry metadata a publication may not
+carry, refused by name at publication, and `publisher_publication` and
+`publisher_updates` stay reserved, so no seller term is silently overwritten by
+evidence or reads as historical evidence (design review 61, F2). The registry renames its columns in the Alembic revision that adds its replay table, and
 the VM buyer reads a pricing record it retained under the old key, as D12 keeps every
 retained record readable. The end-delivery receipt keeps its layout, a request record
 with its body and a response record with its body, and a receipt stored in a buyer's
@@ -985,11 +1036,16 @@ second and re-keys the replay layer, the response binding and the evidence pairi
 `kit/identity` offers two evidence verifiers, one for a request record and one for a
 response record, each reading either version by its `protocol`. Each takes the record,
 the body bytes, the principals trusted for it — kept with the evidence, such as a
-listing's `publisher_principals` or an Agreement's parties — and the expected role,
-operation and resource where the caller knows them. It rebuilds the signature base,
-computes the digest from the body, checks the proof under the principal's scheme and
-the principal against the trusted set, and returns one view for both versions:
-principal, timestamp, operation, resource, request ID and, for a response, status. It
+listing's `publisher_principals` or an Agreement's parties — and the expected
+operation and resource where the caller knows them; the request verifier also takes
+the expected role. A version 3 response signs no role, so the response verifier takes
+none: the exact trusted principals bind its signer, as the Agreement's seller alone
+binds an end acknowledgement's, and a version 2 response envelope's signed role is not
+checked (design review 61, F4). Each rebuilds the signature base, computes the digest
+from the body, checks the proof under the principal's scheme and the principal against
+the trusted set, and returns one view for both versions: principal, timestamp,
+operation, resource, request ID, and the role for a request or the status for a
+response. It
 applies no freshness, since a retained message is not a live request, and checks no
 audience membership, which concerned only the authority that admitted the request.
 
