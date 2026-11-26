@@ -155,7 +155,8 @@ those not retired and added before the event — and names the ones it goes to. 
 `run_cycle()` registers the consumer and its destinations, reads every event past
 the position into pending deliveries, then delivers what is due:
 
-- Each destination receives its events in `sequence` order, at least once, under the
+- Each destination receives its events in `sequence` order, at least once until a
+  delivery is abandoned or pruned while its destination is parked (below), under the
   event's `id`: a delivery whose outcome was not recorded — the process stopped after
   delivering — is delivered again. A failed delivery is retried after the policy's
   backoff, doubling from `initial` to `maximum`, and the destination's later events

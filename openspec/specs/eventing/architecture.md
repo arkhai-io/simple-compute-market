@@ -2,8 +2,8 @@
 
 The [normative contract](spec.md) states what the eventing component guarantees: the
 envelope, declared kinds, recording in the producer's transaction, one occurrence
-per key, delivery at least once per destination and in order, park and resume, the
-finally sink, routes, and retention. This document explains the component's model —
+per key, delivery to each destination in order and at least once until a delivery is
+delivered or abandoned, park and resume, the finally sink, routes, and retention. This document explains the component's model —
 how an event travels from the transaction that records it to each destination of
 each consumer — why each part works as it does, and why the component is built here
 and stands alone. Its [README](../../../tools/eventing/README.md) is its interface;

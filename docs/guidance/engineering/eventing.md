@@ -41,10 +41,16 @@ change is accepted: a transition the owner refuses records nothing.
 ## Delivery is at least once per destination, under a stable identity
 
 Each destination receives each event selected for it at least once, in the order
-the events were recorded. A delivery whose outcome was never recorded — the process
-stopped after delivering — is delivered again, so every delivery carries the event's
-stable identity, and a receiver deduplicates on it. A destination that fails holds
-up only its own later events, never another destination's.
+the events were recorded, until that delivery is ended deliberately. A delivery whose
+outcome was never recorded — the process stopped after delivering — is delivered
+again, so every delivery carries the event's stable identity, and a receiver
+deduplicates on it. A destination that fails holds up only its own later events,
+never another destination's.
+
+A delivery ends without receipt only by a stated rule: the destination refuses it
+outright, it is given up after a bounded age, or the destination it is owed to is
+removed. An ended delivery goes to a fallback recipient, never silently nowhere. A
+destination paused by hand misses what is pruned before it resumes.
 
 A consumer that tracks its position as the last event it has read relies on no event
 committing behind that position. Events are therefore ordered so that none commits
