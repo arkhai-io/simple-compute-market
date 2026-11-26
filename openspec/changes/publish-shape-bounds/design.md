@@ -15,8 +15,10 @@
   field; `listing_resource` is open and stored. `store-registry-listings-as-published`
   is deciding between storing the listing as published and admitting only named
   carriers.
-- `settle-capacity-claim-vocabulary` may rename the flat dimension names; whether round 0
-  adopts the family form is its question.
+- The compute family's flat dimension names stand
+  (`openspec/specs/market-composition/architecture.md`, "The compute family vocabulary").
+  Whether a buyer's opening shape takes the family form is owned by no change; the
+  change index records it under Goal 2's unowned work.
 
 ## Provisional inputs from `capacity-shape-envelope`'s design
 
