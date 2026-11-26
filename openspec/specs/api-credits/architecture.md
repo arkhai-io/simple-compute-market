@@ -4,7 +4,7 @@ The [normative contract](spec.md) defines API-credit behavior. This document exp
 
 ## Market shape
 
-API credits are prepaid finite units for a named service. A listing advertises a unit rate and available quota. The buyer negotiates a quantity, settles the accepted Agreement, and receives either a new bearer key funded with that quantity or a top-up to an existing key.
+API credits are prepaid finite units for a named service. A listing advertises a unit rate and available quota. The buyer negotiates a quantity, settles the accepted Agreement, and receives either a new bearer key funded with that quantity or a top-up to an existing key. A market whose buyers compare what is served and what a unit of usage costs, as model inference is, is a domain of its own beside this one, with its own listing vocabulary ([Inference](../inference/architecture.md#market-shape)); the purchase shape is the `api` family's and is shared.
 
 ```text
 quota-backed listing

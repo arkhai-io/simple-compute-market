@@ -25,6 +25,7 @@ An architecture companion does not replace a normative requirement. When explana
 | Deployment and state | [Spec](deployment-state/spec.md) | [Architecture](deployment-state/architecture.md) |
 | frp grant admission | [Spec](frp-grant-admission/spec.md) | [Architecture](frp-grant-admission/architecture.md) |
 | Fulfillment | [Spec](fulfillment/spec.md) | [Architecture](fulfillment/architecture.md) |
+| Inference | [Spec](inference/spec.md) | [Architecture](inference/architecture.md) |
 | Injected time | [Spec](injected-time/spec.md) | [Architecture](injected-time/architecture.md) |
 | Introduction delivery | [Spec](introduction-delivery/spec.md) | [Architecture](introduction-delivery/architecture.md) |
 | Market change workflow | [Spec](market-change-workflow/spec.md) | [README](market-change-workflow/README.md), [index](market-change-workflow/index.md) |

@@ -1,0 +1,231 @@
+# Inference Architecture
+
+The [normative contract](spec.md) defines the inference domain's vocabulary:
+its listing, its pricing, its usage record and charge, its usage evidence, and
+its discovery. This document explains the shape of the market that vocabulary
+serves and why each part is cut as it is.
+
+## Market shape
+
+A seller serves a model and sells requests against it to many buyers at once. A
+buyer compares sellers per model on context length, quantization, and price per
+token, buys credits through any settlement mechanism the listing accepts, and
+receives a bearer credential.
+
+```text
+model-card listing
+      ↓ quantity-priced negotiation, one base unit per credit
+verified settlement
+      ↓ issuance carrying the accepted listing's rate card
+key balance in the settlement asset's base units
+      ↓ consumption priced by the pinned rate card
+usage record → deterministic charge → usage evidence
+```
+
+The domain owns the shapes a buyer compares on: a model card, a rate card, and
+a usage record. It does not decide what a storefront sells or what it charges.
+Converting money into a balance is the settlement mechanism's and is opaque to
+the domain; how a storefront prices its balance against tokens is the
+storefront's declaration, made in the rate card; and whether two storefronts'
+listings are comparable is whatever the operator of the registry they publish
+to enforces. A registry is a model catalogue separated from payment, routing,
+and the provider relationship, and nothing promises compatibility between
+registries, nor within one unless its operator imposes it.
+
+Inference is a domain beside API credits, not a field on its listing, because
+the vocabulary differs and the meaning of a credit does not. An API-credits
+listing names a service; nothing on it says what is served, at what context
+length, in what quantization, or what a unit of usage costs. A model card on
+that listing would make every seller of any API carry a context length, and one
+buyer plugin interpret two comparison surfaces.
+
+## One listing, one served model
+
+The registry compares listings, not sellers, so each answer to "who serves this
+model under this price with this context length" is a listing: a seller serving
+six models publishes six, each carrying one model card. A catalogue of models
+inside one listing would let a filter match on any entry, so a price bound on
+one model would surface a listing because another model was cheap. One model
+per listing makes every filter mean what it says.
+
+### Model identity
+
+`model_id` is asserted by the seller. The domain keeps no list of models: which
+models are sold is the storefront's business, and which a registry admits is
+its operator's. What the domain owns is a derivation rule, shipped as a pure
+function, so two sellers of the same weights arrive at the same string without
+anyone minting it:
+
+- weights with a public upstream: the upstream owner and repository name,
+  lowercased, with revision, branch, and quantization suffixes stripped;
+- private weights: the model owner's namespace, not the seller's;
+- a fine-tune: the fine-tuner's namespace, because it is different weights.
+
+The rule is a SHOULD. A registry operator who wants convergence enforced
+narrows `model_id` in the filter specification the registry serves, to an
+enumeration or a pattern. That is curation in the right place, an operator's
+policy outside the registry service, which never mints, resolves, or aliases an
+identifier.
+
+Quantization, runtime, and context limits are explicit fields and not parts of
+the identifier, so "every listing of this model" and "this model at fp8" are
+each one query and one fact has one name. `artifact_ref` names the weights
+served under any scheme, `artifact_digest` optionally pins them, and
+`display_name` is a mutable label with no identity role. All are seller
+assertions, as every published field is.
+
+### Provenance and the model owner
+
+`provenance` is required and filterable: `self-hosted`, or `resold` for a
+listing fronting a model someone else hosts, which is a legitimate listing
+stated as such. A listing may name a `model_owner` principal distinct from the
+seller, for weights owned by a party that does not serve them. Nothing pays
+that owner and the card has no royalty field: settlement already carries a
+list of obligations each with its own payer and claimant, so paying a second
+party is wiring a later domain adds, not a change to this card.
+
+## One pricing layer
+
+One credit is one base unit of the asset the listing settles in. The settlement
+option advertises one base unit per credit, `quantity` at purchase is the number
+of base units the buyer puts on the key, and the rate card's integers are prices
+in that asset. The number a buyer sees on the card is the number a meter charges
+and the number the balance is kept in, so there is one authoritative figure and
+a rate bound in a registry query means what it says within an asset. Every
+settlement mechanism, issuance path, and top-up flow applies unchanged, because
+a purchase is still a quantity of credits at a per-credit rate, and the rate is
+always one.
+
+A credit as an abstract unit each seller denominates would break comparison:
+one seller at one base unit per credit listing 500 credits per million tokens
+and another at a hundred base units per credit listing 5 charge the same real
+price and show numbers a filter cannot relate.
+
+The card names its asset, and the listing codec refuses a settlement option or
+escrow token naming another, because the card's integers are base units of
+exactly one asset and a listing taking payment in two would let a discovery
+bound read them in whichever matched. The codec also requires every option and
+accepted escrow to advertise exactly one amount rate, of one per credit, so no
+published price is left to a seller's configured floor.
+
+Integers are required so two implementations of the charge arithmetic cannot
+disagree by rounding. Amounts travel as decimal-digit strings, since canonical
+JSON has no number form above 2⁵³ − 1 and both the published listing and the
+usage evidence are signed canonically; token counts stay plain integers, the
+magnitude living in the charge.
+
+### The rate card at issuance
+
+The materialization handed to issuance carries the accepted listing and its
+rate card, and the codec refuses a card other than that listing's. A grant that
+records the card it was issued under lets a seller's republication reprice new
+purchases only: credits already bought consume at the rate the buyer saw when
+paying, after the settlement mechanism has closed and the buyer has no other
+recourse.
+
+### Comparing prices
+
+The registry filters on the authoritative figures: upper bounds on the card's
+prompt and completion rates, each co-requiring the card's asset, so the registry
+refuses a bound without one. No derived price field is published, because a
+derived figure can drift from what it is computed from and a buyer accepting on
+it would be charged a price they did not see. Comparing across assets needs an
+exchange rate the registry is no authority on, and stays with the client.
+
+## Usage, charge, and evidence
+
+The charge a request costs is the kind of interpretation independent
+implementations of a market must agree on, so the domain defines it as a pure
+function of a usage record and a rate card. A cancelled request is charged for
+what was produced, because the seller did the work; a failed one costs nothing,
+because the buyer got nothing. A record's prompt tokens exclude the cached
+prompt tokens it counts separately, which matters to whatever fills a record
+from an upstream that reports cached tokens as a subset.
+
+Usage evidence carries the record, the pinned card, the derived charge, and the
+grant and fulfillment identities, and never the bearer secret, the prompt, the
+completion, or the response. Verification binds a body to the grant and the
+request its consumer expects, since a body is self-consistent for any of each.
+
+## Attestation
+
+The model card may carry an attestation envelope, and usage evidence a digest
+reference to a proof held elsewhere. The evidence carries a reference and not an
+envelope because an opaque field in signed, durable evidence could carry a
+prompt or a secret, and the format has to keep it secret-free whatever a
+producer does. Both fix where a proof attaches, to the listing for what the
+seller claims to run and to each usage record for what served a request, so a
+trusted-execution proof lands as a new `kind` and not a change of shape.
+Nothing verifies either, a value in the envelope is a seller's assertion, and
+the registry exposes neither as a filter.
+
+## Identities and the admission authority
+
+A marketplace principal negotiates and buys; a bearer credential admits a
+request; canonical ownership decides who may top up a key. The three stay
+separate: the bearer credential is delivery of what was bought, and its balance
+authorizes payment for nothing else. A deployment that adds a spending
+authority does so beside these.
+
+The authority holding keys, grants, pinned rate cards, and balances is the one
+thing consulted when a request is admitted. A rating or billing platform may
+receive usage records downstream and is never asked whether a request may
+proceed: such platforms assume one merchant billing many customers, are outside
+the request path, and would make every seller depend on a third party's
+availability to serve a request.
+
+## Composition
+
+Inference is a domain of the `api` family. Its provision intent is the family's
+purchase shape bound under the inference kind, because the purchase layer is
+the same as API credits': a quantity of credits onto a new or an existing key.
+What differs between the two domains is the listing and the consumption.
+
+The domain binds the family's shapes and does not copy API credits' roles. The
+roles of a market selling prepaid bearer access are one machinery: a copy of
+them into this domain measured about 12,500 copied source lines against fewer
+than 300 new ones, with every new module beside the copy and none inside it. So
+the family's vocabulary and kit come first, and a domain contributes its listing
+schema, its publication guard, its materialization, and its wiring.
+
+An inference storefront is its own executable on the storefront shell,
+registered as a storefront domain as API credits is, and not a contribution to
+the compute-family shell. Its listing therefore binds a quota resource in the
+authority's ledger, not a capacity binding to a resource pool.
+
+## Current limits
+
+- A listing publishes against a declared, finite quota, the backed value of
+  the backing property every pool and listing declares. The quota is a sales
+  cap and not capacity: a model server keeps serving after a seller's declared
+  quota reaches zero and its listing leaves discovery. Admitting the unbacked
+  value is a filter-specification version bump with the affected listings
+  closed and republished, since backing is immutable for a durable listing; a
+  seller who needs it is the trigger.
+- Nothing fills a usage record or signs usage evidence: the vocabulary and its
+  verifier exist, and no component meters a request.
+- Identifier convergence is a SHOULD. Two sellers may name the same weights
+  differently; the derivation function, `model_family`, and an operator's
+  narrowed specification mitigate it. Misrepresentation — a wrong derivation,
+  `self-hosted` while proxying, one model named while another is served — is
+  not detected.
+- The surface is `openai.v1`, chat completions and completions. Embedding,
+  image-generation, audio, and batch endpoints are outside it, so the usage
+  record has one shape; an image given as input to a chat completion is priced
+  by the card's per-unit image rate.
+- On an asset with cents as its base unit the finest expressible rate is one
+  cent per million tokens.
+- The model card requires `endpoint` and the rate card `asset`. Each is an
+  unowned gap in the
+  [change index](../../changes/README.md#roadmap-goal--sell-metered-inference-as-its-own-market-domain):
+  an address a seller writes by hand, and a second statement of the asset
+  beside the settlement option's.
+
+## Related contracts
+
+- [Inference](spec.md)
+- [API family](../api-family/spec.md)
+- [API credits](../api-credits/spec.md)
+- [Market composition](../market-composition/spec.md)
+- [Registry discovery](../registry-discovery/spec.md)
+- [Storefront publication](../storefront-publication/spec.md)

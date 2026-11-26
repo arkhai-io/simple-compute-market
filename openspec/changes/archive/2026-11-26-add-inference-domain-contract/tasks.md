@@ -460,9 +460,11 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
 - [x] 8.1 **Comment hygiene.** Confirmed: `make check-comment-hygiene` passes,
       and the copied modules were read for references to the API-credits change
       history their docstrings may have carried across.
+      *Closeout:* `make check-comment-hygiene` passes at `dee33c9e8`. The comments and docstrings the change's packages carry were read at the pre-closeout review, which found none describing history or naming a change; its fixes added none.
 - [x] 8.2 **Import placement.** Confirmed: no function-level import this change
       adds lacks a genuine circular-import or lazy-load reason.
-- [ ] 8.3 **Documentation compliance.** Pending post-review promotion: the
+      *Closeout:* the local-import check against `dev` passes: every import the change adds inside a function gives its reason.
+- [x] 8.3 **Documentation compliance.** Pending post-review promotion: the
       `inference` capability's `spec.md` and `architecture.md` are created when
       the delta is synchronized at archival, per `AGENTS.md`'s rule that
       promotion follows code review. Re-check accepted decisions against
@@ -481,15 +483,19 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
       promotes with them, so a reader of `openspec/specs` never meets a
       requirement nothing on `dev` satisfies. The "rejected before publication"
       scenarios stay: the listing codec enforces them since round 1 (F1).
+      *Closeout:* done after promotion, which this plan lists later than the workflow's guidance does. Each of D1 to D17 is in the home the placement table gives it: normative statements in the delta the archive merges into the `inference` and `api-family` specifications, rationale and limits in the `inference` companion, the vocabulary in `docs/development/ARCHITECTURE.md`. The companion and the edited passages describe the system as it is, in the present tense, and name no change but in "Current limits", which points at the change index's unowned gaps.
 - [x] 8.4 **Narrative compression.** Compress completed-task notes to final
       behavior, validation evidence, and promotion destinations; keep rejected
       alternatives in `design.md`.
-- [ ] 8.5 **Roadmap currency.** Update Goal 9's current-state prose in
+      *Closeout:* the section notes above were compressed in October; the pre-closeout round's fix note adds final behaviour and evidence only, and no alternative or debugging narrative sits in the notes that `design.md` does not hold.
+- [x] 8.5 **Roadmap currency.** Update Goal 9's current-state prose in
       `docs/development/ROADMAP.md` (the vocabulary now exists) and remove this
       change's row from its gap table; name the update in the promotion record.
-- [ ] 8.6 **Campaign index currency.** Update this change's row and the
+      *Closeout:* `docs/development/ROADMAP.md`, Goal 9: the current-state prose already says the vocabulary exists, and the change's row is removed from the gap table. The sentence there that no storefront, authority, gateway, buyer plugin, stack or deal exists is `compose-inference-domain-stack`'s to correct at its closeout, which promotes those roles.
+- [x] 8.6 **Campaign index currency.** Update this change's row and the
       campaign graph in `openspec/changes/README.md`; confirm every campaign
       link resolves to an existing directory.
+      *Closeout:* the row is `in closeout` with notes for this phase; the campaign graph is unchanged, since the change's place in it is; `change-workflow check index` passes. Other rows' `Depends on` are left for archive cleanup.
 - [x] 8.7 **Packaging.** `make check-packaging` passes: every lock matches
       its project and the wheelhouse, the new distribution is one package
       under `src/` installing editable, and the architecture check classifies
@@ -497,7 +503,8 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
       with the token `inference.v1`. `make check-architecture-change
       CHANGE=add-inference-domain-contract` reports no owned exception or
       override row.
-- [ ] 8.8 **End-to-end pipeline.** Not run. The development stack runs under
+      *Closeout:* `make check-packaging` passes at `dee33c9e8`, and `make check-architecture-change CHANGE=add-inference-domain-contract` reports that the change owns no architecture row. `change-workflow run pre-archive` passes.
+- [x] 8.8 **End-to-end pipeline.** Not run. The development stack runs under
       amd64 emulation on this host, which the seller quickstart records as
       unsuitable for validation, and no continuous-integration run exists: the
       branch lives on a fork, where Actions does not run, and a fork pull
@@ -506,22 +513,33 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
       scenario, so the nightly pipeline on `dev` is the regression check for
       the unchanged services; treat its validations as unrun until a run on a
       branch in the main repository is recorded here.
-- [ ] 8.9 **Promotion.** Write the `inference` capability's `spec.md` and
+      *Closeout:* the paragraph above describes October. Validation record `reviews/02-validation.md` passed for `dee33c9e8`, the commit this closeout's code is: the pipeline run 45685375545 on the repository's `feat/compose-inference-domain-stack` concluded success, with `e2e-vm` 513 passed, `e2e-bare-metal` 249, `e2e-apicredits` 4, `e2e-inference` 1 and the native Ansible gate; the Helm kind passed on the owner's host; the local kind was waived by the owner. Coverage, from the record: `e2e_inference_deal`, `compose-inference-domain-stack`'s scenario, publishes a model-card listing through this contract's codec, discovers it under the `inference` schema identity and purchases under its provision kind; the API-credit scenarios exercise the tightened purchase shape. The usage record, the charge derivation and the usage evidence are exercised by no end-to-end scenario and are proven by the domain's unit suite. No section owes evidence by validation.
+- [x] 8.9 **Promotion.** Write the `inference` capability's `spec.md` and
       `architecture.md`, the `openspec/specs/README.md` row, the
       `docs/development/ARCHITECTURE.md` one-name and Terms entries, and the
       one sentence in the API-credits companion that the record below names;
       then complete the design-promotion record, last.
-- [ ] 8.10 **Guidance placement.** Confirm what this change wrote under
+      *Closeout:* written: `openspec/specs/inference/architecture.md`; the Inference row of `openspec/specs/README.md`; `inference` among the offering modes and the **Rate card** and **Usage record** terms in `docs/development/ARCHITECTURE.md`; one sentence in `openspec/specs/api-credits/architecture.md`, "Market shape". The `inference` capability's `spec.md` and the `api-family` requirement are written by the archive from the deltas. The record below is complete.
+- [x] 8.10 **Guidance placement.** Confirm what this change wrote under
       `docs/guidance/repository/` — the wheel's rows in
       `published-packages.md` — sits in the layer and file its subject
       belongs to, and run `make check-guidance`.
-- [ ] 8.11 **Documentation citations.** After promotion, run
+      *Closeout:* the change's guidance edit is the `arkhai-inference-domain` row of `docs/guidance/repository/published-packages.md`, a repository rule spanning its packages in the file for that subject; nothing is moved. `make check-guidance` passes.
+- [x] 8.11 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=add-inference-domain-contract` and
       `change-workflow openspec validate add-inference-domain-contract --strict` and resolve
       every match. Both pass on the pre-promotion tree.
-- [ ] 8.12 **Archival.** `change-workflow openspec archive add-inference-domain-contract -y`
+      *Closeout:* both pass after promotion: every path the change's five
+      documents cite resolves, and the change validates strictly. The
+      capability index check fails until the archive writes
+      `openspec/specs/inference/spec.md`, which the index's new row links.
+- [x] 8.12 **Archival.** `change-workflow openspec archive add-inference-domain-contract -y`
       once every part above is done; update the campaign row to `archived` and
       the dependency graph in `openspec/changes/README.md`.
+      *Closeout:* archived with its deltas merged: the `inference` specification
+      does not exist before the archive and the `api-family` specification does
+      not hold the purchase-shape requirement, so neither delta is skipped. The
+      row is set to `archived`, and dependents released, at archive cleanup.
 
 ## Design promotion record
 
@@ -546,3 +564,7 @@ Evidence, at the fix commit's tree, on an arm64 macOS host:
 | The family kit first, the stack on it: inference binds the `api` family's purchase shape and carriers rather than copying API credits | `design.md` — "The family kit first, the stack on it"; the `api-family` capability's `spec.md` — "The api family shares one vocabulary and one kit"; `docs/development/ROADMAP.md` Goal 9 current state |
 | `inference` joins the enumerated offering modes; **rate card** and **usage record** join the Terms table | `docs/development/ARCHITECTURE.md` — "One name per concept", "Terms" |
 | Model identity is seller-asserted with a SHOULD derivation rule; the domain keeps no model list; quantization is an enumerated field; provenance is required and resale legitimate; a registry may curate but never mints; `model_owner` is the three-party hook with no royalty field | the `inference` capability's `spec.md` — "One listing is one served model"; rationale in its `architecture.md` |
+| D14 — an inference storefront is its own executable on the storefront shell, binding a quota resource and no capacity binding | the `inference` capability's `architecture.md` — "Composition"; the composition itself is `compose-inference-domain-stack`'s delta and promotes with it |
+| D17 — the version 1 surface is `openai.v1`, chat completions and completions; an image input to a chat completion is priced | the `inference` capability's `spec.md` — "One listing is one served model", "Usage record and deterministic charge derivation"; its `architecture.md` — "Current limits" |
+| Roadmap currency — Goal 9's gap table no longer lists the vocabulary | `docs/development/ROADMAP.md` — "Goal 9 — Sell metered inference as its own market domain" |
+| Campaign index currency — the change's row and the unowned gaps its pre-closeout review recorded | `openspec/changes/README.md` — "Roadmap goal — Sell metered inference as its own market domain" |

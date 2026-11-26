@@ -477,7 +477,6 @@ for readiness.
 
 | Open gap | Owned by |
 |---|---|
-| No inference vocabulary: domain identity, model-card listing, rate card, provision intent, usage record and charge derivation, usage evidence, registry filter specification | [`add-inference-domain-contract`](../../openspec/changes/add-inference-domain-contract/) |
 | No inference roles: storefront, authority, gateway, buyer plugin, local stack, development identities, or end-to-end deal | [`compose-inference-domain-stack`](../../openspec/changes/compose-inference-domain-stack/) |
 | No admission hold, no post-response settlement from measured usage, no streaming usage capture, no cancellation or disconnect handling, no usage retention | [`meter-inference-usage`](../../openspec/changes/meter-inference-usage/) |
 | Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation, and a hand-assembled stack drifts as soon as its pinned versions move | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |

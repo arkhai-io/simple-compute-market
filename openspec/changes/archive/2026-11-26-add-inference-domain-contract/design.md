@@ -92,6 +92,7 @@ API-credits listing would make every weather-API seller carry a context length,
 and one buyer plugin interpret two comparison surfaces. That alternative — a
 `pricing_model` discriminator on the API-credits listing — was rejected on those
 grounds.
+
 ### D2. One listing is one served model
 
 The registry compares listings, not sellers. A buyer asking "who serves this
@@ -161,6 +162,7 @@ value under a version bump when that domain exists.
 Rejected: `deployment_id` as a further identifier. A seller's deployment is
 already identified by `storefront_url` plus the publisher-chosen, normatively
 stable `listing_id`, and `served_model_name` is what a request names.
+
 ### D4. One pricing layer: a credit is one base unit of the settlement asset
 
 In inference, **one credit is one base unit of the asset the listing settles
@@ -257,6 +259,7 @@ projection over options a buyer uses to find how a listing can be paid. The buye
 from the served specification, as `registry-discovery` requires; nothing
 encodes it in code. Cross-asset comparison needs an exchange rate the registry
 must not be an authority on, and stays client-side, consistent with Goal 7.
+
 ### D7. Quota-backed publication in version 1
 
 An inference seller's supply is, in truth, not finite in the way a GPU is: a

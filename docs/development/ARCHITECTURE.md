@@ -794,6 +794,8 @@ key when signing is not configured.
 | **Fulfillment** | Post-acceptance lifecycle encompassing assignment, provider execution, status, teardown, and results | Fulfillment capability |
 | **Provisioned Resource** | One output created by fulfillment, such as a VM or pod | Domain/provider |
 | **Settlement Record** | Durable lifecycle record linking reservation, resource, provider snapshot, operations, and results | Compute provisioning lifecycle |
+| **Rate card** | The prices an inference listing charges for consumption, as integers in base units of one named asset: per million prompt, completion, and cached prompt tokens, per image unit, and per request | Inference domain |
+| **Usage record** | What one inference request consumed: the model and key it ran under, its request identity, its token and image counts, and its outcome, from which the charge is derived | Inference domain |
 | **Kind allowlist** | What a package of one light kind — contracts or client — may depend on, by layer, kind, distribution, or its family's vocabulary | `docs/development/ARCHITECTURE.toml`, held by `make check-architecture` |
 | **Package allowlist** | Every distribution, internal or third-party, one package may declare or import beyond the standard library: its `allowed-dependencies` | The package's own `pyproject.toml`, held by `make check-architecture` |
 | **Role** | An actor in the market — buyer, seller, operator — whose part a role package such as core buyer or core storefront implements, or the authorization role a principal is bound to, such as `seller`, `admin`, or `service`. A deployable process is a service, not a role | The market's participants; each authority's role bindings |
@@ -815,7 +817,7 @@ exactly one name.
 
 | Concept | Name |
 |---|---|
-| What the seller is offering: `vm`, `bare_metal`, `container`, `api_credits` | `offering_mode` |
+| What the seller is offering: `vm`, `bare_metal`, `container`, `api_credits`, `inference` | `offering_mode` |
 | The machine and its connection identity | `host`, identified by `host_id` |
 | The fulfillment implementation selected for a pool | `provider` |
 | The component that validates, submits, and polls an execution action | `executor` |
