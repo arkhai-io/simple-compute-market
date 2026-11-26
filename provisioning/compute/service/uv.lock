@@ -340,10 +340,10 @@ requires-dist = [
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.8.0" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
-    { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
+    { name = "arkhai-kit-resource-pools", specifier = ">=0.11.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.5.0" },
     { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.1.0" },
-    { name = "arkhai-kit-site", specifier = ">=0.14.0" },
+    { name = "arkhai-kit-site", specifier = ">=0.15.0" },
     { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.21.0" },
     { name = "cachetools", specifier = ">=5.3" },
     { name = "cryptography", specifier = ">=42.0" },
@@ -634,7 +634,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -648,7 +648,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]

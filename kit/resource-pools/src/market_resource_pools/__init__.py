@@ -18,6 +18,7 @@ from .host_requirement import (
     pool_needs_host,
 )
 from .pool_config_handler import PoolConfigHandler, PoolConfigValidationProblem
+from .pool_facts import ResourcePoolFacts, StoredPoolFacts
 from .service import (
     DocumentValidationResult,
     PoolAlreadyExistsError,
@@ -43,7 +44,9 @@ __all__ = [
     "PoolValidationError",
     "ReconciliationPlan",
     "ResourcePool",
+    "ResourcePoolFacts",
     "ResourcePoolService",
+    "StoredPoolFacts",
     "ASKING_RATES_POLICY_TAG",
     "asking_rate_entry_problems",
     "validate_asking_rates",

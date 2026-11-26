@@ -5,10 +5,17 @@ looks up hosts, must hold those same instances: a second engine would keep its
 own terminal signals and retry schedule, and a second host authority would miss
 the other domain's pool-change hooks. Asserted by identity on a real container
 whose persistence is an in-memory database.
+
+This root also composes the site authority and the pool authority, which no
+type relates, so it holds the pool authority's reader to the site's pool-facts
+port.
 """
 
 from __future__ import annotations
 
+import dataclasses
+import inspect
+import typing
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -27,6 +34,8 @@ from compute_provisioning.release import (
 
 from compute_provisioning.relays import RelayDeliverableHosts, release_reservation_ports
 from compute_provisioning.relays.rebinding import relay_host_pool_change
+from market_resource_pools import ResourcePoolFacts, StoredPoolFacts
+from market_site import PoolFacts, PoolFactsReader
 
 from compute_provisioning_service.container import Container
 
@@ -255,3 +264,26 @@ def test_the_release_effect_registry_is_the_ledgers_and_composition_fills_it():
 
     assert ledger._release_effect is effects
     assert effects.frozen
+
+
+def test_the_pool_authoritys_reader_answers_the_sites_pool_facts_port():
+    """The pool authority answers the site's pool-facts port structurally and
+    imports nothing from the site, so no type relates the two: this root, which
+    composes both, holds the reader to the port. A fact added to the port
+    alone, with no field on the reader's value, fails here rather than at the
+    first decision that reads it."""
+    port_members = typing.get_protocol_members(PoolFacts)
+    stored_fields = {field.name for field in dataclasses.fields(StoredPoolFacts)}
+
+    assert port_members
+    assert port_members <= stored_fields
+
+    def _parameters(method):
+        return [
+            (parameter.name, parameter.kind)
+            for parameter in inspect.signature(method).parameters.values()
+        ]
+
+    assert _parameters(ResourcePoolFacts.pool_facts) == _parameters(
+        PoolFactsReader.pool_facts
+    )

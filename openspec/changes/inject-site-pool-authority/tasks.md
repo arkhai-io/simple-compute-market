@@ -169,12 +169,15 @@ and `ResourcePoolFacts`, exist and are proven on their own, with nothing yet wir
 them. Touches `kit/site`, `kit/resource-pools`, and the provisioning service's unit
 tests.
 
-- [ ] 2.1 Add `kit/site/src/market_site/pool_facts.py` with the protocols `PoolFacts`
+- [x] 2.1 Add `kit/site/src/market_site/pool_facts.py` with the protocols `PoolFacts`
   (read-only properties `exists`, `enabled`, `deliverable_modes`, `needs_host`) and
   `PoolFactsReader` (`pool_facts(self, db: Session, pool_id: str) -> PoolFacts`), each
   docstring stating the session the read takes and the missing-pool report (D4), and
   export both from `market_site`. Verify: `make -C kit/site test` passes.
-- [ ] 2.2 Add `kit/site/src/market_site/deliverable_hosts.py` with the `DeliverableHosts`
+  Done: `kit/site/src/market_site/pool_facts.py`; `PoolFacts` states the missing-pool
+  report and the decision's session, and `PoolFactsReader.pool_facts` states both too.
+  `make -C kit/site test`: unit and library integration, 384 passed.
+- [x] 2.2 Add `kit/site/src/market_site/deliverable_hosts.py` with the `DeliverableHosts`
   protocol and `declaration_has_usable_host(host_id, *, needs_host, backed, deliverable)`,
   with the behaviour of the authority's predicate given `needs_host` (D5), exported from
   `market_site`; add `kit/site/tests/unit/test_deliverable_hosts.py` with the predicate's
@@ -182,7 +185,9 @@ tests.
   Enforcement" (a host in the report, a host absent from it, no host named, an empty
   report, an unbacked pool, a pool needing no host, and named hosts usable with no report).
   Verify: `make -C kit/site test` passes, unit level.
-- [ ] 2.3 Add `kit/resource-pools/src/market_resource_pools/pool_facts.py` with the frozen
+  Done: the predicate takes `needs_host`, `backed` and `deliverable` as keywords; its
+  seven cases are in `test_deliverable_hosts.py`, unit, all passing within the 384.
+- [x] 2.3 Add `kit/resource-pools/src/market_resource_pools/pool_facts.py` with the frozen
   dataclass `StoredPoolFacts` and `ResourcePoolFacts(host_requirement: HostRequirement |
   None = None)`, whose `pool_facts(db, pool_id)` reads the `ResourcePool` row in the
   caller's session and reports: `exists`; `enabled`; `deliverable_modes` from
@@ -196,20 +201,63 @@ tests.
   pool with and without a requirement, an unreadable deliverable declaration, and a
   read seeing the caller's own uncommitted write in its session. Verify: `make -C
   kit/resource-pools test` passes, library integration level.
-- [ ] 2.4 Add the conformance test to
+  Done: `ResourcePoolFacts` keeps the requirement as `host_requirement`, which section
+  3's composition test reads. `test_pool_facts.py` builds its table with the pool
+  baseline migration (`BASELINE.apply`), not `create_all`, and adds a disabled pool
+  keeping its modes, a provider the requirement says needs no host, and a pool declaring
+  no mode reporting an empty set. `make -C kit/resource-pools test`: unit and library
+  integration, 128 passed (117 before).
+- [x] 2.4 Add the conformance test to
   `provisioning/compute/service/tests/unit/test_authority_composition.py` (D4, 10 F2):
   every member `typing.get_protocol_members(PoolFacts)` returns is a field of
   `StoredPoolFacts`, and `ResourcePoolFacts.pool_facts` has `PoolFactsReader.pool_facts`'
   parameters. Verify: `make -C provisioning/compute/service test-unit` passes, and the
   test fails when a member is added to `PoolFacts` alone (checked by hand, not
   committed).
-- [ ] 2.5 Bump `arkhai-kit-site` to 0.15.0 (D11); `arkhai-kit-resource-pools` is already
+  Done: the test compares parameter names and kinds, not annotations, which differ by
+  design (`PoolFacts` against `StoredPoolFacts`); `typing.get_protocol_members` needs
+  Python 3.13, the root `.python-version`. `make -C provisioning/compute/service reinit
+  test-unit`: unit, 640 passed. By hand: with a `delivery_deadline_seconds` property
+  added to the installed `market_site/pool_facts.py` alone, the test failed on the
+  members assertion; `make reinit` restored the wheel and it passed again. The module
+  docstring now says the root holds the reader to the port. Outside the plan, here
+  rather than in 3.7: the service's floors rise to `arkhai-kit-site>=0.15.0` and
+  `arkhai-kit-resource-pools>=0.11.0`, the first versions exporting what this test
+  imports, with their `pyproject.toml` comment saying so; the service stays at 0.28.1.
+- [x] 2.5 Bump `arkhai-kit-site` to 0.15.0 (D11); `arkhai-kit-resource-pools` is already
   at 0.11.0 from task 1.5. Verify: `make check-version-bumps` passes.
-- [ ] 2.6 Verification point. Focused suites: `make -C kit/site test` (unit, library
+  Done: `make check-version-bumps` passed. The bump needs the relock section 3's 3.10
+  names, since `check-locks` refuses a lock pinning a version the tree no longer builds:
+  `make lock PROJECTS="..."` over the eleven projects whose lock installs
+  `arkhai-kit-site` (`domains/apicredits/service`, `domains/bare_metal/provisioning/adapter`,
+  `domains/bare_metal/storefront`, `domains/vms/provisioning/adapter`,
+  `domains/vms/storefront`, `e2e-tests`, `kit/fulfillment`, `kit/site`,
+  `provisioning/compute/ansible`, `provisioning/compute/service`, `provisioning/compute`),
+  each moving `arkhai-kit-site` 0.14.0 to 0.15.0 and nothing else.
+- [x] 2.6 Verification point. Focused suites: `make -C kit/site test` (unit, library
   integration), `make -C kit/resource-pools test` (unit, library integration), `make -C
   provisioning/compute/service test-unit` (unit); then `change-workflow run pre-commit
   inject-site-pool-authority`. End-to-end: none — nothing deployed reaches the new code
   until section 3 wires it, and none is owed. No CI evidence is owed.
+  Done. `make -C kit/site test`: 384 passed. `make -C kit/resource-pools test`: 128
+  passed. `make -C provisioning/compute/service test-unit`: 640 passed. `change-workflow
+  run pre-commit inject-site-pool-authority`: passed — `make check-packaging`, `make
+  test` (every suite), and `make check-repository`. After the fresh-context check's
+  comment and docstring fixes, `make check-repository` and `make check-locks` passed
+  again, and both kits' suites. End-to-end: confirmed none; nothing deployed reaches the
+  new code until section 3 wires it.
+
+Section 2 notes: the section is additive, so `DeliverableHosts` and the usable-host
+predicate exist both in `market_site.deliverable_hosts` and in
+`market_resource_pools.host_requirement` until 3.4 deletes the authority's copy. The
+docstrings of `market_site.pool_facts`, `market_site.deliverable_hosts` and
+`market_resource_pools.pool_facts` describe the system once section 3 wires the ledger
+and both roots: at this commit the ledger still reads `ResourcePool` rows, and
+`deliverable_hosts.py` cites the site-capacity companion's "Declared capacity and
+connection identity", which names the authority's module until closeout's 4.8 rewrites
+it. Section 3 must leave them true; the round's review reads both commits together. The
+by-hand failure check edits the service's installed wheel copy, which `make reinit`
+restores, rather than the source, so no rebuild is needed to undo it.
 
 ## 3. Cut the site ledger over to the port and the site-owned predicate
 
