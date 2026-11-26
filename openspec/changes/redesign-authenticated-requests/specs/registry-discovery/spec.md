@@ -18,3 +18,24 @@ The registry MUST durably reserve `(principal, request_id)` before dispatch. Reu
 
 - **WHEN** the same principal reuses a request ID for different canonical request content
 - **THEN** the registry rejects the request as changed reuse before dispatch
+
+### Requirement: Seller publication evidence is independently verifiable
+
+The registry MUST retain and return, as a listing's `publication`, the exact publication HTTP body bytes as base64 and the record of the seller's signed request, carrying every value its signature covers, its seller proof included. Its ordinary response signature MUST cover that evidence. Mutable lifecycle/oracle updates MUST retain distinct seller evidence, returned as `updates`, mapping each changed field to its update's body and request record, and MUST NOT rewrite the publication proof. The evidence MUST let a consumer verify the seller's body, context and identity rather than treating the registry's signature as the seller's commitment: the registry attests what it served and which keys belong to the publisher; the seller's proof attests the terms. Evidence the registry retained under version 2 MUST be returned as it was retained, its record the version 2 request envelope, and MUST remain verifiable.
+
+#### Scenario: A consumer verifies a listing's commercial term
+
+- **WHEN** a consumer decodes `publication.body_base64` and verifies its request record with the listing's publisher principals
+- **THEN** the body digest and seller signature bind the listing's published terms
+- **AND** historical verification is distinct from live request freshness and publisher trust
+
+#### Scenario: A listing published before the cutover is read
+
+- **WHEN** a consumer reads a listing whose publication the registry retained under version 2
+- **THEN** its `publication` record is the version 2 request envelope, which the consumer verifies by its protocol
+
+#### Scenario: A seller changes status or oracle after publication
+
+- **WHEN** an authorized seller updates a supported lifecycle/oracle field
+- **THEN** reads retain the original publication proof and, under `updates`, the latest signed update for each changed field
+- **AND** unsupported update keys are refused by name rather than discarded

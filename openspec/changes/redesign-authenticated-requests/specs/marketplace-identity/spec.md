@@ -2,15 +2,15 @@
 
 ### Requirement: Body-bound authenticated request and response version
 
-Every authenticated request MUST use the `arkhai.market-request.v3` profile of RFC 9421 HTTP Message Signatures, with RFC 9530 `Content-Digest` over the request body bytes. Its signature MUST cover the HTTP method, the content digest, and the covered fields `Market-Role`, `Market-Operation`, `Market-Resource`, `Market-Audience`, `Market-Request-ID` and `Market-Request-Origin`; its `keyid` MUST be the complete principal, its `created` parameter the signing instant, and its `tag` the profile. Behavior-affecting query values MUST be represented in the signed semantic body. The route boundary MUST derive the expected operation and resource from the request independently of proxy path spelling, and the authority MUST refuse a request whose stated operation or resource differs from what the route derives.
+Every authenticated request MUST use the `arkhai.market-request-signature.v3` profile of RFC 9421 HTTP Message Signatures, with RFC 9530 `Content-Digest` over the request body bytes. Its signature MUST cover the HTTP method, the content digest, and the covered fields `Market-Role`, `Market-Operation`, `Market-Resource`, `Market-Audience`, `Market-Request-ID` and `Market-Request-Origin`; its `keyid` MUST be the complete principal, its `created` parameter the signing instant, and its `tag` the profile. A request MUST carry `Market-Resource`, naming the object its operation acts on, exactly when its operation acts on one object; a request for an operation with no target object MUST carry no `Market-Resource`, and the route, not the request, determines which kind its operation is. The profile MUST accept one spelling of everything it signs — the covered components in the profile's order, the signature parameters `created`, `keyid`, `tag` in that order, the audience in its canonical list serialization, and one `sha-256` `Content-Digest` — and MUST refuse any other spelling as malformed. Behavior-affecting query values MUST be represented in the signed semantic body. The route boundary MUST derive the expected operation and resource from the request independently of proxy path spelling, and the authority MUST refuse a request whose stated operation or resource differs from what the route derives.
 
 `Market-Request-Origin` MUST be the request's first signing instant, unchanged on every retry under the same request ID while each re-signing carries a fresh `created`; it MUST NOT be later than the authority's instant plus the configured skew, except on a time-setting operation mounted under injected time, which "The time-setting operation is exempt from request freshness" governs. `Market-Audience` MUST list the principals the caller would accept the answer from, and an authority MUST accept a request only when its own signing principal is listed. A signed delivery to an endpoint that is not a marketplace authority MUST cover `@target-uri` in place of `Market-Audience`.
 
 The receiving authority MUST reserve `(principal, request_id)` with the request's hash, origin included, before dispatch, enforce configured clock skew on `created` — on every operation but a time-setting operation mounted under injected time, which "The time-setting operation is exempt from request freshness" governs — and reject changed reuse, missing fields, unsupported protocols, or invalid proofs. An exact reuse of the same canonical request MUST resolve as its route declares under "Each route declares how an exact retry is resolved", and MUST NOT execute a conflicting mutation.
 
-Every response an authority returns on an authenticated route MUST use the `arkhai.market-response.v3` profile, covering its status and content digest and, from the request, its method, operation, resource and request ID. This MUST hold for refusals as well as acknowledgements, and for a refusal raised while authenticating the request as well as one raised after, including a request no route serves, signed over the operation, resource and request ID the request states, whether the authority authenticates in middleware or inside its routes. A request that fails after it was authenticated — a route raising an unexpected error — MUST be answered with a signed 500 carrying a fixed detail that reveals nothing of the error, and the error MUST be logged; on a `RECORDED` route that answer MUST be recorded as the request's outcome, and on a `RERUN` route nothing is recorded. A signed 500 MUST NOT be taken to mean that the request applied nothing: a write may have committed before the error, so its effect is unknown, and a caller MUST learn what applied by reading current state before sending a replacement write under a new request ID. A caller MUST verify the proof, body, request binding, and exact expected authority before accepting any of them.
+Every response an authority returns on an authenticated route MUST use the `arkhai.market-response-signature.v3` profile, covering its status and content digest and, from the request, its method, operation, resource where the request carries one, and request ID. This MUST hold for refusals as well as acknowledgements, and for a refusal raised while authenticating the request as well as one raised after, including a request no route serves, signed over the operation, resource and request ID the request states, whether the authority authenticates in middleware or inside its routes. A request that fails after it was authenticated — a route raising an unexpected error — MUST be answered with a signed 500 carrying a fixed detail that reveals nothing of the error, and the error MUST be logged; on a `RECORDED` route that answer MUST be recorded as the request's outcome, and on a `RERUN` route nothing is recorded. A signed 500 MUST NOT be taken to mean that the request applied nothing: a write may have committed before the error, so its effect is unknown, and a caller MUST learn what applied by reading current state before sending a replacement write under a new request ID. A caller MUST verify the proof, body, request binding, and exact expected authority before accepting any of them.
 
-An authority MUST NOT withhold response authentication because trust has not been established. A request carries a request identity when it carries the profile's covered fields `Market-Request-ID`, `Market-Operation` and `Market-Resource`. An answer MAY be unauthenticated only when the request carried no request identity, and an authority MUST NOT invent one in order to sign.
+An authority MUST NOT withhold response authentication because trust has not been established. A request carries a request identity when it carries the profile's covered fields `Market-Request-ID` and `Market-Operation`, with `Market-Resource` where it states one. An answer MAY be unauthenticated only when the request carried no request identity, and an authority MUST NOT invent one in order to sign.
 
 A refusal body MUST NOT disclose anything the caller has not already proven it holds. Naming which bound field disagreed is disclosure of the authority's expectation, not of a secret, and is permitted; a refusal MUST NOT list the operations an authority serves.
 
@@ -54,13 +54,23 @@ An authority MUST refuse a request under `arkhai.market-request-signature.v2` as
 #### Scenario: A version 2 request arrives
 
 - **WHEN** a request signed under `arkhai.market-request-signature.v2` reaches an authority
-- **THEN** it is refused with an unauthenticated 400 whose body code is `unsupported_protocol` and lists `arkhai.market-request.v3`, since the request carries none of the version 3 fields a signed answer binds
+- **THEN** it is refused with an unauthenticated 400 whose body code is `unsupported_protocol` and lists `arkhai.market-request-signature.v3`, since the request carries none of the version 3 fields a signed answer binds
 - **AND** no request identity is invented to sign it
 
 #### Scenario: A request under an unknown profile carries the version 3 fields
 
 - **WHEN** a request whose signature names a profile the authority does not accept carries `Market-Request-ID`, `Market-Operation` and `Market-Resource`
 - **THEN** it is refused with a signed 400 whose body code is `unsupported_protocol`, bound over those stated fields
+
+#### Scenario: A request for an operation with no target states a resource
+
+- **WHEN** a request for `listing.publish` reaches the registry carrying `Market-Resource: listings`
+- **THEN** the registry answers a signed 400 whose body code is `operation_mismatch`, and no handler runs
+
+#### Scenario: A request signs its parameters in another order
+
+- **WHEN** a request whose signature verifies under RFC 9421 lists its signature parameters as `keyid`, `created`, `tag`
+- **THEN** the authority refuses it as malformed before dispatch
 
 #### Scenario: Version 2 evidence is verified
 
@@ -133,6 +143,25 @@ The time-setting operation of a service whose administrator requests are signed,
 - **THEN** it is refused for timestamp skew
 
 ## ADDED Requirements
+
+### Requirement: A signed message retained as evidence verifies offline as a record
+
+A party that keeps a version 3 signed request or response as evidence MUST keep it as the exact body bytes and a record of the message's signed values, carrying no header: for a request, `protocol` (the signature's tag), `principal` (the complete principal as one string), `role`, `method`, `operation`, `resource` exactly when the request carried one, `request_id`, `timestamp` (the signature's `created`), `origin`, `audience` (each member a complete principal as one string) and `proof` (the signature value); for a response, `protocol`, `principal`, `status`, `timestamp`, `proof`, and the method, operation, resource where present, and request ID of the request it answers. The record MUST NOT keep a digest, which a verifier computes from the body. The identity capability MUST verify a request record and a response record from the record, the body and the principals trusted for it, rebuilding the signature base, checking the proof under the principal's scheme and the principal against the trusted set, and MUST apply no freshness and no audience membership. It MUST verify a version 2 record through the same operation, selecting the verifier by the record's `protocol`.
+
+#### Scenario: A buyer verifies a seller's publication long after it was signed
+
+- **WHEN** a buyer verifies a listing's version 3 publication record, signed days earlier, with the listing's publisher principals
+- **THEN** the proof, body digest, principal, operation and timestamp verify, and no freshness window applies
+
+#### Scenario: A retained record is altered
+
+- **WHEN** any value of a retained request record, or its body, differs from what was signed
+- **THEN** verification fails
+
+#### Scenario: A version 2 record and a version 3 record are verified alike
+
+- **WHEN** a consumer verifies a retained version 2 envelope and a version 3 record through the identity capability's evidence verification
+- **THEN** each verifies under its own protocol and returns the same view: principal, timestamp, operation, resource, request ID and, for a response, status
 
 ### Requirement: Each route declares how an exact retry is resolved
 

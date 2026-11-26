@@ -85,6 +85,15 @@ release may stop accepting the version before
   "operation not served", operation mismatch, misdirected requests and unsupported
   protocols, a version 2 request alone, which carries none of the version 3 fields,
   refused unsigned. Signed webhook deliveries bind their endpoint (D2, D10, D11).
+  `Market-Resource` is sent only when the operation acts on one object, and the profile
+  accepts one spelling of everything it signs (D2, D21).
+- **Signed messages retained as evidence are records of their signed values.** The
+  registry's publications, buyers' and storefronts' negotiation evidence and the
+  end-delivery receipt keep, beside the exact body, a record readable as data —
+  protocol, principal, role, method, operation, resource where present, request ID,
+  timestamp, origin, audience, proof — which `kit/identity`'s evidence verifiers check
+  offline under either version; the listing read's evidence fields become
+  `publication` and `updates` (D21–D23).
 - **One cutover.** Version 3 replaces version 2 in the release that introduces it; the
   three 0.4.0 replay tables are dropped and the SQLite space reclaimed by the migrate
   command (D9). Version 2 stays readable as an evidence format (D12).
@@ -114,7 +123,10 @@ None.
   evidence format.
 - `physical-provisioning`: exact retry per declaration; a failure after authentication
   recorded only on a recorded route.
-- `registry-discovery`: durable replay reservation per declaration.
+- `registry-discovery`: durable replay reservation per declaration; seller publication
+  evidence as `publication` and `updates`, each a request record and its body.
+- `deal-lifecycle`: the end-delivery acknowledgement under version 3; commitment
+  envelopes kept and captured as signed records with their exact bodies.
 - `storefront-publication`: version 3 authorization and exact retry per declaration.
 - `introduction-delivery`: an exact replay of a failed start completes it; signed
   deliveries bind their endpoint.
@@ -148,16 +160,20 @@ contact or a secret; the 0.4.0 tables are gone and the
 SQLite files compacted after the upgrade; every refusal that names a request is signed,
 on a path no route serves too, and an unexpected failure after authentication is a
 signed 500;
-version 2 requests are refused and version 2 evidence still verifies.
+version 2 requests are refused and version 2 evidence still verifies; version 3
+evidence verifies offline from its record and body alone.
 
 ## Impact
 
-Code: `kit/identity` (version 3 profile, wire names, declaration vocabulary, version 2
-evidence reader); a new standalone component under `tools/`; a new
+Code: `kit/identity` (version 3 profile, wire names, declaration vocabulary, evidence
+records and their verifiers for both versions, the capture seam); a new standalone component under `tools/`; a new
 `kit/authenticated-requests`; `kit/schema-migrations` (space-freeing migrations); every
 authority's authentication code listed in the design's findings; every typed client;
 `kit/delivery`'s webhook sink; each service's migration chain and the registry's
-Alembic revisions; the API-credits consume models. Configuration: a retention key and a
+Alembic revisions, the registry's renamed evidence columns among them; the API-credits
+consume models; the evidence carriers and verifiers of `kit/deal-lifecycle-contracts`,
+`kit/deal-lifecycle`, `kit/deal-lifecycle-buyer`, `kit/deal-servicing` and the VM
+buyer. Configuration: a retention key and a
 sweep-interval key on every authority, in its settings and Helm values schema. Packages: `arkhai-kit-identity`
 takes an incompatible minor bump and every dependent's bound moves (D17).
 
@@ -169,7 +185,7 @@ takes an incompatible minor bump and every dependent's bound moves (D17).
 - [x] Existing subsystem specifications — `marketplace-identity`,
       `physical-provisioning`, `registry-discovery`, `storefront-publication`,
       `introduction-delivery`, `compute-provisioning-contract`, `api-credits`,
-      `deployment-state`
+      `deployment-state`, `deal-lifecycle`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -181,9 +197,10 @@ Engineering guidance, shared across repositories, gains a messaging file and a
 
 - D1: no permanent destination — scope is the change's own, and the split-off change
   records its scope in its proposal.
-- D2 version 3 as an RFC 9421 profile: `openspec/specs/marketplace-identity/spec.md` and
-  `architecture.md`; the principle of a standard signature format to a new `messaging.md`
-  in `docs/guidance/engineering/`.
+- D2 version 3 as an RFC 9421 profile, its tags, its one accepted spelling and
+  `Market-Resource` only where the operation has a target:
+  `openspec/specs/marketplace-identity/spec.md` and `architecture.md`; the principle of a
+  standard signature format to a new `messaging.md` in `docs/guidance/engineering/`.
 - D3 one authenticated-request layer: `docs/development/ARCHITECTURE.md`, "Marketplace
   identity" and "Authenticated service boundaries"; `marketplace-identity`
   `architecture.md`.
@@ -228,3 +245,13 @@ Engineering guidance, shared across repositories, gains a messaging file and a
 - D19: no permanent destination — index rows
   are planning state.
 - D20: no permanent destination — the cadence is the plan's, not current behaviour.
+- D21 signed messages retained as records of their signed values: `marketplace-identity`
+  spec and `architecture.md`; `registry-discovery` spec (`publication`, `updates`);
+  `deal-lifecycle` spec (the end-delivery acknowledgement); to the new engineering
+  `messaging.md`, two principles the owner stated: each kind of message carries exactly
+  the fields some message of that kind needs, its fields' presence fixed by the kind and
+  never by one message's values; and a retained signed message is stored as its signed
+  values, readable as data, not as its transport form.
+- D22 evidence verifiers: `marketplace-identity` spec and `architecture.md`.
+- D23 capture carrying records: `marketplace-identity` `architecture.md`, beside the
+  admission core; `deal-lifecycle` spec, its capture requirements.

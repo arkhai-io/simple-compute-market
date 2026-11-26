@@ -80,6 +80,23 @@ lease bounds a pending row and is no part of the horizon; with the registry's an
 provisioning service's 30 s leases, a horizon of skew plus lease would leave a replay
 window.
 
+### Signed messages retained as evidence
+
+Found by section 6. Beside live authentication, signed HTTP messages are kept as
+evidence that a third party verifies offline: the registry keeps each publisher's
+version 2 request as `listings.publisher_publication` and in `publisher_updates`
+(`core/registry/src/core_registry/api/publisher_auth.py`, `retained_request_evidence`)
+and serves both in every listing read; the VM buyer verifies that publication to bind
+accepted pricing to the seller's signed terms, and its negotiation evidence as version
+2 envelopes (`domains/vms/buyer/src/arkhai_vms_buyer/pricing_record.py`);
+`SignedEndDeliveryReceipt`
+(`kit/deal-lifecycle-contracts/src/market_deal_lifecycle_contracts/models.py`) holds a
+version 2 request and response, verified by `verify_end_acknowledgement`; the buyer
+store, the storefronts and deal-servicing capture version 2 envelopes as evidence
+items. Every carrier shipped in marketplace 0.4.0. The admission core's signed-outcome
+hook (`kit/authenticated-requests`, `SignedOutcome`) carries the response but not the
+signed request, and `kit/identity`'s capture seam is typed on version 2 envelopes.
+
 ### Libraries
 
 No library provides the replay and exactly-once layer with a durable store, signed
@@ -122,17 +139,30 @@ growing at the rate of all traffic.
 The version 3 request and response are an RFC 9421 profile with RFC 9530
 `Content-Digest`:
 
-- the signature's `tag` names the profile (`arkhai.market-request.v3`,
-  `arkhai.market-response.v3`); `keyid` is the complete principal; `alg` is omitted,
+- the signature's `tag` names the profile (`arkhai.market-request-signature.v3`,
+  `arkhai.market-response-signature.v3`), so that only the version differs from
+  version 2's protocol names; `keyid` is the complete principal; `alg` is omitted,
   so the principal's scheme selects the verifier, as verifier dispatch does today;
 - the semantic fields are covered header fields: `Market-Role`, `Market-Operation`,
   `Market-Resource`, `Market-Audience` (D10), `Market-Request-ID`, and
   `Market-Request-Origin` (D8);
+- `Market-Resource` is present exactly when the request's operation acts on one object
+  — a listing, a negotiation, a reservation — and names that object's identifier; an
+  operation with no target object, such as `listing.publish` or a collection read,
+  carries no `Market-Resource`, and the route, not the request, says which kind an
+  operation is (D21);
+- the profile accepts one spelling of everything it signs: the covered components in
+  the profile's order, the signature parameters in the order `created`, `keyid`,
+  `tag`, the audience in its canonical list serialization, and one `sha-256`
+  `Content-Digest`; any other spelling is refused as malformed, so a retained record
+  of the signed values rebuilds the exact signature base (D21);
 - the request ID is a covered field, not the RFC's `nonce`, because an exact retry
   reuses it, re-signed;
 - `Content-Digest` hashes the bytes sent, not canonical JSON;
 - a response covers `@status` and `content-digest` and binds its request with the
-  `;req` flag over the request's method, operation, resource and request ID.
+  `;req` flag over the request's method, operation, resource (where the request
+  carries one) and request ID. A request and a response each therefore have two
+  coverage lists, with and without `market-resource`, and the operation fixes which.
 
 ```http
 POST /api/v1/capacity/reservations HTTP/1.1
@@ -143,7 +173,21 @@ Market-Resource: pool-gpu-a100
 Market-Audience: ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE
 Market-Request-ID: 0f6c2b1e7d4a4c1e9a523e8b6d0f1a77
 Market-Request-Origin: 1795000000
-Signature-Input: market=("@method" "market-role" "market-operation" "market-resource" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request.v3"
+Signature-Input: market=("@method" "market-role" "market-operation" "market-resource" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
+Signature: market=:3q2-7w...:
+```
+
+A request whose operation has no target object omits the field and its component:
+
+```http
+POST /listings HTTP/1.1
+Content-Digest: sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:
+Market-Role: seller
+Market-Operation: listing.publish
+Market-Audience: ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE
+Market-Request-ID: 0f6c2b1e7d4a4c1e9a523e8b6d0f1a77
+Market-Request-Origin: 1795000000
+Signature-Input: market=("@method" "market-role" "market-operation" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
 Signature: market=:3q2-7w...:
 ```
 
@@ -151,8 +195,11 @@ The implementation's first gate proves EIP-191 signing and verification through 
 `http-message-signatures` library's algorithm interface, and a small ASGI adapter. If
 that interface cannot take a scheme-dispatched algorithm, `kit/identity` implements
 the profile's signature base itself and keeps the library as an interoperability
-test oracle. The non-HTTP signed artifacts — rotation intents, payment receipts,
-deal-lifecycle acknowledgements, pricing records — keep `kit/identity`'s own framing.
+test oracle. The non-HTTP signed artifacts — rotation intents, payment receipts — keep
+`kit/identity`'s own framing. The VM buyer's pricing record and the end-delivery
+acknowledgement are not among them: the first rests on the seller's signed HTTP
+publish request and the second is a signed HTTP response, so each is retained as a
+record of a version 3 message (D21).
 
 A standard format lets callers in other languages and outside this repository sign
 without reimplementing a bespoke frame (TypeScript and Rust implementations exist),
@@ -182,8 +229,9 @@ The component's interface, walked through every caller:
   `exact_retry_outcome_unknown` among them, D7), or `in progress`;
 - an `exact_retry` flag on the admission, for handlers that re-run but must know it is
   a retry (VM settle's `refuse_after_end`, the credential reads);
-- a signed-outcome hook that hands the signed response's raw body and headers to the
-  caller, for evidence capture (bare metal's `EvidenceSession.capture`, VM's
+- a signed-outcome hook that hands the caller the request's and the signed
+  response's records with their bodies, for evidence capture, and the request's record
+  and body on the admission itself (D23) (bare metal's `EvidenceSession.capture`, VM's
   `capture_negotiation`, deal-servicing's `lifecycle_response`);
 - a middleware form for authorities that route by a contract table (provisioning, the
   site kit) and a request-dependency form for authorities that authenticate inside the
@@ -267,7 +315,8 @@ kit/authenticated-requests          foundation kit; authorities only
         ▲
 kit/identity                        foundation kit; every client and contract may use it
   the version 3 profile (sign and verify request and response parts), wire names (D13),
-  the exact-retry declaration vocabulary as data (D5), the version 2 evidence reader (D12)
+  the exact-retry declaration vocabulary as data (D5), the evidence records and their
+  verifiers, version 2 read beside version 3 (D12, D21, D22)
 ```
 
 The replay and exactly-once machinery is generic infrastructure, so it is a standalone
@@ -648,9 +697,11 @@ rotation; leaving signed deliveries unbound.
 ### D11 — Paths route; the stated operation is checked; every answer that names a request is signed
 
 The authority routes by method and path; the stated operation and resource must equal
-what the route derives. A request carries a request identity when it carries the
-version 3 profile's covered fields `Market-Request-ID`, `Market-Operation` and
-`Market-Resource`, over which D2's response binds its request. Every answer is signed
+what the route derives, and a request for an operation with no target object must
+state no resource, as one with a target must state its identifier (D2, D21); either
+difference is an `operation_mismatch`. A request carries a request identity when it carries the
+version 3 profile's covered fields `Market-Request-ID` and `Market-Operation`, with
+`Market-Resource` where it states one, over which D2's response binds its request. Every answer is signed
 when the request carries a request identity:
 
 | Failure | Status | Signed body | Bound over |
@@ -658,7 +709,7 @@ when the request carries a request identity:
 | No route serves the path or method | 404, or 405 with `Allow` | `{"code": "operation_not_served", "operation": "capacity_reserve"}` | the stated operation, resource and request ID |
 | The route binds another operation or resource | 400 | `{"code": "operation_mismatch", "stated": {…}, "bound": {…}}` | the route's operation and resource |
 | The audience does not include this authority | 421 Misdirected Request | `{"code": "audience_mismatch"}` | the route's operation and resource |
-| An unsupported protocol tag | 400 | `{"code": "unsupported_protocol", "supported": ["arkhai.market-request.v3"]}` | the stated fields, when the request carries a request identity; unsigned otherwise, a version 2 request included |
+| An unsupported protocol tag | 400 | `{"code": "unsupported_protocol", "supported": ["arkhai.market-request-signature.v3"]}` | the stated fields, when the request carries a request identity; unsigned otherwise, a version 2 request included |
 
 An answer is unauthenticated only when the request carries no request identity. Bodies
 name what the caller sent and the authority's expectation, and never list the operations
@@ -685,19 +736,26 @@ unsigned.
 
 ### D12 — Version 2 remains a readable evidence format
 
-Version 2 signed responses are retained as evidence (bare metal's `seller-response:`
-capture, deal-servicing's `lifecycle_response`, deal-lifecycle acknowledgements, VM
-pricing records) for each deal's own retention, so `kit/identity` keeps verifying
-version 2 envelopes as a permanent evidence format, never accepted on the wire
-(`docs/guidance/engineering/persistence.md`, "A retained record stays readable"). No
-release can be named after which no version 2 evidence remains, so this is current
-behaviour rather than a compatibility path with a retirement
+Version 2 signed requests and responses are retained as evidence for each deal's own
+retention and for a listing's life: the registry's publication and update evidence,
+the buyer store's `signed_request` and `signed_response` items, the end-delivery
+receipt in the buyer's end journal, the VM storefront's `buyer-envelope:` and
+`seller-envelope:`, bare metal's `seller-response:`, deal-servicing's
+`lifecycle_response` and `buyer-end-envelope:`, and the VM buyer's retained pricing
+records. Every one of these carriers shipped in marketplace 0.4.0. `kit/identity`
+keeps verifying version 2 envelopes as a permanent evidence format, never accepted on
+the wire (`docs/guidance/engineering/persistence.md`, "A retained record stays
+readable"), through the same evidence verifiers that read version 3 records, which
+tell the two apart by the record's `protocol` (D21, D22). No release can be named
+after which no version 2 evidence remains, so this is current behaviour rather than a
+compatibility path with a retirement
 (`docs/guidance/engineering/retiring-compatibility.md`).
 
 ### D13 — `kit/identity` owns the wire names
 
 `kit/identity` owns every version 3 field name, the profile tags, the refusal codes of
-D11, `exact_retry_expired` and `exact_retry_outcome_unknown` (D7). Every client and authority imports them; no copies
+D11, `exact_retry_expired` and `exact_retry_outcome_unknown` (D7), and the field names
+of the evidence record (D21). Every client and authority imports them; no copies
 remain.
 
 ### D14 — The restated requirements
@@ -712,7 +770,14 @@ remain.
   version 2 request's refusal unsigned, and the signed 500 after authentication on
   every authority, its effect unknown on a `RECORDED` route; the time-setting
   operation exempt from the origin's bound as from `created`'s; the route inventory refusing to start; version 2 as an evidence
-  format.
+  format; the profile's tags, its one accepted spelling and `Market-Resource` only
+  where the operation has a target; a signed message retained as evidence verifying
+  offline as a record of its signed values, under either version (D21, D22).
+- `registry-discovery`: seller publication evidence as `publication` and `updates`,
+  each the body bytes and the seller's request record (D21).
+- `deal-lifecycle`: the end-delivery acknowledgement signed under version 3; each
+  party's commitment envelopes kept, and captured at the signed transport boundary, as
+  signed records with their exact bodies (D21, D23).
 - `physical-provisioning`: the authenticated provisioning boundary's exact retry per
   declaration, a lease reclaimed only on a `RERUN` route; a failure after
   authentication recorded only on a `RECORDED` route, the general rule now
@@ -785,7 +850,8 @@ The change keeps its name.
 
 ### D20 — Implementation cadence
 
-Two rounds:
+Three rounds. Rounds 1 and 3 are as first planned; round 2 was added when section 6
+found the evidence form undesigned, before any of the cutover was implemented:
 
 - **Round 1, the foundations, in two sessions.** Session 1: `kit/identity`'s version 3
   profile, opening with D2's EIP-191 and ASGI gate, the wire names (D13), the declaration
@@ -795,15 +861,174 @@ Two rounds:
   inventory and the signed 500 (D3, D7), the migration engine's `VACUUM` (D9), and the double-dispatch harness with its
   interleaved write (D5). Unit and
   conformance tests; reviewed before anything depends on it.
-- **Round 2, the cutover, in three sessions.** Session 1: the registry, the provisioning
-  service, the site kit and the API-credits service, and deal-servicing, with their typed
+- **Round 2, the foundation amendments, in one session.** `kit/identity`: the renamed
+  tags, the one accepted spelling, `Market-Resource` only where the operation has a
+  target, the evidence records, the two evidence verifiers reading either version,
+  and the version 3 capture seam (D2, D21–D23). The admission core: the request record
+  on the admission and both records on the signed outcome, and the resource-absence
+  check (D11, D23). Unit tests, the record round trip under both schemes among them;
+  reviewed before the cutover depends on it.
+- **Round 3, the cutover, in three sessions.** Session 1: the registry, with
+  `publication` and `updates` and their column rename (D21), the provisioning
+  service, the site kit and the API-credits service, and deal-servicing, with its
+  lifecycle evidence and the end-delivery receipt as records (D23), with their typed
   clients, route declarations and double-dispatch cases, adjust's crash-boundary, renewed-lease and post-commit 500 cases (D7), the relay rotation and staging interleaved-write cases (D6), the table drops, the consume key
   and the retention and sweep-interval settings. Session 2: the three storefronts, with their declarations and
-  cases, the introduction change, and the VM callback's signed refusals. Session 3: the
-  buyers' clients, a typed client's time advance beyond the skew (D8), the signed-delivery binding (D10a), the end-to-end lanes, and the
+  cases, their evidence captured as records (D23), the introduction change, and the VM
+  callback's signed refusals. Session 3: the buyers' clients and the buyer store
+  capturing records, the VM buyer's pricing verification of version 3 and stored
+  version 2 publications and of its negotiation evidence (D22), a typed client's time advance beyond the skew (D8), the signed-delivery binding (D10a), the end-to-end lanes, and the
   documentation closeout promotes. Reviewed, then closeout.
 
-The cutover is atomic (D9), so round 2 lands whole before any end-to-end lane passes.
+The cutover is atomic (D9), so round 3 lands whole before any end-to-end lane passes.
+
+*Section 6's return:* the first cadence had two rounds, the cutover in round 2. Section
+6 stopped before its first task on finding that the cutover left the retained evidence
+of signed messages undesigned. The owner chose a reviewed foundation round over
+folding the amendments into the cutover's first session, which would leave a flaw in
+the profile to surface across five authorities before anyone reviewed it, and over
+placing each piece in the section that first needs it, which splits the foundation
+across its consumers.
+
+### D21 — A signed message retained as evidence is a record of its signed values
+
+Several parties keep a signed request or response as evidence, which a third party
+later verifies offline against a trusted principal (D12 lists them): the registry its
+publishers' publications and updates, served in every listing read, which the VM buyer
+verifies to bind accepted pricing to the seller's own signature; each buyer its
+counterparties' signed negotiation messages and the end-delivery receipt, verified
+against the Agreement alone; each storefront its counterparties' messages. Version 3
+keeps all of them as a **record of the message's signed values**, readable as data,
+beside the exact body bytes. A seller's publication, in a listing read:
+
+```json
+"publication": {
+  "body_base64": "eyJsaXN0aW5nX2lkIjoibGlzdC03ZjNhIiwi...",
+  "request": {
+    "protocol": "arkhai.market-request-signature.v3",
+    "principal": "ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs",
+    "role": "seller",
+    "method": "POST",
+    "operation": "listing.publish",
+    "request_id": "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
+    "timestamp": 1795000000,
+    "origin": 1795000000,
+    "audience": ["ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE"],
+    "proof": "3q2-7w…"
+  }
+}
+```
+
+- `protocol` is the signature's tag; `principal` and each `audience` member are the
+  complete principal as one string, as the signature's `keyid` writes it; `timestamp`
+  is the signature's `created`; `proof` is the signature value alone, its scheme the
+  principal's.
+- `resource` is present exactly when the request carries `Market-Resource` (D2): an
+  update's record names its listing, a publish's has none.
+- A response's record carries `protocol`, `principal`, `status`, `timestamp`,
+  `proof`, and the method, operation, resource where present, and request ID of the
+  request it answers, which its signature binds.
+- No digest is kept: the verifier computes the content digest from the body. No
+  header is kept: the record holds every value the signature covers, and the profile's
+  one accepted spelling (D2) lets `kit/identity` rebuild the exact signature base from
+  it.
+- A version 2 record keeps its stored shape — `request` as the version 2 envelope —
+  and its own `protocol`, `arkhai.market-request-signature.v2`, tells a reader which
+  verifier applies.
+
+The listing read's evidence fields are `publication` and `updates`, renamed from
+`publisher_publication` and `publisher_updates`: `updates` maps each field a signed
+update changed (`status`, `oracle_address`) to that update's publication. The
+registry renames its columns in the Alembic revision that adds its replay table, and
+the VM buyer reads a pricing record it retained under the old key, as D12 keeps every
+retained record readable. The end-delivery receipt keeps its layout, a request record
+with its body and a response record with its body, and a receipt stored in a buyer's
+end journal under version 2 still decodes by its `protocol`.
+
+Each kind of message carries exactly the fields some message of that kind needs: a
+field no message of its kind ever needs, to act on it or to verify it, is left out
+rather than filled with a placeholder, and a field some message of its kind needs is
+always present, even where in one message its value repeats another's. Presence is
+fixed by the kind of message, known to sender and receiver before it is sent, never by
+the values in one message. So `Market-Resource` is absent for an operation with no
+target, `Market-Request-Origin` is on every request, since every operation may be
+retried and a retry's origin is its only record of the first signing, and the record
+keeps no digest. The same rule is what makes one accepted spelling possible.
+
+`Market-Request-ID` stays although a body could fingerprint a request: every retry is
+re-signed with a fresh `created`, so only the request ID tells an exact retry from a
+new request with the same body; it keys the replay reservation (D7), binds a response
+to its request, and pairs a seller's signed acceptance with the buyer request it
+answers.
+
+Rejected: storing the message's signed header fields verbatim beside the body, which
+needs no spelling rule but leaves the principal and the signing time inside
+`Signature-Input`, pairs with nothing in the version 2 record, and makes every reader
+parse RFC 9421 to learn who signed and when; a separately signed non-HTTP artifact
+inside each body, which changes every publisher's, buyer's and seller's payload, signs
+each message twice, and makes the evidence other than the request the authority
+admitted; signing version 2 beside version 3 on the routes that produce evidence, the
+compatibility path D9 rejects, kept forever; relying on the authority's signature in
+place of the party's, against `registry-discovery`'s rule that the registry attests
+what it served and the seller's proof attests the terms; deferring, under which the
+VM buyer refuses every purchase against a republished listing; reopening D2 for a
+bespoke version 3 frame, which keeps the same record without a spelling rule but
+gives up the standard form other languages sign with, rebuilds sections 2 and 4, and
+returns the response binding to hand framing; a constant collection name in
+`Market-Resource`; leaving `Market-Request-Origin` out of a first attempt, whose
+presence would then depend on the attempt; keying requests on their origin and body
+in place of a request ID, which merges intended identical requests sent within one
+second and re-keys the replay layer, the response binding and the evidence pairing.
+
+### D22 — Evidence verifies offline through `kit/identity`'s evidence verifiers
+
+`kit/identity` offers two evidence verifiers, one for a request record and one for a
+response record, each reading either version by its `protocol`. Each takes the record,
+the body bytes, the principals trusted for it — kept with the evidence, such as a
+listing's `publisher_principals` or an Agreement's parties — and the expected role,
+operation and resource where the caller knows them. It rebuilds the signature base,
+computes the digest from the body, checks the proof under the principal's scheme and
+the principal against the trusted set, and returns one view for both versions:
+principal, timestamp, operation, resource, request ID and, for a response, status. It
+applies no freshness, since a retained message is not a live request, and checks no
+audience membership, which concerned only the authority that admitted the request.
+
+Every caller, through these verifiers alone: the VM buyer's publication check verifies
+the publication's request record with the listing's publisher principals; its
+recovered-pricing check verifies the buyer store's request and response records with
+the Agreement's parties; `verify_end_acknowledgement`, from the buyer's ending and
+deal-servicing's self-check, verifies the receipt's two records. None keeps its own
+version 2 branch.
+
+Rejected: verifying evidence through the live verifiers with freshness defeated by
+`now` set to the message's own time and no skew, as version 2 readers do today, which
+is obscure and leaves each consumer dispatching on version; consumers rebuilding the
+signed headers from the record and calling the live verifier, which makes each
+interpret the profile's internals.
+
+### D23 — Capture carries records
+
+Signing and verifying produce the record, so no party builds one by hand:
+
+- the admission core's admission carries the verified request's record and body
+  bytes, so a handler that keeps the request — the registry's publish and update,
+  deal-servicing's end-delivery ingress — stores it before it answers; the signed
+  outcome carries the request's and the response's records with both bodies, for
+  capture after the answer — the VM storefront's negotiation evidence, bare metal's
+  `seller-response:`, deal-servicing's `lifecycle_response`;
+- `kit/identity`'s client-side capture seam carries a record, its body and the
+  expected principals in place of the version 2 envelope and raw headers, and the
+  typed clients (`core_buyer`, `storefront-client`, `deal-lifecycle-client`) pass the
+  record their signing or verification produced;
+- a version 3 evidence item keeps its record in `context` and no headers; the record
+  is everything verification needs.
+
+`deal-lifecycle`'s requirements that each party keep its commitment envelopes, and
+capture them at the signed transport boundary, then speak of the signed record and the
+exact body in place of proof headers.
+
+Rejected: authorities reading the raw request from the framework beside the admission
+core, which is the interface gap the core exists to close.
 
 ## Open Questions
 

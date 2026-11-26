@@ -8,7 +8,7 @@
 ### Requirement: Service calls use the shared version 3 identity contract
 
 A provisioning authority MUST authenticate each inbound service request with
-the shared `arkhai.market-request.v3` profile and MUST sign each response with
+the shared `arkhai.market-request-signature.v3` profile and MUST sign each response with
 the shared response profile. Verification MUST use the complete counterparty
 principal selected by route and authority state, bind the request or response
 body digest, require the authority's own principal in the request's audience,
