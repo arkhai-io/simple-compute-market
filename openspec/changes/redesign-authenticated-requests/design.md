@@ -209,12 +209,27 @@ The component's interface, walked through every caller:
   that;
 - a signed 500 for an unexpected failure after authentication: a handler that raises
   is answered with a signed 500 carrying a fixed detail that reveals nothing of the
-  error, and the error is logged; on a `RECORDED` route the 500 is the recorded
-  outcome, recorded once the domain write has rolled back, so an exact retry learns
-  that nothing applied; on a `RERUN` route nothing is recorded. This
+  error, and the error is logged; on a `RECORDED` route the 500 is the attempt's
+  recorded outcome, so an exact retry receives the same signed answer and is never
+  dispatched, and its effect is unknown: the core sees the error, not where the
+  handler committed, so a write may have applied before it (`KeysService.adjust`
+  commits before it builds its answer), and the caller reads current state before any
+  new write, as after `exact_retry_outcome_unknown` (D7); on a `RERUN` route nothing
+  is recorded. This
   generalizes `physical-provisioning`'s existing requirement, which
   `unbacked-bare-metal-listings` delivered for provisioning and the site kit, to every
-  authority on the core.
+  authority on the core;
+- a lease renewal around a `RECORDED` attempt: in either form, the core renews the
+  attempt's lease while its handler runs and stops when the handler returns or raises
+  (D7).
+
+*Design review 35, F2:* D3 first said a `RECORDED` 500 was recorded once the domain
+write had rolled back, so an exact retry learned that nothing applied. The core cannot
+know that, and the owner judged that a 500 only says something went wrong on the
+server, whose side effects cannot be ruled out. A route that wants to promise a caller
+more — that a failure applied nothing — does so with a specific error code and message
+and atomicity its code enforces, designed with that route; the owner rejected a
+per-route rollback declaration the core would have to trust and could not check.
 
 The fallback and the inventory settle design review 16's F2: the request-dependency
 form alone never runs for an unmatched request, so the registry's handler, which signs
@@ -241,7 +256,7 @@ chain still in design.
 
 ```text
 standalone component under tools/   no internal dependencies; stdlib, optional SQLAlchemy and Starlette
-  reserve, lease, resolve (RERUN/RECORDED), record, expire, sweep over an opaque key and hash;
+  reserve, lease, renew, resolve (RERUN/RECORDED), record, expire, sweep over an opaque key and hash;
   sqlite3 and SQLAlchemy stores; its DDL as published statements; ASGI and dependency wrappers
         ▲
 kit/authenticated-requests          foundation kit; authorities only
@@ -425,8 +440,7 @@ giving `credits_key_adjust` an idempotency key now.
 ### D7 — Bounds, pruning and stores
 
 Every row stores an `expires_at` on the authority's process time source: the later of
-its bound, computed at insert from the request alone, and its lease deadline, raised
-whenever a lease is reclaimed:
+its bound, computed at insert from the request alone, and its lease deadline, raised whenever a lease is reclaimed or renewed:
 
 - `RERUN`: origin + 2 × skew;
 - `RECORDED`: origin + max(retention + skew, 2 × skew).
@@ -443,14 +457,32 @@ reservation under its key replaces it. Expired rows wait for the sweep, so this 
 keeps a leftover row from refusing a request that should be served (16 F6).
 
 A `RECORDED` attempt is dispatched once. Its outcome is recorded after the handler
-returns, in the store's own transaction. An exact retry that finds the row with no
-outcome is refused as in progress while the attempt's lease is held; once the lease has
-ended it is answered with a signed 409 whose body code is
-`exact_retry_outcome_unknown`, and is never dispatched. If the attempt later completes
-and records its outcome, a later exact retry receives that outcome. A lease is reclaimed
-only on a `RERUN` route, where a second run is proven safe (D5). A caller told the
-outcome is unknown learns what applied by reading current state, as it does after the
-410 (D8), and sends any further write under a new request ID.
+returns, in the store's own transaction. While the handler runs, the core renews the
+attempt's lease: a task beside the handler, in either form, extends the lease every
+third of its period and stops when the handler returns or raises, so a live attempt
+keeps its lease however long it runs, and only an attempt whose process is gone loses
+it. An exact retry that finds the row with no outcome is refused as in progress while
+the attempt's lease is held; once the lease has ended it is answered with a signed 409
+whose body code is `exact_retry_outcome_unknown`, and is never dispatched. That answer
+therefore means the attempt ended without recording: none of its local writes can
+still commit. A lease is reclaimed only on a `RERUN` route, where a second run is
+proven safe (D5). A caller told the outcome is unknown, or answered a recorded 500
+(D3), learns what applied by reading current state, as it does after the 410 (D8), and
+sends any further write under a new request ID. Renewal writes the store only for an
+attempt running longer than a third of its lease, so an ordinary request costs nothing
+more. Two cases stay outside it: a handler that blocks the event loop past the whole
+lease, which stalls its renewal and is a defect of that handler; and a call to another
+authority that an ended attempt had already sent, which that authority's state
+settles, as the plan's route check below covers.
+
+*Design review 35, F3:* the 27 F1 triage answered `exact_retry_outcome_unknown` once a
+fixed lease ended, and told the caller to read current state. A handler still running
+past its lease could then commit after that read, and a replacement write sent on it
+could be overwritten by the older one, most plainly for the absolute setters D6 made
+`RECORDED`. The owner chose renewing a live attempt's lease, so that the answer means
+the attempt has ended, over keeping the fixed lease and telling callers to poll the
+exact retry until a recorded outcome or the 410 before writing again, which would leave
+a crashed attempt's caller waiting out the retention or needing an operator.
 
 *Design review 27, F1:* the 16 F3 triage required a `RECORDED` outcome to commit in the
 same transaction as the handler's domain write, so that a crash between them could not
@@ -467,7 +499,11 @@ still could not hold for the handlers that call other services (`admin_reserve_c
 the lifecycle cycle), and over making adjust idempotent in its domain, which fixes one
 route of the many. The crash boundary is proven by an integration case: a crash after
 adjust's commit and before its outcome is recorded, whose exact retry is answered
-`exact_retry_outcome_unknown` with the balance adjusted once. Where a `RECORDED` route's
+`exact_retry_outcome_unknown` with the balance adjusted once; a second, that a handler
+running past its lease is renewed, its exact retry refused as in progress and then
+answered with the recorded outcome; and a third, that a write raising after it commits
+is answered with a recorded 500 whose exact retry dispatches nothing, the balance
+adjusted once. Where a `RECORDED` route's
 caller could not learn by reading whether its write applied, that route would need the
 unit of work; the plan's route check names any such route.
 
@@ -510,14 +546,23 @@ gains one.
 Rejected: pruning on every reservation, which costs a commit per request for no
 urgency; a loop written in each authority; an in-memory production store; committing a
 `RECORDED` outcome in the handler's domain transaction through a shared unit of work
-(27 F1); reclaiming a `RECORDED` attempt's expired lease for a second dispatch.
+(27 F1); reclaiming a `RECORDED` attempt's expired lease for a second dispatch; a fixed
+`RECORDED` lease with callers polling the exact retry until an outcome or the 410
+(35 F3).
 
 ### D8 — Recorded outcomes: a signed request origin, a configurable retention, a signed 410
 
 Every version 3 request carries `Market-Request-Origin`, its first signing time, kept
 unchanged on every retry while each re-signing gets a fresh `created`. It is covered by
 the signature and part of the request hash, so a changed origin is changed reuse. An
-origin may not be later than now + skew. This lets a receiver refuse a too-late retry
+origin may not be later than now + skew, except on the time-setting operation mounted
+under injected time: its request is first signed at the instant it sets, so its origin
+and `created` are as far ahead as the advance, and it is exempt from both bounds while
+its signature, principal, operation, resource and request-ID reservation are checked as
+every request's (`marketplace-identity`'s "The time-setting operation is exempt from
+request freshness"). Its row is `RERUN`, bounded at origin + 2 × skew, which once the
+set lands is the authority's new instant plus twice the skew. A typed client's advance
+beyond the skew is tested end to end through the core (design review 35, F1). This lets a receiver refuse a too-late retry
 of a `RECORDED` route from the request alone, so every row is bounded (D7) and nothing
 is kept indefinitely.
 
@@ -644,10 +689,12 @@ remain.
   origin; the three jobs and their lifetimes, the lease floor, expired rows treated as
   absent, and the periodic sweep; per-route exact-retry resolution, `RERUN` only where
   the domain recognises a retry; a `RECORDED` attempt never dispatched twice, its
-  abandoned attempt answered `exact_retry_outcome_unknown`; the retention and the 410;
+  lease renewed while its handler runs, an ended attempt with no outcome answered
+  `exact_retry_outcome_unknown`; the retention and the 410;
   secrets never recorded; the signed-refusal table, unmatched requests included, a
   version 2 request's refusal unsigned, and the signed 500 after authentication on
-  every authority; the route inventory refusing to start; version 2 as an evidence
+  every authority, its effect unknown on a `RECORDED` route; the time-setting
+  operation exempt from the origin's bound as from `created`'s; the route inventory refusing to start; version 2 as an evidence
   format.
 - `physical-provisioning`: the authenticated provisioning boundary's exact retry per
   declaration, a lease reclaimed only on a `RERUN` route; a failure after
@@ -727,17 +774,16 @@ Two rounds:
   profile, opening with D2's EIP-191 and ASGI gate, the wire names (D13), the declaration
   vocabulary (D5), and the version 2 evidence reader (D12). Session 2: the standalone
   replay component, `kit/authenticated-requests`, both stores, its migrations, the
-  sweep, the unmatched-request fallback, the route inventory and the signed 500 (D3,
-  D7), the migration engine's `VACUUM` (D9), and the double-dispatch harness with its
+  sweep, the `RECORDED` lease renewal, the unmatched-request fallback, the route
+  inventory and the signed 500 (D3, D7), the migration engine's `VACUUM` (D9), and the double-dispatch harness with its
   interleaved write (D5). Unit and
   conformance tests; reviewed before anything depends on it.
 - **Round 2, the cutover, in three sessions.** Session 1: the registry, the provisioning
   service, the site kit and the API-credits service, and deal-servicing, with their typed
-  clients, route declarations and double-dispatch cases, adjust's crash-boundary case
-  (D7), the relay rotation and staging interleaved-write cases (D6), the table drops, the consume key
+  clients, route declarations and double-dispatch cases, adjust's crash-boundary, renewed-lease and post-commit 500 cases (D7), the relay rotation and staging interleaved-write cases (D6), the table drops, the consume key
   and the retention and sweep-interval settings. Session 2: the three storefronts, with their declarations and
   cases, the introduction change, and the VM callback's signed refusals. Session 3: the
-  buyers' clients, the signed-delivery binding (D10a), the end-to-end lanes, and the
+  buyers' clients, a typed client's time advance beyond the skew (D8), the signed-delivery binding (D10a), the end-to-end lanes, and the
   documentation closeout promotes. Reviewed, then closeout.
 
 The cutover is atomic (D9), so round 2 lands whole before any end-to-end lane passes.

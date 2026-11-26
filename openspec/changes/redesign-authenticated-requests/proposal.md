@@ -56,7 +56,7 @@ release may stop accepting the version before
 ## What Changes
 
 - **One authenticated-request layer for every authority.** A standalone replay
-  component under `tools/` (reserve, lease, resolve, record, expire, sweep, with
+  component under `tools/` (reserve, lease, renew, resolve, record, expire, sweep, with
   `sqlite3` and SQLAlchemy stores) and a thin foundation kit,
   `kit/authenticated-requests`, over it: version 3 verification, audience, trust,
   signed refusals and 500s, a signed-outcome hook, a fallback that signs answers to
@@ -68,8 +68,11 @@ release may stop accepting the version before
   with a later write between the request and its retry (D5). Reads and the mutations
   whose domain recognises a retry as applied re-run and record no body; every other
   mutation, absolute setters and deletes included, keeps its outcome (D6), and is
-  dispatched once: an exact retry finding no outcome after the first attempt's lease
-  is answered with a signed "outcome unknown" (D7). A response carrying a secret is
+  dispatched once: the core renews a running attempt's lease, and an exact retry
+  finding no outcome after the attempt's lease has ended, which means the attempt
+  ended without recording, is answered with a signed "outcome unknown"; a recorded
+  500's effect is likewise unknown, and the caller reads current state before writing
+  again (D3, D7). A response carrying a secret is
   never recorded.
 - **Every row is bounded.** Each request carries a signed origin; a row expires at a
   time computed from the request, never before its lease ends, and a periodic sweep
@@ -194,7 +197,7 @@ Engineering guidance, shared across repositories, gains a messaging file and a
   `architecture.md`; `introduction-delivery` and `api-credits` specs; the rule that a
   message carrying a secret is never stored or logged as it stands, and is stripped
   before any persistence, to the new engineering `messaging.md`.
-- D7 bounds, the lease floor, expired rows treated as absent, the periodic sweep,
+- D7 bounds, the lease floor, the `RECORDED` lease renewal, expired rows treated as absent, the periodic sweep,
   database stores and the retention and sweep-interval keys:
   `marketplace-identity` `architecture.md` and `configuration.md`;
   `docs/development/DEPLOYMENT_AND_CONFIG.md`.
