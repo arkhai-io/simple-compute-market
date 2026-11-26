@@ -212,7 +212,7 @@ them.
   `meter-inference-usage`'s.
 - D6: no derived discovery price; a rate bound co-requires the card's asset in
   the filter specification — the `inference` capability's `spec.md` and its
-  `architecture.md`, "Current limits".
+  `architecture.md`, "Comparing prices".
 - D7: quota-backed publication in version 1, quota being a sales cap — the
   `inference` capability's `architecture.md`, "Current limits"; the
   requirement is `compose-inference-domain-stack`'s delta.

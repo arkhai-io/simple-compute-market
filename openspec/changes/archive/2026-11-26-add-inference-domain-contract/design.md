@@ -129,7 +129,7 @@ service. The registry itself never mints, resolves, or aliases identifiers;
 `registry-discovery` keeps it opaque to domain payloads, and federated
 registries would otherwise let one string mean different things in two places.
 
-Quantization, runtime, and context limits are **not** in the identifier. They
+Quantization and context limits are **not** in the identifier. They
 are explicit fields, so "every listing of this model" and "this model at fp8"
 are both one query, and one fact has one name. `quantization` is an enumerated
 field — initially `none`, `fp16`, `bf16`, `fp8`, `int8`, `int4`, `awq`, `gptq`,

@@ -54,8 +54,8 @@ A listing SHOULD derive `model_id` by the domain's derivation rule — the
 upstream owner and repository name, lowercased, with revision and quantization
 suffixes stripped; the owner's namespace for private weights; the fine-tuner's
 for a fine-tune — so that independent sellers of the same weights converge on
-one identifier. Quantization, runtime, and context limits MUST be carried as
-explicit fields and MUST NOT be the only place a deployment property is
+one identifier. Quantization and context limits MUST be carried as explicit
+fields, and `model_id` MUST NOT be the only place a deployment property is
 expressed. The domain MUST NOT maintain a list of admitted models. A registry
 MAY narrow the accepted `model_id` vocabulary by operator policy through its
 filter specification and MUST NOT mint, resolve, or alias identifiers. A resold

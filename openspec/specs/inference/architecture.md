@@ -67,8 +67,8 @@ enumeration or a pattern. That is curation in the right place, an operator's
 policy outside the registry service, which never mints, resolves, or aliases an
 identifier.
 
-Quantization, runtime, and context limits are explicit fields and not parts of
-the identifier, so "every listing of this model" and "this model at fp8" are
+Quantization and context limits are explicit fields and not parts of the
+identifier, so "every listing of this model" and "this model at fp8" are
 each one query and one fact has one name. `artifact_ref` names the weights
 served under any scheme, `artifact_digest` optionally pins them, and
 `display_name` is a mutable label with no identity role. All are seller
@@ -167,12 +167,11 @@ separate: the bearer credential is delivery of what was bought, and its balance
 authorizes payment for nothing else. A deployment that adds a spending
 authority does so beside these.
 
-The authority holding keys, grants, pinned rate cards, and balances is the one
-thing consulted when a request is admitted. A rating or billing platform may
-receive usage records downstream and is never asked whether a request may
-proceed: such platforms assume one merchant billing many customers, are outside
-the request path, and would make every seller depend on a third party's
-availability to serve a request.
+The usage record is the seam at which a rating or billing platform attaches,
+downstream of the authority holding keys, grants, pinned rate cards, and
+balances. Such platforms assume one merchant billing many customers and sit
+outside the request path, so putting one on the admission path would make every
+seller depend on a third party's availability to serve a request.
 
 ## Composition
 
@@ -182,11 +181,12 @@ the same as API credits': a quantity of credits onto a new or an existing key.
 What differs between the two domains is the listing and the consumption.
 
 The domain binds the family's shapes and does not copy API credits' roles. The
-roles of a market selling prepaid bearer access are one machinery: a copy of
-them into this domain measured about 12,500 copied source lines against fewer
-than 300 new ones, with every new module beside the copy and none inside it. So
-the family's vocabulary and kit come first, and a domain contributes its listing
-schema, its publication guard, its materialization, and its wiring.
+roles of a market selling prepaid bearer access are one machinery, shared
+whole: issuance and its digests, the authority's key service and ledger, the
+storefront's settlement composition, and the buyer flows do not depend on what
+is served. So the family's vocabulary and kit hold them, and a domain
+contributes its listing schema, its publication guard, its materialization,
+and its wiring.
 
 An inference storefront is its own executable on the storefront shell,
 registered as a storefront domain as API credits is, and not a contribution to
