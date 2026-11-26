@@ -478,8 +478,9 @@ caller can be left on the old constructor at a commit the functional checks pass
   End-to-end: `e2e_pool_declared_modes` (the deployed site refusing an undeclared mode
   before reservation, now through the port), `e2e_buy` and `e2e_deal` (VM admission and
   commit), `e2e_bare_metal_publication` (a disabled host's close and reopen, through the
-  offered read's host rule), `e2e_bare_metal_deal`, and `e2e_credits_deal` (the API-credit
-  ledger with no host requirement). No CI evidence is owed.
+  offered read's host rule), `e2e_bare_metal_mock_deal` and `e2e_bare_metal_payment_deal`
+  (bare-metal admission and commit), and `e2e_credits_deal` (the API-credit ledger with no
+  host requirement). No CI evidence is owed.
   Done. Focused suites, as recorded in 3.2–3.9: `kit/site` 394, `kit/resource-pools`
   115, `kit/fulfillment` 213, `provisioning/compute` 605, the provisioning service unit
   641 and integration 580, the API-credit service 92, the VM storefront 1199 + 653, the
@@ -493,6 +494,30 @@ caller can be left on the old constructor at a commit the functional checks pass
   `e2e_bare_metal_publication`, `e2e_bare_metal_deal` and `e2e_credits_deal`, which
   reach the rewired ledger once deployed; none was run here, and validation runs them.
   No CI evidence is owed.
+  Round triage (20 A2 / 20 A3): validation 20 credited `e2e_pool_declared_modes` and
+  `e2e_bare_metal_deal` as passed by inference from lane totals, but no lane selected
+  either. `e2e_pool_declared_modes` had joined no lane since it was written; adding it
+  to the VM lane (`E2E_MODULE` in `e2e-tests/Makefile`) is outside the plan. To meet
+  the lane's rules its module now takes the VM lane's four timer holds
+  (`test_scenario_lane_holds.py`), and asserts rather than skips when the site offers
+  no resource with a free unit, choosing one that has, since a resource unable to meet
+  the claim is passed over before its pool's modes are read. `e2e_bare_metal_deal`
+  needs a real whole host and stays in no lane, so the plan's End-to-end line above
+  now names the bare-metal lane's deals, `e2e_bare_metal_mock_deal` and
+  `e2e_bare_metal_payment_deal`; the bare-metal entry in the Done line above is the
+  plan's earlier one. Evidence: collecting the VM lane's marker expression selects 514
+  tests, `test_pool_declared_offering_modes.py` among them, against the 513 the lane ran
+  at validation 20 (system-test collection, no run); `test_scenario_lane_holds.py`,
+  `test_scenario_cleanup_order.py` and `test_qualification_modules.py` (unit): 161
+  passed. `change-workflow run pre-commit inject-site-pool-authority`: the first run
+  failed on `test_scenario_lane_holds.py[E2E_MODULE]`, the module lacking the lane's
+  holds; after the holds were added it passed — `after-functional-change` (no lock
+  changed), `pre-commit-functional` (`check-packaging` and `test`, every suite) and
+  `pre-commit` (`make check-repository`: every check passed). The fresh-context check
+  found the missing holds, the resource choice that could miss the claim, the skip a
+  lane must not take, and the "holds nothing" wording that collides with the lane's
+  timer holds; all were fixed. The scenario has not run deployed: the fix commit's
+  validation runs it in the VM lane.
 
 Section 3 notes: the docstrings section 2 left ahead of the wiring — `market_site.pool_facts`,
 `market_site.deliverable_hosts`, `market_resource_pools.pool_facts` — are now true of the
@@ -547,8 +572,9 @@ closeout parts (`openspec/README.md`, "This repository's closeout parts") order 
   - **End-to-end pipeline:** record the pipeline run the latest passing validation
     gathered, its result, and the scenarios that exercise the change —
     `e2e_pool_declared_modes`, `e2e_buy`, `e2e_deal`, `e2e_bare_metal_publication`,
-    `e2e_bare_metal_deal`, `e2e_compute_dynamic_listings`, `e2e_credits_deal` — from that
-    validation's record.
+    `e2e_bare_metal_mock_deal`, `e2e_bare_metal_payment_deal`,
+    `e2e_compute_dynamic_listings`, `e2e_credits_deal` — from that validation's record.
+    `e2e_bare_metal_deal` is in no lane, as `e2e-tests/Makefile` says.
 - [ ] 4.8 Promotion: write the design-promotion record in this file, and the permanent
   documents:
   - D1, D3, D4, D5, D10: `openspec/specs/site-capacity/architecture.md`, "Declared
