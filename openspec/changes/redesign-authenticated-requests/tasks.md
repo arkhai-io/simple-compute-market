@@ -585,7 +585,47 @@ Notes (section 4):
   and the framework-free ASGI plumbing. The promotion in 17.9 describes them where
   they are.
 - No test-before run: every test imports what only this kit adds.
-
+- Fix from implementation review 45, F1 (D7's third case): a lease that ended under a
+  live `RECORDED` handler, its store refusing every renewal for the whole period, was
+  only retried or ended in silence. An `Attempt` now carries the `lease_until` it was
+  admitted with; `RequestReplay.renew` answers the lease's new end, or `None` once
+  the attempt no longer holds it (it answered a bool); `RequestReplay.now()` is added.
+  A `Renewal` tracks the lease's end from those, and logs one error naming the
+  request, saying its retry is told the outcome is unknown while the attempt can still
+  commit, when a failed renewal finds the lease ended, a renewal finds it no longer
+  held, or its holder stops it after the lease ended between renewals; it then stops
+  renewing. The handler is not stopped (the owner's choice over cancelling it). 6.1
+  and 7.1 name SQLite authorities' `RECORDED` routes holding a write transaction near
+  the lease period.
+- The fix's evidence. Library integration, `tools/request-replay` `make test` (mypy
+  strict, unit 67 passed, integration 77 passed): on both stores, a store refusing
+  every renewal lets the lease end under the live handler, its retry `OutcomeUnknown`,
+  one loss logged at error naming the request; a lease ending between renewals is
+  logged when the handler returns; a renewal finding its lease ended (a stalled loop
+  or a moved time source) logs it; the rule cases assert the admitted and renewed
+  lease ends. Library integration through the kit, `kit/authenticated-requests` `make
+  test` against the rebuilt wheel, 146 passed:
+  `test_a_recorded_handler_whose_renewals_all_fail_loses_its_lease_while_it_runs`, in
+  each form and scheme, renewals refused past the lease, the exact retry answered a
+  signed 409 `exact_retry_outcome_unknown`, the loss logged once at error, the handler
+  still running, then its answer recorded and a later retry receiving it, one
+  dispatch. `change-workflow run test-before` at `01b2f4434` on `test_renewal.py`: the
+  three loss tests fail there (no error logged), and the two record-race tests fail
+  only on `renew`'s new answer; the kit test's sequence but its log passes there,
+  since answering outcome-unknown is unchanged. The fresh-context check found the
+  deadline comment backwards, the deadline read after the renewal trailing the
+  lease's written end (now `renew`'s answer), a "retrying" log on the final failure,
+  tests not checking the level and request, a loss between renewals going unlogged,
+  and this note's missing evidence; all fixed. Its question whether 6.1 and 7.1's
+  route check is in scope: it is, part of the option the owner chose. A second
+  fresh-context check of the revised `Renewal` found it sound, and found the final
+  failure logged twice at error, the finds-ended test passing on its stop alone, no
+  test that renewal stops after a loss or that a renewed attempt logs none, and the
+  README's retry sentence unqualified; all fixed. The pre-commit history-wording check
+  refused "no longer" in `renew`'s docstring; reworded. Then `change-workflow run
+  pre-commit`: "after-functional-change at 01b2f4434…: passed, exit 0", local
+  evidence PASSED (`make test` passed in 470.9 s), "pre-commit-functional at
+  01b2f4434…: passed, exit 0", "pre-commit at 01b2f4434…: passed, exit 0".
 
 ## 5. Space-freeing migrations in `kit/schema-migrations`
 
@@ -676,7 +716,9 @@ it, `main.py`'s unsigned-error path), `db/models.py`, a new Alembic revision und
       criterion. A route whose classification differs from the design's table, or a
       `RECORDED` route whose caller could not learn by reading whether its write
       applied, stops the section: it is a design question, and the change returns to
-      design (D6, D7).
+      design (D6, D7). The registry runs SQLite, so the table also names any
+      `RECORDED` route holding a write transaction near the lease period, which locks
+      out its own renewal (D7, 45 F1); such a route is a defect the section fixes.
 - [ ] 6.2 Authenticate every route through the core's dependency form, the store bound to
       the registry's database through the SQLAlchemy store, and remove
       `publisher_auth.py`'s own reservation, caching and completion. Verify by
@@ -718,7 +760,9 @@ signed"; compute-provisioning-contract "Deal-scoped lifecycle events"). Touches
       `check-leases`, convergence `run-cycle` and `advance-cycle` routes are `RECORDED`;
       confirm `reset-password` `RERUN` as a keyed operation (D6, 27 F4). A difference
       from the design's table, or a `RECORDED` route whose caller could not learn by
-      reading, stops the section as in 6.1.
+      reading, stops the section as in 6.1. The provisioning service runs SQLite, so
+      the table names any `RECORDED` route holding a write transaction near the lease
+      period, as 6.1's does (D7, 45 F1).
 - [ ] 7.2 Replace `ProvisioningAuthMiddleware` and `SqlAlchemyProvisioningReplayStore`
       with the core's middleware form over provisioning's database. Verify by
       application integration tests through the typed client: an exact `terminate`

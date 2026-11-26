@@ -38,12 +38,16 @@ DEFAULT_SWEEP_BATCH = 500
 
 @dataclass(frozen=True)
 class Attempt:
-    """One dispatch of a request, holding its lease as ``owner``."""
+    """One dispatch of a request, holding its lease as ``owner``.
+
+    ``lease_until`` is when the lease ends as admitted, before any renewal.
+    """
 
     principal: str
     request_id: str
     resolution: Resolution
     owner: str
+    lease_until: int
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,11 @@ class RequestReplay:
     def policy(self) -> Policy:
         return self._policy
 
+    def now(self) -> int:
+        """The time source's instant, on which every lease and expiry is written."""
+
+        return self._clock()
+
     def admit(self, entry: Entry) -> Admission:
         now = self._clock()
         lease_until = now + self._policy.lease_seconds
@@ -126,20 +135,26 @@ class RequestReplay:
             # A first use is signed now. A re-run request whose origin is older than
             # the skew is a retry whose row has gone, and its handler is told so.
             first_use = self._policy.admits_first_use(entry.origin, now)
-            return Dispatch(self._attempt(entry, owner), exact_retry=not first_use)
+            return Dispatch(self._attempt(entry, owner, lease_until), exact_retry=not first_use)
         return self._resolve(entry, held, now)
 
-    def renew(self, attempt: Attempt) -> bool:
-        """Extend a running attempt's lease by a full period from now."""
+    def renew(self, attempt: Attempt) -> int | None:
+        """Extend a running attempt's lease by a full period from now.
+
+        Answers when the lease now ends, or ``None`` when the attempt does not
+        hold it: its lease ended, or its outcome is recorded.
+        """
 
         now = self._clock()
-        return self._store.renew(
+        lease_until = now + self._policy.lease_seconds
+        held = self._store.renew(
             attempt.principal,
             attempt.request_id,
             attempt.owner,
             now=now,
-            lease_until=now + self._policy.lease_seconds,
+            lease_until=lease_until,
         )
+        return lease_until if held else None
 
     def complete(self, attempt: Attempt, outcome: Outcome) -> None:
         """End an attempt: record a recorded request's response, release a re-run one."""
@@ -192,13 +207,14 @@ class RequestReplay:
             owner=owner,
         )
         # Another retry reclaimed the lease between the read and the update.
-        return Dispatch(self._attempt(entry, owner), exact_retry=True) if reclaimed else InProgress()
+        return Dispatch(self._attempt(entry, owner, lease_until), exact_retry=True) if reclaimed else InProgress()
 
     @staticmethod
-    def _attempt(entry: Entry, owner: str) -> Attempt:
+    def _attempt(entry: Entry, owner: str, lease_until: int) -> Attempt:
         return Attempt(
             principal=entry.principal,
             request_id=entry.request_id,
             resolution=entry.resolution,
             owner=owner,
+            lease_until=lease_until,
         )

@@ -165,8 +165,9 @@ def test_a_renewed_lease_is_extended_and_raises_the_expiry(store) -> None:
     first = replay.admit(entry(RERUN, origin=START - 3600))
     assert isinstance(first, Dispatch)
 
+    assert first.attempt.lease_until == START + LEASE
     clock.advance(LEASE - 1)
-    assert replay.renew(first.attempt) is True
+    assert replay.renew(first.attempt) == START + 2 * LEASE - 1
 
     row = store.get("scheme:caller-1", "request-1", now=clock())
     assert row.lease_until == START + 2 * LEASE - 1
@@ -180,7 +181,7 @@ def test_an_ended_lease_is_not_renewed(store) -> None:
     assert isinstance(first, Dispatch)
 
     clock.advance(LEASE)
-    assert replay.renew(first.attempt) is False
+    assert replay.renew(first.attempt) is None
     assert replay.admit(entry(RECORDED)) == OutcomeUnknown()
 
 

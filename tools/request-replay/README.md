@@ -55,11 +55,17 @@ lease, recording nothing.
 `renewing(replay, attempt)` is an async context manager renewing the attempt's lease
 every third of its period while its body runs, and stopping when the body returns or
 raises; an attempt shorter than a third of the lease writes nothing. A renewal the
-store fails is tried again at the next interval. `Renewal.start(replay, attempt)`
-does the same for a holder that starts renewal in one place and stops it, with
-`await renewal.stop()`, in another. Hold a `RECORDED` attempt's handler inside one,
-so a lease ends only when its process is gone and `OutcomeUnknown` means the attempt
-has ended.
+store fails is tried again at the next interval, until the lease ends.
+`Renewal.start(replay, attempt)` does the same for a holder that starts renewal in
+one place and stops it, with `await renewal.stop()`, in another. Hold a `RECORDED`
+attempt's handler inside one, so a lease ends only when its process is gone and
+`OutcomeUnknown` means the attempt has ended — unless renewal cannot write for a whole
+lease period: a handler blocking the event loop that long, or a store refusing every
+renewal that long (under SQLite, a handler holding the write lock). The lease then
+ends while the handler still runs; renewal logs that once as an error naming the
+request and stops, and the handler is not stopped. `replay.renew(attempt)` answers
+when the lease now ends, or `None` when the attempt does not hold it, and
+`replay.now()` is the time source's instant leases are written on.
 
 ## Bounds
 

@@ -460,20 +460,37 @@ A `RECORDED` attempt is dispatched once. Its outcome is recorded after the handl
 returns, in the store's own transaction. While the handler runs, the core renews the
 attempt's lease: a task beside the handler, in either form, extends the lease every
 third of its period and stops when the handler returns or raises, so a live attempt
-keeps its lease however long it runs, and only an attempt whose process is gone loses
-it. An exact retry that finds the row with no outcome is refused as in progress while
-the attempt's lease is held; once the lease has ended it is answered with a signed 409
-whose body code is `exact_retry_outcome_unknown`, and is never dispatched. That answer
-therefore means the attempt ended without recording: none of its local writes can
-still commit. A lease is reclaimed only on a `RERUN` route, where a second run is
+keeps its lease however long it runs while its store can be written, and otherwise only
+an attempt whose process is gone loses it. An exact retry that finds the row with no
+outcome is refused as in progress while the attempt's lease is held; once the lease has
+ended it is answered with a signed 409 whose body code is
+`exact_retry_outcome_unknown`, and is never dispatched. That answer therefore means,
+but in the cases below, that the attempt ended without recording: none of its local
+writes can still commit. A lease is reclaimed only on a `RERUN` route, where a second run is
 proven safe (D5). A caller told the outcome is unknown, or answered a recorded 500
 (D3), learns what applied by reading current state, as it does after the 410 (D8), and
 sends any further write under a new request ID. Renewal writes the store only for an
 attempt running longer than a third of its lease, so an ordinary request costs nothing
-more. Two cases stay outside it: a handler that blocks the event loop past the whole
-lease, which stalls its renewal and is a defect of that handler; and a call to another
-authority that an ended attempt had already sent, which that authority's state
-settles, as the plan's route check below covers.
+more. Three cases stay outside it: a handler that blocks the event loop past the whole
+lease, which stalls its renewal and is a defect of that handler; a store that refuses
+every renewal for the whole lease while the handler outlasts it — under SQLite, where
+the replay table shares its authority's database and one writer holds it at a time, a
+handler holding its own write transaction that long, again a defect of that handler —
+which the renewal logs as an error naming the request, since its retry is then told the
+outcome is unknown while the attempt can still commit; and a call to another authority
+that an ended attempt had already sent, which that authority's state settles, as the
+plan's route check below covers. The route check of an authority on SQLite also names
+any `RECORDED` route holding a write transaction near its lease period.
+
+*Implementation review 45, F1:* the renewal retried a store's every failure and stopped
+when a renewal found the lease ended, and neither stopped the handler, so a store
+refusing renewals for a whole lease let the lease end under a live attempt and its
+retry be told the outcome is unknown. The owner chose to name this the third case
+above, logged as an error and its sequence proven through the core, over cancelling the
+handler when its lease is lost, which narrows the window only for an async handler at
+its next await and adds a cancellation path every `RECORDED` handler must tolerate, and
+over answering in progress until a recorded outcome or the 410, rejected under 35 F3,
+or recording the outcome in the handler's transaction, rejected under 27 F1.
 
 *Design review 35, F3:* the 27 F1 triage answered `exact_retry_outcome_unknown` once a
 fixed lease ended, and told the caller to read current state. A handler still running

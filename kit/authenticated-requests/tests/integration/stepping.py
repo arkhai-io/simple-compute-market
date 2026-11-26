@@ -34,3 +34,11 @@ class SteppedSleep:
         assert self._pending is not None
         self._pending.set_result(None)
         self._pending = await asyncio.wait_for(self._waits.get(), STEP_BOUND)
+
+    async def last_step(self) -> None:
+        """End the loop's wait when the test expects it not to wait again."""
+
+        await self.waiting()
+        assert self._pending is not None
+        self._pending.set_result(None)
+        self._pending = None

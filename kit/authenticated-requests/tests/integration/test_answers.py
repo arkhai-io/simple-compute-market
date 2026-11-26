@@ -190,6 +190,61 @@ def test_a_recorded_handler_running_past_its_lease_is_renewed_then_answers(
     assert world.toy.dispatches == {"slow_recorded": 1}
 
 
+class RefusesEveryRenewal:
+    """A replay store that refuses every renewal, as under a write lock held past
+    the lease."""
+
+    def __init__(self, store: object) -> None:
+        self._store = store
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._store, name)
+
+    def renew(self, *args: object, **kwargs: object) -> bool:
+        raise ConnectionError("database is locked")
+
+
+def test_a_recorded_handler_whose_renewals_all_fail_loses_its_lease_while_it_runs(
+    tmp_path: Path, form: str, caller_signer: Signer, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The residual case of a live attempt losing its lease: its retry is told the
+    # outcome is unknown, the loss is logged as an error, and the attempt still
+    # answers and records its outcome.
+    sleep = SteppedSleep()
+    world = make_world(tmp_path, form, caller_signer, sleep=sleep, wrap_store=RefusesEveryRenewal)
+    lost = "lost its lease while its handler runs"
+
+    async def scenario(caller: Caller) -> None:
+        with caplog.at_level(logging.WARNING, logger="request_replay.renewal"):
+            first = asyncio.create_task(caller.send("POST", "/slow", operation="slow_recorded"))
+            await asyncio.wait_for(world.toy.slow_started.wait(), STEP_BOUND)
+            advance(LEASE // 3)
+            await sleep.step()
+            advance(LEASE // 3)
+            await sleep.step()
+            assert not [record for record in caplog.records if lost in record.getMessage()]
+            advance(LEASE - 2 * (LEASE // 3))
+            await sleep.last_step()
+            await asyncio.sleep(0)
+            unknown = await caller.send("POST", "/slow", operation="slow_recorded", origin=START)
+
+        assert unknown.status_code == 409 and unknown.json()["code"] == "exact_retry_outcome_unknown"
+        assert caller.verified(unknown, method="POST", operation="slow_recorded")
+        (loss,) = [record for record in caplog.records if lost in record.getMessage()]
+        assert loss.levelno == logging.ERROR and "request-1" in loss.getMessage()
+        assert not first.done()
+
+        world.toy.slow_finish.set()
+        answered = await asyncio.wait_for(first, STEP_BOUND)
+        retry = await caller.send("POST", "/slow", operation="slow_recorded", origin=START)
+
+        assert answered.status_code == 200
+        assert (retry.status_code, retry.content) == (200, answered.content)
+
+    world.run(scenario)
+    assert world.toy.dispatches == {"slow_recorded": 1}
+
+
 class RefusesToReserve:
     """A replay store whose every reservation fails, as under a lock held too long."""
 
