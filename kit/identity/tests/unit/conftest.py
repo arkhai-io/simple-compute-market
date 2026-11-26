@@ -10,6 +10,9 @@ from market_identity import (
     canonical_body_hash,
 )
 
+# Well-known deterministic development keys, never for a public network: the
+# Ed25519 seed is the bytes 0..31, and the EIP-191 key is a public test-chain
+# account's. The committed vectors under vectors/ are signed with them.
 ED25519_SEED = bytes(range(32))
 EIP191_KEY = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"

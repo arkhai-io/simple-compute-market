@@ -188,7 +188,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.29.0"
+version = "0.29.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -231,7 +231,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.29.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -247,7 +247,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-delivery"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -261,12 +261,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_delivery-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_compute_delivery-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-client"
-version = "0.12.0"
+version = "0.12.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
@@ -277,12 +277,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_client-0.12.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_client-0.12.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-compute-provisioning-contracts"
-version = "0.17.0"
+version = "0.17.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -290,7 +290,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_compute_provisioning_contracts-0.17.0-py3-none-any.whl" },
+    { path = "arkhai_compute_provisioning_contracts-0.17.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -306,7 +306,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-buyer"
-version = "0.8.0"
+version = "0.8.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -321,12 +321,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_core_buyer-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.8.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.13.0"
+version = "0.13.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -335,12 +335,12 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.13.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.19.0"
+version = "0.19.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -356,12 +356,12 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.19.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.19.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.30.0"
+version = "0.30.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -369,7 +369,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.30.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.30.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -401,7 +401,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -413,12 +413,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -432,7 +432,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -467,7 +467,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.12.1"
+version = "0.12.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront" },
@@ -475,12 +475,12 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.12.1-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.12.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.6.1"
+version = "0.6.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -491,12 +491,12 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.6.1-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.6.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-contact-exchange"
-version = "0.5.1"
+version = "0.5.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -508,12 +508,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_contact_exchange-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_contact_exchange-0.5.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -521,12 +521,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-buyer"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -536,12 +536,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_buyer-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_buyer-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -550,24 +550,24 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-servicing"
-version = "0.4.0"
+version = "0.4.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -577,12 +577,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_servicing-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_servicing-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-delivery"
-version = "0.2.2"
+version = "0.2.3"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -590,12 +590,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_delivery-0.2.2-py3-none-any.whl" },
+    { path = "arkhai_kit_delivery-0.2.3-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-delivery-apprise"
-version = "0.1.2"
+version = "0.1.3"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "apprise" },
@@ -603,7 +603,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_delivery_apprise-0.1.2-py3-none-any.whl" },
+    { path = "arkhai_kit_delivery_apprise-0.1.3-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -627,23 +627,25 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
+    { name = "http-message-signatures" },
+    { name = "http-sf" },
     { name = "keyring" },
     { name = "pydantic" },
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.6.0"
+version = "0.6.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -651,12 +653,12 @@ dependencies = [
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.6.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.7.0"
+version = "0.7.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -666,12 +668,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.7.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-pool-overrides"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -681,7 +683,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_pool_overrides-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_pool_overrides-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -723,7 +725,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.8.1"
+version = "0.8.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -734,12 +736,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.8.1-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.8.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.14.0"
+version = "0.14.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -753,12 +755,12 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.14.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-site-client"
-version = "0.13.1"
+version = "0.13.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -768,12 +770,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_site_client-0.13.1-py3-none-any.whl" },
+    { path = "arkhai_kit_site_client-0.13.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-storefront"
-version = "0.12.0"
+version = "0.12.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -787,7 +789,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_storefront-0.12.0-py3-none-any.whl" },
+    { path = "arkhai_kit_storefront-0.12.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -809,7 +811,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.13.0"
+version = "0.13.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -838,12 +840,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_vms_buyer-0.13.0-py3-none-any.whl" },
+    { path = "arkhai_vms_buyer-0.13.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -854,7 +856,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.9.1-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -867,7 +869,7 @@ pools = [
 
 [[package]]
 name = "arkhai-vms-negotiation"
-version = "0.7.0"
+version = "0.7.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -879,7 +881,7 @@ dependencies = [
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_negotiation-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_vms_negotiation-0.7.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -896,7 +898,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.29.0"
+version = "0.29.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -988,7 +990,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.29.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.29.1" },
     { name = "arkhai-compute", specifier = ">=0.3.0" },
     { name = "arkhai-compute-delivery", specifier = ">=0.2.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
@@ -1002,27 +1004,27 @@ requires-dist = [
     { name = "arkhai-kit-arkhai-mediation", specifier = ">=0.3.1" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.9.0" },
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.12.1" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.12.2" },
     { name = "arkhai-kit-config", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-contact-exchange", specifier = "==0.5.1" },
+    { name = "arkhai-kit-contact-exchange", specifier = "==0.5.2" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.5.0" },
     { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.2.0" },
     { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.3.0" },
     { name = "arkhai-kit-deal-servicing", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-delivery", specifier = "==0.2.2" },
-    { name = "arkhai-kit-delivery-apprise", specifier = "==0.1.2" },
+    { name = "arkhai-kit-delivery", specifier = "==0.2.3" },
+    { name = "arkhai-kit-delivery-apprise", specifier = "==0.1.3" },
     { name = "arkhai-kit-fulfillment", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.5.0" },
-    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.6.0" },
+    { name = "arkhai-kit-identity", specifier = "==0.6.0" },
+    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.6.1" },
     { name = "arkhai-kit-policy", specifier = ">=0.6.0" },
-    { name = "arkhai-kit-pool-overrides", specifier = "==0.3.0" },
+    { name = "arkhai-kit-pool-overrides", specifier = "==0.3.1" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.4.0" },
     { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.8.0" },
     { name = "arkhai-kit-site", specifier = ">=0.10.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },
-    { name = "arkhai-kit-storefront", specifier = "==0.12.0" },
+    { name = "arkhai-kit-storefront", specifier = "==0.12.1" },
     { name = "arkhai-vms", specifier = ">=0.9.0" },
     { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.9.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.7.0" },
@@ -1816,6 +1818,31 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7f/87/adf4635b4b8c050283d74e6db9a81496063229c9263e6acc1903ab79fbec/hexbytes-1.3.1.tar.gz", hash = "sha256:a657eebebdfe27254336f98d8af6e2236f3f83aed164b87466b6cf6c5f5a4765", size = 8633, upload-time = "2025-05-14T16:45:17.5Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8d/e0/3b31492b1c89da3c5a846680517871455b30c54738486fc57ac79a5761bd/hexbytes-1.3.1-py3-none-any.whl", hash = "sha256:da01ff24a1a9a2b1881c4b85f0e9f9b0f51b526b379ffa23832ae7899d29c2c7", size = 5074, upload-time = "2025-05-14T16:45:16.179Z" },
+]
+
+[[package]]
+name = "http-message-signatures"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "http-sf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/c7/eecd8e93818a29f6ceb02145018ee7c36469da543af7410981d2e9d40ee5/http_message_signatures-3.0.0.tar.gz", hash = "sha256:fcb26b157462483b4d6b264df8c9c1a796439a78a3d42ad412bcbf507f39db01", size = 115968, upload-time = "2026-10-26T02:17:36.249Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/e7/fc0c602d1e921b13e8451a9287289594871ca3c448f0c4d9bf0a9bd3b0b2/http_message_signatures-3.0.0-py3-none-any.whl", hash = "sha256:c289966e1b2950517cd57aed166be5e981de96f0cd29f69173f09ac547a8552a", size = 53460, upload-time = "2026-10-26T02:17:34.929Z" },
+]
+
+[[package]]
+name = "http-sf"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/44/d1/af2d7665a9cb295f95a4125826a45443bd6f554946d1ca9876cf3ef1dc3b/http_sf-1.5.0.tar.gz", hash = "sha256:b54cfa55f428dd7cb1cfcc6fbd5020f967060df136ffa37cab5b9798f647612f", size = 55553, upload-time = "2026-10-23T01:43:58.992Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/4a/5a1d3b0fcb58cbd827a968f69d6139c1af419dd008f2c4caf8a8ab78b7bd/http_sf-1.5.0-py3-none-any.whl", hash = "sha256:031282bd376549b04fcaa397d9ef351acdc5bd383435cccd1d8ea17b1661c80e", size = 27696, upload-time = "2026-10-23T01:43:57.816Z" },
 ]
 
 [[package]]

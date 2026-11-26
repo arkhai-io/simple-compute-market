@@ -52,7 +52,7 @@ signed = [
 
 [[package]]
 name = "arkhai-apicredits-sample-app"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-apicredits-middleware", extra = ["signed"] },
@@ -92,7 +92,7 @@ provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-kit-identity", specifier = ">=0.5.0" },
+    { name = "arkhai-kit-identity", specifier = ">=0.6.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
@@ -108,7 +108,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -120,12 +120,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -133,35 +133,37 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
+    { name = "http-message-signatures" },
+    { name = "http-sf" },
     { name = "keyring" },
     { name = "pydantic" },
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -555,6 +557,31 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/27/4f/eabe45c58f2d27cd0b338ecc41b0b475a3751ed70eb1a21db08497e3ceec/hexbytes-2.0.0.tar.gz", hash = "sha256:01312fcd5c57e8a8d2d7dd3274dcf84ea50422aff2abcc2d9fd89ad6a32498e5", size = 21344, upload-time = "2026-08-21T20:22:09.711Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e8/72/c7049aabd9e05efebc29b10208b11e5ae5cf819f48685ffced6abf871d10/hexbytes-2.0.0-py3-none-any.whl", hash = "sha256:5425bd7ac83cdd9791c13a5bf97cfe9b9609a304b1ef3ab146adfd50de06cf0e", size = 18866, upload-time = "2026-08-21T20:22:08.654Z" },
+]
+
+[[package]]
+name = "http-message-signatures"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "http-sf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/c7/eecd8e93818a29f6ceb02145018ee7c36469da543af7410981d2e9d40ee5/http_message_signatures-3.0.0.tar.gz", hash = "sha256:fcb26b157462483b4d6b264df8c9c1a796439a78a3d42ad412bcbf507f39db01", size = 115968, upload-time = "2026-10-26T02:17:36.249Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/e7/fc0c602d1e921b13e8451a9287289594871ca3c448f0c4d9bf0a9bd3b0b2/http_message_signatures-3.0.0-py3-none-any.whl", hash = "sha256:c289966e1b2950517cd57aed166be5e981de96f0cd29f69173f09ac547a8552a", size = 53460, upload-time = "2026-10-26T02:17:34.929Z" },
+]
+
+[[package]]
+name = "http-sf"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/44/d1/af2d7665a9cb295f95a4125826a45443bd6f554946d1ca9876cf3ef1dc3b/http_sf-1.5.0.tar.gz", hash = "sha256:b54cfa55f428dd7cb1cfcc6fbd5020f967060df136ffa37cab5b9798f647612f", size = 55553, upload-time = "2026-10-23T01:43:58.992Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/4a/5a1d3b0fcb58cbd827a968f69d6139c1af419dd008f2c4caf8a8ab78b7bd/http_sf-1.5.0-py3-none-any.whl", hash = "sha256:031282bd376549b04fcaa397d9ef351acdc5bd383435cccd1d8ea17b1661c80e", size = 27696, upload-time = "2026-10-23T01:43:57.816Z" },
 ]
 
 [[package]]

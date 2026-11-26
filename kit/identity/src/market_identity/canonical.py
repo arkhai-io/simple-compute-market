@@ -1,4 +1,4 @@
-"""Canonical JSON hashing, length-delimited envelopes, and signing helpers."""
+"""Canonical JSON hashing, length-delimited envelopes, and rotation signing."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ import rfc8785
 from pydantic import BaseModel
 
 from market_identity.models import (
-    AuthenticatedRequest,
-    AuthenticatedResponse,
     RequestEnvelope,
     ResponseEnvelope,
     RotationIntent,
@@ -131,30 +129,6 @@ def request_hash(envelope: RequestEnvelope) -> str:
         )
     )
     return hashlib.sha256(semantic_bytes).hexdigest()
-
-
-def sign_request(*, signer: Signer, envelope: RequestEnvelope) -> AuthenticatedRequest:
-    """Sign a prepared request envelope with its declared identity."""
-
-    if signer.identity != envelope.principal:
-        raise ValueError("signer identity must match request principal")
-    proof = SignatureProof.from_bytes(
-        signer.identity.scheme,
-        signer.sign(canonical_request_bytes(envelope)),
-    )
-    return AuthenticatedRequest(**envelope.model_dump(mode="python"), proof=proof)
-
-
-def sign_response(*, signer: Signer, envelope: ResponseEnvelope) -> AuthenticatedResponse:
-    """Sign a prepared response envelope with its declared identity."""
-
-    if signer.identity != envelope.principal:
-        raise ValueError("signer identity must match response principal")
-    proof = SignatureProof.from_bytes(
-        signer.identity.scheme,
-        signer.sign(canonical_response_bytes(envelope)),
-    )
-    return AuthenticatedResponse(**envelope.model_dump(mode="python"), proof=proof)
 
 
 def sign_rotation(

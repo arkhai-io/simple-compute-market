@@ -45,7 +45,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -57,12 +57,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.3.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -76,12 +76,12 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.9.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle-contracts" },
@@ -89,35 +89,37 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.3.0"
+version = "0.3.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-identity"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
     { name = "cryptography" },
     { name = "eth-account" },
+    { name = "http-message-signatures" },
+    { name = "http-sf" },
     { name = "keyring" },
     { name = "pydantic" },
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_identity-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_identity-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -130,7 +132,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-settlement-runtime"
-version = "0.8.1"
+version = "0.8.2"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -141,7 +143,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_settlement_runtime-0.8.1-py3-none-any.whl" },
+    { path = "arkhai_kit_settlement_runtime-0.8.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -540,6 +542,31 @@ wheels = [
 ]
 
 [[package]]
+name = "http-message-signatures"
+version = "3.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "http-sf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/c7/eecd8e93818a29f6ceb02145018ee7c36469da543af7410981d2e9d40ee5/http_message_signatures-3.0.0.tar.gz", hash = "sha256:fcb26b157462483b4d6b264df8c9c1a796439a78a3d42ad412bcbf507f39db01", size = 115968, upload-time = "2026-10-26T02:17:36.249Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/14/e7/fc0c602d1e921b13e8451a9287289594871ca3c448f0c4d9bf0a9bd3b0b2/http_message_signatures-3.0.0-py3-none-any.whl", hash = "sha256:c289966e1b2950517cd57aed166be5e981de96f0cd29f69173f09ac547a8552a", size = 53460, upload-time = "2026-10-26T02:17:34.929Z" },
+]
+
+[[package]]
+name = "http-sf"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/44/d1/af2d7665a9cb295f95a4125826a45443bd6f554946d1ca9876cf3ef1dc3b/http_sf-1.5.0.tar.gz", hash = "sha256:b54cfa55f428dd7cb1cfcc6fbd5020f967060df136ffa37cab5b9798f647612f", size = 55553, upload-time = "2026-10-23T01:43:58.992Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/4a/5a1d3b0fcb58cbd827a968f69d6139c1af419dd008f2c4caf8a8ab78b7bd/http_sf-1.5.0-py3-none-any.whl", hash = "sha256:031282bd376549b04fcaa397d9ef351acdc5bd383435cccd1d8ea17b1661c80e", size = 27696, upload-time = "2026-10-23T01:43:57.816Z" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -718,7 +745,7 @@ wheels = [
 
 [[package]]
 name = "payments-lane-double"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -743,7 +770,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.9.0" },
-    { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-identity", specifier = ">=0.6.0" },
     { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "lane-double-controls", specifier = ">=0.2.0" },

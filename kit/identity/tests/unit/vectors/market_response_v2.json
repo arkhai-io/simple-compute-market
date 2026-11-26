@@ -1,0 +1,40 @@
+{
+  "ed25519": {
+    "protocol": "arkhai.market-response-signature.v2",
+    "role": "storefront",
+    "principal": {
+      "scheme": "ed25519",
+      "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+    },
+    "method": "POST",
+    "operation": "negotiation.advance",
+    "resource": "negotiation/thread-17",
+    "request_id": "7f0ed41b-6ad8-4a1f-94dc-80691c28b841",
+    "timestamp": 1900000000,
+    "status": 200,
+    "body_hash": "11a49f853eb8befe94fef278d487125cd20930b9e41c4c0934394443e7f00878",
+    "proof": {
+      "scheme": "ed25519",
+      "value": "6j-haEOa_mzqnz-ap7Me0bDyXkYm_Ab9NVCzHcck-lv4oCoI8CDTlD1Dm6wxgDwvrdiAQAO9etqHbz7q2iw3CA"
+    }
+  },
+  "eip191": {
+    "protocol": "arkhai.market-response-signature.v2",
+    "role": "storefront",
+    "principal": {
+      "scheme": "eip191",
+      "identifier": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    },
+    "method": "POST",
+    "operation": "negotiation.advance",
+    "resource": "negotiation/thread-17",
+    "request_id": "7f0ed41b-6ad8-4a1f-94dc-80691c28b841",
+    "timestamp": 1900000000,
+    "status": 200,
+    "body_hash": "11a49f853eb8befe94fef278d487125cd20930b9e41c4c0934394443e7f00878",
+    "proof": {
+      "scheme": "eip191",
+      "value": "0x8d85a2096476dfb7ae6f926e46e2f35287bc57bd993481bc556fb267692b75190985b7da9a1bd91a96ed95a68127ddec875eb317117ca1dba42f0daebe7e06e81c"
+    }
+  }
+}

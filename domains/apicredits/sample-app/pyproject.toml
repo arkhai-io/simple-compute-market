@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-apicredits-sample-app"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 description = "Minimal token-gated HTTP service for the API-credits e2e topology."
 requires-python = ">=3.12,<3.14"
@@ -35,7 +35,7 @@ dev = [
   "httpx>=0.27",
   # The time-control suite's stand-in credits service verifies and signs as the
   # service does.
-  "arkhai-kit-identity>=0.5.0",
+  "arkhai-kit-identity>=0.6.0",
 ]
 
 [build-system]

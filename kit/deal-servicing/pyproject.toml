@@ -1,10 +1,10 @@
 [project]
 name = "arkhai-kit-deal-servicing"
-version = "0.4.0"
+version = "0.4.1"
 license = "MIT"
 description = "Seller evidence, delivery-end journals and lifecycle observation."
 requires-python = ">=3.12"
-dependencies = ["arkhai-kit-deal-lifecycle>=0.5.0", "arkhai-kit-deal-lifecycle-contracts>=0.3.0", "arkhai-kit-identity>=0.4.0", "pydantic>=2.7", "fastapi>=0.115"]
+dependencies = ["arkhai-kit-deal-lifecycle>=0.5.0", "arkhai-kit-deal-lifecycle-contracts>=0.3.0", "arkhai-kit-identity>=0.6.0", "pydantic>=2.7", "fastapi>=0.115"]
 
 [build-system]
 requires = ["hatchling"]
