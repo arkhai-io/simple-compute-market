@@ -408,7 +408,13 @@ scenarios declare their configured delivery allowance" requires; the lanes' pool
 that same value, or none, so the requirement stays true. Either way the site enforces
 the value the deal accepted.
 
-Recommended: (a), with the lanes' pools stating the lanes' value.
+Whichever is chosen, a default is a statement of how long a provider's delivery takes.
+The records of the real-host runs made for earlier releases may hold delivery
+durations for both providers; where they do, the values are taken from them and not
+from the VM example's clause.
+
+Recommended: (a), with the lanes' pools stating the lanes' value, replaced by measured
+durations where the run records hold them.
 
 ### Q6 — The bare-metal commitment instant read from the database clock
 
@@ -479,3 +485,23 @@ Recommended: two rounds, after `inject-site-pool-authority` lands. First the sit
 tag and its resolution, the column, the commit, the due read, the claim, the report and
 the views, one session. Then the storefront: the commit's fields, publication, the
 classification, the handbook and whatever Q1 settles, one session.
+
+### Q9 — Reclaiming a lease whose create is still running
+
+A lease can end while its create is in flight today, and the release guard holds its
+capacity until the create settles and teardown is proven. With a deadline recorded at
+commit, that stops being rare: every delivery slower than its deadline is reclaimed
+mid-create. The site's part, the claim and the guard, is proven in `kit/site` and in a
+lane, where a provisioning job is held at a gate under lane time. What a lane cannot
+show is that a real host is left clean when teardown follows an interrupted create.
+That behaviour is the provisioning roles', which this change does not touch, and the
+observations the validation runbook owes cover teardown of delivered machines only.
+
+- (a) Nothing here. The path is unchanged, and a real-host run is owed when a change
+  touches the provisioning roles or how an adapter runs them.
+- (b) One real-host observation of a reclaim during a create, made with this change,
+  because this change is what makes the case routine.
+- (c) Table it with Goal 1's qualification work, as an observation the runbook lacks.
+
+Recommended: (c). The gap is in the provisioning roles' evidence and exists without
+this change; (b) would make this change wait on a host for behaviour it does not alter.
