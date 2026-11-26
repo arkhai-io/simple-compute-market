@@ -417,11 +417,12 @@ deal in flight is stranded.
 - (c) The storefront publishes the category a shape derives even where the pool states
   none. It publishes a statement the seller did not make.
 
-The missing-value rule is one question for the filter grammar, and two other changes
-meet it: `filter-listings-by-capacity-bounds` for a listing that states no bound, and
-`publish-shape-bounds` for a listing that declares no maximum. The evaluator's ordering,
-which decides a missing value before an `exists` test, belongs to the same question. The
-three changes take one answer, from whichever is designed first.
+The missing-value rule is one question for the filter grammar, and one other change
+meets it: `filter-listings-by-capacity-bounds`, for a listing that states no bound.
+`publish-shape-bounds` adds no filter and takes that change's answer if one over a
+constraint is ever added. The evaluator's ordering, which decides a missing value
+before an `exists` test, belongs to the same question. The two changes take one answer,
+from whichever is designed first.
 
 Recommended, subject to that: (a), with the `exists` ordering left to the grammar's
 owner. The category filter gives a buyer supply without GPUs whether or not

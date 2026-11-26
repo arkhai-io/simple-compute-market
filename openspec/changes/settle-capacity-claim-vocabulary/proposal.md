@@ -92,8 +92,8 @@ None.
 - Respelling the flat dimension names (D2).
 - Renaming the storefronts' whole-claim key `required_attributes` (D1).
 - The form a buyer states a shape in when opening a negotiation. A buyer opens with a
-  flat, partial mapping and a later round carries a whole family-grouped shape; the
-  change index records it as unowned in Goal 2's campaign.
+  flat, partial mapping and a later round carries a whole family-grouped shape;
+  `unify-negotiation-shape-forms` owns it.
 - Publishing no null for an absent capacity attribute, which VM publication already does.
 - A third category. The design asks what one would be (Q9).
 
@@ -103,9 +103,10 @@ None.
 - `pools-6-fair-scheduling-policy` reads the scheduling cursor's key, which holds the
   category after this change. Neither waits for the other.
 - `publish-shape-bounds` and `filter-listings-by-capacity-bounds` edit the compute filter
-  specification, and both meet the question of what a listing that states nothing
-  answers. The three changes take one answer (design Q6); whichever lands later
-  reverifies against the others.
+  specification. `filter-listings-by-capacity-bounds` meets the question of what a
+  listing that states nothing answers, and the two changes take one answer (design Q6);
+  `publish-shape-bounds` declares a listing term there and adds no filter. Whichever
+  lands later reverifies against the others.
 - `negotiation-capacity-feasibility-probe` builds and probes the claim this change adds a
   category to. Whichever lands second reverifies against the other.
 - `kit-owned-storefront-auth-and-persistence` is noted in the change index as the place

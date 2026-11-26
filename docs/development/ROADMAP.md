@@ -110,7 +110,8 @@ A seller can price a shape. Rates are stated per capacity family -- per card-hou
 
 | Open gap | Owned by |
 |---|---|
-| A buyer cannot discover which shapes a seller would sell, so it learns a listing's admissible range only from refusals | [`publish-shape-bounds`](../../openspec/changes/publish-shape-bounds/) |
+| A listing does not publish its seller's shape constraints, so a buyer learns the least a seller would sell of each quantity only from a refusal, and will have no way to read how far above the offer a seller would go once a larger shape can be negotiated | [`publish-shape-bounds`](../../openspec/changes/publish-shape-bounds/) |
+| A buyer states a shape in two forms, a flat, partial mapping when it opens and a whole family-grouped shape in a later round, as two payloads under one version of the VM provision envelope. No shipped buyer command sends the second, so nobody meets it yet | [`unify-negotiation-shape-forms`](../../openspec/changes/unify-negotiation-shape-forms/) |
 | No check before terms asks the site whether it would admit the claim being agreed, so a buyer cannot negotiate a shape larger than the advertised one, and a claim the site would refuse is found only at settlement, after the buyer has funded | [`negotiation-capacity-feasibility-probe`](../../openspec/changes/negotiation-capacity-feasibility-probe/) |
 | A buyer cannot search for supply without GPUs: a listing publishes no class of compute, and no registry query selects listings that state no GPU field | [`settle-capacity-claim-vocabulary`](../../openspec/changes/settle-capacity-claim-vocabulary/) |
 | The resource type that would name a deal's class of compute is a constant: every VM declaration and claim names `compute.gpu` whatever its shape, every VM reservation is scheduled under a configured default, and the site's scheduling cursor, kept per kind, has one kind | [`settle-capacity-claim-vocabulary`](../../openspec/changes/settle-capacity-claim-vocabulary/) |
@@ -119,6 +120,8 @@ A seller can price a shape. Rates are stated per capacity family -- per card-hou
 | A buyer cannot name the publication it read, so a multi-registry seller whose registries diverge refuses every thread on the listing until they converge | Unowned — recorded in the change index; revisit when multi-registry sellers lose deals to it |
 
 Nothing blocks `negotiation-capacity-feasibility-probe`: the site's dry-run route it asks through is released, and it waits for no other change and no other repository. It is this goal's work alone; no Goal 5 change needs what it lands.
+
+Nothing blocks `publish-shape-bounds` either: the kit, the listing-level carrier and the registry's retention it builds on are released, and it waits for no other change and no other repository. What its published term claims while the advertised cap stands is settled with the probe's answer to what a buyer may ask above the offer. `unify-negotiation-shape-forms` waits for no other repository; the change index states when it starts.
 
 Reservation resizing keeps having no caller within this goal, deliberately: both storefronts place no hold before settlement, so the reservation created at settlement is built from the agreed shape and there is nothing to resize during negotiation. The first caller is Goal 5's `negotiation-time-capacity-hold`, the change that holds capacity before the shape is final.
 

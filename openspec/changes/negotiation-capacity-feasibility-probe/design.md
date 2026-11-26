@@ -110,8 +110,8 @@ where today the buyer learns of it at settlement.
 
 Rejected:
 
-- Folding the work into `publish-shape-bounds`. That change's work is the registry
-  carrier and publication, and its carrier is undecided; this change's is the
+- Folding the work into `publish-shape-bounds`. That change's work is the admissibility
+  kit's render operation, publication and the buyer's reader; this change's is the
   negotiation runtime and the storefront's capacity path.
 - Leaving the cap and having sellers publish every size they would sell. A catalogue of
   sizes is the pre-partitioning Goal 2 exists to remove, and a large listing closes once
