@@ -75,6 +75,7 @@ uninstallable. Each package's version is the one its `pyproject.toml` declares.
 | Package | Path | Internal deps |
 |---|---|---|
 | `arkhai-injected-time` | `tools/injected-time/` | none |
+| `arkhai-request-replay` | `tools/request-replay/` | none |
 | `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-core`, `arkhai-injected-time`, `arkhai-kit-config`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-config` | `kit/config/` | `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-identity` | `kit/identity/` | `arkhai-injected-time` |

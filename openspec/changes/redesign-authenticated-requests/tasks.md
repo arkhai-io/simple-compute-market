@@ -189,7 +189,7 @@ its `Makefile`, `README.md`, `pyproject.toml`, `uv.lock`, `src/`, `tests/unit/` 
 `tests/integration/`; the root `Makefile`'s `test` target and
 `.github/workflows/tests.yml`'s matrix gain `test-request-replay`.
 
-- [ ] 3.1 Implement the store contract and both stores (D7): a row keyed by opaque
+- [x] 3.1 Implement the store contract and both stores (D7): a row keyed by opaque
       principal and request ID, holding the request hash, kind, `expires_at`, lease
       deadline and owner, and on `RECORDED` the outcome; `expires_at` the later of the
       bound (`RERUN`: origin + 2 × skew; `RECORDED`: origin + max(retention + skew,
@@ -201,39 +201,154 @@ its `Makefile`, `README.md`, `pyproject.toml`, `uv.lock`, `src/`, `tests/unit/` 
       concept. Verify by unit tests per rule against an injected clock, and library
       integration tests running the same cases on the `sqlite3` store and on the
       SQLAlchemy store over SQLite.
-- [ ] 3.2 Implement lease renewal (D7): a renewal operation extending a held lease and
+      `request_replay.store` (`ReplayStore`, `Entry`, `Row`, `Outcome`),
+      `request_replay.policy` (`Resolution`, `Policy`), `request_replay.guard`
+      (`RequestReplay.admit` answering `Dispatch(attempt, exact_retry)`, `Answered`,
+      `InProgress`, `ChangedReuse`, `OutcomeUnknown`, `Expired`; `complete`, `renew`,
+      `sweep`), `SqliteReplayStore` (a connection per step, each `BEGIN IMMEDIATE`)
+      and `sqlalchemy_store.SqlAlchemyReplayStore` (insert, a key conflict read as
+      held; every other step one conditional statement). The rules are one module,
+      `tests/rules.py`, of 18 cases against a `ManualClock`: unit
+      (`tests/unit/test_rules.py`, against the in-memory double in
+      `tests/support.py`) and library integration (`tests/integration/test_store_rules.py`,
+      the same 18 on each store over a real SQLite file migrated from the published
+      DDL); passed. `tests/unit/test_policy.py` holds the bounds' arithmetic (unit);
+      passed. A `RECORDED` request whose origin is older than the skew is never
+      claimed: only its row can answer it, and with none it is `Expired`. A `RERUN`
+      request claimed with an origin older than the skew is a retry whose row has
+      gone, so it is dispatched with `exact_retry` true. Library integration,
+      `tests/integration/test_concurrency.py` on both stores: two first uses racing,
+      the competitor's claim run inside the other's through a test-only adapter, end
+      one dispatched and one in progress (the SQLAlchemy store through a real key
+      conflict); two retries racing for an ended `RERUN` lease end one reclaiming and
+      one in progress; a `sqlite3` step finding the write lock held is refused with no
+      busy timeout; and the SQLAlchemy claim whose conflicting row vanished before the
+      read claims again, giving up after three; passed.
+- [x] 3.2 Implement lease renewal (D7): a renewal operation extending a held lease and
       raising `expires_at`, and a wrapper that renews every third of the lease period
       while a wrapped awaitable runs and stops when it returns or raises; renewal writes
       nothing for an attempt shorter than a third of its lease. Verify by library
       integration tests: a handler running past its lease is renewed and its concurrent
       retry refused as in progress, then answered with the recorded outcome; a renewal
       racing the handler's record leaves the outcome recorded and the lease cleared.
-- [ ] 3.3 Implement the sweep (D7): delete expired rows through an index on
+      `RequestReplay.renew` and `renewing(replay, attempt, sleep=asyncio.sleep)`, an
+      async context manager; a renewal extends only a lease its owner still holds,
+      so an ended lease is not revived (rule case `test_an_ended_lease_is_not_renewed`).
+      Library integration, `tests/integration/test_renewal.py` on both stores: the
+      handler past its lease (the waits stepped by the test, never slept), the short
+      attempt writing no renewal, renewal stopping when the handler raises, and the
+      race in both orders (renew after record, renew then record), and a renewal
+      failing once with "database is locked" tried again before the lease ends;
+      passed. The race is shown as the two orders of the store's steps, not as two
+      threads.
+- [x] 3.3 Implement the sweep (D7): delete expired rows through an index on
       `expires_at` in bounded batches, each its own transaction, idempotent under
       concurrent sweepers. Verify by library integration tests: a backlog swept in
       batches, a running old-origin `RERUN` attempt's row kept by its lease floor, two
       concurrent sweeps.
-- [ ] 3.4 Publish the DDL (D4, D9 support): the table and index statements per dialect
+      `RequestReplay.sweep(batch_size=500)` over `ReplayStore.sweep_batch`. Library
+      integration, `tests/integration/test_sweep.py` on both stores: 250 expired rows
+      swept as batches of 100, 100 and 50; an old-origin `RERUN` attempt's row kept
+      and its retry in progress; two stores over one database alternating batches
+      deleting each of 120 rows once; passed. SQLite serializes writers on its write
+      lock, so two sweepers' batches interleave rather than overlap; the test drives
+      that interleaving batch by batch, and shows idempotence, not overlapping
+      transactions.
+- [x] 3.4 Publish the DDL (D4, D9 support): the table and index statements per dialect
       as data the market kit wraps into migrations, the component issuing no DDL when a
       store opens. Verify by a unit test that opening a store changes no schema.
-- [ ] 3.5 Implement the double-dispatch harness (D5): a case is a request, a later
+      `request_replay.ddl.statements(dialect, table=)` for `sqlite` and `postgresql`,
+      default table `request_replay`, and `replay_table()` describing it for
+      SQLAlchemy without creating it. Unit: `tests/unit/test_ddl.py`; passed.
+      Correction to the plan's level: the store-open proof needs a real database, so
+      it is library integration, `tests/integration/test_store_open.py` on both stores
+      — opening and using a store leaves `sqlite_master` unchanged, a store over a
+      database without its table fails with "no such table" and creates nothing, and a
+      recorded response outlives the store that recorded it; passed. The PostgreSQL
+      statements are rendered and unit-tested as text only; nothing in this section
+      runs them.
+- [x] 3.5 Implement the double-dispatch harness (D5): a case is a request, a later
       write to the same resource, and the first request's exact retry re-signed;
       the harness asserts the domain state after the retry equals the state before it,
       replay table excluded, and that the retry's answer is the route's current answer;
       a completeness helper fails for a `RERUN` operation with no case. Verify by unit
       tests over a toy application with one convergent and one non-convergent route,
       the latter failing the harness.
-- [ ] 3.6 Hold the standalone boundary: a structure test that the project imports and
+      `request_replay.harness`: `DoubleDispatchCase`, `run_double_dispatch(case,
+      snapshot=)`, `assert_complete`, `DoubleDispatchFailure` (an `AssertionError`), and
+      `sqlite_snapshot`; `sqlalchemy_store.table_snapshot` for SQLAlchemy databases.
+      The route's current answer is the case's own `current_answer` callable. Unit:
+      `tests/unit/test_harness.py` over a toy of two async methods — `raise_to` passes,
+      `set_to` fails on the state, a stale answer fails on the answer, completeness
+      names the missing operations; passed. Library integration:
+      `tests/integration/test_snapshots.py`, both snapshots over a real SQLite file,
+      the excluded table's writes unseen; passed. The toy is plain async functions, not an
+      HTTP application: the harness drives whatever callables a case supplies.
+- [x] 3.6 Hold the standalone boundary: a structure test that the project imports and
       declares no internal distribution and names no market concept, as
       `tools/frp-grant-admission` does (`tools/README.md`, "Standalone infrastructure
       components"); `make test-request-replay` runs its unit and integration suites;
       the root `test` target and the CI matrix include it. Verify by running the target
       and `make test` resolving it.
-- [ ] 3.7 Verify the section: `make test-request-replay` (unit and library
+      Unit: `tests/unit/test_structure.py` — imports only the standard library, itself,
+      and SQLAlchemy in `sqlalchemy_store.py` alone; declares no runtime dependency and
+      only the `sqlalchemy` extra; its lock resolves nothing from the wheelhouse; and
+      no source token names a marketplace word (`host` and `site` among them); the
+      import and marketplace-word checks are each also shown finding a planted
+      violation, the declaration and lock checks are not; passed. `make test-request-replay`: passed; `make -n test` runs it.
+      The root `Makefile` gains `test-request-replay` and `dist-request-replay` (in
+      `dist-release-set` and `dist-ci`), and `tests.yml`'s matrix
+      `test-request-replay`. `make test-release-tooling` over `test_publish_matrix.py`,
+      `test_init_targets.py`, `test_tests_workflow.py` and `test_release_components.py`:
+      223 passed.
+- [x] 3.7 Verify the section: `make test-request-replay` (unit and library
       integration).
       End-to-end: none — nothing deployed uses it yet.
       Owed by validation (ci tests.yml): the job `test · test-request-replay` runs and
       passes on a clean runner, showing the component's suites in CI.
+      `make test-request-replay`: mypy strict clean; 67 unit and 67 library-integration
+      tests passed. End-to-end confirmed: none. The owed line is confirmed as written.
+
+Notes (section 3):
+
+- Outside the plan: the distribution is `arkhai-request-replay`, not `request-replay`
+  as the section's heading named it, because a released package's name takes the
+  `arkhai-` prefix (`published-packages.md`, "Published packages") and the admission
+  core's wheel will depend on it. The directory is `tools/request-replay` and the
+  import `request_replay`. Being a runtime dependency of released services from
+  section 6 on, it is declared in `manifests/release-components.json` and in
+  `published-packages.md`'s table now, beside `arkhai-injected-time`, whose layout
+  (a library with `make build DIST_DIR=`) it follows rather than
+  `frp-grant-admission`'s image layout.
+- For section 4: the component's resolution vocabulary is its own
+  `request_replay.Resolution` (`"rerun"`, `"recorded"`), since it may not import
+  `kit/identity`; the kit maps `ExactRetry` onto it by value. The entry's
+  `principal` is an opaque string — the kit passes `principal_text(identity)` — and
+  `request_hash` is `VerifiedRequest.request_hash`. `RequestReplay` takes the time
+  source as `clock` (integer seconds); pass `injected_time.now`.
+- For section 4: `complete(attempt, outcome)` records only on `RECORDED`; on `RERUN`
+  it releases the lease, so the next exact retry reclaims at once rather than waiting
+  out the lease. Hold a `RECORDED` handler inside `renewing(...)`.
+- Outside the plan, for section 4: D4 places "ASGI and dependency wrappers" in this
+  component, and this section built only their framework-free parts —
+  `request_replay.asgi` (`read_body`, `replayed_receive`, `capture`,
+  `send_response`) and `renewing`. The wrappers that admit, dispatch, record and
+  answer are built in section 4 beside the kit's two forms, once its gate (4.1) has
+  settled what the dependency form can hold; their generic part lands here, in
+  `request_replay`, and only the market's verification and signing in the kit. The
+  kit's migrations wrap `ddl.statements(...)`, choosing their table name (the default
+  is `request_replay`).
+- For closeout: `tools/README.md`'s "Standalone infrastructure components" says a
+  component names no "lease"; it means a compute lease. This component's central
+  concept is the dispatch lease an attempt holds on its request, so the entry 17.9
+  writes for it reconciles that wording.
+- Declined from the fresh-context check: running the renewal's store step on a
+  thread (`asyncio.to_thread`). Every store step is one short transaction, as the
+  admission's own steps are on the same loop; a lock held past the busy timeout
+  fails the step, which renewal now retries at its next interval.
+- The sweep's default batch is 500 rows (`DEFAULT_SWEEP_BATCH`).
+- No test-before run: every test imports what only this project adds, so each would
+  fail at collection against the base, which shows nothing more.
 
 ## 4. The admission core, `kit/authenticated-requests`
 

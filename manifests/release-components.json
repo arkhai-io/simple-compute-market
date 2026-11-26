@@ -6,6 +6,11 @@
       "dist": "arkhai-injected-time"
     },
     {
+      "key": "request-replay",
+      "path": "tools/request-replay",
+      "dist": "arkhai-request-replay"
+    },
+    {
       "key": "kit-schema-migrations",
       "path": "kit/schema-migrations",
       "dist": "arkhai-kit-schema-migrations"
