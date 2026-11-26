@@ -21,9 +21,12 @@ The authority MUST durably reserve `(principal, request_id)` with the request's
 hash before dispatch, and resolve an exact retry as the route's declared
 exact-retry resolution says: a `RERUN` route runs again, and a `RECORDED` route
 returns the recorded status and body under a freshly signed response without
-repeating the operation. One caller MAY reclaim an exact unfinished request
-after its dispatch lease expires; an in-progress exact retry or reuse with
-changed signed content MUST NOT dispatch a second operation.
+repeating the operation. On a `RERUN` route one caller MAY reclaim an exact
+unfinished request after its dispatch lease expires; a `RECORDED` request is
+dispatched once, as `marketplace-identity` requires. An in-progress exact retry
+or reuse with changed signed content MUST NOT dispatch a second operation.
+Relay token rotation and grant-key staging MUST be declared `RECORDED`: each
+replaces the relay's value with the request's, and its response holds no secret.
 
 #### Scenario: An inbound request is authenticated
 
@@ -65,6 +68,14 @@ changed signed content MUST NOT dispatch a second operation.
   active
 - **THEN** the authority rejects it as still in progress without dispatching a
   second operation
+
+#### Scenario: A grant-key staging is retried after a later staging
+
+- **WHEN** an operator stages a relay grant key and loses the acknowledgement,
+  stages another, and the first staging's exact retry arrives within the
+  retention
+- **THEN** the authority answers the first staging's recorded outcome, its
+  public half, and the later staged key remains staged
 
 #### Scenario: A request identity is replayed
 

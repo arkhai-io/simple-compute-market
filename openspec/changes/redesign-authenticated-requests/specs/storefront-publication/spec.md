@@ -19,10 +19,10 @@ A storefront MUST authenticate publisher, buyer, administrator, and configured s
 - **WHEN** an administrator re-signs the same `admin_force_accept_negotiation` request with the same principal, request ID and origin after losing the response, within the retention
 - **THEN** the storefront returns the recorded outcome without dispatching a conflicting mutation
 
-#### Scenario: Exact retry of a convergent administrator mutation
+#### Scenario: Exact retry of an administrator setter
 
-- **WHEN** an administrator re-signs the same `admin_pause_listing` request after losing the response
-- **THEN** the storefront runs it again, the listing stays paused, and the answer is signed
+- **WHEN** an administrator re-signs the same `admin_pause_listing` request after losing the response, the listing has been resumed since, and the retry arrives within the retention
+- **THEN** the storefront answers the pause's recorded outcome under a fresh signed response without running it again, and the listing stays resumed
 
 #### Scenario: A request ID is reused with changed content
 

@@ -178,8 +178,8 @@ admits, and where its trust comes from.
 The component's interface, walked through every caller:
 
 - one admission per request: `dispatch`, `rerun` (an exact retry the route lets the
-  handler run again), `answered` (a recorded outcome or a refusal, already signed), or
-  `in progress`;
+  handler run again), `answered` (a recorded outcome or a refusal, already signed,
+  `exact_retry_outcome_unknown` among them, D7), or `in progress`;
 - an `exact_retry` flag on the admission, for handlers that re-run but must know it is
   a retry (VM settle's `refuse_after_end`, the credential reads);
 - a signed-outcome hook that hands the signed response's raw body and headers to the
@@ -196,9 +196,14 @@ The component's interface, walked through every caller:
   caller stated;
 - a route inventory, checked when the core is constructed over the application: every
   route in the application's route table carries an exact-retry declaration through
-  its admission, in either form, or an explicit unauthenticated mark (health, the
-  OpenAPI document, the injected time route), and the authority refuses to start
-  naming any route that has neither (D5). If the round 1 gate finds the framework's
+  its admission, in either form, or an explicit unauthenticated mark (health and the
+  OpenAPI document everywhere; the injected time route only where its authority does
+  not sign it, as the registry's API-key `/admin/time`), and the authority refuses to
+  start naming any route that has neither (D5). A signed time-setting route — a
+  storefront's, the API-credits service's — carries a `RERUN` declaration, since a
+  time-set only moves forward (D6), and the core applies to it the freshness exemption
+  `marketplace-identity`'s "The time-setting operation is exempt from request
+  freshness" gives it (design review 27, F5). If the round 1 gate finds the framework's
   route table cannot tell an admitted route from one that is not, the dependency form
   registers each declaration in an explicit table at import, and the inventory reads
   that;
@@ -338,11 +343,33 @@ does not commute with a later write, so a delayed retry, or one from another cli
 under the same principal, would re-assert an older value over a newer one. Everything
 else is `RECORDED`, whose outcome answers the retry within the retention and whose
 signed 410 answers it after (D8); the replay layer remembers what the domain cannot
-recognise. A response carrying a secret is never `RECORDED`: its route is `RERUN`
-where the re-run supersedes the lost answer (issuance rotates an unused key's secret,
-`grant-keys/stage` stages a new key, relay `token`, VM `reset-password`), and a route
-whose secret a re-run cannot supersede is not admitted until a design gives it a mode
-with its whole lifecycle (D5).
+recognise.
+
+A secret in the request is never recorded under either declaration: the replay store
+keeps only the request's hash and, on a `RECORDED` route, the response. Only a secret
+in the response constrains the declaration. A response carrying a secret is never
+`RECORDED`: its route is `RERUN` where the re-run supersedes the lost answer (credits
+issuance rotates an unused key's secret), and a route whose secret a re-run cannot
+supersede is not admitted until a design gives it a mode with its whole lifecycle
+(D5). The plan's route check applies this distinction to every route it classifies.
+
+*Design review 27, F4:* D6 first listed relay `token` rotation, relay
+`grant-keys/stage` and VM `reset-password` beside issuance as secret-bearing `RERUN`
+routes. None answers a secret. Rotation replaces the relay's token with the one the
+request supplies and answers a redacted `RelayView`; staging replaces any staged key,
+supplied or generated, and answers its public half
+(`provisioning/compute/src/compute_provisioning/relays/service.py`). As `RERUN` routes
+both fail the interleaved-write test: an old exact retry of a rotation restores a token
+rotated away since, and an old staging overwrites a key staged since, whose public half
+the operator may already have added to the relay's plugin. Both are therefore
+`RECORDED`, holding a redacted view or a public key, no more than `POST relays` holds.
+`reset-password` answers a job submission, its password fetched afterwards from the
+job's credentials read, and derives the job's operation ID from the request
+(`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/controllers/vms_controller.py`):
+it is `RERUN` as a keyed operation, which the plan's route check confirms. The owner
+chose the reviewer's first alternative over domain guards recognising an older retry,
+which would need durable domain changes for the same effect, and over refusing later
+rotations while an earlier request may still retry, which blocks normal operator work.
 
 The plan checks every authenticated route on every authority against this criterion
 and names its declaration; the table below is the set known at design.
@@ -378,7 +405,7 @@ The `RECORDED` set:
 | VM storefront | `refund_listing`, `arbitrate_listing` |
 | API-credits storefront | `publish-from-quota` |
 | Registry | listing publish, update and delete |
-| Provisioning service | `POST relays`; host and pool upserts and deletes; the VM-domain job routes but `reset-password`; the `check-leases`, convergence `run-cycle` and `advance-cycle` routes |
+| Provisioning service | `POST relays`, relay `token` rotation and relay `grant-keys/stage`; host and pool upserts and deletes; the VM-domain job routes but `reset-password`; the `check-leases`, convergence `run-cycle` and `advance-cycle` routes |
 | API-credits service | `credits_key_adjust` |
 
 Every other authenticated route on every authority is `RERUN`, reads included. None of
@@ -415,10 +442,34 @@ An expired row is treated as absent: it answers nothing and refuses nothing, and
 reservation under its key replaces it. Expired rows wait for the sweep, so this is what
 keeps a leftover row from refusing a request that should be served (16 F6).
 
-A `RECORDED` outcome commits in the same transaction as the handler's domain write, so
-a crash between them cannot leave a write applied with no outcome for a reclaimed lease
-to find. Where a handler's effect is outside the authority's database, its route's
-recovery is the domain's, as today.
+A `RECORDED` attempt is dispatched once. Its outcome is recorded after the handler
+returns, in the store's own transaction. An exact retry that finds the row with no
+outcome is refused as in progress while the attempt's lease is held; once the lease has
+ended it is answered with a signed 409 whose body code is
+`exact_retry_outcome_unknown`, and is never dispatched. If the attempt later completes
+and records its outcome, a later exact retry receives that outcome. A lease is reclaimed
+only on a `RERUN` route, where a second run is proven safe (D5). A caller told the
+outcome is unknown learns what applied by reading current state, as it does after the
+410 (D8), and sends any further write under a new request ID.
+
+*Design review 27, F1:* the 16 F3 triage required a `RECORDED` outcome to commit in the
+same transaction as the handler's domain write, so that a crash between them could not
+leave a write applied with no outcome for a reclaimed lease to find and dispatch again.
+Nothing gave the core that transaction: `KeysService.adjust` opens its own session and
+commits before it returns
+(`domains/apicredits/service/src/apicredits_service/services/keys_service.py`), the
+site middleware sees the response only after the handler returns, and provisioning's
+durable store records in its own session and reclaims an expired lease for a second
+dispatch. A handler running longer than its lease met the same double dispatch without
+any crash. The owner chose never to dispatch a `RECORDED` attempt again over a shared
+unit of work, which would change every `RECORDED` handler's interface in both forms and
+still could not hold for the handlers that call other services (`admin_reserve_capacity`,
+the lifecycle cycle), and over making adjust idempotent in its domain, which fixes one
+route of the many. The crash boundary is proven by an integration case: a crash after
+adjust's commit and before its outcome is recorded, whose exact retry is answered
+`exact_retry_outcome_unknown` with the balance adjusted once. Where a `RECORDED` route's
+caller could not learn by reading whether its write applied, that route would need the
+unit of work; the plan's route check names any such route.
 
 The origin rule depends on the route's kind. On a `RERUN` route the origin decides only
 when the row is pruned; a re-signed retry that finds no row is dispatched, which its
@@ -457,7 +508,9 @@ daily sweep does, and the core can own the loop through the lifespan, so no auth
 gains one.
 
 Rejected: pruning on every reservation, which costs a commit per request for no
-urgency; a loop written in each authority; an in-memory production store.
+urgency; a loop written in each authority; an in-memory production store; committing a
+`RECORDED` outcome in the handler's domain transaction through a shared unit of work
+(27 F1); reclaiming a `RECORDED` attempt's expired lease for a second dispatch.
 
 ### D8 — Recorded outcomes: a signed request origin, a configurable retention, a signed 410
 
@@ -533,19 +586,36 @@ rotation; leaving signed deliveries unbound.
 ### D11 — Paths route; the stated operation is checked; every answer that names a request is signed
 
 The authority routes by method and path; the stated operation and resource must equal
-what the route derives. Every answer is signed when the request carries a request
-identity:
+what the route derives. A request carries a request identity when it carries the
+version 3 profile's covered fields `Market-Request-ID`, `Market-Operation` and
+`Market-Resource`, over which D2's response binds its request. Every answer is signed
+when the request carries a request identity:
 
 | Failure | Status | Signed body | Bound over |
 |---|---|---|---|
 | No route serves the path or method | 404, or 405 with `Allow` | `{"code": "operation_not_served", "operation": "capacity_reserve"}` | the stated operation, resource and request ID |
 | The route binds another operation or resource | 400 | `{"code": "operation_mismatch", "stated": {…}, "bound": {…}}` | the route's operation and resource |
 | The audience does not include this authority | 421 Misdirected Request | `{"code": "audience_mismatch"}` | the route's operation and resource |
-| An unsupported protocol tag, version 2 included | 400 | `{"code": "unsupported_protocol", "supported": ["arkhai.market-request.v3"]}` | the stated fields where the request carries them |
+| An unsupported protocol tag | 400 | `{"code": "unsupported_protocol", "supported": ["arkhai.market-request.v3"]}` | the stated fields, when the request carries a request identity; unsigned otherwise, a version 2 request included |
 
 An answer is unauthenticated only when the request carries no request identity. Bodies
 name what the caller sent and the authority's expectation, and never list the operations
 an authority serves.
+
+A version 2 request carries none of the version 3 fields — its request ID is
+`X-Market-Request-ID`, and its route supplies the operation and resource — so its
+`unsupported_protocol` refusal is unsigned, and no identity is invented to sign it. An
+old typed client verifies only version 2 responses, so it could not verify a version 3
+refusal however it were signed, and a new typed client never sends version 2: the old
+client fails on the unauthenticated answer, and the body's code tells whoever reads its
+log why. A request under a later profile that keeps the version 3 field names is
+refused signed over them (D16).
+
+*Design review 27, F2:* D11 first promised a signed refusal wherever a version 2
+request carried identity, but D2's response binding needs request components a version
+2 request lacks. The owner chose the unsigned answer over a separate signed refusal over
+version 2's fields, a second verification path no caller could use, and over signing it
+in the version 2 format, the compatibility path D9 rejects.
 
 Rejected: routing by the stated operation, which replaces seven routers for a problem no
 deployment has reported; one status for every refusal; keeping unroutable answers
@@ -565,7 +635,7 @@ behaviour rather than a compatibility path with a retirement
 ### D13 — `kit/identity` owns the wire names
 
 `kit/identity` owns every version 3 field name, the profile tags, the refusal codes of
-D11, and `exact_retry_expired`. Every client and authority imports them; no copies
+D11, `exact_retry_expired` and `exact_retry_outcome_unknown` (D7). Every client and authority imports them; no copies
 remain.
 
 ### D14 — The restated requirements
@@ -573,15 +643,20 @@ remain.
 - `marketplace-identity`: the version 3 profile with audience, stated operation and
   origin; the three jobs and their lifetimes, the lease floor, expired rows treated as
   absent, and the periodic sweep; per-route exact-retry resolution, `RERUN` only where
-  the domain recognises a retry; the retention and the 410; secrets never recorded; the
-  signed-refusal table, unmatched requests included, and the signed 500 after
-  authentication on every authority; the route inventory refusing to start; version 2
-  as an evidence format.
+  the domain recognises a retry; a `RECORDED` attempt never dispatched twice, its
+  abandoned attempt answered `exact_retry_outcome_unknown`; the retention and the 410;
+  secrets never recorded; the signed-refusal table, unmatched requests included, a
+  version 2 request's refusal unsigned, and the signed 500 after authentication on
+  every authority; the route inventory refusing to start; version 2 as an evidence
+  format.
 - `physical-provisioning`: the authenticated provisioning boundary's exact retry per
-  declaration; a failure after authentication recorded only on a `RECORDED` route, the
-  general rule now `marketplace-identity`'s.
-- `registry-discovery`: durable replay reservation per declaration.
-- `storefront-publication`: version 3, and exact retry per declaration.
+  declaration, a lease reclaimed only on a `RERUN` route; a failure after
+  authentication recorded only on a `RECORDED` route, the general rule now
+  `marketplace-identity`'s.
+- `registry-discovery`: durable replay reservation per declaration, listing publish,
+  update and delete `RECORDED`.
+- `storefront-publication`: version 3, and exact retry per declaration, pause and
+  resume `RECORDED`.
 - `introduction-delivery`: an exact replay of a failed start completes it; signed
   deliveries bind their endpoint.
 - `compute-provisioning-contract`: a resent capacity-released notification is re-run.
@@ -600,8 +675,9 @@ unsigned refusals; moving it onto the admission core signs them (D3, D11).
 
 ### D16 — The protocol-capability check is the signed `unsupported_protocol` refusal
 
-A caller learns the protocols an authority accepts from the signed refusal, which lists
-them (D11). No probe route is added.
+A caller learns the protocols an authority accepts from the `unsupported_protocol`
+refusal, which lists them (D11), signed when its request carries the version 3 field
+names and unsigned for a version 2 request. No probe route is added.
 
 ### D17 — Identity pins move with the incompatible bump
 
@@ -657,7 +733,8 @@ Two rounds:
   conformance tests; reviewed before anything depends on it.
 - **Round 2, the cutover, in three sessions.** Session 1: the registry, the provisioning
   service, the site kit and the API-credits service, and deal-servicing, with their typed
-  clients, route declarations and double-dispatch cases, the table drops, the consume key
+  clients, route declarations and double-dispatch cases, adjust's crash-boundary case
+  (D7), the relay rotation and staging interleaved-write cases (D6), the table drops, the consume key
   and the retention and sweep-interval settings. Session 2: the three storefronts, with their declarations and
   cases, the introduction change, and the VM callback's signed refusals. Session 3: the
   buyers' clients, the signed-delivery binding (D10a), the end-to-end lanes, and the

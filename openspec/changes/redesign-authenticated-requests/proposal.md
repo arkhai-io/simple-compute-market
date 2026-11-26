@@ -67,8 +67,10 @@ release may stop accepting the version before
   required, with no default, each `RERUN` mutation proven by a double-dispatch test
   with a later write between the request and its retry (D5). Reads and the mutations
   whose domain recognises a retry as applied re-run and record no body; every other
-  mutation, absolute setters and deletes included, keeps its outcome (D6). A response
-  carrying a secret is never recorded.
+  mutation, absolute setters and deletes included, keeps its outcome (D6), and is
+  dispatched once: an exact retry finding no outcome after the first attempt's lease
+  is answered with a signed "outcome unknown" (D7). A response carrying a secret is
+  never recorded.
 - **Every row is bounded.** Each request carries a signed origin; a row expires at a
   time computed from the request, never before its lease ends, and a periodic sweep
   the admission core runs, daily by default, deletes it. Recorded outcomes are kept
@@ -78,7 +80,8 @@ release may stop accepting the version before
   expected-authority set as its audience, states its operation and resource, and
   carries the request origin; every answer that names a request is signed, including
   "operation not served", operation mismatch, misdirected requests and unsupported
-  protocols. Signed webhook deliveries bind their endpoint (D2, D10, D11).
+  protocols, a version 2 request alone, which carries none of the version 3 fields,
+  refused unsigned. Signed webhook deliveries bind their endpoint (D2, D10, D11).
 - **One cutover.** Version 3 replaces version 2 in the release that introduces it; the
   three 0.4.0 replay tables are dropped and the SQLite space reclaimed by the migrate
   command (D9). Version 2 stays readable as an evidence format (D12).
@@ -103,8 +106,9 @@ None.
 ### Modified Capabilities
 
 - `marketplace-identity`: the version 3 profile; the three replay jobs and their
-  lifetimes; per-route exact-retry resolution; the retention and the 410; secrets never
-  recorded; signed refusals; version 2 as an evidence format.
+  lifetimes; per-route exact-retry resolution; a recorded route dispatched once; the
+  retention and the 410; secrets never recorded; signed refusals; version 2 as an
+  evidence format.
 - `physical-provisioning`: exact retry per declaration; a failure after authentication
   recorded only on a recorded route.
 - `registry-discovery`: durable replay reservation per declaration.
@@ -134,7 +138,8 @@ superseded by it (D18), and `sign-multi-language-credits-middleware` and
 
 Acceptance: every authority authenticates through the one admission core under version
 3; every authenticated route declares its exact-retry resolution and every `RERUN`
-mutation passes its double-dispatch case; no expired replay row affects an answer, and
+mutation passes its double-dispatch case; no `RECORDED` request is dispatched twice; no
+expired replay row affects an answer, and
 every expired row is deleted within one sweep interval; no recorded outcome holds a
 contact or a secret; the 0.4.0 tables are gone and the
 SQLite files compacted after the upgrade; every refusal that names a request is signed,
