@@ -1,109 +1,166 @@
+# Ask the site whether it would admit what a round would reserve
+
 ## Why
 
-A storefront never asks the site authority whether a shape can actually be served until
-it places a hold at terms acceptance. Everything before that point runs against the
-advisory projection, and the seller's only shape check
-(`has_matching_inventory_guard`) compares `region` and `gpu_model` by equality.
+Before terms are agreed, a compute seller checks its listing against the listing's own
+source: before every seller decision, and before a buyer's or an administrator's
+acceptance (`kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py`,
+`_listing_source`, `_enforce_on_decision`, `_enforce_on_acceptance`). For a
+capacity-backed listing that check also asks whether capacity is available, and neither
+compute domain puts that question to the site as admission would decide it.
 
-The consequence is that a negotiation can run to completion, price a shape, agree
-terms, and only then discover the site has nothing to give — the failure surfaces after
-both parties have committed, which is the worst point to discover it.
+- **VM.** The check reads the bound site's snapshot and judges whether the quantity the
+  listing advertises is free now
+  (`domains/vms/storefront/src/market_storefront/services/listing_source_check.py`,
+  `_pinned_site_availability`). It does not judge the shape the round carries, holds
+  over the deal's window, or a conflict on the physical host.
+- **Bare metal.** The check reads the projection the storefront holds, which lags the
+  site by up to the source-confirmation window, and calls no site
+  (`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/listing_source_check.py`).
 
-`kit/site` already has the primitive: `probe()` runs the same matching logic as
-`reserve()` and consumes nothing. `SiteCapacityClient.probe` and the aggregate client
-expose it, and `vm_job_spec_service` already calls it in the fulfillment path. Nothing
-calls it during negotiation, which runs as `kit/negotiation-runtime`'s lifecycle
-with the VM domain's hooks injected.
+Two things follow.
 
-This change is a shared prerequisite. Shape negotiation runs without it by capping
-every requested quantity at the listing's advertised one, a shape the site was
-already found able to serve; negotiating a shape larger than the advertised one —
-lifting that cap — needs it, to distinguish a shape the seller will not sell from one
-the site cannot currently serve. The parked capacity-economics thread needs it to let
-a buyer learn feasibility before any hold — and therefore any charge — exists.
+- **A claim the site would refuse is found after the buyer has paid.** The VM storefront
+  ships `capacity.hold_ttl_seconds = 0` and the bare-metal storefront composes no hold,
+  so nothing is held at acceptance, and the first admission is the reserve at
+  settlement (`domains/compute/delivery/src/compute_delivery/path.py`,
+  `_reserve_settlement`). A refusal there ends in a refund.
+- **A buyer cannot negotiate a shape larger than the advertised one.** Nothing judges a
+  requested shape against capacity, so the VM seller refuses any quantity above the
+  listing's as `shape_exceeds_advertised`
+  (`domains/vms/storefront/src/market_storefront/negotiation_runtime.py`,
+  `within_advertised`). A buyer who finds a one-GPU listing on an eight-GPU machine
+  cannot ask for four. A seller must publish every size it would sell, and a large
+  listing closes once any of its quantity is taken although smaller shapes still fit.
+
+The site already answers the question. `POST /api/v1/capacity/probe` runs the candidate
+search a reserve runs and reserves nothing
+(`kit/site/src/market_site/ledger.py`, `probe` and `_find_candidate`). Marketplace 0.3.0
+and 0.4.0 both serve it. Nothing in negotiation calls it.
 
 ## What Changes
 
-- Check a requested capacity shape against the site authority during negotiation,
-  before the seller commits to terms, using the existing non-consuming probe.
-- Report an unservable shape as a distinct outcome from an unacceptable one. A shape the
-  seller will not sell and a shape the site cannot currently supply are different
-  answers and lead to different counter-offers: change the ask, or retry later.
-- Keep the check non-consuming. It reserves nothing, holds nothing, and creates no
-  state, so it cannot be used to exclude other buyers and needs no protection against
-  being used that way.
-- Treat the result as a point-in-time answer with no guarantee. Two negotiations may
-  both be told a shape is servable and one may lose the race at reservation — the same
-  guarantee the advisory projection already offers, made explicit rather than implied.
+- **A seller asks its site whether it would admit the claim a round would reserve**, in
+  both compute domains, with the site's existing dry-run (design D1).
+- **The question is the availability half of the listing-source check.** The check is
+  given the round's effective terms, so the site is asked before every seller decision
+  and on all four acceptance paths, for VM and bare metal (D2).
+- **Nothing is reserved or held.** The answer is advisory and two negotiations may both
+  be told yes; the reserve at settlement stays the admission (D3, D4).
+- **A shape the seller's own policy refuses never reaches the site** (D5).
+- **The site is unchanged**, and only the listing's own site is asked (D6).
+- **An unbacked listing is never asked about, and a site that cannot answer is a
+  retryable refusal**, as the source check already decides (D7).
+- **The advertised-shape cap lifts.** What then bounds a larger ask where a seller
+  stated no maximum is the design's Q1, settled first.
+
+Whether a buyer can ask about feasibility without opening a negotiation, whether the
+probe replaces the present availability judgement, the window it asks for, and the
+shape of the kit hook are open in the design's "Open Questions".
 
 ## Capabilities
+
+### Modified Capabilities
+
+- `negotiation-protocol`: the cap in "A round may revise the capacity shape", and one
+  added requirement for the question the seller asks its site.
+- `storefront-publication`: what the availability half of "The seller's inventory guard
+  checks a listing against its own source" asks, and of "Bare-metal opening rechecks its
+  listing against its source".
+- `market-composition`: only if the design changes when the runtime obtains the
+  listing-source verdict (design Q5).
+
+`.openspec.yaml` sets `skip_specs` until the design session settles the open questions;
+the design's Q6 names the requirements to be modified and the one to be added.
 
 ### New Capabilities
 
 None.
 
-### Modified Capabilities
-
-- `negotiation-protocol`: a requested capacity shape is verified against the
-  authoritative site before terms are agreed, with unservable reported distinctly from
-  unacceptable, and the verification consuming no capacity.
-
 ## Non-Goals
 
-- Do not move the capacity hold earlier than terms acceptance. Holding at inquiry
-  requires the parked capacity-economics work; this change deliberately delivers the
-  early-failure benefit without it.
-- Do not decide whether a shape is one the seller will consider —
-  `capacity-shape-envelope` owns admissibility, and it is evaluated before this check
-  so an inadmissible shape never causes a site round trip.
-- Do not price the shape. `capacity-shape-pricing` owns that.
-- Do not add the protocol field carrying a shape change between rounds —
-  `negotiation-driven-capacity-resize` owns it. This change verifies whatever shape the
-  round carries; until it is composed, that change refuses any requested quantity
-  above the listing's advertised one, and composing this check is what lets that cap
-  lift.
-- Do not eliminate the race between concurrent negotiations. Accepted explicitly.
-- Do not change `probe()` itself, its matching semantics, or the aggregate client's
-  site selection.
-
-## Impact
-
-- Affected code: `kit/negotiation-runtime`'s
-  `NegotiationDomainHooks` if the probe is a distinct hook,
-  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py` (the VM
-  `evaluate_round` composition), `domains/vms/negotiation/policies.py` (outcome
-  vocabulary alongside the existing guard), and the storefront's capacity client
-  usage.
-- Affected tests: negotiation unit suites, and an e2e path proving an unservable shape
-  fails during negotiation rather than at settlement.
-- Performance: adds one site round trip per checked round. `kit/site`'s ledger
-  serializes `probe` behind the same process-wide lock as `reserve`, so this is not
-  free — see `design.md`.
-- Not affected: reservation admission, hold lifecycle, settlement, fulfillment.
-
-## Permanent documentation impact
-
-- [x] `docs/development/ARCHITECTURE.md` — the "Discovery and negotiation" section, on
-      when the authoritative site is consulted.
-- [x] Existing subsystem specification — `openspec/specs/negotiation-protocol/spec.md`.
-- [ ] New subsystem specification — none.
-
-### Knowledge to promote
-
-- A requested shape is verified against the authoritative site before terms are agreed,
-  non-consuming, with unservable distinct from unacceptable —
-  `openspec/specs/negotiation-protocol/spec.md`.
-- That the verification is advisory and does not exclude concurrent buyers — same
-  requirement, as a scenario.
+- Holding capacity before settlement. `negotiation-time-capacity-hold` moves the hold
+  earlier once held time is charged (D3).
+- Removing the race between two negotiations for the same capacity (D4).
+- Any change to the site: its route, its ledger, its client or its matching (D6).
+- Which shapes a seller will consider, and their price. Admissibility and shape pricing
+  have landed and are used as they stand.
+- Telling a buyer which shapes a seller would sell. `publish-shape-bounds` owns that.
+- A counter-offer naming what the site could serve. The probe returns one match, not a
+  range (design Q6).
+- The VM storefront's dependency on the site authority package, `arkhai-kit-site`. It is
+  recorded as unowned in the change index (D10).
+- API credits, whose listings derive from no declaration and compose no listing-source
+  check.
 
 ## Dependencies and Related Changes
 
-- Prerequisite for negotiating a shape larger than the advertised one under
-  `negotiation-driven-capacity-resize`, which caps requested shapes at the advertised
-  quantities until this check is composed — not for shape negotiation as a whole —
-  and for the parked capacity-economics thread.
-  It does not belong exclusively to any roadmap goal.
-- Complements `capacity-shape-envelope`: admissibility first, from declared policy and
-  without a round trip; then this check, authoritative and remote.
-- Relies on `kit/site`'s existing `probe()` and `SiteCapacityClient.probe`; changes
-  neither.
+- Nothing gates this change (D8).
+- `publish-shape-bounds` discloses a listing's bounds to a buyer. A published maximum
+  above the offer can be bought only once the cap lifts, and what an unstated maximum
+  means is this change's Q1. Neither waits for the other; whichever lands second
+  reverifies against the other.
+- `settle-capacity-claim-vocabulary` adds the category of compute to the claim this
+  change probes. The probe sends the claim the reserve would send, so it carries the
+  category once that change lands. Whichever lands second reverifies against the other.
+- `negotiation-time-capacity-hold` holds capacity during negotiation. A thread that
+  holds a reservation is judged by resizing it, not by a probe, which is that change's
+  to state (design Q6). Its documents have a buyer verify feasibility; whether a buyer
+  can do so without proposing is this change's Q2.
+- **Builds on**, all archived: `bare-metal-mock-provisioned-deal` (the kit's
+  listing-source check), `capacity-shape-envelope` (admissibility),
+  `negotiation-driven-capacity-resize` (a round's shape, the evaluation order and the
+  cap), `unify-compute-delivery-path` (one settlement reserve for both domains), and
+  `inject-site-pool-authority` (the pool facts the site's decisions read).
+
+## Impact
+
+`kit/negotiation-runtime` (the listing-source hook), `kit/capacity-publication` (a probe
+at the listing's bound site), both compute storefronts' listing-source checks and
+negotiation runtimes, `kit/policy` if a refusal reason is added, both lanes' scenario
+stages, `docs/configuration.md`, `docs/development/ARCHITECTURE.md`, and the
+`negotiation-protocol` and `storefront-publication` companions.
+
+Compatibility is owed to `marketplace-v0.4.0`, the newest release tag, which carries
+every form below as it stands on the development branch.
+
+- **The site.** Nothing changes. The probe route, its route contract and its request
+  are those 0.3.0 and 0.4.0 serve, so a 0.4.0 provisioning service answers an upgraded
+  storefront.
+- **Behaviour.** A round within the advertised shape is refused where the site would
+  not admit its claim, which 0.4.0 finds at settlement. A bare-metal round makes one
+  site call where 0.4.0 makes none. What a buyer may ask above the advertised shape of
+  a listing whose seller stated no maximum is the design's Q1; keeping 0.4.0's
+  behaviour for such a seller is one of its alternatives.
+- **Wire.** No field is added. A refusal is a reason a buyer reads as text, and a
+  released buyer is owed nothing for a reason it has not seen.
+- **Persistence.** No decision needs a record a 0.4.0 storefront did not write, and no
+  migration is planned. A thread opened under 0.4.0 continues.
+- **Configuration.** No setting is added, and nothing is shipped disabled.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`: "Discovery and negotiation" and "Capacity
+      reservation".
+- [x] Existing subsystem specification: the capabilities above.
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+- D1: `openspec/specs/negotiation-protocol/spec.md` and its companion's "Evaluation
+  order" and "Current limits"; `docs/development/ARCHITECTURE.md`, "Discovery and
+  negotiation" and "Capacity reservation".
+- D2: `openspec/specs/storefront-publication/spec.md` and its companion;
+  `docs/development/ARCHITECTURE.md`, "Discovery and negotiation";
+  `docs/configuration.md`, the row for `has_matching_inventory_guard`.
+- D3: `openspec/specs/negotiation-protocol/architecture.md`, "Evaluation order".
+- D4: `openspec/specs/negotiation-protocol/spec.md`, as a scenario.
+- D5: `openspec/specs/negotiation-protocol/architecture.md`, "Evaluation order".
+- D6: `openspec/specs/storefront-publication/spec.md`;
+  `docs/development/ARCHITECTURE.md`, "Storefront capacity boundary".
+- D7: `openspec/specs/storefront-publication/spec.md`.
+- D8: no permanent destination — it records that nothing gates the change.
+- D9: `docs/development/ROADMAP.md`, Goal 2, whose open-gap row leaves the table and is
+  absorbed into the goal's current state when this change closes out.
+- D10: no permanent destination — the change index's unowned entry holds the question.

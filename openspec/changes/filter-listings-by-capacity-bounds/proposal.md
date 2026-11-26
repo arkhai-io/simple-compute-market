@@ -54,6 +54,9 @@ None.
   share no code.
 - `publish-shape-bounds` and `drop-escrow-from-shared-wire` edit the compute filter
   specification later. Whichever lands second reverifies against the other.
+  `publish-shape-bounds` declares a listing term there and adds no filter; a filter over
+  a shape constraint, if one is ever added, takes this change's answer to what a
+  listing that states no bound answers (its design, D4).
 
 ## Impact
 
