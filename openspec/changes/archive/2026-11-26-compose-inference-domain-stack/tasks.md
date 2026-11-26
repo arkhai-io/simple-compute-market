@@ -2383,19 +2383,21 @@ index currency and before promotion; each is specific to this change. Closeout
 edits only the inert paths, and a part that would need a code edit returns the
 change to implementation.
 
-- [ ] 12.1 **Comment hygiene.** Confirm: `make check-comment-hygiene` passes,
+- [x] 12.1 **Comment hygiene.** Confirm: `make check-comment-hygiene` passes,
       and the three recovered modules (5.3, 5.5, 5.6), every new root, and the
       time routes and control and the negotiation admission the merges of `dev`
       added were read for
       references to the withdrawn branch, the API-credits history, or this
       change. Anything found returns the change to implementation.
-- [ ] 12.2 **Import placement.** Confirm: no function-level import this
+      *Closeout:* `make check-comment-hygiene` passes, and the history-wording check against `dev` finds no comment or docstring the change adds describing history. The comments of the recovered modules, the roots, the time routes and control, and the negotiation admission were read at pre-closeout reviews 24 and 25, whose fixes are in; nothing was found here that needs rewriting.
+- [x] 12.2 **Import placement.** Confirm: no function-level import this
       change added — in the family's vocabulary, contracts, authority, gate,
       and gateway, or in the four roles — lacks a verified circular-import or
       lazy-load reason
       (`docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level`).
       One that should move returns the change to implementation.
-- [ ] 12.3 **Documentation compliance.** Re-check every decision in the
+      *Closeout:* the local-import check against `dev` passes: every import the change adds inside a function gives its reason.
+- [x] 12.3 **Documentation compliance.** Re-check every decision in the
       promotion record below against the placement tables
       (the change workflow's OpenSpec documentation guidance and
       `openspec/README.md#documentation-placement`): normative behaviour in
@@ -2405,28 +2407,33 @@ change to implementation.
       `DEPLOYMENT_AND_CONFIG.md`, the repository's rules in
       `docs/guidance/repository/`; confirm no permanent document announces
       completion or names this change.
-- [ ] 12.4 **Narrative compression.** Shorten each section's completed-task
+      *Closeout:* done after promotion. Each row of the record below was checked against its named document and heading, and each exists. Normative behaviour is in the six deltas the archive merges; rationale and limits are in the `inference` and `api-family` companions; topology in `docs/development/ARCHITECTURE.md`; the stack's files, overlays and migrations in `DEPLOYMENT_AND_CONFIG.md`; the lane in `TESTING.md`. The promoted text names no change and announces nothing as newly done. One judgement for the closeout review: the companions' "Current limits" name what a later change replaces by what it is (pricing by measured usage), not by the change's name.
+- [x] 12.4 **Narrative compression.** Shorten each section's completed-task
       notes to final behaviour, material validation evidence, unresolved or
       deferred work, and destinations; move any alternative or debugging
       narrative they hold into `design.md` first.
-- [ ] 12.5 **Roadmap currency.** `docs/development/ROADMAP.md`, Goal 9: the
+      *Closeout:* the section notes are kept as they stand. They are each section's final behaviour, its evidence, and each review round's fixes, which later rounds cite by finding; no alternative or debugging narrative was found in them that `design.md` lacks. They are long, and shortening them further would cut the per-round fix records the reviews refer to; that is left as a judgement for the closeout review.
+- [x] 12.5 **Roadmap currency.** `docs/development/ROADMAP.md`, Goal 9: the
       current-state prose now says the four roles exist and complete one deal
       at a flat charge per request, and the gap table's "No inference roles"
       row is removed, leaving metering, packaging, and qualification; name the
       update in the promotion record.
-- [ ] 12.6 **Campaign index currency.** `openspec/changes/README.md`: this
+      *Closeout:* `docs/development/ROADMAP.md`, Goal 9: the current-state prose says the vocabulary and the four roles exist, that a local stack runs them, that the lane completes one deal at a flat charge per request, and that nothing meters a request; the "No inference roles" row is removed, leaving metering, packaging and qualification. The paragraph there that fixes the campaign's order is left as it was.
+- [x] 12.6 **Campaign index currency.** `openspec/changes/README.md`: this
       change's row and the Goal 9 campaign graph; every link resolves; `make
       check-change-index` passes; name the update in the promotion record.
       Other rows' `Depends on` are left as they are: `meter-inference-usage`
       and `package-inference-seller` are released at archive cleanup, not
       here.
-- [ ] 12.7 **Packaging.** `make check-packaging` passes with every new
+      *Closeout:* the row is `in closeout` with notes for this phase, and its `Depends on` still names `repair-storefront-alkahest-configuration`, which is not archived; the owner directed closeout with it open (ledger, `closeout`). The campaign graph is unchanged. `change-workflow check index` passes. `meter-inference-usage` and `package-inference-seller` keep their rows until archive cleanup.
+- [x] 12.7 **Packaging.** `make check-packaging` passes with every new
       project's lock current; `make check-architecture-change
       CHANGE=compose-inference-domain-stack` reports no exception or override
       row owned by this change; `make check-agent-skills` if the change
       touched `.agents/`, `.claude/`, or `.codex/`. A failure returns the
       change to implementation.
-- [ ] 12.8 **End-to-end pipeline.** Record the pipeline run the latest passing
+      *Closeout:* `make check-packaging` passes, and `make check-architecture-change CHANGE=compose-inference-domain-stack` reports that the change owns no architecture row. The change's last commits touched no skill directory; the workflow's skills check runs among the pre-commit defaults and passes. `change-workflow run pre-archive` passes.
+- [x] 12.8 **End-to-end pipeline.** Record the pipeline run the latest passing
       validation gathered — the `e2e-inference` job (`e2e_inference_deal`) and
       the `e2e-apicredits` job (`e2e_credits_deal`, the family's unchanged
       bytes over databases the migrate commands built; design D20) — with its
@@ -2440,7 +2447,8 @@ change to implementation.
       pipeline as unrun, naming the cause and the change that owns it, and
       treats what the pipeline gates — the amd64 images on a native host, a
       Helm deployment, the Linux-only suites — as unproven.
-- [ ] 12.9 **Promotion.** Write the permanent documents the record below
+      *Closeout:* validation record `reviews/26-validation.md` passed for `dee33c9e8`; every commit since changes only documents, so it describes the code this closeout carries. Pipeline run 45685375545 on the repository's `feat/compose-inference-domain-stack` concluded success: `e2e-inference` 1 passed (`e2e_inference_deal`), `e2e-apicredits` 4 passed, `e2e-vm` 513, `e2e-bare-metal` 249, and the native Ansible gate. The Helm kind passed on the owner's host, where no chart serves an `api` family domain, so it shows only that the compute release deploys on this tree. The local kind was waived by the owner (log seq 20), so no single run of every suite on this tree exists; the package suites ran on the owner's macOS host across the rounds above, and the Linux-only IaC suites did not. Scenarios exercising the change, from the record: `e2e_inference_deal`; the API-credit deal scenarios, over the family kit; the VM and bare-metal scenarios, over the bumped core storefront and client. No section owes evidence by validation. What stays unproven: the amd64 images on a native host outside the pipeline's runners, and any deployment of the inference roles by chart.
+- [x] 12.9 **Promotion.** Write the permanent documents the record below
       names, file and heading exactly: the `inference` capability's
       `architecture.md` ("Role composition over the family kit",
       "Verification seams", "Current limits"); the `api-family` capability's
@@ -2470,7 +2478,8 @@ change to implementation.
       capability this change's deltas touch is organized by an index, so
       `make check-spec-index CHANGE=compose-inference-domain-stack` is run
       and no `index.md` is written.
-- [ ] 12.10 **Guidance placement.** Read the guidance this change wrote since
+      *Closeout:* written, each against the code: the `inference` companion's "Role composition over the family kit", "Verification seams" and "Current limits"; the `api-family` companion's "Contribution bundles" (an inference column and the delivery context), "The gate" (the separable verify step), a new "The gateway", and "Current limits" (`grant_terms`, one balance per key, retries, and the sentence that only API credits composes the kit removed); `docs/development/ARCHITECTURE.md`, "Runtime service map" and "Local development"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition" (the inference files, both overlays and the `vllm` profile) and "Migrations at startup" (`20261109_001_grant_terms`); `docs/development/TESTING.md`, the inference lane among the lanes. Confirmed already in final state and not rewritten: `dev-env/identities/README.md`, "The inference stack"; `TESTING.md`, "Lane time"; the `test-compatibility` companion, "Lane time and the doubles' controls"; the `injected-time` companion's table; `docs/guidance/repository/migrations-at-startup.md`. `openspec/specs/README.md`'s Inference row resolves. `make check-spec-index CHANGE=compose-inference-domain-stack` passes and no `index.md` is written. The record below is complete.
+- [x] 12.10 **Guidance placement.** Read the guidance this change wrote since
       it branched against the layer test, adjacency, and exception placement:
       under `docs/guidance/repository/`, `compose-stacks.md`,
       `contract-conformance.md`, `migrations-at-startup.md`,
@@ -2478,17 +2487,20 @@ change to implementation.
       `published-packages.md`. Move what is misplaced within the inert paths,
       report a misplacement that needs a decision for the closeout review, and
       run `make check-guidance`.
-- [ ] 12.11 **Documentation citations.** `make check-doc-citations
+      *Closeout:* the guidance this change wrote under `docs/guidance/repository/` — rows and sentences in `compose-stacks.md`, `contract-conformance.md`, `migrations-at-startup.md`, `package-layers.md`, `project-environments.md` and `published-packages.md` — states repository rules spanning its systems, each in the file for its subject; nothing is moved. `make check-guidance` passes.
+- [x] 12.11 **Documentation citations.** `make check-doc-citations
       CHANGE=compose-inference-domain-stack` after promotion, every match
       resolved; then `change-workflow openspec validate
       compose-inference-domain-stack --strict` as the last check before the
       archive.
-- [ ] 12.12 **Archival.** `change-workflow openspec archive
+      *Closeout:* both pass after promotion: every path the change's nine documents cite resolves, and the change validates strictly.
+- [x] 12.12 **Archival.** `change-workflow openspec archive
       compose-inference-domain-stack -y`, merging the six deltas into
       `openspec/specs/{api-family,inference,deployment-state,
       test-compatibility,market-composition,storefront-publication}/spec.md` and
       moving the change under `changes/archive/`; the index row then links the
       archive. Dependents are released at archive cleanup, not here.
+      *Closeout:* archived with all six deltas merged: each added requirement is absent from its permanent specification and each modified one present, so none is skipped. The row is set to `archived`, and dependents released, at archive cleanup.
 
 ## Design promotion record
 
@@ -2530,4 +2542,6 @@ change to implementation.
 | D20 (pre-closeout review 24 F5) — the inference buyer is in the `market` binary; the inference lane is outside release-candidate validation until inference ships | `docs/guidance/repository/images.md` — "The `market` binary"; `docs/release-handbook.md` — "Running the lanes on a release candidate's images" (the first states the binary's domains; the second lists the lanes a candidate runs, inference not among them; no edit owed) |
 | Pre-closeout review 24 F7 — listing pages order by `created_at`, then by first write, newest first, under the `(created_at, listing_id)` cursor | the `storefront-publication` capability's `spec.md` — "Reconciliation reads every listing once" (written by the archive from the delta); the `api-family` capability's `architecture.md` — the publication paragraph (already in final state) |
 | Pre-closeout review 25 F1 — the inference storefront refuses its administrator on every party route and serves its negotiation reads to the administrator alone | the `storefront-publication` capability's `spec.md` — "A storefront never authorizes its administrator as a party" (written by the archive from the delta); `docs/development/ARCHITECTURE.md` — "The administrator's reach" (already in final state) |
+| The inference lane among the end-to-end lanes | `docs/development/TESTING.md` — the lane list under the pipeline's lanes |
+| The first pipeline run's findings — the log collector's fourth artifact; the lane-time race | `docs/development/TESTING.md` — the log paths; `openspec/changes/README.md` — the unowned gap under the inference goal |
 | Roadmap and index currency (closeout's "Roadmap currency" and "Campaign index currency") | `docs/development/ROADMAP.md` — Goal 9 current state and gap table; `openspec/changes/README.md` — this change's row and the Goal 9 campaign graph |

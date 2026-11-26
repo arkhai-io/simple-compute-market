@@ -408,8 +408,15 @@ authorities:
   gated sample service, and API-credit storefront.
 - `compose.bare-metal.yml` composes the dedicated bare-metal storefront with a
   compute-family registry and the selected-site provisioning authority.
-- `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`
-  and `domains/apicredits/compose.yml`, so the dev chain enters once.
+- `compose.inference.yml` composes the inference registry, the inference
+  service, the gateway in front of a model server, the deterministic model
+  stub, and the inference storefront, from `domains/inference/compose.yml`. The
+  stub is a test image answering an OpenAI-style API with fixed text; the
+  `vllm` profile adds a CPU model server under the stub's model name, and the
+  gateway fronts it when `INFERENCE_MODEL_BASE_URL` names it.
+- `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`,
+  `domains/apicredits/compose.yml`, and `domains/inference/compose.yml`, so the
+  dev chain enters once.
 
 What a base file and an overlay may bind is
 [`compose-stacks.md`](../guidance/repository/compose-stacks.md). The overlays, each
@@ -420,7 +427,9 @@ of whose headers gives the command it belongs to:
 | `compose.vms-local.yml` | the VM services' identities; Bob's and Alice's `storefront.toml` and secret overlays; both VM registries' profiles and credentials; both provisioning services' site profiles; the development Alkahest address book; the VM buyer service |
 | `compose.apicredits-local.yml` | the API-credit services' identities and admin key; the storefront's `storefront.toml` and secret overlay; the API-credit registry's profile; the credits buyer service |
 | `compose.bare-metal-local.yml` | the bare-metal registry's and site's profiles, identities and definition documents; the storefront's development `storefront.toml`, secret overlay, address book and lane CA; the buyer service and Mailpit |
+| `compose.inference-local.yml` | the inference services' identities; the storefront's `storefront.toml` and secret overlay; the inference registry's profile; the gateway's signing credential; the inference buyer service |
 | `compose.payments-double.yml` | the payments lane double, run by every end-to-end lane and never by the full local stack; both lane doubles on injected time (`PAYMENTS_LANE_DOUBLE_TIME_SOURCE`, `MEDIATION_LANE_DOUBLE_TIME_SOURCE`) |
+| `compose.inference-lane.yml` | the inference lane's own bindings: a compute-schema and an API-credit-schema registry of the lane's own, which its schema-filter scenario routes discovery away from; the lane profile on all three registries; the model stub's streaming pace |
 | `compose.vms-lane.yml`, `compose.apicredits-lane.yml` | each lane's own bindings: its payment storefront's lane configuration and the lane CA, and the registry profile recommending the double's pinned dispute authority; the API-credit lane also runs a compute-schema registry of its own, which the credits scenario routes discovery away from and the full local stack never runs, since VM's registry fills that role there |
 | the lanes' time settings | every party of a lane on injected time, in configuration only the lanes load: the registries' lane profile `dev-env/registry/config-payments-lane.env`; the provisioning services' `dev-env/provisioning/config-lane-time.yml`, layered as the `lane-time` profile through `ACTIVE_PROFILES` by `compose.vms-lane.yml` and `compose.bare-metal-local.yml`; each storefront's lane configuration (`storefront.bob.lane.toml`, `storefront.alice.lane.toml`, `storefront.credits.lane.toml`, `storefront.inference.lane.toml`, and the bare-metal lane's `storefront.dev.toml`); in `compose.apicredits-lane.yml`, the credits service's `APICREDITS_TIME__SOURCE`, its lane `admin` principal, and the sample app's `APICREDITS_SAMPLE_APP_TIME_SOURCE` and control token; and, in `compose.inference-lane.yml`, the inference service's `INFERENCE_TIME__SOURCE`, its lane `admin` principal, and the gateway's `INFERENCE_GATEWAY_TIME_SOURCE` and control token. The full local stack stays on wall time |
 
@@ -662,7 +671,9 @@ database of theirs the chain did not build is refused as unsupported. A database
 refused the same way. Each in-house migration commits with its record, so a
 failure leaves the migrations before it applied and recorded; under Alembic,
 SQLite DDL is not transactional, so a fresh registry database whose migration
-fails partway is unsupported and is replaced by a fresh one. An image rolled back
+fails partway is unsupported and is replaced by a fresh one. The family authority's chain ends at
+`20261109_001_grant_terms`, which creates the table a grant's accepted terms
+are kept in. An image rolled back
 over a migrated database is refused as ahead, so an upgrade is rolled back by
 restoring the backup taken before it. The operator handbook's
 ["Upgrading a deployment"](../operator-handbook.md#upgrading-a-deployment) is the

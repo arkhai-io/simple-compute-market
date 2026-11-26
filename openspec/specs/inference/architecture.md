@@ -1,9 +1,10 @@
 # Inference Architecture
 
-The [normative contract](spec.md) defines the inference domain's vocabulary:
+The [normative contract](spec.md) defines the inference domain's vocabulary —
 its listing, its pricing, its usage record and charge, its usage evidence, and
-its discovery. This document explains the shape of the market that vocabulary
-serves and why each part is cut as it is.
+its discovery — and the roles that sell under it. This document explains the
+shape of the market, how the roles compose the `api` family kit, and why each
+part is cut as it is.
 
 ## Market shape
 
@@ -193,8 +194,94 @@ registered as a storefront domain as API credits is, and not a contribution to
 the compute-family shell. Its listing therefore binds a quota resource in the
 authority's ledger, not a capacity binding to a resource pool.
 
+## Role composition over the family kit
+
+Four distributions compose the market, each a thin root over the family kit:
+the storefront, the authority service, the gateway executable, and the buyer
+plugin. The issuance label and the accepted-terms payload live in the domain
+package, because the storefront, the service, and the gateway each need them
+and one composition root cannot import another.
+
+The storefront fills the family's selling contributions. Its publish request
+carries a model card, and its publication mapping fills the card's resource,
+site, and offering mode from the quota resource the request names, so a seller's
+card cannot name a resource other than the one its quota backs. Its issuance
+projection names the served model as the digested service, so a grant is bound
+to what the gateway admits in a request's `model` field, and delivers the
+gateway's address as metadata outside the digest; the convergent `model_id`
+stays in the accepted listing the kit pins. Its public-result extension places
+the contract's materialization in the delivery, built from the accepted listing
+and its rate card with the settlement reference the delivery context carries,
+so the public record cannot show a buyer a rate they did not accept.
+
+The accepted terms then exist in three places, each with one role and all bound
+by one digest: the storefront's accepted-listing artifact, which is the issuance
+input and the seller's record; the authority's `grant_terms` row, which
+consumption is charged against; and the public materialization, which is the
+buyer's and an auditor's copy.
+
+The storefront starts without its dependencies. It refuses at startup only what
+waiting cannot repair — an unset authority address, a missing signing
+credential or authority trust set, an unreadable capacity configuration, a
+settlement priority naming a mechanism it does not compose — and otherwise
+waits: the listing seed waits for the authority, the chain probe owns the chain
+clients, and readiness reports a chain that does not answer. Its `publish` and
+`listings` commands are clients of the running storefront. The seller is one
+account, the one its wallet key signs as.
+
+The authority service is the family authority composed under the inference
+label, on its own database, which the family authority chain builds. It has no
+shared-secret gate behind its signed authentication and refuses to start
+without a signing credential and a trusted role.
+
+The gateway executable reads the listing it fronts from the storefront that
+published it, since a registry's copy can lag a republication and the two are
+deployed together. It finds the listing by the quota resource and served model
+name it is configured with, reading every page of the storefront's open
+listings and refusing readiness on zero or several matches, and retries until
+the storefront has published. It validates the listing, refuses one that is not
+request-priced, and projects it to the family's gateway offering. It signs
+toward the authority as the `service` role.
+
+The buyer plugin fills the family's buying contributions and compiles its
+discovery filters from the specification the registry serves, so it encodes no
+rule pairing a rate bound with an asset. Its one settlement stage carries the
+purchase-time verification hook.
+
+## Verification seams
+
+The contract fixes where a proof attaches; the roles carry the seams a first
+proof format needs, each admitting everything. The gateway runs a hook per
+request, after the key is verified and before it is charged, with the
+offering's current rate card and attestation, the key's accepted terms, and
+their digest, so a proof can refuse a credential whose seller changed the
+attestation or the price since the buyer accepted, or verify against the
+accepted envelope the authority holds. The buyer plugin runs a hook before it
+proposes settlement, with the listing's attestation envelope. The gateway image
+is built reproducibly from a digest-pinned base, so it can be measured. No
+proof `kind` is defined.
+
 ## Current limits
 
+- Consumption is a flat charge per request: the storefront publishes only a
+  card whose per-token and image rates are zero and whose request charge is
+  between one and 2⁵³ − 1, the range the authority's ledger and the issuance
+  digest both carry, and the gateway charges that amount. Pricing by measured
+  usage replaces the guard and the charge together.
+- A retried request is charged twice, as the family gate charges it.
+- A republished price reaches new keys only. A key keeps the charge its first
+  grant accepted, and a top-up under other terms is refused, so one balance
+  never mixes two prices.
+- A request straight after a top-up is refused until the gate's cached
+  verification of the exhausted key expires.
+- Alkahest is the one settlement mechanism. The storefront's settlement
+  composition is the kit's obligation list unmodified, so a second claimant in
+  a deal, such as a model owner, is an addition to that list and not a new
+  mechanism.
+- After each reconcile the storefront closes, at each registry, the open
+  inference listings under its identity that it does not hold open. Two
+  inference storefronts sharing one identity and one registry would close each
+  other's listings.
 - A listing publishes against a declared, finite quota, the backed value of
   the backing property every pool and listing declares. The quota is a sales
   cap and not capacity: a model server keeps serving after a seller's declared

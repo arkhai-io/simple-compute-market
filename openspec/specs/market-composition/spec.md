@@ -80,7 +80,7 @@ The buyer executable MUST be core-owned and load domain plugins, and registry be
 Core role packages MUST expose one versioned market-domain contract for deterministic codecs and role integration hooks, and concrete domain packages MUST implement that contract without core importing their implementations.
 
 #### Scenario: Shipped domains are loaded
-- **WHEN** VM, bare-metal, and API-credit plugins are discovered independently
+- **WHEN** VM, bare-metal, API-credit, and inference plugins are discovered independently
 - **THEN** each satisfies the same supported contract version and registers a unique domain identity without modifying core
 
 #### Scenario: Unsupported contract version is installed

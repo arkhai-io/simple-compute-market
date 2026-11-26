@@ -383,6 +383,16 @@ project of its own:
   top-up is visible to the next request; the cache's own behaviour, including no
   service call on a key known to be exhausted, is proven by the gate's
   conformance trace.
+- **Inference lane** (`make -C e2e-tests test-e2e-inference`): the inference
+  registry, service, gateway, model stub, and storefront, compute-schema and
+  API-credit-schema registries of the lane's own that discovery is routed away
+  from, and the dev chain. Its `e2e_inference_deal` scenario buys credits
+  through the buyer CLI and calls the model through the gateway with the
+  delivered key: an unlisted model is refused uncharged, the key is consumed to
+  a 402, a second purchase tops it up, a completion is streamed, a key bought
+  under another listing is refused at this gateway, and after an hour of lane
+  time the last credit is charged once. The stub answers with a digest of the
+  prompt, so the scenario asserts exact responses.
 
 Each lane also runs the payments double and the mediation double
 (`compose.payments-double.yml`): its payment storefront — Bob, the bare-metal

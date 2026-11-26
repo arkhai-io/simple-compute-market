@@ -51,18 +51,18 @@ Each lives in the library whose types it is written against, so neither is
 typed as `Any` and neither is vocabulary. Every optional field's absence is
 valid, so a domain supplies no placeholder.
 
-| Field | API credits supplies |
-|---|---|
-| `label` | `api-credits`, with the grant prefix `api-credit-fulfillment.v1` |
-| `kind` | `api_credits.v1` |
-| `offering_mode`, `contribution_id`, `table_prefix` | `api_credits`, `apicredits`, `api_credit` |
-| `listing_schema`, `publication_mapping` | the named-service listing over its quota resource |
-| `issuance_projection` | service from `service_name`, resource from `resource_id`, endpoint from `base_url` |
-| `publication_guards`, `acceptance_hook`, `public_result_extension` | none |
-| `consumption_rule` | a fixed amount per request, configured at the gate |
-| `refusal_noun` | `API-credit` |
-| buying `schema_id`, `command`, `noun` | `api_credits`, `credits`, `API-credit` |
-| buying `rendering` | the service name, description, and OpenAPI and base URLs |
+| Field | API credits supplies | Inference supplies |
+|---|---|---|
+| `label` | `api-credits`, with the grant prefix `api-credit-fulfillment.v1` | `inference`, with the grant prefix `inference-fulfillment.v1` |
+| `kind` | `api_credits.v1` | `inference.v1` |
+| `offering_mode`, `contribution_id`, `table_prefix` | `api_credits`, `apicredits`, `api_credit` | `inference`, `inference`, `inference` |
+| `listing_schema`, `publication_mapping` | the named-service listing over its quota resource | the model-card listing, its resource, site, and offering mode filled from the quota resource the publish request names |
+| `issuance_projection` | service from `service_name`, resource from `resource_id`, endpoint from `base_url` | service from the card's `served_model_name`, resource from `resource_id`, endpoint from the card's `endpoint.base_url`, with the accepted terms, their digest, and the request charge |
+| `publication_guards`, `acceptance_hook`, `public_result_extension` | none | one guard refusing a card that is not request-priced; no acceptance hook; an extension placing the contract's materialization in the public result |
+| `consumption_rule` | a fixed amount per request, configured at the gate | the accepted card's `request_credits` per request, charged by the gateway |
+| `refusal_noun` | `API-credit` | `inference` |
+| buying `schema_id`, `command`, `noun` | `api_credits`, `credits`, `API-credit` | `inference`, `inference`, `inference` |
+| buying `rendering` | the service name, description, and OpenAPI and base URLs | the model identity, with quantization, context length, provenance, and the request charge |
 
 The envelope kinds, the opening guard's name, and the private-credentials
 reference are spelled from the kind's stem and the table prefix, which
@@ -70,10 +70,15 @@ reproduces the names API credits' recorded tables and envelopes carry. The
 buyer's resource filters are the registry schema's, so the buying bundle
 carries no filter vocabulary of its own.
 
-A second domain would supply the same fields: its label and kind, a listing
-schema and mapping from a quota resource, a projection naming the service and
+Another domain supplies the same fields: its label and kind, a listing schema
+and mapping from a quota resource, a projection naming the service and
 resource it issues, and any publication guard, acceptance hook, or public
 extension its product needs. Its values are its own design's.
+
+The public-result extension takes a third argument, a frozen delivery context
+naming the agreed settlement mechanism and the stage's settlement reference,
+because the issuance result carries neither and a domain's public record may
+need both. API credits supplies no extension, so its delivery is as it was.
 
 ## The accepted listing and the issuance projection
 
@@ -221,6 +226,42 @@ The Python, TypeScript, and Rust gates implement all three. The shared
 conformance trace under `kit/api/gate-ports/conformance/` pins the
 first two for every gate, and each gate's own tests pin the ordering.
 
+The Python gate verifies and charges in separable steps beside `authorize`, so
+a caller that must decide something between the two — the gateway's model
+check and its verification hook — charges only what it admitted. The split
+makes the same exchanges with the authority as `authorize` does, so the
+conformance trace holds for both.
+
+## The gateway
+
+`kit/api/gateway` (`arkhai_api_gateway`) is a reverse proxy in front of a
+service that speaks an OpenAI-style API. It parses the request body, refuses a
+service name the deployment does not serve before anything is charged, verifies
+the key, runs a verification hook, charges, replaces the buyer's
+`Authorization` with the deployment's own upstream credential, and forwards,
+streaming the response through when the request asks for a stream. It lists
+only the service it serves and leaves its health route ungated. The gate's
+middleware cannot stand in for it: the middleware authorizes on headers alone,
+so an unserved name would be charged before it was refused.
+
+The library understands one value, `GatewayOffering`: the service name it
+admits, the key scope it enforces, the default charge, the purchase pointer a
+refusal names, the upstream address and credential reference, and the current
+terms it hands the verification hook. A domain's executable validates its own
+listing and projects it to an offering, so the library imports no domain.
+
+The gateway sends its offering's service and resource with every verify and
+consume, and the authority refuses, uncharged, a key whose first grant names
+another scope. Enforcement at the authority means a gateway cannot forget the
+check and no scope leaves the authority. The charge a request pays is the one
+the key's first grant pinned, which verification returns; the offering's
+default applies only to a key that pins none.
+
+The verification hook receives the offering's current terms, the key's
+accepted terms, and their digest, after the key is verified and before it is
+charged, so a refusal costs the buyer nothing. It admits everything; it is the
+place a proof format attaches.
+
 ## Current limits
 
 - The family's composability claim is scoped to prepaid bearer access. The
@@ -231,7 +272,18 @@ first two for every gate, and each gate's own tests pin the ordering.
   trigger.
 - A domain's issuance projection values — which identity enters the digested
   service and whether an endpoint is delivered — are that domain's design's.
-  Only API credits composes the kit.
+- A grant's accepted terms, their digest, and its request charge are kept in
+  `grant_terms`, a table beside `credit_grants` that the authority chain's
+  `20261109_001_grant_terms` creates. A key's pinned values are its first
+  grant's row; a grant with no row is unpinned, and a key whose first grant is
+  unpinned accepts only unpinned top-ups and is charged the offering's default,
+  which is every API-credits key. The fields are omitted from the wire when
+  unset, so API credits' issuance digests and verify responses carry none.
+- A key holds one balance under one scope and one set of terms. A key meant to
+  span services or prices needs balances per grant, which changes the ledger,
+  the verify response, and the gate's pinned conformance contract.
+- A retried request is a second charge: the gateway passes no idempotency key
+  to the gate.
 - The authority's baseline migration is identified
   `v0_3_0_baseline_apicredits_service` in every domain's database: the chain
   is one, and each domain's deployment runs it on its own database. The chain
