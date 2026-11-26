@@ -11,6 +11,14 @@ and `converge-ongoing-compute-leases` leave it and adds the spec deltas.
 
 To be verified when the change is designed.
 
+> **Owed restatement.** The funding timer is this change's to design:
+> `converge-ongoing-compute-leases` builds none (its design, D4), and this change is to
+> hold one calculation of when a deal's delivery ends from what the deal has funded,
+> for every class of deal. Open for that restatement: whether the calculation needs the
+> payments service's horizon, and whether a seller opts into it. The second bullet
+> below is stale: both storefronts run the kit's servicing cycle, which keeps no
+> funding timer.
+
 - `renewable-compute-lease-deadlines` gives every compute lease a delivery deadline, on the activation phase `activate-compute-leases-at-the-site` adds,
   at commit, recorded in `renew_by_utc` with phase `awaiting_activation`, replaced
   once at activation; it records renewal and the lapse policy as deferred options.

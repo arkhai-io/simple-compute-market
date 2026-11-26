@@ -67,8 +67,9 @@ None.
 Internal readiness gates: `switch-on-hosted-per-period-vm` (the VM declaration,
 the operators' policy and runbooks, the prepared hosted target, and the VM live
 evidence, which builds on `serve-running-rate-deals`' servicing in both domains),
-`converge-ongoing-compute-leases` (the rest of servicing and the consolidated
-matrix), `discover-open-ended-compute-listings` (discovery),
+`converge-ongoing-compute-leases` (the remaining rate rows against the lane doubles
+and three servicing fixes; it builds no funding timer and no operator recovery
+command), `discover-open-ended-compute-listings` (discovery),
 `renewable-compute-lease-deadlines` (the pool's delivery deadline, which the full
 product publishes and the site enforces in place of the MVP's storefront-enforced
 clause deadline) and `offer-a-seller-chosen-payout-hold` (the seller-chosen payout

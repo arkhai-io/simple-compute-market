@@ -1,490 +1,348 @@
-# Design
+# Design: converge-ongoing-compute-leases
 
 ## Context
 
-The landed `deal-lifecycle` specification defines the post-commitment lifecycle:
-final requests, end service, kept evidence, lifecycle commands, `watch` and its
-cursors, cause classification with its pending slot, the seller's self-penalty
-filing and the buyer's delivery end. The landed `compute-delivery` specification
-defines the one delivery path both compute domains compose: activation before
-billing start, end service's one billing-start intent and the classified
-undelivered hand-off. The landed lane-double requirements in `test-compatibility`
-supply the payments and mediation doubles, their typed controls and their
-perceived clocks.
+**What services a deal.** Both compute storefronts run one kit-owned servicing cycle,
+`ServicingCycle` (`kit/deal-servicing/src/market_deal_servicing/servicing.py`), in a
+`deal-servicing` loop registered through the kit loop controller, as `deal-lifecycle`'s
+"Each deal's servicing steps run in one kit-owned order" and `market-composition`'s
+"Both compute storefronts run one loop layout" state. A cycle discovers counterparty
+cases once per dispute authority, then takes the page deal by deal: the authorities
+read, the domain's recovery steps, the physical end, local reconciliation, site-report
+correction, filing dispatch, and the physical end again, each step isolated. A failed
+step skips nothing. A deal's physical end still runs after its own authorities read and
+after every earlier deal's steps, and each authority client waits ten seconds by
+default (`kit/arkhai-payments/src/market_arkhai_payments/client.py`,
+`kit/arkhai-mediation/src/market_arkhai_mediation/client.py`).
 
-The archived `spot-deals-through-arkhai-payments` supplies the mechanics in both
-compute domains: rate and setup mandate derivation with every `partialPeriod`
-treatment and the dispute entry's `chosen` stop, one payments transaction adapter
-with the rate `authorize` and start, verified rate observations, the seller's
-notice through `deals preempt`, the buyer's canonical `end` and opt-in watchdog,
-end service's refusal to commit a rate deal it cannot service (its D12–D14), and a
-receipt key change as a drained cutover with no re-anchoring (its D17, D21). The
-archived `negotiate-open-ended-compute-terms` supplies the terms, the servicing
-declaration as a list of qualified treatments, the shipped presets — the buyer's
-stop `charged`, a seller's preemption and the term end `returned` — and the default
-buyer's refusals with a waiver each.
+**Ends and filings.** End service keeps every final request and selects the earliest.
+A seller failure cannot be recorded without its `delivery_end(cause=payee)` filing
+(`kit/deal-servicing/src/market_deal_servicing/journal.py`, `record_end`), for every
+kind of deal: an administrator's failure end, a site's unentitled withdrawal, and a
+missed delivery deadline, which for a rate deal is recorded only after a payment read
+made at or after the deadline (`deal-lifecycle`'s "The seller files ends its terms do
+not entitle", "Administrator interruption explicitly classifies its cause" and
+"Delivery authorization delegates payment interpretation"). A filing for a failure
+before the Agreement's start waits for that start.
 
-Goal 8's MVP changes land before this change. `serve-running-rate-deals` lifts
-end service's refusal and composes rate servicing in both compute storefronts:
-rate start through the shared delivery path, stop-cause classification, the
-physical fact and the meaning of *ended*, one operator signal, startup coherence
-and withdrawal, restart recovery with each domain's production-application
-rebuild, a kit-owned per-deal step order both storefront cycles call with each
-step's failure isolated (which also fixes bare metal's cycle, where a physical
-failure skips its filing dispatch), loop registration through `kit/storefront`,
-the keying of a refused rate deal's next commit, the buyer watchdog's
-delivered-deal cases, and the baseline forms of rows 0, 6, 7 and 9 in both lanes.
-`drive-the-storefront-clock-in-lanes` gives both storefronts a perceived clock the
-lane moves with the doubles'.
+**A changed claim.** When a new, earlier seller failure becomes the selected end, the
+journal adds a filing for it. The mediation adapter reserves one original
+`delivery_end` writer per commitment, Agreement and authority; a different caller
+adopts an equivalent filed claim, and a claim that differs from the one filed is
+answered `repair required: delivery-end revision requires resolved prior rulings and
+effects` (`kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`). A rejected
+filing is terminal and shows repair required. That is the fallback "Filing identities
+and revised requests are safe across callers" gives an unsupported mapping, and no
+mapping exists; "Revised cases carry their prior rulings" is otherwise unmet. The
+vendored mediation contract has no revision or linked-case construct. Its
+`CaseConcurrencyPolicy` fixes `repeated_cases: allowed` and
+`rulings: net_prior_effects`, and its published traces include
+`manual-second-mechanical-claim` and `operator-nets-earlier-ruling`
+(`kit/arkhai-mediation/src/market_arkhai_mediation/contract_data/`): a second
+mechanical claim goes to an operator, and the authority nets its earlier ruling.
 
-This change is the rest of rate-part servicing inside end service: the work that
-keeps a running rate deal's physical state, authority records and journaled
-effects converged in both compute compositions when sellers fail, authorities are
-down or evidence arrives late. It is not a second lifecycle. The storefront and
-the site are one seller from the buyer's perspective, and the buyer's guarantees
-rest on authority records and kept signed bytes, never on the seller's
-cooperation.
+**When a deal is ended.** "The seller half lists deals" lists a deal with a recorded
+end `ended` only when its resource is proven released, every payment part has a
+verified stop or end, and a saved read of its dispute authority shows no case open;
+otherwise `ending`, naming each outstanding condition from four closed codes. The list
+computes this at read time from saved views
+(`kit/deal-servicing/src/market_deal_servicing/seller.py`, `_outstanding`) and never
+reads the deal's own filings, so a deal whose filing is unsent, waiting or unanswered
+can be listed `ended`. The single-deal read and the list both carry the filings
+themselves.
 
-## Goals and non-goals
+**Release.** For a delivered deal, each storefront records the release when the site's
+provisioning service delivers its capacity-released event. The service sends it once a
+teardown is proven or an administrator force-releases the lease, which leaves the lease
+`force_released`, and sends it again each lease-watchdog cycle until acknowledged
+(`provisioning/compute/src/compute_provisioning/lease_lifecycle.py`).
 
-Both compute compositions converge after commitment, report physical and financial
-work separately, and recover durable effects across restart and authority outages.
+**The lanes.** Every party of a Compose lane runs on one lane time a stage sets,
+forward only (`test-compatibility`'s "Every party in a lane shares one lane time the
+scenario sets"). A scenario holds a storefront's loops and steps them; it cannot stop
+the service, and a storefront whose loops are held still answers its API
+(`docs/guidance/repository/deterministic-tests.md`, "Pause the loop, then advance it
+explicitly"). The mediation double takes a ruling as a programmed rule and executes its
+`reverse`, `stop` and `penalty` effects, the penalty capped at what is held. Both lane
+storefronts declare `charged` and `returned` and no setup charge. What runs today is
+`test-compatibility`'s "A recurring purchase is delivered end to end in each compute
+lane", "Rate deals are qualified in both compute lanes on lane time", "The buyer's
+watchdog is qualified against a delivered deal", "Controls scenarios prove the lane's
+dispute wiring in the VM lane" and "A dispute on a running rate deal is qualified in the
+VM lane"; the bare-metal lane runs no dispute row on a rate deal.
 
-No payment ledger, site renewal protocol, local payment-stop scheduler or minimum
-spend is introduced, and no rotation work: a receipt key change is a drained
-cutover (spot D17, D21). The archived spot change owns rate mechanics, mandates,
-period arithmetic and partial-period terms; the archived terms change owns
-publication and buyer acceptance policy, as landed in their specifications. Compute delivery owns the delivery
-state machine. Activation owns hosted enablement of the full product.
+**What is released.** `marketplace-v0.4.0` carries all of the above.
 
 ## Decisions
 
-### D1. Ownership and dependencies
+### D1 — One change holds the remaining rows and three servicing fixes
 
-`kit/deal-servicing` owns the storefront end-service loop, its observation state,
-the evidence and effect journal, the domain-neutral physical ports, and the
-consumption of the delivery authorization protocol. It imports no mechanism kit,
-no dispute kit and no compute specialization. Each composition injects its
-concrete payment and dispute adapters and its domain ports for lease admission,
-activation and release.
+This change is the remaining rate qualification rows and three fixes to how a
+storefront services a deal: a revised `delivery_end` claim reaches the dispute
+authority, the seller's list does not show a deal `ended` while a filing of its own is
+unsent or unanswered, and the order of work within a page lets a physical end run
+without waiting for authority reads.
 
-This change depends on `serve-running-rate-deals`, which brings the MVP set;
-the mechanics it needs are the archived spot change's and are landed. It owns the
-rest of the rate qualification matrix, including the two rows that exercise the
-delivery path under a rate hook (scenarios 4 and 8 below).
+A change costs a design, reviews, a validation and a closeout, so a piece of work left
+over is placed by one rule: it goes to a related change where it fits; with no such
+home, a small piece stays with the others; only a large piece with no home becomes a
+change. Each fix here is small, each has evidence in the code, and each is exercised by
+the rows this change qualifies.
 
-The seller-list requirement keeps the landed bounded page, continuation token,
-identity, extension and state clauses and adds diagnostics. The settlement retry
-requirement's lifecycle-journal allowance is `serve-running-rate-deals`'s; no
-requirement is promoted twice.
+Rejected:
 
-### D2. Durable state, completion and diagnostics
+- A qualification change and a servicing change. Two designs and two closeouts for
+  three small fixes and the rows that exercise them.
+- One change also holding the funding timer, operator recovery and a release
+  acknowledgement. D2 to D4 place each elsewhere or drop it.
 
-Per deal, the kit persists the commitment and Agreement binding, the domain
-operation and lease identity, the verified record cursors, the selected earliest
-final request, the immutable operation descriptors, the completion history and, when the seller enables it (D3), the funding
-observation and timer. Exact evidence bytes live in the foundation's evidence
-store.
+### D2 — Operator recovery with the storefront stopped is its own change
 
-*Ended* has the meaning `serve-running-rate-deals` defines: physically
-released, every part stopped or ended at the authority as verified, and no open
-end-related case. This change refines the two facts under that meaning; it does
-not change it.
+Filing a seller's `delivery_end`, or sending its notice, for a deal whose storefront is
+not running is a storefront command, designed in
+`recover-deals-from-the-storefront-cli`, which is deferred. It is large — an evidence
+export, a client method, a command, a durable command envelope and a rule for a filing
+that overlaps the restarted storefront's own — and nothing here needs it: a buyer's
+protection is its own stop and a case, and a seller whose storefront is down ends the
+lease at the site and lets the restarted storefront file
+(`docs/operator-handbook.md`, "Leases the storefront has not delivered").
 
-**Physical completion** requires authenticated proof of capacity release — the
-capacity-released callback, or a verified terminal lease or fulfillment release
-read — or proof that nothing was dispatched, or a labelled, authenticated manual
-acknowledgement. Unknown dispatch is adopted and ended first. A signed
-`lease_ended` is end intent and attribution evidence, not proven teardown: an
-initial report or a `release_failed` report leaves physical completion false. An
-earlier end never resurrects a resource. The MVP records the release proof; this
-change adds the manual acknowledgement.
+Rejected: keeping it here, where the largest item with no named user would hold three
+small fixes; and an unowned roadmap row, which would drop the design already worked out
+for it.
 
-**Financial completion** is revision-scoped: every required part has a verified
-authority stop or end (payout is not required), every end-related case and ruling
-effect is resolved, and no operation is pending or unknown. An unstarted rate part
-needs a verified stop or end too; a once part uses its own term end or an earlier
-authority stop. A dispute-window hold still running is not unfinished end work,
-and filing acceptance alone does not complete anything. The end revision names the
-selected earliest request and the relevant cases and ruling revisions; new earlier
-evidence or a relevant case change reopens financial work without deleting
-history. Once-only deals use the same facts. Watches and retention continue after
-both facts are set.
+### D3 — A pending release is cleared at the site
 
-The seller's lifecycle `read` and `list` expose both facts with their evidence
-references, the end revision, the age of each gap, pending case and operation
-references, repair reasons, and the principal, reason and operation of any manual
-recovery. They also show pending self-penalty cases, billing that continues after
-a delivery end (a buyer's stop not yet landed included, which the MVP shows as
-*ending* with reason "rate still running"). A deal is *running* or *unstarted* until a final request is due, *ending*
-while either fact is false, and *ended* when both are true. A permanent refusal or
-a missing required credential or evidence shows *repair required* while both facts
-are preserved. The buyer's read keeps its landed delivery and evidence projection
-and shows none of the administrator diagnostics.
+A deal listed `ending` with `release_pending` is cleared at its site, through the
+provisioning service's administrator API: `retry-release` re-observes a teardown that
+has since finished, and `force-release` returns the capacity on the operator's word,
+with a reason and evidence. Either leads the service to deliver the capacity-released
+event the storefront records. A site that no longer serves listings does the same: it
+runs its provisioning service to answer those requests. The storefront gains no command
+for it, and `docs/operator-handbook.md`, "A deal ending on a pending release", gives the
+procedure.
 
-Manual recovery is the seller `submit` kind `acknowledge_physical_recovery`,
-authorized to the storefront administrator only. Its payload binds the deal, the
-resource or end revision and a reason, under a stable operation key; reuse of the
-key with changed content is rejected. It is dispatched locally to end service, not
-to either authority adapter; its `at` is the observed recovery instant, never
-future; its accepted result names the immutable local audit record and the updated
-physical fact, not an authority record; an unknown transport outcome resolves by
-seller read and same-key retry. It records audited physical evidence only, never
-money and never site-signed evidence.
+The site is the party that can see the host and that owns the lease's release, so it is
+where an operator's assertion belongs
+(`docs/guidance/engineering/implementation.md`, "Deciding which party is authoritative").
 
-Revision history is retained. The kit warns on a physical gap beyond the
-configured watchdog-plus-teardown budget and on authority work beyond one retry
-budget, and surfaces permanent refusals at once. Budgets derive from measured
-domain latency. Warnings never stop servicing, never call a priced notice gap an
-overcharge, and never claim that reserve-ahead caps buyer billing after an
-unnoticed end.
+Rejected: a seller command acknowledging physical recovery at the storefront. It would
+add a command kind, a client method and an audit record for an assertion the site
+already records, made by the party that cannot check it. Rejected too: recording a
+condition under which to revisit, since a site can always run its provisioning service
+again.
 
-> **Stale (spot D17, D21).** This decision also persisted rotation and
-> re-anchoring status per deal, and listed running rate deals awaiting
-> re-anchoring and once-only deals depending on a retiring key as "must drain".
-> A receipt key change is now a drained cutover with no re-anchoring, and
-> convergence takes on no rotation work; the operator finds open payment deals
-> through the existing seller read and list (spot D20).
+### D4 — The funding timer is `lapse-billing-with-the-site-lease`'s
 
-### D3. One kit loop with whole-page passes, and the opt-in funding timer
+This change builds no funding timer. When a deal's delivery ends for want of funds is
+to be calculated by one mechanism from what the deal has funded, for every class of
+deal, and `lapse-billing-with-the-site-lease` is where that is designed, with the site
+lease it lapses. Whether a seller opts into it, and what it asks of the payments
+service, are that change's questions. Until it lands, a running rate deal's funding end
+reaches end service only as the payment authority's recorded stop, as `deal-lifecycle`'s
+companion states under "Current limits".
 
-One end-service loop in `kit/deal-servicing` replaces the two storefront cycles,
-registered through `kit/storefront`'s loop controller and built on the per-deal
-step-order helper the MVP introduces. Its step runs the physical work for every
-deal on the page, then bounded authority work with its own error handling, then a
-second physical pass for ends that became due. Each composition supplies its own
-recovery steps (site-report and respondent recovery) to the loop rather than
-running a cycle of its own. Pausing pauses that loop; stepping runs all three
-passes. An authority failure cannot prevent physical work, the second pass
-included; a physical failure cannot prevent authority work. Cursor-after-journal
-and same-key resolution of unknown outcomes are the foundation's rules.
+Rejected: a seller's opt-in timer for rate deals here. It would be one of several
+mechanisms each ending delivery for its own category of deal.
 
-The authority queue consumes verified records and drives journaled commands. An
-entitled stop stays pending until its authority effective time; observing it does
-not stop anything.
+### D5 — The late-anchor row is `renewable-compute-lease-deadlines`'
 
-By default the authority's recorded stops — funding exhaustion, the term end, a
-notice taking effect, the buyer's stop and the dispute authority's stop — are the
-only end source for a running rate, as in the MVP. A seller may enable a funding
-timer in its composition to limit its exposure while the payments service is
-unreachable. With it enabled, a verified funded-through value is a replaceable
-timer, never a speculative lease truncation, and funding can advance it. At expiry
-the loop reads the payment authority before ending: a verified renewal replaces
-the timer, and a verified exhaustion stop is an authority final request with no
-classification. Only an unreachable or unverifiable authority produces a
-bare-timer final request and the pending classification of D5. The read is
-bounded, so an outage does not block physical work; a top-up within one polling
-interval is not seller fault when the authority can verify it. Missing pre-start
-funding is not exhaustion. No site deadline follows funding.
+The row in which a storefront commits with a later anchor than the payment authority's
+approval, the site enforces the longer physical deadline, and the buyer's case is ruled
+non-delivery at the accepted deadline needs a delivery deadline the site enforces.
+`renewable-compute-lease-deadlines` builds that, so it runs the row. Here the row would
+make this change wait on another.
 
-### D4. Adapter-based admission, and activation before billing
+## Open Questions
 
-The landed `deal-lifecycle` and `compute-delivery` requirements already state the
-protocol: the neutral kit asks the injected payment adapter for
-`authorize(phase, evidence)` and `start_billing(operation_key, evidence)`, the
-lease is activated before billing starts, end service alone journals the
-billing-start key, and a refused or failed start enters the undelivered hand-off.
-`serve-running-rate-deals` binds the rate adapter in both domains and lifts end
-service's commit refusal. This change qualifies both domains under the rate hook
-in rows 4 and 8.
+Each is decided in this change's design session.
 
-> **Stale.** This decision bound the rate adapter in bare metal; with
-> `serve-running-rate-deals` covering both compute domains, that binding is its
-> (moved with tasks 1.3 and 3.1).
+### Q1 — The order of work within a page
 
-A healthy remote stop still has a polling, watchdog and teardown observation
-window, not instantaneous revocation. Each party has one `notice_seconds` on its
-stop entitlement. Measured servicing latency and reserve-ahead sizing are the
-seller's capacity-risk choices, not codec gates and not buyer charges. With the
-storefront absent, service may run to the maximum lease end; an activation
-deadline protects the seller's capacity, not the buyer's money.
+D1 keeps the fix; how it is made is open. Today a physical end waits for its own deal's
+authorities read and for every earlier deal's steps.
 
-### D5. Classified ends, held money and revised remedies
+- (a) Passes over the page: the physical end for every deal, then the authority work,
+  then the physical end again for ends the authority work recorded. It changes the
+  order "Each deal's servicing steps run in one kit-owned order" states, in one method.
+- (b) The per-deal order as it is, and after an authority's first failure in a cycle no
+  further read of that authority in that cycle. The landed order stands; the cycle
+  gains state it does not have.
 
-The landed cause classification owns its timing and the end and filing journal;
-this change adds one source, the opt-in funding timer. After the expiry read of D3
-fails at *T*, the final request is recorded atomically with a pending filing
-classification in the same journal. A later verified exhaustion stop at or before
-*T* discharges it; billing that continued beyond *T* resolves it into the fixed
-`delivery_end(cause=payee)` filing intent; inconclusive evidence leaves it
-pending. The same atomic resolution covers earlier evidence that arrives after an
-end. There is no synthetic final request and no second journal, and physical work
-never waits for a classification.
+Recommended: (a). It is the smaller change and removes the wait instead of bounding
+it. It would change if a measurement showed a page's physical ends never wait
+materially, which would make the fix unnecessary.
 
-The seller half files `delivery_end(cause=payee)` with the Agreement's dispute
-authority through the dispute adapter, journaled with the end. It is never
-future-dated: a pre-start failure journals immediately and files at the Agreement
-start. The seller sends no stop or reverse of its own for a self-penalty.
+### Q2 — How the list accounts for a deal's own filings
 
-Arkhai mediation's mechanical delivery-end rule is payee agreement under the
-foundation's guards; its cause=payee branch is the standard self-penalty
-(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`).
-Which claims rule mechanically, under which guards, and what each cause's ruling
-does are the foundation's statements and are not restated here; this change
-proves their consequences — a buyer-filed claim the payee signed, a receipt-backed
-payer claim, a contested one left to a person, and the self-penalty's financial
-effects — in rows 1, 5, 8, 10 and 12. The mediation double executes only a
-ruling's `reverse` today, so this change adds execution of its `stop` and
-`penalty` effects, proven by the double's suite, before those rows run. The
-storefront ends delivery on a ruling's delivery end whatever its applied state,
-so a row that holds a ruling at its gate steps no storefront servicing while the
-ruling waits there.
+Settled, and in the `deal-lifecycle` delta: a deal with a filing of its own unsent or
+unanswered is listed `ending`. Open is how the list names the condition and what else
+counts.
 
-A self-penalty is one package — stop, refunds and bond — and a partial direct path
-would still need a dispute. Seller stop entries therefore exist only for
-entitlements, such as spot's notice entry; a spot emergency files `delivery_end`,
-not a notice-only fallback or an immediate seller stop. On-demand's promise not to
-preempt is remedied by the premature-stop penalty and a buyer's case over held
-money, not enforced by the mandate; the seller's own exit is the mechanically
-ruled self-penalty.
+- (a) A fifth code in the closed list, computed at read time from the journal, for a
+  required filing that is unsent, waiting or of pending or unknown outcome. Whether a
+  journaled operation of unknown outcome counts under it too is part of the question.
 
-Earlier evidence creates revision-bound dispute work; an append is not an
-amendment. Unknown original filings and ruling effects are resolved before any
-revised request is submitted. The dispute adapter's qualified revision mapping is
-consumed as is: read the existing cases and prior ruling effects, use a supported
-revision or linked-case path, and net prior authority-applied reversals and bond
-awards without duplication. No local monetary delta and no seller payment
-correction is introduced. If the adapter cannot demonstrate a safe revision
-mapping, the deal shows repair required and its financial work stays unresolved.
+  ```json
+  {"negotiation_id": "n-123", "state": "ending", "ending": ["filing_pending"],
+   "filings": [{"intent_ref": "9f2c…", "outcome": {"status": "pending",
+     "reason": "delivery-end filing waits for Agreement start"}}]}
+  ```
 
-Partial-period pricing, stop-entry notices and term-end treatment are payment
-terms owned by spot and the terms change. Holds and case extensions are
-authoritative only when verified at the payment authority. Both authorities down
-leaves durable unresolved work, not a recovery deadline. A malicious seller may
-bill until the buyer's stop, exhaustion or the maximum term; held earnings and
-timely buyer action at the agreed dispute authority protect recovery.
+  A 0.4.0 seller client refuses the unknown code, so the lifecycle contracts take an
+  incompatible step and ship with the client that reads it. The list's readers are the
+  typed seller client and an operator's raw read; neither storefront CLI lists deals.
+- (b) Persisted completion state per end, with its history, the age of each gap and
+  references to what is pending. It adds tables to each storefront chain and fields no
+  reader uses yet.
 
-### D6. Commands and recovery
+Recommended: (a), the code arriving with its text in the contracts' `ENDING_TEXT`, as
+the four codes did. It would change if Q3's answer needs a record of which end a filing
+answers.
 
-The buyer flow is the foundation's and the MVP's; this change exercises it. The
-buyer half stops at the payment authority first and sends a hint; with a nonzero
-notice, service continues until `watch` observes the effective stop. If the
-payment authority is unreachable, the buyer half journals its stop and retries it
-under the same key, and billing runs until the stop lands. `end_delivery` is the
-explicit end-now-regardless command: it carries no `at`, and the storefront signs
-its own receipt time as evidence. The storefront has no authority to stop billing
-for the buyer and journals no cooperative payment stop. The buyer's
-`delivery_end(cause=payer)` case is the foundation's
-(`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-buyers-end`);
-this change proves it in row 1 and assumes no payee notice waiver and no payer
-early release.
+### Q3 — How a revised `delivery_end` reaches the authority
 
-Operator recovery is stateless and runs through the injected adapters from a
-caller-retained command file. A seller-authenticated, read-only export of the
-foundation's evidence store supplies the exact Agreement, the commitment and
-mandate, the authority bindings, the original filing identities, the signed
-evidence and the known case and effect references; the seller lifecycle
-contracts, client and CLI own the export, which carries no private keys, and it is
-produced and retained outside the stopped storefront. Missing required bytes
-refuse recovery rather than reconstructing an Agreement or allocating a
-replacement key.
+D1 keeps the fix; the mapping is open.
 
-Before any I/O the runner durably writes an immutable operation envelope: the
-key, the fixed kind, time and payload, the commitment and authority binding, the
-principal and reason, the evidence digests and references, and the exact adapter
-command and request descriptors. Replay reads first and retries identical
-descriptors; it never issues `delivery_end(cause=payee)` or a new key. Results are
-exported separately, so an interruption before the export is recoverable. For a
-self-penalty the descriptors target the dispute adapter only; an entitled notice
-targets the payment adapter only.
+- (a) Once the original case is ruled or closed, the adapter files the changed claim as
+  a repeated case, naming the earlier case in its evidence. The authority routes a
+  second mechanical claim to an operator and nets its earlier ruling, as its published
+  traces show. New work in `kit/arkhai-mediation`; the mediation double must accept a
+  second case on one Agreement, which is not verified.
+- (b) The adapter keeps answering repair required, and the operator handbook says how
+  an operator raises the correction with the authority by hand.
 
-Before filing, the runner and online replay read the dispute record and adopt an
-equivalent existing payee-filed case under the original semantic filing identity.
-A preflight read alone cannot close a concurrent-writer race, so the adapter must
-prove same-intent resolution and same-key retry, or refuse the filing with repair
-required. On restart, `watch` discovers operator cases and ruling effects and
-reconciles the journaled obligations. Manual physical acknowledgement goes only
-through the online administrator `submit` of D2. No offline storefront writer and
-no second payment implementation exists.
+Recommended: (a): repair required is permanent today and says nothing to the buyer. It
+would change if the dispute authority's maintainers want corrections raised another
+way.
 
-### D7. Restart, rotation and declarations
+### Q4 — How a lane row holds a storefront back
 
-Restart recovers journaled effects and cursors, not historical approval or lease
-status alone; each domain's production-application rebuild over the same database
-is `serve-running-rate-deals`', and this change extends it to the journaled
-filings, revisions and recovery envelopes it adds.
+Rows 2, 12 and 12b were written for a storefront that is absent. A lane can only hold
+its loops, and a storefront so held still accepts a site's pushed report or a buyer's
+hint.
 
-> **Stale (spot D17, D21).** The rest of this paragraph is withdrawn: a receipt
-> key change is a drained cutover, nothing re-anchors a running deal, and
-> convergence takes on no rotation work. Re-anchoring across a key change is an
-> unowned gap in `docs/development/ROADMAP.md`'s Goal 8, with the design to resume
-> from recorded in spot's D17. The withdrawn text: During a payments identity overlap the loop requests spot's fresh
-> verified snapshot for each running rate deal, persists the exact re-anchoring
-> evidence before dependence on the old key is retired, and reports unanchored deals
-> as repair reasons before retirement; once-only deals are inventoried as "must
-> drain". Spot owns the cryptographic and rotation policy, informed by the payments
-> service's key-retention commitment; this change owns the durable consumption and
-> the seller read and list status. Until it lands, the MVP's operating rule is to
-> drain running deals before the signing key retires.
+- (a) "Absent" means the loops are held, and each row states what else it holds back
+  through a control that exists. For row 2 that is the site's delivery of its report;
+  whether a lane can hold that is not verified.
+- (b) Rows 12 and 12b drop the premise: they are the buyer's stop and case against the
+  doubles, with the storefront not stepped.
+- (c) What a storefront does on returning from an absence is proven at application
+  integration by rebuilding the application over its database, as restart recovery is
+  in both domains, and the lane rows keep only what crosses services.
 
-> **Stale.** Startup coherence and declaration withdrawal in both domains are now
-> `serve-running-rate-deals`' (task 3.5 moved). The text it replaces: Startup
-> coherence and declaration withdrawal in VM are the MVP's. This change gives bare
-> metal the same: a storefront holding accepted rate deals with no rate
-> adapter composed refuses to start, as incoherent state; a dependency outage alone
-> is recoverable, never a refusal; withdrawing the declaration disables new deals
-> only, and existing commitments keep their servicing and evidence. Per-period
-> servicing is declared on in lanes and off elsewhere until a hosted switch-on
-> qualifies it.
+Recommended: (b) for rows 12 and 12b; for row 2, (c) for the return and a lane row
+under held loops for the filing.
+
+### Q5 — Which lane runs which row
+
+`docs/guidance/repository/family-kits.md`, "Sibling domains behave alike", argues for
+running a row in both lanes; `docs/guidance/engineering/test-levels.md` asks for the
+fewest system tests that cover a cross-service contract. The baseline rows run in both lanes; the two rate dispute rows run in the VM
+lane only.
+
+- (a) Every remaining row in both lanes.
+- (b) Each row once, in the VM lane, and in the bare-metal lane too where bare-metal
+  code is on its path: the buyer's commands, the teardown, the physical end.
+- (c) Each row once, in the VM lane, and in the bare-metal lane only the twins of the
+  two rate dispute rows the VM lane runs today.
+
+Recommended: (b), beginning with those two twins, since the bare-metal lane has no
+dispute row on a rate deal.
+
+### Q6 — Rows that need a setup charge
+
+Row 0's setup variant, the setup returned in rows 5 and 8, and the end of row 10's cap
+where the setup charge alone is held all need an option with a setup part. No lane
+declares `setup`, and "Setup returns by delivered for either cause" keeps setup-bearing
+presets disabled until a hosted dispute authority is qualified on the vendored
+`delivery_end` revision.
+
+- (a) The lane storefronts declare `setup = true`, in the lane configuration only, as
+  they declared `charged` and `returned` before either was a supported configuration.
+- (b) The setup rows go to `activate-per-period-compute-servicing`, which switches
+  setup charges on.
+
+Recommended: (a). The rows prove this repository's handling against the doubles, and
+activation then repeats them against the hosted authorities.
+
+### Q7 — Provisional answers
+
+Each follows from something settled or from the nearest precedent, and is confirmed or
+moved in the design session.
+
+- **Deltas modify the landed requirements.** The pass order changes "Each deal's
+  servicing steps run in one kit-owned order"; the list's new condition changes "The
+  seller half lists deals", replacing this change's added requirement once Q2 names
+  the condition; anything added about restart changes "Bare-metal storefront restart
+  recovery is proven at integration level". A specification states each rule once.
+- **Rulings are programmed, effects are executed.** A row's ruling is a rule the
+  scenario installs; the double executes its `stop` and `penalty` as the contract
+  defines them, the cap included; the row proves the storefront's handling, not the
+  authority's arithmetic (`docs/guidance/engineering/test-doubles.md`, "A double
+  mirrors its producer").
+- **Row 4 is proven at integration.** The activate, start and disclose races are in
+  `domains/compute/delivery/tests/integration`; no lane row repeats them
+  (`docs/guidance/engineering/test-levels.md`).
+- **Compatibility.** As the proposal's "Impact" states it against `marketplace-v0.4.0`.
+- **Diagrams.** Only a pair that draws what the product does is promoted, to
+  `docs/development/diagrams/`; `diagrams/README.md` says which pairs need redrawing
+  first.
+
+### Q8 — Implementation cadence
+
+Recommended: two rounds. First the three fixes with their kit and application
+integration tests, one session. Then the lane rows, the VM lane's and then the
+bare-metal lane's, a session each.
 
 ## Scenarios and evidence
 
-This change owns the rest of the rate-servicing lane matrix. It executes spot's
-prepared entry points — the maximum term and the on-demand and spot emergency
-self-penalty filings included — and spot records preparation, not qualification.
-Compute delivery owns once-only activation expiry; rows 4 and 8, which exercise
-the delivery path under a rate hook, are this change's.
+Rows keep the numbers the diagrams use. Every row runs against the lane doubles on lane
+time, each on a deal of its own, and is lane-double evidence.
 
-`serve-running-rate-deals` qualifies the baseline forms of rows 0, 6, 7 and 9
-in both lanes, on the shipped presets with default buyers: the physical fact and
-*ended*, and no funding timer. For those rows this change runs only the variants
-the MVP leaves (the "Residual" column, both lanes; the MVP's design names exactly
-which it runs, and this column follows it at this change's design review). Every
-other row runs in both lanes.
+| # | Row | Runs today | Remains | Needs |
+|---|---|---|---|---|
+| 0 | On-demand baseline, ended by the buyer's stop | Both lanes | A setup part beside the rate | Q6 |
+| 1 | The buyer ends while the payment authority is unreachable | — | The buyer journals its stop and retries it under one key, sends `end_delivery`, keeps the signed receipt and files `delivery_end(cause=payer)` with it; billing runs until the stop lands (`buyer-orchestration`'s "The buyer's end is backed by its own stop or a case") | Nothing new |
+| 2 | The site ends a lease the storefront is not servicing | — | The buyer's own stop and case; the site's late report; the storefront's `delivery_end(cause=payee)`; release proven apart | Q4 |
+| 3 | Authority effects interrupted | A lost filing answer and a held ruling's resend, on once-only deals in the VM lane | The same on a rate deal; earlier evidence after a filed end | Q3 |
+| 5 | An undelivered rate deal passes its delivery deadline | At integration, with the payment read the deadline waits for | The filing at the Agreement's start and the ruled return, setup included | Q6 |
+| 7 | Spot preemption with notice | Both lanes | The buyer's earlier stop during the notice | Nothing new |
+| 8 | Activated, never available | — | Both orders of "Non-delivery is established at the delivery deadline": no start sent, refused; a start accepted before the deadline standing as history, the ruling returning what the rate earned | Q6 for the setup variant |
+| 9 | Maximum term | Both lanes | A late start; an end inside a period | Nothing new |
+| 10 | Seller emergency | An on-demand seller's filing ruled with a stop and the penalty, in the VM lane | The on-demand notice refused at `deals preempt`, naming `delivery_end`; a spot seller's filing; the cap's other ends | Q5, Q6 |
+| 12 | The seller never files | — | The buyer's stop and its case from the accepted Agreement and kept evidence are the whole remedy | Q4 |
+| 12b | Availability asserted | — | The seller's timely `available` weighed against the buyer's kept observation of failure | Q4 |
+| 13 | A case over paid-out money | A once part, in the VM lane | A rate part: the filing accepted, the part `not_held`, no money moved | Nothing new |
 
-| # | Scenario | Required observation | Residual |
-|---|---|---|---|
-| 0 | On-demand baseline | setup once + rate, provision/activate/start/disclose, priced payer stop + hint, both facts | a VM seller-enabled setup part unless the MVP runs it; the revision-scoped financial fact |
-| 1 | Buyer end with payments down | pre/during/post dispatch, receipt-timed end_delivery evidence, buyer-half same-key stop retry with billing until it lands; receipt concurrence, unsigned-case triage and both-down replay | — |
-| 2 | Site withdraws with storefront absent | buyer independent stop/case; late report, classified seller self-penalty filing; release proven separately | — |
-| 3 | Interrupted authority effects | same case/effect-key resolution, partial reverse after stop; earlier evidence during partial correction or append/close race remains unresolved until verified revision effects | — |
-| 4 | Stop between start and disclosure | activate/start/disclose races in both domains; no start before activation or duplicate start key across crashes; local admission blocks disclosure; measured remote observation windows | — |
-| 5 | Rate deal activation deadline expires | no-dispatch proof or adoption/release; delivery_end at start, setup entirely returned | — |
-| 6 | Funding exhaustion | verified exhaustion stop ends delivery at its effective time; with the seller's timer enabled, read before end — reachable renewal replaces the timer, verified exhaustion is an authority end, and only outage/unverifiable state ends on the bare timer, with a hidden top-up requiring a later self-penalty filing | the timer variants |
-| 7 | Spot notice then earlier payer stop | authority hosts pending stop during absence; earliest wins, authority partial-period terms | the earlier payer stop |
-| 8 | Activated but never disclosed | post-activation start refusal and started-but-undisclosed failure in both domains; no start before activation or duplicate start key across crashes; classified delivery_end filing at deal start, buyer-case backstop; the deadline variants, both orders: `start` not yet sent at the deadline, refused, no rate started; and `start` accepted by the authority before the deadline with `available` never recorded — seconds before, and thirty periods before with no setup and no penalty — the start standing as history, non-delivery established at the deadline, `delivery_end(cause=payee)` and the ruling returning every period the rate earned, the buyer's net charge zero | — |
-| 9 | Maximum term | absolute authority end with its own partialPeriod, including late start and a mid-period end; physical recovery, no delivery_end | late start; mid-period end |
-| 10 | Seller emergency | the on-demand notice refused at `deals preempt`, naming `delivery_end`, before the filing; on-demand and spot file delivery_end; mediation mechanically rules payee-agreed delivery_end with mapping/time/replay guards through its chosen entry; seller sends no stop/reverse; on-demand emergency pays premature_stop_penalty capped by earned amounts still held after refunds in mandate order, shown at both ends of the cap: late in a deal, the stated amount; minutes after activation with the started period returned, the setup charge alone, and zero with no setup charge; entitled spot notice pays none | — |
-| 11 | Identity rotation overlap — **withdrawn** (spot D17, D21: a key change is a drained cutover; spot's running-storefront cutover proof is its own) | old receipt verified during overlap, current snapshot re-anchors the running rate deal before retirement, exact old bytes retained; once-only dependencies drain; revoked/stale anchors and livemode changes refused | — |
-| 12 | Seller never files | an unentitled end the storefront never reports and never files; the buyer's own stop and a case filed from the exact accepted Agreement and kept evidence alone, with the storefront absent throughout, are the whole remedy; the ruling rests on the buyer's record | — |
-| 12a | Late anchor | the storefront commits with a later, non-future anchor than the approval the payment authority recorded; the site enforces the longer physical deadline; the buyer's case from its kept approval record is ruled non-delivery at the accepted deadline regardless | — |
-| 12b | Asserted availability | the storefront records `available` before the deadline with nothing reachable behind it; the buyer's case carries its own kept observation of failure; the seller's record is weighed as its assertion, not conclusive, and the ruling rests on the classes together | — |
-| 13 | Case over paid-out money | a case filed after a part has paid out is accepted, reports `not_held` per part with the reason, may still end delivery, and moves no paid-out money; the buyer display shows per-part `held` / `not_held`, never a pending refund | — |
+Rows no longer here:
 
-The nine diagram pairs under `diagrams/` illustrate cases 0–8; cases 9–13 extend
-the matrix without duplicating diagrams. Row 12a needs the site's delivery
-deadline from `renewable-compute-lease-deadlines`.
+| # | Row | Where it went |
+|---|---|---|
+| 4 | A stop between start and disclosure | Proven at integration (Q7) |
+| 6 | Funds running out | Runs in both lanes. Its variants under a funding timer left with the timer (D4) |
+| 11 | Receipt key rotation across a running deal | No change owns it: a key change is a drained cutover, and re-anchoring is tabled in Goal 8's unowned work |
+| 12a | A late anchor against a site-enforced deadline | `renewable-compute-lease-deadlines` (D5) |
 
-A lane interruption is a loop pause and resume, not evidence of process restart.
-Durable restart is proved by production-application integration tests that
-rebuild against the same database in both domains; the bare-metal lane keeps its
-permanent no-restart contract. Lost-response replay in a lane proves cross-service
-effect convergence only.
+A row that holds a ruling at the double's gate steps no storefront servicing while the
+ruling waits: the storefront ends delivery on a ruling's delivery end whatever its
+applied state, an unowned question in the roadmap.
 
-Each run is labelled under `test-compatibility`'s two labels: lane-double evidence
-with each double's installed contract hashes, never live evidence; only a hosted
-target yields live evidence. Rows 7 and 9 run on the shipped presets — a seller's
-preemption and the term end `returned` — with default buyers; there are no interim
-charged terms, since the vendored contract expresses `returned`. A `charged`
-variant, where one is run, is a separate observation that waives each charged term
-by name (`--allow-charged-preemption`, `--allow-charged-term-end`).
+## Verification
 
-> **Stale (spot D17, D21).** This paragraph also said spot owns identity
-> re-anchoring policy and evidence production and that row 11 qualifies its
-> overlap and recovery in both lanes; row 11 is withdrawn.
+Provisional levels, for planning and review to confirm. The pass order and the list's
+accounting are library integration in `kit/deal-servicing/tests/integration`, beside
+`test_servicing_order.py`; a revised claim is library integration in
+`kit/arkhai-mediation` against its published traces; each storefront proves all three
+at application integration through its typed lifecycle client; the rows above are the
+system-level proof.
 
-Lane scenarios follow `docs/development/TESTING.md`'s discipline: a row waits
-only for an effect its own request caused or for an instant the Agreement fixes,
-and a behaviour defined by time elapsing is driven by moving every perceived clock
-together through the lane's joint clock fixture — both doubles' and the
-storefront's, both storefronts through `drive-the-storefront-clock-in-lanes` —
-whose finaliser resets them
-whatever the module's outcome. Library integration keeps deterministic injected
-clocks for expiry and race permutations; lanes qualify the network transitions
-only and never duplicate arithmetic coverage. Kits use the single clock-injected
-payments authority engine in `kit/arkhai-payments`' fixtures directly; the HTTP
-doubles wrap that engine with controls and the mediation composition. No kit
-depends on runnable tooling.
+## Design promotion record
 
-## Rejected alternatives and accepted limitations
-
-Rejected: a seller-advanced horizon or vouch; locally scheduled payment stops; a
-required minimum spend; backdated stops; mandatory reverse-before-stop; a parallel
-financial-end log; one completion fact; end intent as release proof; seller-direct
-exceptional-end payment correction; a ruling SCM infers from silence or
-manufactures; append as amendment; an offline second database writer; a funding
-timer every storefront must run. None strengthens the buyer's authority-backed
-guarantees.
-
-Outside scope: periodic collection, pooled funding, liability ledgers, push
-observation and lease top-up. Seller-side site renewal is optional capacity
-policy.
-
-Accepted: buyer recovery requires kept evidence and action within dispute
-protection; no seller cooperation and no instant adjudication is promised. With
-the funding timer disabled, a seller serves at its own risk while the payments
-service is unreachable; the exhaustion stop's effective time, not the time the
-storefront observes it, bounds what the buyer pays.
-
-## Open questions
-
-- **The site's clock.** Whether a row whose storefront step follows a clock
-  advance also needs the site's perceived clock depends on whether the site judges
-  a truncation instant or a lease end against its own wall clock; the answer
-  `drive-the-storefront-clock-in-lanes`'s design records decides whether this
-  change also takes the site's share of the lane-wide perceived clock.
-
-## Permanent documentation destinations
-
-| Decision | Destination |
+| Accepted decision | Permanent location |
 |---|---|
-| D1, D3, D7 composition ownership | `openspec/specs/market-composition/spec.md`; `docs/development/ARCHITECTURE.md` |
-| D2–D6 end-service contracts and guarantee limits | `openspec/specs/deal-lifecycle/spec.md` and `openspec/specs/deal-lifecycle/architecture.md` |
-| D3 the opt-in funding timer setting | `openspec/specs/deal-lifecycle/spec.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| Scenario boundaries, lane time and the mediation double's ruling effects | `openspec/specs/test-compatibility/spec.md` |
-| Diagram pairs | `docs/development/diagrams/` |
-
-Tasks record the exact promotion destinations. No permanent document changes while
-this remains design-stage work.
-
-## Status
-
-Reconciled onto the foundation on 2026-10-29 from the Goal 8 design groomed on
-2026-10-28, which this change absorbs as rate servicing inside end service.
-
-- External review F4 and F16: `kit/deal-servicing` ownership (D1) and the single
-  three-pass loop (D3).
-- External review F5: completion facts and diagnostics on the seller's read and list
-  (D2).
-- External review F2: the rate consumer's mapping onto the foundation's closed
-  classification (D5).
-- Reviews 03 F1 and 04 F6/F12: stateless operator recovery, the read-only evidence
-  export, the immutable envelope, shared filing identities and dispute-record adoption
-  (D6).
-- Review Sol F3: lane pause/resume is not restart evidence; durable restart is
-  integration-level (Scenarios and evidence).
-- Goal 8 round-5 triage: rows 4 and 8 are this change's; the option's shape is
-  `price`, `settlement` and `lifecycle` (foundation D5).
-- Owner direction, 2026-10-29: the seller's exceptional end is a dispute filing with
-  no seller stop or reverse; `delivery_end` is one claim for either filer, mechanical
-  with payee agreement and guards, otherwise triaged; the storefront signs receipt
-  evidence only.
-- Goal 8 rescope, 2026-11-10: rescoped onto the MVP set. The funding timer returns
-  as a seller opt-in (D3); the MVP's per-deal helper precedes the one kit loop
-  (D3); *ended* keeps the MVP's meaning (D2); rotation overlap stays (D7); rows 7
-  and 9 record the shipped buyer policy; the bare-metal storefront clock and the
-  mediation double's `stop` and `penalty` effects are this change's; evidence is
-  labelled lane-double or live; lane time follows `TESTING.md`. Reverified against
-  the code the foundation, compute delivery and the lane doubles left.
-
-- Goal 8 replan, 2026-11-16, after the terms and spot changes archived: the MVP
-  servicing change, now `serve-running-rate-deals`, covers both compute domains,
-  so bare metal's rate composition, rate start binding, stop-cause classification,
-  startup coherence and withdrawal, restart rebuild and baseline lane rows moved
-  there (tasks 1.3, 2.3's classifier, 3.1, 3.5), with the keying of a refused rate
-  deal's next commit (spot D14) and the buyer watchdog's delivered-deal cases that
-  the campaign index had assigned here; bare metal's storefront clock moved to
-  `drive-the-storefront-clock-in-lanes` (task 4.1a). Rotation work is withdrawn
-  (spot D17, D21): D2's re-anchoring status, D7's overlap paragraph, task 3.5's
-  re-anchoring, the deal-lifecycle rotation requirement and row 11, each marked
-  stale. Rows 7 and 9 run on the shipped `returned` presets with default buyers,
-  a `charged` variant a separate waived observation; runs carry the two labels,
-  lane-double evidence and live evidence; row 10 observes the on-demand notice
-  refused naming `delivery_end`. Task 1.2 is answered from the archived spot
-  change. The owner dispositions D1/E1, D2, D7, D8, D9, D11 and D12 recorded in the
-  2026-11-10 rescope concern the terms and spot documents and are settled by what
-  landed. Of those owner dispositions, D3 (opt-in timer), D4 (one kit loop after the MVP's helper), D6 (the
-  MVP's meaning of *ended*) and D14's clock (now the clock change's) stand here.
-
-Next: design review of the rescoped change, reverified against the code the
-archived spot and terms changes left; its triage amends the drafted plan.
+| D1 scope of the change | none; each fix and row as the design settles it |
+| D2 boundary with operator recovery | none |
+| D3 a pending release is cleared at the site | `docs/operator-handbook.md`, "A deal ending on a pending release" |
+| D4 boundary with the funding timer | none |
+| D5 boundary with the site-enforced deadline | none |

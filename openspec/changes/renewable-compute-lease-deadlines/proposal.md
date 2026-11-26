@@ -136,7 +136,10 @@ None.
   table. Coordinate migration order; use a separate lease-deadline due query/index.
   Index coordination is not a behavior dependency.
 - `converge-ongoing-compute-leases` uses end service to end an active lease earlier;
-  it does not renew this site's deadline.
+  it does not renew this site's deadline. Its lane row for a storefront that commits
+  with a later anchor than the payment authority's approval, the site enforcing the
+  longer deadline while the buyer's case is ruled at the accepted one, is this
+  change's to run (that change's design, D5).
 
 ## Impact and acceptance boundary
 
