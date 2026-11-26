@@ -200,6 +200,20 @@ def test_route_service_assigns_a_rule_id_and_hides_the_output() -> None:
     assert (listed.rule_id, listed.result_stdout) == (added.rule_id, True)
 
 
+def test_route_service_hands_a_failure_record_to_the_rule_and_lists_only_its_presence() -> None:
+    rules = MockRuleSet()
+    routes = MockRuleRouteService(lambda: rules)
+    record = {"task": "Clean up", "tags": ["failure_class:cleanup_refused"], "msg": "refused"}
+
+    added = routes.add(MockRuleCreate(match={}, fail_with="refused", failure_record=record))
+
+    assert rules.find({}).failure_record == record
+    [listed] = routes.list()
+    assert (listed.rule_id, listed.fail_with, listed.failure_record) == (
+        added.rule_id, "refused", True,
+    )
+
+
 def test_route_service_refuses_resume_of_a_rule_without_a_gate() -> None:
     rules = MockRuleSet()
     routes = MockRuleRouteService(lambda: rules)

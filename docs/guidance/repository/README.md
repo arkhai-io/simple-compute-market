@@ -37,3 +37,4 @@ by its directory, so no capability has a tag.
 |---|---|---|
 | `repository` | layer | Names this repository's packages, services, tools, deployment, documents, or make targets |
 | `architecture` | topic | This repository's system shape, authorities, and flows |
+| `operator-events` | topic | The state changes reported to operators as event kinds: what is one, where the market's kinds are declared, how one is declared and recorded |

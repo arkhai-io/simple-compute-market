@@ -7,8 +7,8 @@ releases it or its run is cancelled, the evaluate-job dry run, and a
 framework-free route service each adapter binds under its own ``/test`` prefix.
 
 The mechanism knows nothing about how a job runs or what its output looks like:
-rules match an opaque parameter mapping, and ``result_stdout`` is handed back to
-the adapter's own mock untouched. A job held at a gate is counted on its rule, so
+rules match an opaque parameter mapping, and ``result_stdout`` and a failure's
+``failure_record`` are handed back to the adapter's own mock untouched. A job held at a gate is counted on its rule, so
 a test waits for it with ``MockRuleSet.wait_until_held`` (and for its departure
 with ``MockRuleSet.wait_until_released``) rather than on elapsed
 time, and the rule routes report the count. It serves the compute family only
@@ -41,13 +41,16 @@ class MockRule:
     equal value; an empty ``match`` matches every job. ``pause_before_result``
     holds a matching job until the rule is resumed. ``fail_with`` makes a matching
     job fail with that message and takes precedence over ``result_stdout``, which
-    replaces the mock's default output when set.
+    replaces the mock's default output when set. ``failure_record`` is the
+    record of the failed task a ``fail_with`` failure reports, in the form the
+    adapter's runner reads; the adapter's mock interprets it.
     """
 
     match: dict[str, Any] = field(default_factory=dict)
     pause_before_result: bool = False
     result_stdout: str | None = None
     fail_with: str | None = None
+    failure_record: dict[str, Any] | None = None
     rule_id: str = ""
     gate: asyncio.Event | None = field(default=None, repr=False)
     #: Jobs currently held at this rule's closed gate.
@@ -84,6 +87,7 @@ class MockRuleSet:
                 "match": rule.match,
                 "pause_before_result": rule.pause_before_result,
                 "fail_with": rule.fail_with,
+                "failure_record": rule.failure_record is not None,
                 "result_stdout": rule.result_stdout is not None,
                 "paused": rule.gate is not None and not rule.gate.is_set(),
                 "waiting": rule.waiting,
@@ -242,6 +246,9 @@ class MockRuleRouteService:
                 pause_before_result=request.pause_before_result,
                 result_stdout=request.result_stdout,
                 fail_with=request.fail_with,
+                failure_record=(
+                    dict(request.failure_record) if request.failure_record is not None else None
+                ),
             )
         )
         return MockRuleAdded(rule_id=rule.rule_id, status="added")

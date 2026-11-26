@@ -3,8 +3,8 @@
 ``VmAnsibleCodec`` is the VM domain's contribution to the compute family's
 Ansible executor. It owns everything VM about a job: the ``VmJobParams`` a job
 stores, the variables the VM-operations playbook reads (golden-image root
-credentials and relay endpoints included), which VM failures are not worth
-retrying, the facts the playbook prints for each action, the result payload
+credentials and relay endpoints included), the classes a failed VM task
+carries, none of them retried, the facts the playbook prints for each action, the result payload
 those facts become, and the ``root`` and ``tenant`` credentials it carries.
 
 A create's result is the compute family's ``CreateJobResult``, whoever submitted
@@ -43,7 +43,7 @@ from compute_provisioning_contracts import (
     ResultEnvelope,
 )
 from pydantic import ValidationError
-from compute_provisioning.jobs import JobRun
+from compute_provisioning.jobs import ConfigurationRefusedError, JobRun
 from compute_provisioning.relays import (
     RELAY_GRANT_VARIABLE,
     RELAY_JOB_RESERVED_VARIABLES,
@@ -51,8 +51,11 @@ from compute_provisioning.relays import (
     RELAY_TOKEN_VARIABLE,
 )
 from compute_provisioning_ansible import (
+    TASK_FAILED_CLASS,
     AnsibleJobInterpretation,
     AnsibleJobPlan,
+    FailureClass,
+    FailureRecord,
     matches_any,
     read_fact,
 )
@@ -69,15 +72,20 @@ VM_INVENTORY_GROUP = "kvm_hosts"
 #: key's path on the host, and the relay family's secret variable names.
 VM_SECRET_FIELDS = frozenset({"ssh_key_path_host"}) | RELAY_SECRET_VARIABLES
 
-#: VM failures that running the same job again cannot fix.
-VM_NON_RETRYABLE_FAILURES: tuple[str, ...] = (
-    "VM target not found",
-    'Failed to get "resize" lock',
-    "Is another process using the image",
-    "Cannot determine IP address for VM",
-    "failed to get domain",
-    "Domain not found",
-)
+#: The guest the job names has no libvirt domain on the host.
+VM_NOT_FOUND = "vm_not_found"
+#: The guest's disk image is locked by another process.
+VM_IMAGE_LOCKED = "vm_image_locked"
+#: The guest's address could not be determined.
+VM_ADDRESS_UNKNOWN = "vm_address_unknown"
+
+#: Each VM failure class, by the messages a failing VM task reports it with.
+#: Running the same job again meets the same state, so none is retried.
+VM_FAILURE_CLASSES: Mapping[str, tuple[str, ...]] = {
+    VM_NOT_FOUND: ("VM target not found", "failed to get domain", "Domain not found"),
+    VM_IMAGE_LOCKED: ('Failed to get "resize" lock', "Is another process using the image"),
+    VM_ADDRESS_UNKNOWN: ("Cannot determine IP address for VM",),
+}
 
 #: The fact the VM-operations playbook prints for each action's result.
 VM_RESULT_FACTS: Mapping[str, str] = {
@@ -245,12 +253,15 @@ class VmAnsibleCodec:
     # ------------------------------------------------------------------
 
     def prepare(self, run: JobRun) -> AnsibleJobPlan:
-        params = vm_job_params(run.parameters, host_id=run.host.host_id)
+        try:
+            params = vm_job_params(run.parameters, host_id=run.host.host_id)
+        except (KeyError, ValidationError) as exc:
+            raise ConfigurationRefusedError(f"VM job parameters are not valid: {exc}") from exc
         collisions = sorted(
             self.reserved_var_keys(params).intersection(params.provider_extra_vars)
         )
         if collisions:
-            raise ValueError(
+            raise ConfigurationRefusedError(
                 "provider extra_vars override reserved job variables: " + ", ".join(collisions)
             )
         if self._relay_resolver is not None:
@@ -298,8 +309,17 @@ class VmAnsibleCodec:
             credentials=credentials,
         )
 
-    def is_retryable(self, message: str) -> bool:
-        return not matches_any(message, VM_NON_RETRYABLE_FAILURES)
+    def classify(self, run: JobRun, failure: FailureRecord) -> FailureClass:
+        """The VM class the failing task's message reports, else ``task_failed``.
+
+        The task's ``msg`` is read first, then its error output, where a
+        ``command`` task running ``virsh`` reports what failed.
+        """
+        for text in (failure.msg, failure.stderr):
+            for code, messages in VM_FAILURE_CLASSES.items():
+                if text and matches_any(text, messages):
+                    return FailureClass(code, retryable=False)
+        return TASK_FAILED_CLASS
 
     # ------------------------------------------------------------------
     # VM variables
@@ -698,7 +718,10 @@ def _roles(auth: Mapping[str, Any]) -> Iterable[tuple[str, Mapping[str, Any]]]:
 __all__ = [
     "GoldenImageCredentials",
     "VM_INVENTORY_GROUP",
-    "VM_NON_RETRYABLE_FAILURES",
+    "VM_ADDRESS_UNKNOWN",
+    "VM_FAILURE_CLASSES",
+    "VM_IMAGE_LOCKED",
+    "VM_NOT_FOUND",
     "VM_RESULT_FACTS",
     "VM_CREATE_DETAIL",
     "VM_DIAGNOSTICS_FIELDS",

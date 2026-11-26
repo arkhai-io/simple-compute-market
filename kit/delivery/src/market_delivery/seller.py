@@ -23,7 +23,7 @@ from .config import DeliveryConfig, validate_delivery_origins
 from .discovery import build_delivery_sinks
 from .dispatch import DeliveryOutcome, deliver, deliver_async
 from .events import introduction_delivery_event
-from .sinks import ConfiguredSink
+from .sinks import ConfiguredSink, SigningAs
 
 _logger = logging.getLogger(__name__)
 
@@ -116,6 +116,11 @@ class SellerIntroductionDelivery:
             )
 
 
+#: What a storefront's signing sink signs a revealed introduction as: the
+#: seller, delivering an introduction.
+INTRODUCTION_SIGNING = SigningAs(role="seller", operation="introduction_delivery")
+
+
 def build_seller_introduction_delivery(
     config: DeliveryConfig,
     *,
@@ -132,7 +137,9 @@ def build_seller_introduction_delivery(
     """
 
     validate_delivery_origins(config, known_origins)
-    sink_set = build_delivery_sinks(config, factories=factories, signer=signer)
+    sink_set = build_delivery_sinks(
+        config, factories=factories, signer=signer, signing=INTRODUCTION_SIGNING
+    )
     for warning in sink_set.warnings:
         logger.warning("%s", warning)
     if not sink_set.sinks:
@@ -142,4 +149,8 @@ def build_seller_introduction_delivery(
     )
 
 
-__all__ = ["SellerIntroductionDelivery", "build_seller_introduction_delivery"]
+__all__ = [
+    "INTRODUCTION_SIGNING",
+    "SellerIntroductionDelivery",
+    "build_seller_introduction_delivery",
+]

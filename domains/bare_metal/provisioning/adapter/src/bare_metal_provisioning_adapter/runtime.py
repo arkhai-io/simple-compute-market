@@ -16,6 +16,7 @@ from compute_provisioning_ansible.runner import AnsibleRunner
 
 from bare_metal_provisioning_adapter.bundle import (
     HOST_REQUIREMENT,
+    OPERATOR_REPAIRABLE_FAILURES,
     build_bare_metal_adapter_bundle,
 )
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec

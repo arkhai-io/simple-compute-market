@@ -5,6 +5,8 @@ license = "MIT"
 description = "Site-authority scaffold: capacity ledger, tables, and HTTP surface"
 requires-python = ">=3.12"
 dependencies = [
+    # The site records its events in its transitions' transactions.
+    "arkhai-eventing>=0.1.0",
     "arkhai-injected-time>=0.1.0",
     # The site authority signs its own responses and verifies its callers'
     # requests, so the identity primitives are a runtime dependency of the

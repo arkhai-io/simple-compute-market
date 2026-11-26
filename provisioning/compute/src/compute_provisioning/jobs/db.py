@@ -4,8 +4,9 @@ The tables keep their names, ``ansible_jobs`` and ``credentials``. A job row
 holds its identity, state, route key (``offering_mode`` and ``executor_action``),
 ``host_id``, its opaque parameters, retry bookkeeping, the contract identity it
 was submitted under if any, the opaque cancellation handle its executor
-reported, when its execution started and when it finished, its logs, and its
-result as a ``ResultEnvelope``. A credential row
+reported, when its execution started and when it finished, its logs, its
+result as a ``ResultEnvelope``, and its latest failed attempt's classified
+failure as a ``ProvisioningErrorEnvelope``. A credential row
 holds one ``CredentialEnvelope``. Nothing here interprets a parameter, a
 handle, a result, or a credential.
 """
@@ -55,6 +56,13 @@ class JobRecord(Base):
     result = Column(JSON, nullable=True)
     logs = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
+    # The latest failed attempt's ProvisioningErrorEnvelope — its class,
+    # message, whether it is retryable, and redacted details — beside
+    # ``error``, which carries its text. Null while no attempt has failed, once
+    # an attempt succeeds, and on a job that failed before failures were kept;
+    # a cancellation leaves it, so a job cancelled after a failed attempt keeps
+    # that attempt's failure.
+    failure = Column(JSON, nullable=True)
     # The opaque cancellation handle the executor reported, returned to it as is.
     execution_handle = Column(JSON, nullable=True)
     # When an executor first reported that the job's execution was starting,

@@ -86,6 +86,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage10b_LeaseCycleBeginsTeardown,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
+    Stage11c_LeaseEventsRecorded,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.payment_compensation import PurchaseCompensation, refund_may_clear
@@ -811,6 +812,10 @@ class TestStage11a3_TeardownJobSucceeded:
 
 
 class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestStage11c_LeaseEventsRecorded(Stage11c_LeaseEventsRecorded):
     pass
 
 

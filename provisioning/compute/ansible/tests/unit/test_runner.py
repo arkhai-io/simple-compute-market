@@ -27,6 +27,7 @@ from compute_provisioning_ansible import (
     ProtectedKeyUnreadableError,
     SshConnectionCodec,
 )
+from compute_provisioning_ansible.failures import CALLBACK_PLUGINS_DIR, FAILURE_RECORDS_ENV
 from compute_provisioning_ansible.runner import (
     AnsibleRun,
     AnsibleRunner,
@@ -34,6 +35,7 @@ from compute_provisioning_ansible.runner import (
     extract_fact,
     extract_json_block,
     inventory_target,
+    playbook_environment,
     read_fact,
     redact_ansible_output,
 )
@@ -577,3 +579,149 @@ def test_an_error_running_the_check_is_returned_redacted(tmp_path, monkeypatch) 
     assert result.reachable is False
     assert result.detail.startswith("Failed to run ansible ping: ")
     assert result.detail == redact_ansible_output(result.detail)
+
+
+@pytest.fixture
+def no_ansible_settings(tmp_path, monkeypatch) -> None:
+    """No Ansible variable, and a working and home directory holding no
+    ``ansible.cfg``, so each test names the configuration it means."""
+    for name in ("ANSIBLE_CALLBACK_PLUGINS", "ANSIBLE_CONFIG", "ANSIBLE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    (tmp_path / "work").mkdir()
+    (tmp_path / "home").mkdir()
+    monkeypatch.chdir(tmp_path / "work")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+def _callback_path(tmp_path) -> list[str]:
+    return playbook_environment(tmp_path / "records.jsonl")["ANSIBLE_CALLBACK_PLUGINS"].split(
+        os.pathsep
+    )
+
+
+def test_a_playbook_runs_with_the_callback_before_the_path_the_environment_gives(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    """The variable outranks any configuration, so the path it gives is the one
+    Ansible would search; nothing is added after it."""
+    monkeypatch.setenv("ANSIBLE_CALLBACK_PLUGINS", "/operator/callbacks")
+    config = tmp_path / "ansible.cfg"
+    config.write_text("[defaults]\ncallback_plugins = /from/config\n")
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(config))
+
+    environment = playbook_environment(tmp_path / "records.jsonl")
+
+    assert environment["ANSIBLE_CALLBACK_PLUGINS"].split(os.pathsep) == [
+        str(CALLBACK_PLUGINS_DIR),
+        "/operator/callbacks",
+    ]
+    assert environment[FAILURE_RECORDS_ENV] == str(tmp_path / "records.jsonl")
+    # Nothing else of the process's environment changes.
+    assert environment["ANSIBLE_CONFIG"] == str(config)
+    assert "ANSIBLE_CALLBACKS_ENABLED" not in environment or (
+        environment["ANSIBLE_CALLBACKS_ENABLED"] == os.environ["ANSIBLE_CALLBACKS_ENABLED"]
+    )
+
+
+def test_a_playbook_runs_with_the_callback_before_the_configurations_directories(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    """A relative entry is taken from the configuration file's directory and
+    ``~`` is expanded, as Ansible resolves ``callback_plugins``; Ansible's
+    defaults, which the configuration replaced, are not added."""
+    operator = tmp_path / "operator"
+    operator.mkdir()
+    config = operator / "ansible.cfg"
+    config.write_text(
+        "[defaults]\ncallback_plugins = ./callbacks:~/more ; the site's own\n"
+    )
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(config))
+
+    assert _callback_path(tmp_path) == [
+        str(CALLBACK_PLUGINS_DIR),
+        str(operator / "callbacks"),
+        str(tmp_path / "home" / "more"),
+    ]
+
+
+def test_a_configuration_directory_named_is_read_for_its_ansible_cfg(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    (tmp_path / "operator").mkdir()
+    (tmp_path / "operator" / "ansible.cfg").write_text(
+        "[defaults]\ncallback_plugins = /site/callbacks\n"
+    )
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(tmp_path / "operator"))
+
+    assert _callback_path(tmp_path) == [str(CALLBACK_PLUGINS_DIR), "/site/callbacks"]
+
+
+def test_with_no_configuration_named_the_working_directorys_is_read(
+    tmp_path, no_ansible_settings
+) -> None:
+    (tmp_path / "work" / "ansible.cfg").write_text(
+        "[defaults]\ncallback_plugins = callbacks\n"
+    )
+
+    assert _callback_path(tmp_path) == [
+        str(CALLBACK_PLUGINS_DIR),
+        os.path.join(os.getcwd(), "callbacks"),
+    ]
+
+
+def test_a_relative_entry_is_taken_from_where_a_linked_configuration_is_named(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    """Ansible does not follow the configuration file's link to find its
+    directory, so neither does the runner."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "real" / "ansible.cfg").write_text("[defaults]\ncallback_plugins = ./cb\n")
+    (tmp_path / "link").mkdir()
+    (tmp_path / "link" / "ansible.cfg").symlink_to(tmp_path / "real" / "ansible.cfg")
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(tmp_path / "link" / "ansible.cfg"))
+
+    assert _callback_path(tmp_path) == [str(CALLBACK_PLUGINS_DIR), str(tmp_path / "link" / "cb")]
+
+
+def test_the_defaults_follow_the_configurations_home(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    config = tmp_path / "ansible.cfg"
+    config.write_text("[defaults]\nhome = ./ansible-home\n")
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(config))
+
+    assert _callback_path(tmp_path) == [
+        str(CALLBACK_PLUGINS_DIR),
+        str(tmp_path / "ansible-home" / "plugins" / "callback"),
+        "/usr/share/ansible/plugins/callback",
+    ]
+
+
+def test_a_configuration_naming_no_callback_directory_keeps_ansibles_defaults(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    config = tmp_path / "ansible.cfg"
+    config.write_text("[defaults]\nstdout_callback = minimal\n")
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(config))
+    monkeypatch.setenv("ANSIBLE_HOME", "/srv/ansible")
+
+    assert _callback_path(tmp_path) == [
+        str(CALLBACK_PLUGINS_DIR),
+        "/srv/ansible/plugins/callback",
+        "/usr/share/ansible/plugins/callback",
+    ]
+
+
+def test_a_configuration_that_does_not_parse_keeps_ansibles_defaults(
+    tmp_path, monkeypatch, no_ansible_settings
+) -> None:
+    """Ansible reports a malformed file itself; the runner adds no path from it."""
+    config = tmp_path / "ansible.cfg"
+    config.write_text("callback_plugins = /outside/any/section\n")
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(config))
+
+    assert _callback_path(tmp_path) == [
+        str(CALLBACK_PLUGINS_DIR),
+        "~/.ansible/plugins/callback",
+        "/usr/share/ansible/plugins/callback",
+    ]

@@ -217,18 +217,29 @@ Both properties — evaluating the new shape's availability *as if* the old hold
 The ledger records one immutable `lease_ended` event with the transition that
 forms end intent, before executor teardown. Repeating that transition returns
 the same event. The event binds reservation/site, instant, cause and source state,
-including termination/failure reasons and any applicable deadline phase. The
-service's separately acknowledged report outbox borrows the same transaction,
-so rollback removes both; direct release, expiry, explicit termination, failed
-release and operator force-release are all covered.
+including termination/failure reasons and any applicable deadline phase. In the
+same transaction the ledger records a `site.lease_ended` event carrying that
+payload through the event recorder its composition injects, and the kind's
+record-time hook, which compute provisioning attaches, signs the report and keeps
+it, so rollback removes the record, the event and the signed report together;
+direct release, expiry, explicit termination, failed release and operator
+force-release are all covered. A ledger composed without a recorder records no
+event. The release that frees capacity records `site.capacity_released` in its own
+transaction the same way. The release-failure transition records an event its
+caller prepared, `provisioning.lease_release_failed` from the lease lifecycle, in
+its transaction without interpreting its kind, and records nothing when it refuses
+the transition, so a failure the site turned away, such as one an operator's force
+release overtook, reports nothing. The site's kinds are declared in `kit/site`
+(`market_site.events`); the eventing system is
+[`ARCHITECTURE.md`, "Events"](../../../docs/development/ARCHITECTURE.md#events).
 
 Compute provisioning signs and persists the original wrapper under
 `arkhai.site.lease-ended.v1`. Owner-scoped push and authenticated
 `LeaseView.end_reports` recovery return identical signed bytes even after signer
-changes. Unsupported push parks per configured peer, transient failures retry,
-and old events are never redirected on peer reconfiguration. Explicit resumption
-follows receiver upgrade. See
-[report delivery](../physical-provisioning/architecture.md#lease-end-report-delivery).
+changes. Push is a consumer of `site.lease_ended`: unsupported push parks the
+configured peer's destination, transient failures retry, and old events are never
+redirected on peer reconfiguration. Explicit resumption follows receiver upgrade.
+See [report delivery](../physical-provisioning/architecture.md#lease-end-report-delivery).
 
 This report states intended end, not successful teardown or financial state.
 A due end terminates immediately; a future end truncates the lease without

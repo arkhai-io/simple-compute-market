@@ -14,6 +14,7 @@ from compute_provisioning import JobExecutorTable
 from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
 from compute_provisioning.jobs import (
+    ConfigurationRefusedError,
     JobFailure,
     JobRetryPolicy,
     JobSuccess,
@@ -216,6 +217,113 @@ async def test_a_job_s_creation_and_retry_are_the_process_source_s_instants(sour
     assert queue.enqueued == [job.job_id]
 
 
+_REFUSAL = ProvisioningErrorEnvelope(
+    code="cleanup_refused",
+    message='bm-02: task "Clean attributable bounded scratch and IPC" failed: '
+    "cleanup refused a foreign-owned descendant",
+    retryable=True,
+    details={
+        "host": "bm-02", "task": "Clean attributable bounded scratch and IPC", "rc": 1,
+        "domain_detail": {"error": "Refusal", "message": "cleanup refused a foreign-owned descendant"},
+    },
+)
+
+
+@pytest.mark.asyncio
+async def test_a_reclaim_that_exhausts_its_retries_keeps_its_structured_failure(source) -> None:
+    """Every attempt keeps the latest failure on the job; the last one fails it."""
+    engine, _ = _engine(_Executor(JobFailure(error=_REFUSAL, logs="refused")))
+    job = await _submit(engine, _Queue())
+
+    for attempt in (1, 2):
+        await engine.process_job(job.job_id)
+        retrying = engine.get_job(job.job_id)
+        assert (retrying.status, retrying.retry_count) == ("queued", attempt)
+        assert retrying.failure == _REFUSAL
+        source.set(source.now() + 600)
+    await engine.process_job(job.job_id)
+
+    failed = engine.get_job(job.job_id)
+    assert failed.status == "failed"
+    assert failed.failure == _REFUSAL
+    assert failed.error == f"Job failed (max retries exceeded): {_REFUSAL.message}"
+
+
+@pytest.mark.asyncio
+async def test_an_attempt_that_succeeds_after_a_failure_clears_it(source) -> None:
+    executor = _Executor(JobFailure(error=_REFUSAL, logs="refused"))
+    engine, _ = _engine(executor)
+    job = await _submit(engine, _Queue())
+    await engine.process_job(job.job_id)
+    assert engine.get_job(job.job_id).failure == _REFUSAL
+
+    executor.outcome = JobSuccess(result=None)
+    source.set(source.now() + 600)
+    await engine.process_job(job.job_id)
+
+    succeeded = engine.get_job(job.job_id)
+    assert (succeeded.status, succeeded.error, succeeded.failure) == ("succeeded", None, None)
+
+
+class _Raising:
+    """Raises ``error`` before reporting a start, as a refused preparation does."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def execute(self, run):
+        raise self.error
+
+    async def cancel(self, handle):
+        pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error,code,text",
+    [
+        (ConfigurationRefusedError("relay 'r-1' holds no lease"), "configuration_refused",
+         "Configuration refused: relay 'r-1' holds no lease"),
+        (RuntimeError("unexpected"), "internal_error", "Internal error: unexpected"),
+    ],
+    ids=["configuration", "internal"],
+)
+async def test_a_raising_executor_fails_the_job_with_the_engines_code_and_no_retry(
+    error, code, text
+) -> None:
+    engine, _ = _engine(_Raising(error))
+    job = await _submit(engine, _Queue())
+
+    await engine.process_job(job.job_id)
+
+    failed = engine.get_job(job.job_id)
+    assert (failed.status, failed.retry_count, failed.error) == ("failed", 0, text)
+    assert failed.failure == ProvisioningErrorEnvelope(code=code, message=text, retryable=False)
+
+
+def test_a_job_recorded_before_failures_were_kept_reads_none() -> None:
+    """The migration adds the column and backfills nothing; ``error`` keeps its text."""
+    database = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    *earlier, failure = JOBS_MIGRATIONS
+    with database.begin() as connection:
+        for migration in (JOBS_BASELINE, *earlier):
+            migration.apply(connection)
+        connection.exec_driver_sql(
+            "INSERT INTO ansible_jobs (id, status, params, retry_count, max_retries, error) "
+            "VALUES ('j-old', 'failed', '{}', 3, 3, 'Job failed (max retries exceeded): "
+            "Playbook failed')"
+        )
+        failure.apply(connection)
+    engine, _ = _engine(_Executor(), database=database, migrate=False)
+
+    old = engine.get_job("j-old")
+
+    assert old.failure is None
+    assert old.error == "Job failed (max retries exceeded): Playbook failed"
+
+
 def _naive_utc(instant: int) -> datetime:
     """An instant as SQLite returns a stored time: UTC with no zone."""
     return datetime.fromtimestamp(instant, timezone.utc).replace(tzinfo=None)
@@ -257,6 +365,8 @@ async def test_a_job_refused_before_its_executor_runs_records_no_start_and_its_f
     assert status.execution_started_at is None
     assert status.finished_at == _naive_utc(source.now())
     assert _instants(factory, job.job_id) == (None, _naive_utc(source.now()), None)
+    assert (status.failure.code, status.failure.retryable) == ("not_dispatchable", False)
+    assert status.failure.message == status.error
 
 
 @pytest.mark.asyncio
@@ -438,6 +548,8 @@ async def test_a_job_whose_host_is_not_registered_fails_before_any_executor_runs
     status = engine.get_job(job.job_id)
     assert status.status == "failed"
     assert "'h1' is not registered" in status.error
+    assert status.failure.code == "not_dispatchable"
+    assert (status.retry_count, status.failure.retryable) == (0, False)
 
 
 @pytest.mark.asyncio

@@ -179,4 +179,5 @@ def test_the_wire_models_read_what_the_rule_routes_answer() -> None:
         "pause_before_result": False,
         "result_stdout": None,
         "fail_with": None,
+        "failure_record": None,
     }

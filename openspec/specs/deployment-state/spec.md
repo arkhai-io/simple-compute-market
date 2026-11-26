@@ -274,67 +274,6 @@ Migration tooling MUST be deployable before runtime rejection, and production cu
 - **WHEN** a new image receives old settlement values or an old image receives new settlement values
 - **THEN** schema validation or startup readiness fails before publication or settlement mutation
 
-### Requirement: Generated configuration has one source of truth
-
-Typed configuration metadata MUST generate role-appropriate init templates, dotted-path
-editing validation, environment schema fragments, and reference tables. Generated
-outputs MUST be checked for drift in CI and MUST omit secret values and fields not
-applicable to the role.
-
-A chart that passes a service's configuration through MUST carry a values-schema
-fragment generated from that service's typed configuration models, refusing under the
-pass-through configuration every field the models mark secret or not applicable to the
-role, and every field a typed section's model does not have, each in every spelling
-the service's loader reads, and MUST accept every other typed field in every such
-spelling. The fragment MUST NOT carry defaults, MUST NOT require a field's presence,
-and MUST NOT constrain settings the service reads untyped. A secret the
-service reads without a typed model MUST be declared by the service with the same
-secret marker, so the generated fragment refuses it. A section that carries public
-identity MUST be declared closed to its public keys, so the generated fragment admits
-those keys and refuses every other.
-
-#### Scenario: Mechanism field changes
-
-- **WHEN** a mechanism's typed configuration adds or removes an operator field
-- **THEN** drift validation requires the applicable templates, schema, reference
-  output, and generated values-schema fragment to change together
-
-#### Scenario: A secret is placed in pass-through configuration
-
-- **WHEN** a storefront agent's configuration values carry a secret-marked setting,
-  such as a wallet private key or a registry write token
-- **THEN** values-schema validation fails before render, naming the setting
-- **AND** no ConfigMap is produced
-
-#### Scenario: Private identity material is placed in pass-through configuration
-
-- **WHEN** a storefront agent's configuration values carry a key under `Identity`,
-  at any level, that the public identity declaration does not name
-- **THEN** values-schema validation fails before render, naming the key
-- **AND** no ConfigMap is produced
-
-#### Scenario: Payer data is placed in pass-through configuration
-
-- **WHEN** a storefront agent's configuration values declare a payer profile,
-  payment instrument, payment method, mandate, bank detail, or action URL in a
-  settlement section
-- **THEN** values-schema validation fails before render, naming the field
-
-#### Scenario: A typed field is spelled differently
-
-- **WHEN** a storefront agent's configuration values spell a typed field
-  differently from its model, such as `Settlement.Priority`
-- **THEN** values-schema validation accepts it, as the storefront's loader does
-- **AND** a secret-marked or retired key spelled differently is still refused,
-  naming the key
-
-#### Scenario: A typed section gains a field
-
-- **WHEN** a storefront's settlement mechanism adds a public operator field and the
-  fragment is regenerated
-- **THEN** the field passes through the chart with no template or hand-written schema
-  change
-
 ### Requirement: A storefront chart passes service configuration through
 
 A storefront chart MUST render an agent's service configuration from its values
@@ -1771,6 +1710,19 @@ Every in-house migration chain MUST declare a floor: the release it is supported
 
 - **WHEN** an operator runs the VM storefront's migration command with `--check` against a database an earlier release built and v0.3.0 then ran on
 - **THEN** it lists the baselines to be adopted, names marketplace 0.3.0 as the floor release whose records adoption replaces, lists each recorded migration adoption would remove beyond the floor's, and the pending migrations, changes nothing, and exits unsuccessfully
+
+### Requirement: Typed configuration metadata generates templates, validation and references
+
+Typed configuration metadata MUST generate role-appropriate init templates, dotted-path
+editing validation, environment schema fragments, and reference tables. Generated
+outputs MUST be checked for drift in CI and MUST omit secret values and fields not
+applicable to the role.
+
+#### Scenario: Mechanism field changes
+
+- **WHEN** a mechanism's typed configuration adds or removes an operator field
+- **THEN** drift validation requires the applicable templates, environment schema
+  fragments and reference output to change together
 
 ## Evidence
 

@@ -164,7 +164,7 @@ def test_version_1_and_2_hosts_are_rewritten_with_their_fields_and_ciphertext_as
     # The unfinished jobs hold no connection of their own. This migration
     # leaves the rows unchanged except for the later nullable job fields.
     assert _rows(engine, "ansible_jobs", "id") == {
-        job_id: {**row, "execution_started_at": None, "finished_at": None}
+        job_id: {**row, "execution_started_at": None, "finished_at": None, "failure": None}
         for job_id, row in jobs_before.items()
     }
     authority = _authority(engine)

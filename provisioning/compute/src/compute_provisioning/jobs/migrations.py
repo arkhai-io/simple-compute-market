@@ -78,6 +78,15 @@ def _add_execution_instants(connection: Connection) -> None:
     connection.exec_driver_sql("ALTER TABLE ansible_jobs ADD COLUMN finished_at DATETIME")
 
 
+def _add_failure(connection: Connection) -> None:
+    """Add ``ansible_jobs.failure``, the latest failed attempt's envelope.
+
+    Nothing is backfilled: no stored job kept its structured failure, so every
+    existing row reads null, and its ``error`` still carries the text.
+    """
+    connection.exec_driver_sql("ALTER TABLE ansible_jobs ADD COLUMN failure JSON")
+
+
 BASELINE: Migration[Connection] = Migration(
     "v0_3_0_baseline_compute_provisioning_jobs", _create_baseline
 )
@@ -87,5 +96,7 @@ EXECUTION_INSTANTS: Migration[Connection] = Migration(
     "20261118_001_ansible_jobs_execution_instants", _add_execution_instants
 )
 
-MIGRATIONS: tuple[Migration[Connection], ...] = (EXECUTION_INSTANTS,)
+FAILURE: Migration[Connection] = Migration("20261126_001_ansible_jobs_failure", _add_failure)
+
+MIGRATIONS: tuple[Migration[Connection], ...] = (EXECUTION_INSTANTS, FAILURE)
 """Every migration after :data:`BASELINE`, in the order a chain applies them."""

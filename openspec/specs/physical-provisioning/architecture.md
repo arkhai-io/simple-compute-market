@@ -40,6 +40,49 @@ A job's result is read from the fact its role prints, and one reader in the shar
 
 Two limits follow. An operator's VM password reset runs as its own job, whose new credentials are stored against that job; the fulfillment result still reads the create job's, so after a reset it delivers the superseded password. And the envelopes are stored as plain JSON, unlike a relay's admission token, which is encrypted with the deployment's key, and nothing deletes job rows; anyone who can read the provisioning database can read every credential a job has reported, including those of workloads since torn down.
 
+## Failure classification
+
+A failed playbook run is classified from Ansible's own account of each failed task, never from the run's printed output. The shared Ansible kit ships a notification callback, `compute_provisioning_ansible/callback_plugins/arkhai_failure_records.py`, which appends one JSON record per failed or unreachable task to the file `ARKHAI_FAILURE_RECORDS_PATH` names: its host, play, role, task name, tags, resolved module, `rc`, `msg`, `stdout` and `stderr` (each bounded to 8 KiB, the message keeping its start and the output its end), whether the host was unreachable, and whether the failure was ignored (`ignore_errors`, or `ignore_unreachable`) or rescued (the task sits in the `block` of an enclosing block that has a `rescue`). A result under `no_log` arrives censored, so its record says only that it was hidden. Parsing the printed output was rejected: it depends on the stdout callback, the result format and Ansible's wording, any of which an operator's own `ansible_cfg` or an Ansible upgrade can change, and on a YAML parser the kit keeps out. So was having roles wrap themselves in `block`/`rescue` to print a failure fact: it restructures every role and still needs another source for an unreachable host, which skips `rescue`.
+
+The callback is a notification callback that needs no enabling, so it runs beside whatever stdout callback and enabled callbacks an operator's configuration names. Ansible has no setting that adds a callback directory: `ANSIBLE_CALLBACK_PLUGINS` replaces the search path an `ansible.cfg`'s `callback_plugins` or Ansible's defaults would give. The runner therefore sets it, per process, to the path Ansible would otherwise search with the callback's directory in front — the variable's own value when the environment gives one; else the `callback_plugins` of the configuration file Ansible reads, found in Ansible's order (`ANSIBLE_CONFIG`, the working directory's, `~/.ansible.cfg`, `/etc/ansible/ansible.cfg`) and resolved as Ansible resolves it, a relative entry from the file's directory; else Ansible's defaults under `ANSIBLE_HOME` or the configuration's `home` — so a stdout or notification callback an operator loads from a directory of their own is still found. It sets no `ANSIBLE_CALLBACKS_ENABLED`, which outranks an `ansible.cfg`'s `callbacks_enabled` and would drop the callbacks the operator's configuration enables; a callback that needs no enabling loads from the plugin path alone.
+
+The runner creates the records file owner-only under a random name before the playbook starts; the callback only appends to it and never creates it. `wait_for_playbook` reads the file once the process has ended and attaches the records, as `FailureRecord`s, to the `AnsibleResult` it returns or the `AnsibleError` it raises, with the run's outcome (`failed`, `timed_out`, `cancelled`, or `error` where the runner could not run or watch the playbook) and exit status; its own `finally` removes the file on success, failure, timeout and cancellation alike, and a spawn that fails removes it at once. The executor reads no file: it classifies from the records it is handed, and the task output they hold lives on disk only for the run. The mock runner writes no file and attaches its rule's `failure_record`, so a lane's mocked failure is classified through the same path; a mocked failure with no record is a `playbook_error`, as a real playbook that recorded no failed task is.
+
+The executor classifies a failed run in order:
+
+1. the runner's own outcome: `timed_out`, then `cancelled`;
+2. else the last record neither ignored nor rescued: an unreachable host is `authentication_refused` when its message is an SSH authentication refusal (`TRANSPORT_FAILURES`: "Permission denied", "Authentication failed", "Too many authentication failures") and `unreachable` otherwise; a failed task is what the domain's codec classifies it as;
+3. else, with no deciding record, `playbook_error`, its exit status in the details, or `internal_error` where the runner could not run or watch the playbook.
+
+A codec's `classify(run, failure)` returns a `FailureClass`: its code, whether it is retryable, and optionally a summary replacing the record's `msg` in the message and a `domain_detail` for the details. A role declares a domain class by tagging the task that can raise it, `failure_class:<class>`; Ansible never selects tasks by these tags, since the runner passes no `--tags`. The bare-metal codec maps `failure_class:cleanup_refused`, carried by the three tasks of `bounded-reclaim.yml` that run the working-data helper, to `cleanup_refused`, refined from the helper's structured refusal, the last line of its standard error as `{"version": 1, "error": …, "message": …}`. The VM codec matches the failing task's `msg`, then its `stderr`, against `VM_FAILURE_CLASSES`. A task failure no domain class applies to is `task_failed`. The failure's message names the host, the task and what failed (`bm-02: task "…" failed: …`); its details are the record's host, task, play, role, module and `rc` with the codec's `domain_detail`, never its output, which the job's logs keep. Message and details are redacted as logs are, a key naming a secret field replaced whole.
+
+| Class | Raised by | Retried |
+|---|---|---|
+| `host_key_refused` | the executor, before the start, for a host with no pin or presenting another key ([The host registry owns the connection](#the-host-registry-owns-the-connection)) | no |
+| `not_dispatchable` | the engine, before any executor runs: no host, an unregistered host, an unsupported action | no |
+| `configuration_refused` | the engine, for a typed refusal (`ConfigurationRefusedError`) of the codec's preparation, the variables, the inventory target, an undecryptable key or an unusable relay | no |
+| `internal_error` | the engine, for anything else an executor raises; the executor, for a run the runner could not run or watch that recorded no failure | no |
+| `timed_out` | the runner, a playbook past `ansible_timeout_seconds` | yes |
+| `cancelled` | the runner, a run stopped through its handle | no |
+| `unreachable` | a record: the host stopped answering during the run | yes |
+| `authentication_refused` | a record: the host refused the SSH login | no |
+| `task_failed` | a record no domain class applies to | yes |
+| `playbook_error` | no record, a non-zero exit | no |
+| `vm_not_found`, `vm_image_locked`, `vm_address_unknown` | the VM codec | no |
+| `cleanup_refused` | the bare-metal codec, from the tagged helper tasks | yes |
+
+Classes are an open set of strings: the generic ones are constants of `compute_provisioning_ansible.failures` and `compute_provisioning.jobs`, a domain's are its codec's. Whatever the class, a failure matching one of the operator's `additional_non_retryable_errors` is not retried ([configuration](configuration.md#non-retryable-failure-messages)). A host that stops answering mid-run is retried: the probe before the start proved it reachable under its pinned key, so one that stops answering afterwards is most often rebooting or briefly partitioned, and refusing the retry would send every teardown on a host that blinked to an operator. A refused login is not: it is configuration — a key or user the host does not accept — which a retry meets again.
+
+The job keeps its structured failure beside its error. `ansible_jobs.failure` holds the latest failed attempt's envelope — `code`, `message`, `retryable` and redacted `details` — written on the retry and terminal transitions, cleared with `error` on success and kept on cancellation, and the job view's `failure` carries it. `error` keeps its form, its text carrying the classified message (`Attempt 1 failed: bm-02: task "…" failed: …` while a retry is scheduled, `Job failed (max retries exceeded): …` once none is), so the fulfillment's and the lease's failure messages read the classified failure with no schema of their own. Only the latest attempt's failure is kept, each failed attempt overwriting the one before.
+
+`cleanup_refused` is the one operator-repairable class: a reclaim refusing a foreign-owned entry waits on a person removing it, and is retried so the same job completes once they have. The bare-metal adapter names it in `OPERATOR_REPAIRABLE_FAILURES`, the service hands that set to the job engine, and a teardown attempt failing with it while a retry is scheduled records `provisioning.teardown_attempt_held`, so an operator is told of the hold within the retry window — about seven minutes at the default backoff — rather than finding it by polling the job.
+
+## Operator events
+
+The provisioning service records the site's event kinds and compute provisioning's in its own database, through one recorder its site ledger, job engine and lease lifecycle share, each in the transaction of the change it reports ([`operator-events.md`](../../../docs/guidance/repository/operator-events.md)); the kinds are the specification's requirement "Compute provisioning records operator-relevant events" and [`site-capacity`'s](../site-capacity/spec.md). The event store is `tools/eventing` ([`eventing`'s architecture](../eventing/architecture.md)), its tables built by the service's own chain from the component's schema step.
+
+`EventDeliveryWorker` runs three consumers, then prunes, on its own timer, with a pause and a manual cycle that runs the same production cycle (`POST /api/v1/system/event-delivery/{pause,resume,run-cycle}`): `event-sinks`, delivering what the deployment's routes select to the sinks `[Events.sinks]` enables ([configuration](configuration.md#operator-events)), and the storefront peer's `lease-end-reports` and `capacity-released` ([Lease-end report delivery](#lease-end-report-delivery)). It holds each consumer under a runner name for its site, `compute-provisioning:<site>`, stable across restarts, since one process serves a site's database: a restarted service takes its own holds back at once. A route, sink or finally sink the eventing component refuses refuses the service's start, since the worker is composed before it serves. The administrator reads events through `GET /api/v1/events`, filtered by kind, severity, subject or related reference, each destination's delivery state through `GET /api/v1/events/deliveries`, and resumes a parked destination through `POST /api/v1/events/destinations/{name}/resume`, all through route contracts and the family client's typed methods.
+
 ## Selected-resource execution
 
 Concrete providers operate on the Settlement Resource selected by fulfillment scheduling. The VM Ansible adapter resolves pool/provider configuration, validates it, and snapshots prepared inputs at dispatch. Administrative pool edits therefore affect later operations rather than rewriting the accepted execution.
@@ -136,16 +179,99 @@ The site forms immutable `lease_ended` evidence when it intends to end a lease,
 before teardown. Explicit termination, expiry, direct release without dispatch,
 release failure and force release all have durable event identity. Payloads bind
 reservation/site, effective instant, cause/source state, caller/failure reason
-and applicable deadline phase. The ledger ending transition and separately
-acknowledged report outbox commit atomically; retries reuse the original event.
+and applicable deadline phase. The ledger's ending transition records the
+`site.lease_ended` event with that record, keyed on the reservation and the
+transition, so a repeated transition records neither again and every delivery
+reuses the original event.
 
-The compute wire codec frames canonical payload bytes under
-`arkhai.site.lease-ended.v1`. The service persists the original signed wrapper,
-so retries and `LeaseView.end_reports` return the same bytes after signer changes.
-Push targets only the owning storefront peer. A 404/unsupported receiver parks
-that peer's push, transient failures retry, and a changed peer cannot redirect
-old events. Explicit resumption after receiver upgrade re-enables parked push.
-Authenticated lease reads recover reports independently of the push channel.
+**The evidence is domain state.** `site.lease_ended`'s record-time hook, which
+the service's event catalogue attaches, signs the lease end's statement with the
+site's service identity and writes it to `lease_end_reports` in the ending
+transaction, so the end, its event and its signed report commit or roll back
+together. The compute wire codec frames canonical payload bytes under
+`arkhai.site.lease-ended.v1`, and the table keeps the original signed wrapper,
+so every delivery and `LeaseView.end_reports`, the authenticated lease read,
+return the same bytes after a signer changes. The table has a retention of its
+own, `retention_days.lease_end_reports`, unlimited by default
+([configuration](configuration.md#operator-events)), and a report is kept
+while its event is, whatever that retention, so a delivery never finds its
+report pruned. Keeping the evidence in the event stream instead was rejected:
+events are retained by time, whatever their kind, while a report a storefront
+missed must stay readable after its event has gone.
+
+**Delivery is a consumer.** The `lease-end-reports` consumer delivers each
+`site.lease_ended` event's stored report to the owning storefront under a
+request identity derived from the event's, so a lost acknowledgement is retried
+as the same request, with a backoff doubling from 10 seconds to an hour and no
+limit. It holds one destination per configured storefront peer, named for the
+peer's URL — `storefront@` and its host, port and path, each `/` of the path
+written `~` and any credentials left out — so the name is one segment of the
+resume route's path. A peer answering 404, 405, 501 or an explicit
+`unsupported` parks its destination until an administrator resumes it through
+`POST /api/v1/events/destinations/{name}/resume`; resumed, it receives in order
+the reports it missed whose events are still retained, and an older one stays
+readable through the lease read. Any other failure is retried, and a report the
+table does not hold is abandoned to the finally sink, since no retry can send
+it. A peer configured beside or in place of another is a destination of its own that
+starts at the latest committed event, so a changed peer cannot redirect old
+events: a report recorded before it never reaches it. A first peer, the
+consumer's first destination, by contrast receives what was recorded since the
+consumer last read, so the first report after an install, or after an upgrade
+that moved no undelivered report, reaches it. A peer whose undelivered reports
+the upgrade moved already has its destination, which keeps receiving them and
+every later report; a peer configured in its place is a change of peer, as
+above. A report from a restart's window
+sent to a first peer that does not own its reservation can park that peer until
+it is resumed. The destination of a peer the configuration does not name is retired, and
+its undelivered reports, those the consumer had not yet read included, go to
+the finally sink, the log, while staying readable through the lease read.
+
+**The capacity-released callback is a consumer too.** The site records
+`site.capacity_released` in the transaction of the release that frees a
+reservation's capacity, its `lease_lifecycle` attribute marking the releases the
+lease lifecycle makes through the site authority port. The `capacity-released`
+consumer sends the signed capacity-released callback for those alone; a
+release a caller of the site's own release route asks for draws none. Its one destination, `storefront`, is
+whichever URL configures the storefront, so a pending callback follows the
+storefront to another URL, and its request identity is derived from the
+reservation and its release instant. It retries with backoff and no limit. A
+storefront refusing one callback outright — 400, 404 or 409, for a reservation
+it does not hold — has that callback abandoned to the finally sink at once, and
+the next follows, so one refusal holds back nothing. The destination is
+registered whether or not a storefront URL is configured: while none is, its
+delivery fails and stays pending, and a callback recorded or migrated meanwhile
+is delivered once one is.
+
+**When deliveries leave.** Terminate, retry-release, force-release and a lease
+watchdog cycle that made a transition each run the two storefront consumers'
+cycles through the event delivery worker once their transitions have committed
+and before they return, so a report or callback leaves on the request or
+stepped cycle that recorded it; a failure there is logged and never fails the
+command. Retries, and events recorded on any other path, are delivered on the
+worker's timer. The lease watchdog delivers nothing of its own. Each consumer
+runs one cycle at a time, a delivery asked for during its cycle waiting for it,
+and none waits for another consumer's deliveries or for pruning.
+
+**The upgrade from the storefront outboxes.** Migration
+`20261126_002_storefront_outboxes_to_event_store`, after the event store's
+schema step `eventing_0001`, carries the undelivered rows of the two outboxes
+marketplace 0.4.0 kept, `lease_end_report_outbox` and
+`capacity_release_callback_outbox`, into the event store, then drops both.
+Every signed report is copied to `lease_end_reports`. Each undelivered report
+becomes a `site.lease_ended` event under its original event identity, in
+creation order, written as the recorder writes one, its delivery pending to the
+peer it was signed for with its attempts and last error, and that peer's
+destination parked when the peer had parked its reports; a report for a peer the
+configuration does not name is retired to the finally sink at the first cycle, never
+redirected. Each undelivered callback of a released or force-released
+reservation becomes a pending `site.capacity_released` delivery to
+`storefront`, marked `lease_lifecycle`; a callback of a reservation never
+released is dropped, since none was owed. Delivered rows need no event. Both
+storefront consumers are registered past every event it writes. A report naming no
+recorded lease end, or a callback whose release records no instant or lease
+end, refuses the migration, which then writes nothing. The signed report and
+the callback keep their wire forms, and the migration runs once, so no
+compatibility path is kept.
 
 VM/bare-metal ingress verifies the configured selected-site binding, retains the
 exact wrapper idempotently, and records source/actor/cause in end service. Buyer
@@ -156,8 +282,8 @@ Seller end classification/filing belongs above provisioning.
 Due delivery ends terminate immediately; future ends truncate rather than extend
 the accepted horizon at second precision. Pre-dispatch release stays behind the
 site's guard; create-in-flight is adopted before termination. The intended-end
-report has its own acknowledgement, distinct from the existing capacity-released
-outbox. A report, failed release or queued teardown proves no hardware stop and
+report has its own acknowledgement, distinct from the capacity-released
+callback's. A report, failed release or queued teardown proves no hardware stop and
 returns no capacity; normal release remains proof-driven below.
 
 ## Proof-driven release

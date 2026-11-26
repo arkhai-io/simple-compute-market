@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
+from compute_provisioning.jobs.executor import ConfigurationRefusedError
 from compute_provisioning_contracts import ConnectionSubmission
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.fernet import InvalidToken
@@ -104,12 +105,13 @@ class SshConnection(BaseModel):
         return value
 
 
-class ProtectedKeyUnreadableError(ValueError):
+class ProtectedKeyUnreadableError(ConfigurationRefusedError):
     """A host's protected private key cannot be decrypted with the configured key.
 
     The message names the host, why, and how to recover, and carries no
     ciphertext or key material, so whoever catches it can show it as it is.
-    Running again meets the same configuration, so nothing gains by retrying.
+    Running again meets the same configuration, so nothing gains by retrying:
+    a job meeting it fails as ``configuration_refused``.
     """
 
     def __init__(self, host_id: str, reason: str) -> None:

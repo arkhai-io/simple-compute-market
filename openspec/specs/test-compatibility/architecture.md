@@ -123,9 +123,11 @@ SCM imports no authority service implementation.
 Unit/service suites own same-key retry, lost-response adoption, caller-session
 admission/end races, exact-envelope capture, pinned-authority verification,
 independent cursor floors, respondent answer journals and conservative retention.
-Site/provisioning producer integration tests own atomic event/outbox rollback,
-all ending causes, crash/ack recovery, exact signed push/pull after signer change,
-unsupported-peer parking and explicit resumption. Consumers do not replace that
+Site/provisioning producer integration tests own atomic rollback of the ending
+transition, its event and its signed report, all ending causes, crash/ack
+recovery, exact signed push/pull after signer change, unsupported-peer parking and
+explicit resumption, and the carrying of an earlier release's pending deliveries
+into the event store. Consumers do not replace that
 producer proof with a hand-built report.
 
 Restart recovery of rate deals is proven at application integration

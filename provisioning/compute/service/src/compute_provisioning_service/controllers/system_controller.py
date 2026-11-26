@@ -11,8 +11,9 @@ other route is under ``/api/v1/system``:
   injected time (``make_time_router``).
 - ``POST /system/check-leases``: one lease lifecycle cycle, run whether or not
   the watchdog's timer is paused, answering its counts.
-- ``POST /system/fulfillment-convergence/{run-cycle,advance-cycle,pause,resume}``
-  and ``POST /system/lease-watchdog/{pause,resume}``: the workers' controls. A
+- ``POST /system/fulfillment-convergence/{run-cycle,advance-cycle,pause,resume}``,
+  ``POST /system/lease-watchdog/{pause,resume}`` and
+  ``POST /system/event-delivery/{run-cycle,pause,resume}``: the workers' controls. A
   cycle answers the convergence diagnostics before and after it; a pause or
   resume answers the worker's pause state: whether its timer is held, and
   whether it is at its gate with no timer cycle running.
@@ -32,6 +33,7 @@ import injected_time
 from compute_provisioning.route_errors import require_composed
 from compute_provisioning_contracts import (
     ConvergenceCycleResponse,
+    EventDeliveryCycleResponse,
     HealthResponse,
     LeaseCheckResponse,
     SystemStatusResponse,
@@ -52,6 +54,7 @@ def make_system_routers(
     status_service: Callable[[], SystemStatusService | None],
     lease_lifecycle: Callable[[], Any],
     convergence_watchdog: Callable[[], Any],
+    event_delivery: Callable[[], Any],
 ) -> tuple[APIRouter, APIRouter]:
     """The root health router and the ``/system`` router, over accessors.
 
@@ -212,6 +215,39 @@ def make_system_routers(
         lifecycle = require(lease_lifecycle, "the lease lifecycle")
         lifecycle.resume()
         return pause_state(lifecycle)
+
+    @system_router.post(
+        "/event-delivery/run-cycle",
+        response_model=EventDeliveryCycleResponse,
+        summary="Run one event delivery and pruning cycle, paused or not (admin)",
+    )
+    async def run_event_delivery_cycle() -> EventDeliveryCycleResponse:
+        """The worker's production cycle: each consumer delivers what is due,
+        then the stores are pruned. A consumer another cycle holds reports
+        ``held_elsewhere`` and does nothing."""
+        worker = require(event_delivery, "event delivery")
+        return EventDeliveryCycleResponse.model_validate(await worker.run_cycle())
+
+    @system_router.post(
+        "/event-delivery/pause",
+        response_model=WorkerPauseResponse,
+        summary="Pause timer-driven event delivery cycles (admin)",
+    )
+    async def pause_event_delivery() -> WorkerPauseResponse:
+        """Hold the timer at its gate; ``run-cycle`` still runs a cycle."""
+        worker = require(event_delivery, "event delivery")
+        worker.pause()
+        return pause_state(worker)
+
+    @system_router.post(
+        "/event-delivery/resume",
+        response_model=WorkerPauseResponse,
+        summary="Resume timer-driven event delivery cycles (admin)",
+    )
+    async def resume_event_delivery() -> WorkerPauseResponse:
+        worker = require(event_delivery, "event delivery")
+        worker.resume()
+        return pause_state(worker)
 
     return health_router, system_router
 

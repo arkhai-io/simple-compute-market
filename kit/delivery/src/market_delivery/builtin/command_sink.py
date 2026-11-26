@@ -13,8 +13,7 @@ import subprocess
 from collections.abc import Mapping
 from typing import Any
 
-from ..events import DeliveryEvent
-from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, Deliverable, DeliveryError, DeliverySink, SinkSettings
 
 
 class CommandSinkSettings(SinkSettings):
@@ -36,7 +35,7 @@ def build_command_sink(settings: Mapping[str, Any]) -> DeliverySink:
     argv = config.normalized_argv()
     timeout = config.timeout_seconds
 
-    def deliver_to_command(event: DeliveryEvent) -> None:
+    def deliver_to_command(event: Deliverable) -> None:
         if config.send == "text":
             payload = event.rendered
         else:

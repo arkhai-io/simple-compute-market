@@ -50,6 +50,12 @@ class DeliveryEvent(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
     rendered: str = ""
 
+    @property
+    def reference(self) -> str:
+        """What the event is about, as a sink names it: its obligation reference."""
+
+        return self.obligation_ref
+
     def payload(self) -> dict[str, Any]:
         """The structured form a sink transmits, with the rendering included."""
 

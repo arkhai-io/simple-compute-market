@@ -196,6 +196,7 @@ REAL_LANE_ORDER = [
     # The teardown-job poll, where a mock lane releases its teardown gate.
     "TestStage11a3_TeardownJobSucceeded",
     "Stage11b_TeardownCompletion",
+    "Stage11c_LeaseEventsRecorded",
     # The guest's absence from the host, then the end of its access.
     "TestStage11c_GuestGoneFromHost",
     "TestStage11d_DeliveredAccessEnded",

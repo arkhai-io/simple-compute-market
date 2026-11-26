@@ -640,6 +640,209 @@ redacted unless an operator configures otherwise".
   changes neither, and neither does the packaged configuration's own
   `host_key_checking = False`
   ([Capturing and rotating a host key](#capturing-and-rotating-a-host-key)).
+- **Your configuration's callbacks still load.** Every playbook runs with the
+  service's failure-records callback on Ansible's callback path, in front of the
+  `callback_plugins` your file names (or Ansible's defaults), and the service sets
+  no enabled callbacks and no stdout callback. A stdout callback or notification
+  callback your file names, from a directory it names, runs as it would without
+  the service, and the job's failure is classified the same whatever your output
+  looks like ([Reading a job's failure class](#reading-a-jobs-failure-class)).
+- **`additional_non_retryable_errors` marks failures not to retry.** List
+  substrings in the profile's `additional_non_retryable_errors` (default empty).
+  A failed attempt is not retried, whatever its class, when one of them occurs,
+  ignoring case, in the failed task's message (`msg`), its standard output or
+  standard error, as Ansible recorded them for the last failed or unreachable
+  task neither ignored nor rescued, or in the failure's classified message — the job view's
+  `failure.message`, which a timeout or a run that recorded no task also has.
+  Entries for the failures the service already refuses to retry change nothing;
+  use it for a failure that a retry meets again on your hosts, such as
+  `"disk quota exceeded"`
+  ([configuration](../openspec/specs/physical-provisioning/configuration.md#non-retryable-failure-messages)).
+
+## Operator events
+
+The provisioning service records, as events, the state changes an operator may
+want to know of: a lease whose release failed, a teardown attempt held for your
+repair, a job that finished, a lease that ended, capacity that was released. It
+delivers the ones your routes select to the sinks you configure, and serves every
+event and each destination's delivery state to its administrator. Events reach your
+sinks only through the routes you configure, with one exception: a sink you name as
+`finally` also receives each abandoned delivery, one a sink gave up on or one owed to
+a sink you removed, whatever your routes say. The signed lease-end reports and
+capacity-released callbacks to your storefront are delivered whatever your routes say
+too ([Lease-end report delivery](../openspec/specs/physical-provisioning/architecture.md#lease-end-report-delivery)).
+The settings are
+[`physical-provisioning`'s "Operator events"](../openspec/specs/physical-provisioning/configuration.md#operator-events),
+and the kinds, with what each carries, are
+[`operator-events.md`](guidance/repository/operator-events.md#the-provisioning-services-operator-events).
+Every route below needs the `admin` role, and each has a typed method on
+`SyncComputeProvisioningClient` (and `ComputeProvisioningClient`), named beside it.
+
+### Reading a job's failure class
+
+A failed job attempt is classified, and the job view (`GET /api/v1/jobs/{job_id}`,
+`get_job`) carries the latest failed attempt as `failure` beside `error`: its
+`code`, the class; a `message` naming the host, the task and what failed;
+`retryable`; and `details` — the host, task, play, role, module and `rc`, and for a
+domain's class its `domain_detail` — redacted as the job's logs are. The run's whole
+output is the job's logs (`GET /api/v1/jobs/{job_id}/logs`). A retryable failure is
+retried up to `default_max_retries` (3) times, after 60, 120 and 240 seconds at the
+default backoff; a failure that is not retryable fails the job at once.
+
+| Class | What failed | Retried | What to do |
+|---|---|---|---|
+| `cleanup_refused` | A bare-metal reclaim's working-data helper refused to clean, remove or verify, such as an entry another account owns; `details.domain_detail.message` says what | yes | Repair what it names on the host before the retries run out; the same job then completes. A `provisioning.teardown_attempt_held` event is recorded for each held attempt |
+| `unreachable` | The host stopped answering during the run | yes | If it persists, find why the host is down or cut off |
+| `timed_out` | The playbook ran past `ansible_timeout_seconds` | yes | If a playbook of expected length times out, raise the timeout |
+| `task_failed` | A task failed and no domain class applies | yes | Read the message and the logs |
+| `authentication_refused` | The host refused the SSH login | no | Fix the key or user the host's connection names |
+| `host_key_refused` | The host has no pinned key, or presented another, before anything started | no | Settle its pin ([Capturing and rotating a host key](#capturing-and-rotating-a-host-key)) |
+| `playbook_error` | The playbook exited non-zero having recorded no failed task | no | Read the logs: an unparseable playbook or inventory fails this way |
+| `not_dispatchable` | The job names no host, an unregistered host, or an action no executor serves | no | Register the host, or correct the request |
+| `configuration_refused` | The job's configuration was refused before it ran: its parameters, an undecryptable key, an unusable relay | no | Correct what the message names |
+| `internal_error` | Anything else; the service's log has the error | no | Read the service's log |
+| `cancelled` | The job was cancelled | no | — |
+| `vm_not_found`, `vm_image_locked`, `vm_address_unknown` | The VM's domain is missing, its image is locked, or its address cannot be found | no | Act on the VM host |
+
+`cleanup_refused` is the one class you repair while the job waits: at the defaults
+you have about seven minutes from the first refusal, which is why it is the class
+that raises `provisioning.teardown_attempt_held` (`action_required`). A teardown that
+fails after its retries sends its lease `release_failed` and records
+`provisioning.lease_release_failed`, naming the reason, the class and the teardown
+job ([A deal ending on a pending release](#a-deal-ending-on-a-pending-release) has
+what to do then).
+
+### Routing events to sinks
+
+Configure sinks under `[Events.sinks]`, shaped as a storefront's `[Delivery]`, and
+routes under `[Events.routes]`. A route's `where` is an SQL condition over the
+event's envelope fields and its kind's attributes, with the event's references as
+the table `related`; its `sinks` are the enabled instances that receive what it
+selects:
+
+```toml
+[Events.sinks]
+enabled = ["ops-push", "audit"]
+
+[Events.sinks.ops-push]
+sink = "apprise"                    # urls in the Secret overlay
+
+[Events.sinks.audit]
+sink = "file"
+path = "/var/log/provisioning-events.jsonl"
+
+[Events.routes.held-work]
+where = "severity = 'action_required'"
+sinks = ["ops-push", "audit"]
+
+[Events.routes.long-jobs]
+where = "kind = 'provisioning.job_finished' AND duration_seconds >= 1800"
+sinks = ["audit"]
+
+[Events.routes.host-bm-02]
+where = "id IN (SELECT event_id FROM related WHERE type = 'host' AND id = 'bm-02')"
+sinks = ["audit"]
+```
+
+`severity = 'action_required'` routes every event that needs you — a held repair and
+a failed release today, and any such kind declared later. Put a sink's secret settings
+— an Apprise URL, a webhook URL carrying a token, an SMTP password — in the
+provisioning service's Secret overlay (under the chart, the
+`config-provisioning-secrets.yml` profile of its runtime Secret), never in the public
+`config`: the chart passes `Events` through unchanged, and the service does not
+refuse a secret stated there. The service reads `[Events]` at startup and refuses to
+start on a route or sink it cannot use, naming it; validate a change on a rehearsal
+stack before the release. A sink that keeps failing an event is retried for
+`sink_max_age_seconds` (a day by default), then the event goes to `finally`, the
+service's log unless you name an enabled sink.
+
+### Reading events
+
+`GET /api/v1/events` (`list_events`) lists the recorded events in sequence order,
+filtered by `kind`, `severity` (matched exactly), `subject` and `reference`, the
+last two as `<type>:<id>`; `limit` (1 to 500, default 100) and `after`, a sequence,
+page through them, and a full page names the next `after` as `next_after`. Each
+event carries its kind, severity, subject, `related` references, attributes, a
+one-line `summary` and its `details`. For example:
+
+```text
+GET /api/v1/events?reference=lease:<reservation>
+GET /api/v1/events?kind=provisioning.teardown_attempt_held&subject=job:<job-id>
+GET /api/v1/events?severity=action_required
+```
+
+The first lists every event of a lease, whoever recorded it: its jobs' finishes, its
+end, a failed release, its capacity's release.
+
+### Reading delivery state
+
+`GET /api/v1/events/deliveries` (`get_event_deliveries`) lists each consumer's
+destinations: the consumer — `event-sinks` for your sinks, `lease-end-reports` and
+`capacity-released` for the storefront — the destination's name, its `state`
+(`active`, `parked` with its `state_reason`, or `retired`), how many deliveries are
+pending, delivered and abandoned, and its `head`, the next event it owes with its
+attempts, last error and next attempt. A destination delivers in order, so a head
+that keeps failing holds the events behind it until it is delivered, parked or
+abandoned; its `last_error` says why.
+
+### Resuming a parked destination
+
+A storefront that does not take lease-end reports — one answering 404, 405, 501 or
+`unsupported`, as an older storefront does — parks its `lease-end-reports`
+destination, and its reports wait. The destination is named for the storefront's URL:
+`storefront@` and its host, port and path, each `/` of the path written `~`, as
+`storefront@storefront.example:8443~seller` for `https://storefront.example:8443/seller`.
+Once the storefront takes reports, resume it:
+
+```text
+POST /api/v1/events/destinations/storefront@storefront.example:8443~seller/resume
+{}
+```
+
+(`resume_event_destination(name)`). A name two consumers share needs
+`{"consumer": "<consumer>"}` (`consumer=`); an unknown name is refused
+`404 unknown_destination`, a shared one without its consumer
+`409 ambiguous_destination`, a retired one `409 destination_retired`, and an active
+one is answered as it is. The resumed destination receives, in order, the reports it
+missed whose events are still retained; a report whose event was pruned meanwhile is
+not sent again, and the storefront recovers it by reading the lease, whose signed
+reports the service keeps by their own retention. A storefront configured beside or
+in place of another is a destination of its own that receives no report recorded
+before it; the former one's destination is retired and its undelivered reports go to
+the service's log, while staying readable through the lease read.
+
+### Pausing and stepping the delivery worker
+
+The event delivery worker runs every `delivery_interval_seconds` (10 by default):
+each consumer's deliveries, then pruning. `POST /api/v1/system/event-delivery/pause`
+(`pause_event_delivery`) holds its timer, `POST /api/v1/system/event-delivery/resume`
+(`resume_event_delivery`) releases it, and
+`POST /api/v1/system/event-delivery/run-cycle` (`run_event_delivery_cycle`) runs one
+cycle, paused or not, reporting what each consumer did and what was pruned. A failed
+delivery is retried once its backoff has passed — from 10 seconds, doubling to an
+hour — so a cycle run before then does not send it. A pause holds the timer only: a
+lease command that ends or releases a lease still delivers the storefront's report
+and callback before it returns.
+
+### A callback the storefront refused
+
+The capacity-released callback goes to the storefront for each release the lease
+lifecycle makes, retried until the storefront acknowledges it. A storefront refusing
+one outright — 400, 404 or 409, for a reservation it does not hold — has that callback
+abandoned at once, and the callbacks after it follow. The abandoned callback is in
+the provisioning service's log, a warning on the `eventing.finally` logger:
+
+```text
+delivery abandoned: consumer=capacity-released destination=storefront event=<id> last_error=refused: HTTP 404: … envelope={…}
+```
+
+The envelope names the reservation in its `subject`. Check the storefront's binding
+for that reservation; the release itself stands.
+
+While no storefront URL is configured, the capacity-released callbacks stay pending:
+`get_event_deliveries` shows the `capacity-released` consumer's `storefront`
+destination with its head failing "no storefront is configured". They are delivered,
+in order, once a URL is configured and the service restarted.
 
 ## Payments access
 
@@ -830,8 +1033,9 @@ A deal listed `ending` with `release_pending` has a recorded end whose resource 
 site has not yet reported released. For a delivered deal the storefront records the
 release when the site's provisioning service delivers its capacity-released event. The
 service sends that event once the lease's teardown is proven, or once an operator
-force-releases the lease, and sends it again on every lease-watchdog cycle until the
-storefront acknowledges it. No storefront command clears the code, so clear it at the
+force-releases the lease, on the request or lease-watchdog cycle that released it,
+and its event delivery worker retries it with backoff until the storefront
+acknowledges it ([Operator events](#operator-events)). No storefront command clears the code, so clear it at the
 site, as the provisioning service's administrator. A site that has stopped serving listings
 clears its leases the same way: its provisioning service must be running to answer
 these requests and to deliver the event.
@@ -850,7 +1054,7 @@ Then act on the lease's `status`:
 | `active` | The recorded end is still ahead, or the storefront's termination has not reached the site | Once the end has passed, run a servicing cycle at the storefront, `POST /api/v1/admin/lifecycle/deal-servicing/run-cycle`, or terminate the lease at the site as under "End a lease its storefront cannot service" above |
 | `releasing` | The teardown is running, or is being run again | Wait: a lease still `releasing` past `lease_watchdog_grace_period_seconds` becomes `release_failed` |
 | `release_failed` | The teardown failed or timed out; `failure_reason` and `failure_message` say which | If the teardown has since finished, `POST /api/v1/contract/leases/<reservation>/retry-release` re-observes it and releases the lease. Otherwise verify the host holds nothing of the deal, removing what the teardown would have removed, then `POST /api/v1/contract/leases/<reservation>/force-release` with a `reason` and `evidence` saying what you checked ([What the upgrade from v0.3.0 changes](#what-the-upgrade-from-v030-changes) gives the steps for a teardown that never started) |
-| `released` or `force_released` | The site has released the lease and the storefront has not acknowledged the event | Run one lease-watchdog cycle, `POST /api/v1/system/check-leases`, which delivers every release still unacknowledged. The provisioning service logs a delivery that fails (`Could not deliver capacity-released event`): restore its route to the storefront and run the cycle again |
+| `released` or `force_released` | The site has released the lease and the storefront has not acknowledged the event | Read `GET /api/v1/events/deliveries`: the `capacity-released` consumer's `storefront` destination shows the callback it owes and its last error. Restore the route to the storefront, or configure its URL if none is; the event delivery worker sends it at its next retry, which `POST /api/v1/system/event-delivery/run-cycle` runs once its backoff has passed. A callback the storefront refused (400, 404 or 409) is not retried: it is in the service's log ([A callback the storefront refused](#a-callback-the-storefront-refused)) |
 
 A force-release returns the capacity on your word, without a teardown's proof, so make
 it only after checking the host. Once the storefront acknowledges the event, its next

@@ -24,9 +24,11 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, insert, select, text, update
 
 from compute_provisioning.hosts import ConnectionEnvelope, ProtectedValue
 from compute_provisioning.hosts.migrations import BASELINE as HOSTS_BASELINE
@@ -35,14 +37,45 @@ from compute_provisioning.jobs.migrations import BASELINE as JOBS_BASELINE
 from compute_provisioning.jobs.migrations import MIGRATIONS as JOBS_MIGRATIONS
 from compute_provisioning.relays.migrations import BASELINE as RELAYS_BASELINE
 from compute_provisioning_ansible.connection import SSH_CONNECTION_KIND, SshConnectionCodec
+from compute_provisioning_contracts import SignedLeaseEndedReport
+from eventing import (
+    ACTIVE,
+    ENVELOPE_VERSION,
+    PARKED,
+    PENDING,
+    Catalogue,
+    Envelope,
+    EventDraft,
+    Kind,
+    Source,
+)
+from eventing import SCHEMA_STEPS as EVENTING_SCHEMA_STEPS
+from eventing import schema as event_schema
 from market_fulfillment.migrations import BASELINE as FULFILLMENT_BASELINE
 from market_resource_pools.migrations import BASELINE as POOLS_BASELINE
 from market_schema_migrations import Chain, Floor, Migration
+from market_site.events import (
+    SITE_CAPACITY_RELEASED,
+    SITE_KINDS,
+    SITE_LEASE_ENDED,
+    CapacityReleasedDetails,
+    capacity_released_draft,
+    lease_ended_draft,
+)
 from market_site.migrations import BASELINE as SITE_BASELINE
 from market_site.migrations import MIGRATIONS as SITE_MIGRATIONS
 # VM's pool configuration is VM's table, held in this database; VM's package
 # owns its baseline.
 from vm_provisioning_adapter.migrations import BASELINE as VM_BASELINE
+
+from compute_provisioning_service.event_names import (
+    CAPACITY_RELEASED_CONSUMER,
+    CAPACITY_RELEASED_DESTINATION,
+    EVENT_SCHEMA_PREFIX,
+    EVENT_SOURCE_SERVICE,
+    LEASE_END_REPORT_CONSUMER,
+    peer_destination,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +278,361 @@ def _rewrite_ssh_connections_to_version_3(connection: Connection) -> None:
         logger.info("Marked %d SSH hosts for host-key adoption", len(host_ids))
 
 
+_LEASE_END_REPORTS_DDL = (
+    """
+    CREATE TABLE lease_end_reports (
+        event_id VARCHAR NOT NULL,
+        capacity_reservation_id VARCHAR NOT NULL,
+        report TEXT NOT NULL,
+        created_at DATETIME NOT NULL,
+        envelope_id VARCHAR,
+        PRIMARY KEY (event_id)
+    )
+    """,
+    "CREATE INDEX ix_lease_end_reports_capacity_reservation_id "
+    "ON lease_end_reports (capacity_reservation_id)",
+    "CREATE INDEX ix_lease_end_reports_created_at ON lease_end_reports (created_at)",
+)
+
+#: The instant the migration stamps on the consumers it registers: fixed, so one
+#: database migrates to the same rows whenever it runs.
+_REGISTERED_AT = datetime(1970, 1, 1)
+
+
+def _stored_instant(value: Any, *, label: str) -> datetime:
+    """A time the outboxes stored, as an aware UTC datetime."""
+    if isinstance(value, datetime):
+        instant = value
+    else:
+        try:
+            instant = datetime.fromisoformat(str(value))
+        except ValueError as exc:
+            raise MigrationDataError(f"{label} is not a time: {value!r}") from exc
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(timezone.utc)
+
+
+def _record_moved_event(
+    connection: Connection,
+    catalogue: Catalogue,
+    kind: Kind[Any],
+    draft: EventDraft,
+    *,
+    event_id: str,
+    site_id: str,
+    recorded_at: datetime,
+) -> int:
+    """Write ``draft`` as the event store's next event under ``event_id``,
+    recorded at ``recorded_at``, and return its sequence.
+
+    The event is written as the recorder writes one — its sequence from the
+    store's counter, its occurrence key, its related references, a whole
+    envelope — except that its identity and instant are the moved record's.
+    """
+    attributes = kind.validate_attributes(draft.attributes)
+    details = kind.validate_details(draft.details)
+    dedup = kind.dedup_value(draft, details)
+    sequence = int(
+        connection.execute(
+            update(event_schema.sequence_counter)
+            .where(event_schema.sequence_counter.c.name == event_schema.SEQUENCE_COUNTER)
+            .values(value=event_schema.sequence_counter.c.value + 1)
+            .returning(event_schema.sequence_counter.c.value)
+        ).scalar_one()
+    )
+    envelope = Envelope(
+        envelope_version=ENVELOPE_VERSION,
+        id=event_id,
+        kind=kind.name,
+        kind_version=kind.version,
+        data_schema=catalogue.data_schema(kind),
+        source=Source(service=EVENT_SOURCE_SERVICE, instance=site_id),
+        sequence=sequence,
+        occurred_at=recorded_at,
+        severity=kind.severity,
+        subject=draft.subject,
+        related=draft.related,
+        correlation_id=draft.correlation_id,
+        causation_id=draft.causation_id,
+        attributes=attributes,
+        summary=kind.summary(draft, details),
+        details=details.model_dump(mode="json"),
+        extensions={},
+    )
+    stored = event_schema.to_stored(recorded_at)
+    connection.execute(
+        insert(event_schema.events).values(
+            sequence=sequence,
+            id=event_id,
+            kind=kind.name,
+            kind_version=kind.version,
+            dedup_key=dedup if dedup is not None else event_id,
+            severity_rank=kind.severity.rank,
+            subject_type=draft.subject.type,
+            subject_id=draft.subject.id,
+            occurred_at=stored,
+            recorded_at=stored,
+            envelope=envelope.to_json(),
+        )
+    )
+    for reference in sorted({(item.type, item.id) for item in draft.related}):
+        connection.execute(
+            insert(event_schema.related).values(
+                event_sequence=sequence, type=reference[0], id=reference[1]
+            )
+        )
+    return sequence
+
+
+def _pending_delivery(
+    connection: Connection,
+    *,
+    consumer: str,
+    destination: str,
+    sequence: int,
+    row: Mapping[str, Any],
+    label: str,
+) -> None:
+    """A pending delivery of ``sequence`` carrying an outbox row's attempts and
+    last error, due at once."""
+    created_at = event_schema.to_stored(_stored_instant(row["created_at"], label=label))
+    last_attempted_at = row["last_attempted_at"]
+    connection.execute(
+        insert(event_schema.deliveries).values(
+            consumer=consumer,
+            destination=destination,
+            event_sequence=sequence,
+            state=PENDING,
+            attempts=int(row["attempt_count"] or 0),
+            last_error=row["last_error"],
+            created_at=created_at,
+            last_attempted_at=(
+                None
+                if last_attempted_at is None
+                else event_schema.to_stored(_stored_instant(last_attempted_at, label=label))
+            ),
+            next_attempt_at=created_at,
+        )
+    )
+
+
+def _move_lease_end_reports(connection: Connection, catalogue: Catalogue) -> None:
+    """Keep every signed report; make each undelivered one a pending, or
+    parked, delivery of a ``site.lease_ended`` event under its own identity,
+    which the report names as the event it is kept for. A delivered report has
+    no event and is kept by its own retention alone."""
+    connection.exec_driver_sql(
+        "INSERT INTO lease_end_reports "
+        "(event_id, capacity_reservation_id, report, created_at, envelope_id) "
+        "SELECT event_id, capacity_reservation_id, report, created_at, "
+        "CASE WHEN delivered_at IS NULL THEN event_id END FROM lease_end_report_outbox"
+    )
+    parked_peers = {
+        row[0]
+        for row in connection.exec_driver_sql(
+            "SELECT DISTINCT peer FROM lease_end_report_outbox WHERE parked"
+        )
+    }
+    latest = {
+        str(row[0]): _stored_instant(row[1], label=f"lease_end_report_outbox of {row[0]}")
+        for row in connection.exec_driver_sql(
+            "SELECT peer, max(created_at) FROM lease_end_report_outbox GROUP BY peer"
+        )
+    }
+    rows = connection.execute(text(
+        "SELECT o.event_id, o.capacity_reservation_id, o.peer, o.report, o.attempt_count, "
+        "o.last_error, o.created_at, o.last_attempted_at, e.transition_key "
+        "FROM lease_end_report_outbox o "
+        "LEFT JOIN site_lease_ended_events e ON e.event_id = o.event_id "
+        "WHERE o.delivered_at IS NULL ORDER BY o.created_at, o.event_id"
+    )).mappings().all()
+    unmapped = [row["event_id"] for row in rows if row["transition_key"] is None]
+    if unmapped:
+        raise MigrationDataError(
+            f"{len(unmapped)} undelivered lease-end report(s) name no recorded lease end, "
+            "so none was moved; restore the database backup taken before the upgrade: "
+            + ", ".join(unmapped)
+        )
+    peers: dict[str, str] = {}
+    for row in rows:
+        label = f"lease_end_report_outbox {row['event_id']}"
+        try:
+            payload = json.loads(SignedLeaseEndedReport.model_validate_json(row["report"]).payload)
+        except ValueError as exc:
+            raise MigrationDataError(f"{label} holds no signed report: {exc}") from exc
+        sequence = _record_moved_event(
+            connection,
+            catalogue,
+            SITE_LEASE_ENDED,
+            lease_ended_draft(payload, transition_key=str(row["transition_key"])),
+            event_id=str(row["event_id"]),
+            site_id=str(payload["site_id"]),
+            recorded_at=_stored_instant(row["created_at"], label=label),
+        )
+        destination = peer_destination(str(row["peer"]))
+        peers[destination] = str(row["peer"])
+        _pending_delivery(
+            connection,
+            consumer=LEASE_END_REPORT_CONSUMER,
+            destination=destination,
+            sequence=sequence,
+            row=row,
+            label=label,
+        )
+    for peer in parked_peers:
+        peers[peer_destination(str(peer))] = str(peer)
+    for destination, peer in sorted(peers.items()):
+        _migrated_destination(
+            connection,
+            consumer=LEASE_END_REPORT_CONSUMER,
+            name=destination,
+            parked=peer in parked_peers,
+            at=latest[peer],
+        )
+
+
+def _move_capacity_release_callbacks(connection: Connection, catalogue: Catalogue) -> None:
+    """Make each undelivered callback of a released reservation a pending
+    delivery of a ``site.capacity_released`` event.
+
+    A callback whose reservation is not released was never delivered, since
+    delivery waits for the release, and is dropped with its table. The event
+    carries the release as the reservation records it, and the site its lease
+    ends name, the one site this database serves; it was forced when the
+    reservation was force-released, and follows a release failure when the
+    reservation recorded one at any time before — an earlier release failure
+    the release need not have followed directly, since the outbox kept no
+    reservation's state before its release. The outbox held only the lease
+    lifecycle's releases, so each event is marked the lease lifecycle's.
+    """
+    rows = connection.execute(text(
+        "SELECT o.capacity_reservation_id, o.attempt_count, o.last_error, o.created_at, "
+        "o.last_attempted_at, r.state, r.released_at, r.failure_reason, "
+        "(SELECT e.payload FROM site_lease_ended_events e "
+        " WHERE e.capacity_reservation_id = o.capacity_reservation_id "
+        " ORDER BY e.event_id LIMIT 1) AS ended, "
+        "EXISTS (SELECT 1 FROM site_lease_ended_events f "
+        " WHERE f.capacity_reservation_id = o.capacity_reservation_id "
+        " AND f.transition_key = 'release_failure') AS failed_before "
+        "FROM capacity_release_callback_outbox o "
+        "JOIN capacity_reservations r ON r.capacity_reservation_id = o.capacity_reservation_id "
+        "WHERE o.delivered_at IS NULL AND r.state IN ('released', 'force_released') "
+        "ORDER BY o.created_at, o.capacity_reservation_id"
+    )).mappings().all()
+    unmapped = [
+        row["capacity_reservation_id"]
+        for row in rows
+        if row["ended"] is None or row["released_at"] is None
+    ]
+    if unmapped:
+        raise MigrationDataError(
+            f"{len(unmapped)} undelivered capacity-released callback(s) name a release "
+            "recording no time or lease end, so none was moved; restore the database "
+            "backup taken before the upgrade: " + ", ".join(unmapped)
+        )
+    for row in rows:
+        label = f"capacity_release_callback_outbox {row['capacity_reservation_id']}"
+        site_id = str(_json_mapping(row["ended"], label=label)["site_id"])
+        details = CapacityReleasedDetails(
+            capacity_reservation_id=str(row["capacity_reservation_id"]),
+            site_id=site_id,
+            state=str(row["state"]),
+            released_at=str(row["released_at"]),
+            failure_reason=row["failure_reason"],
+        )
+        sequence = _record_moved_event(
+            connection,
+            catalogue,
+            SITE_CAPACITY_RELEASED,
+            capacity_released_draft(
+                details,
+                forced=row["state"] == "force_released",
+                after_release_failure=bool(row["failed_before"]),
+                lease_lifecycle=True,
+            ),
+            event_id=f"capacity_released:{details.capacity_reservation_id}:{details.released_at}",
+            site_id=site_id,
+            recorded_at=_stored_instant(row["created_at"], label=label),
+        )
+        _pending_delivery(
+            connection,
+            consumer=CAPACITY_RELEASED_CONSUMER,
+            destination=CAPACITY_RELEASED_DESTINATION,
+            sequence=sequence,
+            row=row,
+            label=label,
+        )
+    if rows:
+        _migrated_destination(
+            connection,
+            consumer=CAPACITY_RELEASED_CONSUMER,
+            name=CAPACITY_RELEASED_DESTINATION,
+            parked=False,
+            at=max(
+                _stored_instant(row["created_at"], label="capacity_release_callback_outbox")
+                for row in rows
+            ),
+        )
+
+
+def _migrated_destination(
+    connection: Connection, *, consumer: str, name: str, parked: bool, at: datetime
+) -> None:
+    """A moved destination, added and in its state since ``at``, the latest
+    outbox row it carries."""
+    stored = event_schema.to_stored(at)
+    connection.execute(
+        insert(event_schema.destinations).values(
+            consumer=consumer,
+            name=name,
+            state=PARKED if parked else ACTIVE,
+            added_at_position=0,
+            added_at=stored,
+            state_changed_at=stored,
+            state_reason="unsupported" if parked else None,
+        )
+    )
+
+
+def _move_outboxes_to_the_event_store(connection: Connection) -> None:
+    """Carry both storefront outboxes into the event store, then drop them.
+
+    Every signed lease-end report moves to ``lease_end_reports``. Each
+    undelivered report becomes a ``site.lease_ended`` event under its own
+    event identity, in the order the reports were created, carrying the lease
+    end's payload; its delivery to the peer it was signed for is pending with
+    the attempts and last error it had, and that peer's destination is parked
+    when the peer had parked its reports. Each undelivered capacity-released
+    callback of a released reservation becomes a pending delivery of a
+    ``site.capacity_released`` event. Delivered rows need no event.
+
+    The storefront peer's consumers are registered past every moved event, so
+    they read none twice and every event recorded after the upgrade, on a
+    fresh database as on an upgraded one. Any row the move cannot map without
+    guessing refuses the migration, which then writes nothing.
+    """
+    for statement in _LEASE_END_REPORTS_DDL:
+        connection.exec_driver_sql(statement)
+    catalogue = Catalogue(SITE_KINDS, schema_prefix=EVENT_SCHEMA_PREFIX)
+    _move_lease_end_reports(connection, catalogue)
+    _move_capacity_release_callbacks(connection, catalogue)
+    position = int(
+        connection.execute(
+            select(event_schema.sequence_counter.c.value).where(
+                event_schema.sequence_counter.c.name == event_schema.SEQUENCE_COUNTER
+            )
+        ).scalar_one()
+    )
+    now = _REGISTERED_AT
+    for consumer in (LEASE_END_REPORT_CONSUMER, CAPACITY_RELEASED_CONSUMER):
+        connection.execute(
+            insert(event_schema.consumers).values(name=consumer, position=position, created_at=now)
+        )
+    connection.exec_driver_sql("DROP TABLE lease_end_report_outbox")
+    connection.exec_driver_sql("DROP TABLE capacity_release_callback_outbox")
+
+
 SERVICE_BASELINE: Migration[Connection] = Migration(
     "v0_3_0_baseline_compute_provisioning_service", _create_service_baseline
 )
@@ -305,6 +693,17 @@ FLOOR_IDS: tuple[str, ...] = (
 )
 """Every ID the v0.3.0 release's chain recorded on a database it built."""
 
+#: The eventing component's schema, one migration per step it supplies, in its
+#: order: the service's event store, which the site ledger, the job engine and
+#: the delivery worker share with the rest of its database.
+EVENTING_MIGRATIONS: tuple[Migration[Connection], ...] = tuple(
+    Migration(step.name, step.apply) for step in EVENTING_SCHEMA_STEPS
+)
+
+OUTBOXES_TO_EVENT_STORE: Migration[Connection] = Migration(
+    "20261126_002_storefront_outboxes_to_event_store", _move_outboxes_to_the_event_store
+)
+
 CHAIN: Chain[Connection] = Chain(
     service=SERVICE,
     command=COMMAND,
@@ -323,6 +722,8 @@ CHAIN: Chain[Connection] = Chain(
         SSH_CONNECTIONS_VERSION_2,
         *JOBS_MIGRATIONS,
         SSH_CONNECTIONS_VERSION_3,
+        *EVENTING_MIGRATIONS,
+        OUTBOXES_TO_EVENT_STORE,
     ),
     floor=Floor("marketplace 0.3.0", FLOOR_IDS),
 )

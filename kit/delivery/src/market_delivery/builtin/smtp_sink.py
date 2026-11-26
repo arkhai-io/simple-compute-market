@@ -9,8 +9,7 @@ from typing import Any
 
 from pydantic import Field
 
-from ..events import DeliveryEvent
-from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, Deliverable, DeliveryError, DeliverySink, SinkSettings
 
 
 class SmtpSinkSettings(SinkSettings):
@@ -36,9 +35,9 @@ def build_smtp_sink(settings: Mapping[str, Any]) -> DeliverySink:
         raise ValueError("smtp sink password requires a username")
     timeout = config.timeout_seconds
 
-    def deliver_by_mail(event: DeliveryEvent) -> None:
+    def deliver_by_mail(event: Deliverable) -> None:
         message = EmailMessage()
-        message["Subject"] = f"{config.subject_prefix}: {event.obligation_ref}"
+        message["Subject"] = f"{config.subject_prefix}: {event.reference}"
         message["From"] = config.sender
         message["To"] = ", ".join(config.recipients)
         message.set_content(event.rendered)

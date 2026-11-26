@@ -19,9 +19,11 @@ from compute_provisioning.jobs.executor_mock import MockRule
 from compute_provisioning_contracts import ResultEnvelope
 
 from compute_provisioning_ansible import (
+    TASK_FAILED_CLASS,
     AnsibleJobExecutor,
     AnsibleJobInterpretation,
     AnsibleJobPlan,
+    FailureClass,
     MockAnsibleRunner,
     MockPlaybook,
 )
@@ -44,7 +46,8 @@ def _default(playbook: MockPlaybook) -> str:
 
 
 class _EchoCodec:
-    """Reports the playbook's raw output as the job's result."""
+    """Reports the playbook's raw output as the job's result, and classes a
+    failed task tagged ``failure_class:held`` as retryable ``held``."""
 
     inventory_group = "nodes"
     secret_fields: frozenset[str] = frozenset()
@@ -59,8 +62,10 @@ class _EchoCodec:
             )
         )
 
-    def is_retryable(self, message: str) -> bool:
-        return True
+    def classify(self, run, failure) -> FailureClass:
+        if "held" in failure.failure_classes:
+            return FailureClass("held", retryable=True)
+        return TASK_FAILED_CLASS
 
 
 def _run(**parameters) -> JobRun:
@@ -177,7 +182,44 @@ class TestFailure:
         outcome = await _execute(runner)
 
         assert isinstance(outcome, JobFailure)
-        assert outcome.error.message == "disk image lock conflict"
+        # A failure with no record is a playbook that recorded no failed task.
+        assert (outcome.error.code, outcome.error.retryable) == ("playbook_error", False)
+        assert "disk image lock conflict" in outcome.error.message
+
+    async def test_a_failure_record_is_classified_through_the_codec(self):
+        runner = MockAnsibleRunner(default_output=_default)
+        runner.add_rule(
+            MockRule(
+                rule_id="f",
+                match={},
+                fail_with="held",
+                failure_record={
+                    "task": "Clean up", "tags": ["failure_class:held"], "msg": "refused",
+                    "rc": 1, "module": "ansible.builtin.command",
+                },
+            )
+        )
+
+        outcome = await _execute(runner)
+
+        assert isinstance(outcome, JobFailure)
+        assert (outcome.error.code, outcome.error.retryable) == ("held", True)
+        # The record names no host, so it is the run's.
+        assert outcome.error.message == 'node-1: task "Clean up" failed: refused'
+        assert outcome.error.details["host"] == "node-1"
+
+    async def test_a_record_of_an_unreachable_host_is_classified_as_a_real_one(self):
+        runner = MockAnsibleRunner(default_output=_default)
+        runner.add_rule(
+            MockRule(
+                rule_id="f", match={}, fail_with="unreachable",
+                failure_record={"task": "Gather", "unreachable": True, "msg": "No route to host"},
+            )
+        )
+
+        outcome = await _execute(runner)
+
+        assert (outcome.error.code, outcome.error.retryable) == ("unreachable", True)
 
     async def test_fail_with_takes_precedence_over_result_stdout(self):
         runner = MockAnsibleRunner(default_output=_default)
@@ -287,7 +329,9 @@ class TestExecutorIntegration:
 
         assert "pid" not in handles[0]
         assert isinstance(outcome, JobFailure)
-        assert outcome.error.message == "Playbook cancelled"
+        assert (outcome.error.code, outcome.error.message) == (
+            "cancelled", "node-1: playbook cancelled"
+        )
         await asyncio.wait_for(runner.rules.wait_until_released("gate"), timeout=2.0)
         assert runner.list_rules()[0]["waiting"] == 0
 

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-delivery"
-version = "0.2.2"
+version = "0.3.0"
 description = "Recipient-side delivery of revealed marketplace events to locally configured sinks"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
@@ -9,6 +9,11 @@ dependencies = [
   "arkhai-kit-identity==0.5.0",
   "pydantic>=2.7",
 ]
+
+[project.optional-dependencies]
+# The event-sink consumer (`market_delivery.event_sinks`), which a service
+# delivering its events composes; introduction delivery needs neither.
+events = ["arkhai-eventing>=0.1.0", "sqlalchemy>=2.0"]
 
 [project.entry-points."market.delivery_sinks"]
 file = "market_delivery.builtin.file_sink:FILE_SINK"
@@ -29,4 +34,8 @@ testpaths = ["tests/unit", "tests/integration"]
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["pytest>=8.3.4,<9.0.0", "pytest-asyncio>=0.23"]
+dev = [
+  "arkhai-kit-delivery[events]",
+  "pytest>=8.3.4,<9.0.0",
+  "pytest-asyncio>=0.23",
+]

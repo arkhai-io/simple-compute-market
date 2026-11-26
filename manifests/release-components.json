@@ -6,6 +6,11 @@
       "dist": "arkhai-injected-time"
     },
     {
+      "key": "eventing",
+      "path": "tools/eventing",
+      "dist": "arkhai-eventing"
+    },
+    {
       "key": "kit-schema-migrations",
       "path": "kit/schema-migrations",
       "dist": "arkhai-kit-schema-migrations"

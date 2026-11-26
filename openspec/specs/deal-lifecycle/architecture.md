@@ -383,8 +383,10 @@ a same-key retry changing the administrator or reason is refused.
 
 ## Site evidence and retention
 
-The site records intended-end payload and separately acknowledged event outbox
-atomically with its ending transition, before teardown. Stored signed wrappers
+The site records intended-end payload, its `site.lease_ended` event and the signed
+report atomically with its ending transition, before teardown, and the report's
+push to the storefront is a separately acknowledged consumer of that event. Stored
+signed wrappers
 survive retries and signer changes; authenticated lease reads recover the same
 bytes. Both parties retain obtained reports. The site report is independent
 signed evidence, not a payment stop, delivery attestation or proof of free capacity.

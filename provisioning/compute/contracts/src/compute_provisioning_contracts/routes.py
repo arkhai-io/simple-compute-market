@@ -320,6 +320,19 @@ PROVISIONING_ROUTE_CONTRACTS = (
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/fulfillment-convergence/resume"), "provisioning_fulfillment_convergence_resume"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/lease-watchdog/pause"), "provisioning_lease_watchdog_pause"),
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/lease-watchdog/resume"), "provisioning_lease_watchdog_resume"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/event-delivery/run-cycle"), "provisioning_event_delivery_cycle"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/event-delivery/pause"), "provisioning_event_delivery_pause"),
+    ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/event-delivery/resume"), "provisioning_event_delivery_resume"),
+    # Operator events: the recorded events, their delivery state, and resuming
+    # a parked destination.
+    ProvisioningRouteContract("GET", re.compile(r"/api/v1/events/?"), "provisioning_events_list"),
+    ProvisioningRouteContract("GET", re.compile(r"/api/v1/events/deliveries"), "provisioning_event_deliveries"),
+    ProvisioningRouteContract(
+        "POST",
+        re.compile(r"/api/v1/events/destinations/(?P<destination>[^/]+)/resume"),
+        "provisioning_event_destination_resume",
+        path_resource="destination",
+    ),
     # Sets an injected service's time; a wall-time service mounts no such route.
     ProvisioningRouteContract("POST", re.compile(r"/api/v1/system/time"), PROVISIONING_TIME_OPERATION),
     ProvisioningRouteContract("GET", re.compile(r"/api/v1/jobs/?"), "provisioning_jobs_list"),
@@ -384,6 +397,13 @@ ADMIN_PROVISIONING_OPERATIONS = frozenset(
         PROVISIONING_TIME_OPERATION,
         "provisioning_identity_rotate",
         "provisioning_lease_watchdog_resume",
+        "provisioning_event_delivery_cycle",
+        "provisioning_event_delivery_pause",
+        "provisioning_event_delivery_resume",
+        # Events name every storefront's leases and the deployment's sinks.
+        "provisioning_events_list",
+        "provisioning_event_deliveries",
+        "provisioning_event_destination_resume",
         "provisioning_jobs_list",
         "provisioning_job_status",
         "provisioning_job_credentials_admin",

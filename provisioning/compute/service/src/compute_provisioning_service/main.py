@@ -37,6 +37,7 @@ from compute_provisioning_service.route_table import assemble_service_route_tabl
 from compute_provisioning_service.controllers.capacity_definitions_controller import CapacityDefinitionsController
 from compute_provisioning_service.controllers.pools_controller import PoolController
 from compute_provisioning_service.controllers.fulfillment_controller import FulfillmentController
+from compute_provisioning_service.controllers.events_controller import make_events_router
 from compute_provisioning_service.controllers.system_controller import (
     make_system_routers,
     make_time_router,
@@ -240,6 +241,7 @@ _health_router, _system_router = make_system_routers(
     status_service=lambda: _container_module.resolved_system_status_service,
     lease_lifecycle=lambda: _container_module.resolved_lease_lifecycle_service,
     convergence_watchdog=lambda: _container_module.resolved_fulfillment_convergence_watchdog,
+    event_delivery=lambda: _container_module.resolved_event_delivery_worker,
 )
 
 
@@ -314,6 +316,9 @@ app = build_compute_provisioning_app(
             host_operations=lambda: _container_module.resolved_host_operations_service,
         ),
         ComputeProvisioningRouterMount(jobs_controller.router, "/api/v1"),
+        ComputeProvisioningRouterMount(
+            make_events_router(lambda: _container_module.resolved_event_service), "/api/v1"
+        ),
         ComputeProvisioningRouterMount(host_import_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(hosts_controller.router, "/api/v1"),
         ComputeProvisioningRouterMount(relays_controller.router, "/api/v1"),

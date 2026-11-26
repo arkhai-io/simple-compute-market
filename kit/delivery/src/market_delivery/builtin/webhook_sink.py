@@ -5,10 +5,11 @@ bot without the marketplace learning any of their formats. Failures report a
 status code and never the URL, which commonly carries the operator's own token.
 
 With ``sign = true`` the request is signed with the process's marketplace
-signer as a v2 marketplace request, so the receiving API can verify the sender
-against the storefront principal it already trusts rather than relying on the
-secrecy of its URL. The signed body is the canonical JSON of the event, the
-bytes the signature's body hash covers.
+signer as a v2 marketplace request, under the role and operation the composition
+building the sink states, so the receiving API can verify the sender against the
+principal it already trusts rather than relying on the secrecy of its URL. The
+signed resource is the deliverable's reference, and the signed body the
+canonical JSON of what is sent, the bytes the signature's body hash covers.
 """
 
 from __future__ import annotations
@@ -30,8 +31,14 @@ from market_identity import (
 )
 from pydantic import Field
 
-from ..events import DeliveryEvent
-from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
+from ..sinks import (
+    DeclaredSink,
+    Deliverable,
+    DeliveryError,
+    DeliverySink,
+    SigningAs,
+    SinkSettings,
+)
 
 
 class WebhookSinkSettings(SinkSettings):
@@ -51,8 +58,6 @@ class WebhookSinkSettings(SinkSettings):
 
 #: The marketplace v2 request-authentication headers, as every signed
 #: marketplace request carries them.
-SIGNED_DELIVERY_ROLE = "seller"
-SIGNED_DELIVERY_OPERATION = "introduction_delivery"
 _SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
 _IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
 _IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
@@ -63,15 +68,15 @@ _SIGNATURE_HEADER = "X-Market-Signature"
 
 
 def _signed_request(
-    signer: Signer, body: Any, resource: str
+    signer: Signer, signing: SigningAs, body: Any, resource: str
 ) -> tuple[bytes, dict[str, str]]:
     authenticated = sign_request(
         signer=signer,
         envelope=RequestEnvelope(
-            role=SIGNED_DELIVERY_ROLE,
+            role=signing.role,
             principal=signer.identity,
             method="POST",
-            operation=SIGNED_DELIVERY_OPERATION,
+            operation=signing.operation,
             resource=resource,
             request_id=uuid.uuid4().hex,
             timestamp=injected_time.now(),
@@ -93,26 +98,35 @@ def build_webhook_sink(
     settings: Mapping[str, Any],
     *,
     signer: Signer | None = None,
+    signing: SigningAs | None = None,
 ) -> DeliverySink:
-    """Configure the POST-to-an-endpoint sink."""
+    """Configure the POST-to-an-endpoint sink.
+
+    A signing webhook signs with ``signer`` as ``signing`` names, both given by
+    the composition building it.
+    """
 
     config = WebhookSinkSettings.model_validate(dict(settings))
     if config.sign and signer is None:
         raise ValueError("a signing webhook requires the process's marketplace signer")
+    if config.sign and signing is None:
+        raise ValueError(
+            "a signing webhook requires the role and operation its composition signs as"
+        )
     if not config.url.startswith(("http://", "https://")):
         raise ValueError("webhook sink url must be an http or https URL")
     if config.send not in {"json", "text"}:
         raise ValueError("webhook sink send must be 'json' or 'text'")
     timeout = config.timeout_seconds
 
-    def deliver_to_webhook(event: DeliveryEvent) -> None:
+    def deliver_to_webhook(event: Deliverable) -> None:
         if config.send == "text":
-            body = {"text": event.rendered}
+            body: Any = {"text": event.rendered}
         else:
             body = event.payload()
         signed_headers: dict[str, str] = {}
-        if config.sign and signer is not None:
-            data, signed_headers = _signed_request(signer, body, event.obligation_ref)
+        if config.sign and signer is not None and signing is not None:
+            data, signed_headers = _signed_request(signer, signing, body, event.reference)
         else:
             data = json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
         request = urllib.request.Request(  # noqa: S310 - scheme checked above

@@ -82,19 +82,28 @@ def seeded(ledger: CapacityLedgerService) -> CapacityLedgerService:
     return ledger
 
 
+class _WritingRecorder:
+    """Writes each lease end's identity beside it, as a record-time hook does,
+    failing while ``fail`` is set."""
+
+    def __init__(self, table: Table) -> None:
+        self.table = table
+        self.fail = True
+
+    def record(self, session, draft):
+        if draft.kind == "site.lease_ended":
+            session.execute(self.table.insert().values(event_id=draft.details["event_id"]))
+            if self.fail:
+                raise RuntimeError("the event's write failed")
+
+
 @pytest.mark.parametrize("transition", ["release", "begin_releasing", "release_failure", "force_release"])
-def test_lease_end_and_borrowed_outbox_are_atomic_and_deduplicated(transition):
-    outbox = Table("fixture_end_outbox", MetaData(), Column("event_id", String, primary_key=True))
-    fail = [True]
-
-    def reserve_report(db, payload):
-        db.execute(outbox.insert().values(event_id=payload["event_id"]))
-        if fail[0]:
-            raise RuntimeError("report reservation failed")
-
-    ledger = _make_ledger(site_id="fixture-site", lease_end_effect=reserve_report)
+def test_a_lease_end_and_what_its_event_writes_are_atomic_and_deduplicated(transition):
+    written = Table("fixture_end_reports", MetaData(), Column("event_id", String, primary_key=True))
+    recorder = _WritingRecorder(written)
+    ledger = _make_ledger(site_id="fixture-site", event_recorder=recorder)
     with ledger._session_factory() as db, db.begin():
-        outbox.create(db.connection())
+        written.create(db.connection())
         db.add(CapacityReservation(
             capacity_reservation_id="fixture-end", state="leased", offering_mode="vm",
         ))
@@ -108,20 +117,20 @@ def test_lease_end_and_borrowed_outbox_are_atomic_and_deduplicated(transition):
             return ledger.record_release_failed("fixture-end", reason="fixture failure")
         return ledger.begin_releasing("fixture-end", release_job_id="fixture-release")
 
-    with pytest.raises(RuntimeError, match="report reservation failed"):
+    with pytest.raises(RuntimeError, match="the event's write failed"):
         end()
     assert ledger.get_reservation("fixture-end")["state"] == "leased"
     assert ledger.lease_end_events("fixture-end") == []
     with ledger._session_factory() as db:
-        assert db.execute(select(outbox)).all() == []
-    fail[0] = False
+        assert db.execute(select(written)).all() == []
+    recorder.fail = False
     assert end() is not None
     original = ledger.lease_end_events("fixture-end")
     assert len(original) == 1
     end()
     assert ledger.lease_end_events("fixture-end") == original
     with ledger._session_factory() as db:
-        assert db.execute(select(outbox.c.event_id)).scalars().all() == [original[0]["event_id"]]
+        assert db.execute(select(written.c.event_id)).scalars().all() == [original[0]["event_id"]]
 
 
 def test_snapshot_reports_availability(seeded: CapacityLedgerService):
