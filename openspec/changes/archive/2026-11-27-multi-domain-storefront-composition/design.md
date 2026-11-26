@@ -1,3 +1,5 @@
+Archived 2026-11-27 as delivered. "Context" through "Migration Plan" below are the design as written on 2026-08-15: "Context" describes the system before the change, and the decisions describe the plan. Notes dated 2026-11-27 say where the code differs today, and "Disposition of the original delta requirements" at the end says where each requirement's rule lives.
+
 ## Context
 
 See `proposal.md` for motivation. The implementation must start from these observed boundaries:
@@ -85,6 +87,8 @@ The check records exact promoted headings, package APIs, and focused evidence in
   fulfillment contexts, uses exact-site methods for accepted work, and keeps
   concrete market meaning behind the selected contract.
 
+*2026-11-27:* the requirement titles this record cites have changed. `market-composition`'s "Storefront roots inject one validated domain contract" was replaced by this change's "Storefront roots inject a frozen domain registry"; `resource-pool-management`'s is now "Pool-declared deliverable offering modes"; `site-capacity`'s is now "Requested offering mode is required and bounded by the pool". `test_domain_runtime_parameterization.py` no longer exists; the VM root's contract validation is covered by `domains/vms/storefront/tests/unit/test_domain_runtime_wiring.py`. Commits `18083392` and `3b46f6f8` are in this repository. Bare metal's domain-local negotiation service was deleted by `bare-metal-mock-provisioned-deal` (archived 2026-10-09), which composed bare-metal negotiation onto the kit runtime; its own listing and negotiate routes remain.
+
 ### 2. Use a frozen registration registry; keep mode and domain key distinct
 
 Add a core-owned immutable composition carrier with these semantics:
@@ -110,6 +114,8 @@ The serializable binding contains no callable, URL, provider field, or secret. `
 
 Resolution compares all binding fields and returns the already registered object. It never calls an entry point during a request and never constructs a contract from stored strings. A stable domain identity is unique in the current core contract, so simultaneously registering two API versions of that identity remains invalid; accepting an old durable version requires installing that exact version as the sole registration for the identity during recovery or completing an explicit domain migration.
 
+*2026-11-27:* no domain migration exists (decision 8).
+
 Alternative considered: use artifact `kind` or `offering_mode` as the only key. Rejected because each is caller/public payload, neither pins the core plugin API version, and VM's domain identity is not its pool mode.
 
 Alternative considered: ordered registrations with a default. Rejected because order changes across configuration renders and a one-element registry would silently recreate the VM fallback.
@@ -121,6 +127,8 @@ Alternative considered: ordered registrations with a default. Rejected because o
 The current `market-storefront` executable becomes the compute-family composition root. Installed VM and bare-metal storefront contributions provide full contracts through a dedicated storefront-contribution entry-point group; this is distinct from `market.storefront_domains`, whose concept-level contracts may intentionally omit role hooks. Configuration names each contribution and asserts its mode, identity, and version; the loader verifies those assertions against the returned object.
 
 The bare-metal executable, when retained for a one-domain deployment, is reduced to the same factory with one explicit registration. Its independent `api.py`/server/runtime route orchestration and VM-only handler branches are removed after callers/tests move. This is a clean cutover, not a proxy from one app into another.
+
+*2026-11-27 — not built.* `build_vm_storefront_app(*, registry)` takes the frozen registry and builds the VM application: it resolves the `vm` registration and builds VM services alone (`domains/vms/storefront/src/market_storefront/server.py`), its negotiation runtime and listing service refuse a binding other than that registration's (`negotiation_runtime.py`, `services/listing_service.py`), its publication loop builds the VM source alone (`publication_wiring.py`), and its migration chain holds no bare-metal table (`utils/migrations.py`). The `market-storefront` distribution installs the bare-metal contribution, so its configuration may register it; that registration is validated and reported and serves nothing. The bare-metal executable was not reduced to this factory: it keeps `server.py`, `runtime.py`, and `api.py` with its own listing and negotiate routes, over a registry of its one registration. The kit composition both executables build through, `market_storefront_kit.composition.StorefrontComposition`, takes the registry and one selected binding. One executable serving both domains, and the removal of the dedicated bare-metal storefront, are `unify-vm-and-bare-metal-storefronts`'s.
 
 Alternative considered: mount the existing VM and bare-metal FastAPI apps under two prefixes. Rejected because listing IDs, negotiation continuation, recovery workers, operator pause, and settlement identity would still have two state authorities and would not prove one storefront.
 
@@ -167,6 +175,8 @@ The selector sequence is fixed:
 
 A registration or pool mode can disappear for new work, but accepted binding identity never changes. Startup fails readiness when a nonterminal/recoverable record cannot resolve. Terminal history with an unavailable old codec remains inspectable as safe opaque status; any operation requesting domain decoding reports the missing exact binding rather than guessing.
 
+*2026-11-27:* two steps differ. Publication does not iterate the registrations: each publisher names the contributions whose sources it builds (`core_storefront.publication_plugins.build_registry_publication_sources`), and the VM loop names its own alone. Startup does not read stored bindings against the registry: a record whose binding the registry cannot resolve fails with a binding error when an operation next resolves it.
+
 ### 6. Make trusted site routing durable, not cache-dependent
 
 Extend the aggregate capacity and fulfillment clients with explicit site-targeted methods/parameters for commit, release, truncate, schedule, begin, status, result, and begin-teardown. When `site_id` is present, the client selects exactly that configured client, verifies its pinned authority principal, and propagates refusal/error. It does not call `_route_order`.
@@ -182,6 +192,8 @@ A publisher reads the accepted pool-declaration projection and suppresses modes 
 Mode withdrawal closes publications/new work. It does not rewrite accepted bindings, but it can prevent a held request from advancing when the pool prerequisite specifies that behavior. Recovery may observe/reclaim/teardown existing effects; it may not submit a fresh create that the current authority rejects.
 
 ### 8. Migrate one quiesced legacy database with explicit provenance
+
+*2026-11-27 — removed code.* The command below and `market_storefront.domain_migration` were built, shipped in marketplace 0.3.0, and removed by `add-database-migration-commands` (archived 2026-11-09), with their tests and the requirement "Legacy storefront domain migration is transactional": the migration's only input is a storefront database from before marketplace 0.3.0, which every storefront's migration baseline refuses. The binding tables are created by that baseline. The rest of this decision is kept as the record of what was built.
 
 Add a migration command consistent with existing configuration migration practice:
 
@@ -234,6 +246,8 @@ domain_identity = "bare_metal.v1"
 contract_version = "1.0"
 ```
 
+*2026-11-27:* the format built is an array of tables, `[[storefront_domains]]`, each with exactly `contribution`, `offering_mode`, `domain_identity`, and `contract_version`; there is no `schema_version`, `enabled` list, or `registrations` table (`core_storefront.domain_plugins.parse_storefront_contribution_selections`). Helm passes each agent's `config` through a closed schema generated from the storefront's settings models.
+
 Order is for deterministic status/publication iteration only, never fallback or precedence. Generated config and Helm schemas reject duplicates, unknown keys, empty registrations, and provider/secret fields. Trusted site URLs and public principals remain in their existing public connection configuration; signer credentials remain Secret-mounted.
 
 The packaged settings file contains no `storefront_domains` entry. Dynaconf
@@ -251,6 +265,7 @@ The storefront wheel/image installs the shared role plus exact VM and bare-metal
 - Storefront integration tests use the canonical typed storefront and provisioning clients against real applications/databases. They cover publication, negotiation, settlement, exact site calls, restart, result, teardown, and transactional migration.
 - Package/render tests use staged wheels and the real image/config/Helm/Compose surfaces.
 - One system scenario runs a single multi-domain storefront through both complete lifecycles at one accepted authority, including cross-domain substitutions and independent failure. It does not duplicate Compute-40's later two-authority topology proof or `bare-metal-buyer-domain`'s buyer CLI acceptance.
+  *2026-11-27 — not built.* No such scenario exists, and none can be written while no storefront process serves both domains (decision 3). A VM deal and a bare-metal deal each run in their own lane. The one-process scenario is `unify-vm-and-bare-metal-storefronts`'s lane scenario.
 
 No test uses sleeps for recovery, raw HTTP where a canonical client exists, route-internal calls for cross-service proof, no-op fulfillment, or a boolean success flag in place of observed result/teardown/capacity restoration.
 
@@ -272,6 +287,8 @@ No test uses sleeps for recovery, raw HTTP where a canonical client exists, rout
 - Shared client/contract fixtures only if observable carriers change: `core/storefront-client/src/storefront_client/{models.py,client.py,fixtures/}` and producer/consumer integration suites.
 - Packaging/deployment: `core/storefront/pyproject.toml`, both storefront `pyproject.toml`/Makefiles, `domains/Makefile`, storefront Dockerfile/build inputs, `compose.vms.yml`, relevant domain Compose configuration, `helm/charts/storefront/{values.yaml,values.schema.json,templates/configmap.yaml,templates/deployment.yaml}`, parent `helm/{values.yaml,values.schema.json}`, fixtures, and E2E staged state/scenarios.
 
+*2026-11-27:* paths above that have moved or gone: `core_storefront/sqlite_migrations.py` is `core_storefront/migrations.py`; `core_storefront/negotiation_sync.py`, `market_storefront/utils/sync_negotiation.py`, and `arkhai_bare_metal_storefront/negotiation_service.py` no longer exist; the VM reconciler is `domains/vms/listings/src/arkhai_vms_listings/reconciler.py`.
+
 ## Migration Plan
 
 1. Complete and record prerequisite contract checks.
@@ -282,26 +299,56 @@ No test uses sleeps for recovery, raw HTTP where a canonical client exists, rout
 6. Build/install/render staged artifacts, run complete one-domain regressions and the dual-domain system scenario, then activate one combined deployment.
 7. Promote accepted requirements/rationale, update Goal 3, complete hygiene and compression, and archive only after strict validation.
 
+*2026-11-27:* steps 1, 2, 4, and 5 were carried out for the VM storefront, and step 7's promotion on 2026-08-15. Step 3's command is removed (decision 8). Step 6's dual-domain scenario and combined activation did not happen (decisions 3 and 11).
+
 ## Design Promotion Record
 
 | Decision | Disposition | Permanent location |
 |---|---|---|
 | Frozen configured contributions; mode and domain identity remain distinct; durable resolution returns only the exact startup object | permanent | `openspec/specs/market-composition/spec.md#requirement-storefront-roots-inject-a-frozen-domain-registry`, companion `architecture.md#frozen-storefront-registry-and-executable-ownership`, and `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition` |
-| Common listing binding, exact public mode, collision-safe provenance, and site-pinned routing | permanent | `openspec/specs/storefront-publication/spec.md#requirement-durable-bindings-govern-multi-domain-publication`, `#requirement-trusted-listing-mappings-route-to-one-site`, and companion `architecture.md#immutable-domain-bound-publication` |
+| Common listing binding, exact public mode, collision-safe provenance, and site-pinned routing | permanent | `openspec/specs/storefront-publication/spec.md#requirement-durable-bindings-govern-multi-domain-publication`, `#requirement-trusted-listing-mappings-route-to-one-site`, and companion `architecture.md#immutable-domain-ownership-and-publication` |
 | Listing binding is copied transactionally into the thread and controls continuation/acceptance | permanent | `openspec/specs/negotiation-protocol/spec.md#requirement-negotiation-inherits-an-immutable-listing-domain-binding` and companion `architecture.md#record-bound-domain-dispatch` |
 | Accepted binding controls settlement, fulfillment, result recovery, and teardown through domain-neutral carriers | permanent | `openspec/specs/settlement-servicing/spec.md#requirement-accepted-domain-binding-governs-the-servicing-lifecycle` and companion `architecture.md#accepted-domain-continuity` |
-| Combined artifact/config topology and preview-first transactional legacy migration | permanent | `openspec/specs/deployment-state/spec.md#requirement-multi-domain-storefront-configuration-is-explicit`, `#requirement-legacy-storefront-domain-migration-is-transactional`, companion `architecture.md#multi-domain-storefront-activation`, and `openspec/specs/market-composition/configuration.md#combined-compute-family-storefront` |
+| Combined artifact/config topology | permanent | `openspec/specs/deployment-state/spec.md#requirement-multi-domain-storefront-configuration-is-explicit`, companion `architecture.md#multi-domain-storefront-activation`, and `openspec/specs/market-composition/configuration.md#combined-compute-family-storefront` |
+| Preview-first transactional legacy migration | superseded | Promoted as `deployment-state`'s "Legacy storefront domain migration is transactional"; removed with the command by `add-database-migration-commands` |
 | Focused cross-domain boundary matrix and real one-process proof jurisdiction | permanent | `openspec/specs/test-compatibility/spec.md#requirement-multi-domain-storefront-selection-has-focused-compatibility-coverage`, companion `architecture.md#multi-domain-storefront-evidence-ownership`, and `openspec/specs/market-composition/testing.md#multi-domain-storefront-composition` |
-| Goal 3 shared shell accepted; bare-metal buyer/producer and Compute-40 live proof remain separate gaps | permanent | `docs/development/ROADMAP.md#goal-3--one-storefront-serving-several-compute-family-domains` |
+| Goal 3's registry and record binding delivered; the bare-metal buyer and producer since delivered; a storefront process serving both domains not built, and owned by `unify-vm-and-bare-metal-storefronts` | permanent | `docs/development/ROADMAP.md#goal-3--one-storefront-serving-several-compute-family-domains` |
 | Process-global contract getters, one-element/default selection, payload-kind routing, cross-site accepted-record fan-out, and parallel VM/bare-metal shared control flow | superseded | Replaced by the permanent registry/binding requirements above |
-| A no-op bare-metal fulfillment hook or VM-shaped compatibility adapter | rejected | Explicit blocker in `test-compatibility` and the Goal 3 gap table |
-| Change-local implementation/debugging commentary | temporary | Retained only in this checked design/tasks history until validation and archive |
+| A no-op bare-metal fulfillment hook or VM-shaped compatibility adapter | rejected | `test-compatibility`'s "Multi-domain storefront selection has focused compatibility coverage", scenario "Full live proof is requested" |
+| Change-local implementation/debugging commentary | temporary | Retained only in this design and task history |
+| The derivation key includes the offering mode and the exact domain identity and contract version | permanent | `openspec/specs/storefront-publication/spec.md#requirement-commercial-mapping-identity`, by the archive |
 
 ## Delta scope
 
-The "Commercial mapping identity" modification adds the offering mode and exact
-domain identity to the derivation key and the "One pool exposes two offering modes"
-scenario; the rest of the block is the current permanent text, which already makes
-the common binding the only listing mapping. The "Role-owned executable composition"
-modification adds the compute-family registration sentences and keeps every current
-scenario.
+The deltas are the corrective pair written on 2026-11-27, each a MODIFIED requirement rebuilt from the permanent text as it stood that day.
+
+- `storefront-publication`, "Commercial mapping identity": adds that a derivation key includes the offering mode and the exact domain identity and contract version. Every other sentence, and every scenario, is the permanent text. `core_storefront.domain_registry.build_storefront_derivation_key` builds the key so. The original delta's scenario "One pool exposes two offering modes" is not carried: no test asserts that two modes over one source identity yield different keys, and no deployment reaches it, since each storefront builds its own publication source alone. `unify-vm-and-bare-metal-storefronts` adds that scenario, with its test, when it makes one pool publishable under two modes.
+- `test-compatibility`, "Multi-domain storefront selection has focused compatibility coverage": drops migration from the coverage it requires, since the migration and its tests are removed; restates the scenario "One and two registrations use the same shell" without the claim of common routes, each storefront executable mounting its own; and restates the scenario "Full live proof is requested", whose condition was the bare-metal contribution or the selected-site lifecycle being unavailable, as what blocks a one-process proof today: no storefront process serves a second registration.
+
+## Disposition of the original delta requirements
+
+The six delta files written with the proposal are deleted. They were not merged: on 2026-08-15 the permanent specifications received the shorter requirement set the Design Promotion Record names, written by hand, and the archive would have refused three of the original requirements as already present and added the rest beside the text that restates them. Each original requirement, and where its rule lives:
+
+| Capability | Original delta requirement | Where its rule lives |
+|---|---|---|
+| `deployment-state` | ADDED "Multi-domain storefront configuration is explicit" | The permanent requirement of the same title, reworded. Its clause that startup rejects a recoverable binding the configuration does not supply was not carried, and startup makes no such check (decision 5) |
+| `deployment-state` | ADDED "Storefront domain-binding migration is transactional and explicit" | Nowhere. Promoted as "Legacy storefront domain migration is transactional" and removed by `add-database-migration-commands` |
+| `deployment-state` | ADDED "Multi-domain packaging and rollout are coordinated" | Its packaging half is in "Multi-domain storefront configuration is explicit"; forward recovery after effects is in the companion's "Multi-domain storefront activation". Its rollout half prescribed the removed migration and lives nowhere |
+| `market-composition` | MODIFIED "Role-owned executable composition" | Not applied. The permanent requirement stands as it was: VM, bare-metal, and API-credit storefront executables are domain-owned composition roots. The modification's claim that a one-domain storefront is no alternate role implementation is not true of them |
+| `market-composition` | ADDED "Storefront domain registrations are explicit and immutable" | "Storefront roots inject a frozen domain registry" |
+| `market-composition` | ADDED "Domain selection comes only from immutable record binding" | "Storefront roots inject a frozen domain registry", with `negotiation-protocol`'s and `settlement-servicing`'s requirements below. Its scenario "Registration order changes after restart" is held by `core/storefront/tests/unit/test_domain_registry.py` and stated nowhere |
+| `market-composition` | ADDED "Shared storefront control flow does not branch on compute domains" | Nowhere, and not true: each storefront keeps its own route set. For VM and bare metal it is `unify-vm-and-bare-metal-storefronts`'s to make true |
+| `negotiation-protocol` | ADDED "Negotiation inherits an immutable listing-domain binding" | The permanent requirement of the same title, condensed |
+| `negotiation-protocol` | ADDED "Continuation and acceptance use the recorded thread binding" | The last sentence of "Negotiation inherits an immutable listing-domain binding" and its scenario "Configuration changes during an accepted thread" |
+| `negotiation-protocol` | ADDED "Accepted domain binding cannot be rewritten" | The same scenario; the immutability itself is `storefront-publication`'s "Durable bindings govern multi-domain publication" and the binding triggers of the storefront baseline |
+| `settlement-servicing` | ADDED "Accepted domain binding governs the entire servicing lifecycle" | "Accepted domain binding governs the servicing lifecycle" |
+| `settlement-servicing` | ADDED "Recovery resolves domain and site from durable state" | That requirement's scenarios "Teardown repeats after restart" and "Contract is unavailable after acceptance" |
+| `settlement-servicing` | ADDED "Cross-domain failures and teardown remain isolated" | Not stated separately; that requirement's scenario "VM and bare-metal obligations service concurrently" is the nearest |
+| `storefront-publication` | MODIFIED "Commercial mapping identity" | Its clause is kept, rebuilt, as one of the corrective pair. Its scenario "One pool exposes two offering modes" is not carried and is left to `unify-vm-and-bare-metal-storefronts` ("Delta scope", above) |
+| `storefront-publication` | ADDED "Published offering mode is exact and pool-authorized" | "Durable bindings govern multi-domain publication" |
+| `storefront-publication` | ADDED "Listing and mapping bindings are immutable" | "Durable bindings govern multi-domain publication" |
+| `storefront-publication` | ADDED "Trusted site routing applies across all offering modes" | "Trusted listing mappings route to one site", beside "Site-pinned claim routing" |
+| `test-compatibility` | ADDED "Multi-domain storefront selection has focused compatibility coverage" | The permanent requirement of the same title, which the corrective pair modifies |
+| `test-compatibility` | ADDED "One storefront proves complete VM and bare-metal lifecycles" | Nowhere as a requirement: unmet. The scenario "Full live proof is requested" says what blocks it, and `unify-vm-and-bare-metal-storefronts`'s lane scenario is the proof |
+| `test-compatibility` | ADDED "Pool mode and trusted site isolation are proven together" | Nowhere under this capability; the behaviours are `site-capacity`'s and `storefront-publication`'s own evidence |
+| `test-compatibility` | ADDED "Multi-domain package and deployment evidence uses staged artifacts" | The scenario "Installed-artifact deployment is inspected" of "Multi-domain storefront selection has focused compatibility coverage" |

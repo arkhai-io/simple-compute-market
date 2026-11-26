@@ -332,18 +332,28 @@ admission is a conflict, distinct from an unknown site or a changed binding.
 owns its aggregate, as bare metal does for its durable reservation-to-site map,
 builds one over that. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#storefront-composition-kit).
 
-The storefront role is one domain-neutral compute-family shell. At startup it
-discovers installed `market.storefront.contributions`, applies the operator's
-explicit `[storefront_domains]` selection, and freezes one registry. Each
-registration binds a contribution ID, pool offering mode, exact domain
-identity, contract version, and the exact validated `MarketDomainContract`.
-One-domain deployments use the identical registry with one entry; there is no
-singleton, module getter, installed-order fallback, global selection, or
-contract reconstruction.
+Every storefront resolves contracts through a frozen
+`StorefrontDomainRegistry`. Each registration binds a contribution ID, pool offering mode, exact domain
+identity, contract version, and the exact validated `MarketDomainContract`. A
+durable binding resolves only to the registered object: no storefront selects
+a contract from installed order, a payload, or a default, or reconstructs one
+from stored strings.
 
-The common database owns immutable listing, negotiation-thread, and domain
-artifact bindings. They retain the selected site, mode, domain
-identity/version, and collision-safe provenance. Opening a thread inherits its
+VM, bare metal, and API credits each run a dedicated storefront executable,
+and each executable builds its services, routes, and migration chain for one
+registration. The bare-metal and API-credit executables register their own
+contract alone. The VM executable discovers the installed
+`market.storefront_contributions` entry points, applies the operator's explicit
+`[[storefront_domains]]` selection, and freezes the result; its image installs
+the bare-metal contribution too, so a selection may name both. A registration
+beyond the one an executable serves is validated at startup and reported in
+its system status, and serves nothing: the executable publishes, negotiates,
+and delivers only its own mode's listings, and refuses a record bound to
+another registration.
+
+Each storefront's database holds immutable listing, negotiation-thread, and
+domain-artifact bindings in one common schema. They retain the selected site,
+mode, domain identity/version, and collision-safe provenance. Opening a thread inherits its
 listing binding before domain policy runs. Publication, negotiation,
 settlement, fulfillment, result recovery, and teardown resolve only that
 recorded binding against the frozen registry. Selected-site calls are pinned
@@ -385,12 +395,6 @@ step records its intent before submitting and records the attestation UID
 before completing. An evidence submission whose outcome is unknown is never
 repeated: it parks its obligation for an operator, and the storefront's status
 counts the parked obligations.
-
-Legacy single-domain databases cross this boundary only through an explicit
-contribution migration adapter. Check mode validates the complete population.
-Write mode uses a restrictive backup and atomic replacement; ambiguity,
-orphaned provenance, cross-domain rows, or unsupported versions abort without
-partial state.
 
 ### Settlement configuration
 
