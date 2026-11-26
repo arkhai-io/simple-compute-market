@@ -1,420 +1,507 @@
-# Design — compute lease delivery deadlines
+# Design: renewable-compute-lease-deadlines
 
 ## Context
 
-`kit/site` owns the capacity reservation and agreed lease window. Its commit is
-idempotent, truncation only moves the end earlier, and admission accounts the full
-agreed window. `list_lease_due` currently selects leased rows by `lease_end_utc`;
-compute's lease lifecycle begins release and performs provider work outside the
-ledger transaction. API credits commits quota holds with no lease end.
+**What the site does today.** `kit/site` owns the reservation and the agreed lease
+window. Commit is idempotent and records only the window
+(`kit/site/src/market_site/ledger.py`, `commit`). The due read selects a `leased`
+reservation by its `lease_end_utc` alone (`list_lease_due`), and entering `releasing` is
+conditioned on the reservation's state, not on what the watchdog read
+(`begin_releasing`). Activation writes `activated_at_utc` once and changes nothing else;
+whether a lease is activated is derived from it. The compute lease lifecycle begins
+release and does provider work outside the ledger's transaction
+(`provisioning/compute/src/compute_provisioning/lease_lifecycle.py`). The API-credits
+service hosts the same ledger and commits quota holds with no lease end.
 
-A storefront that dies before delivery can therefore hold compute capacity until
-the maximum term. A delivery deadline on the unactivated lease closes that gap, and
-the same number is the buyer's term. After activation, storefront liveness remains
-the seller's risk: an operating resource is not reclaimed simply because storefront
-bookkeeping has stopped.
+**What the storefront enforces.** End service's delivery record holds the deal's
+commitment instant and accepted `delivery_deadline_seconds`, and its deadline is the
+earlier of the term end and that many seconds after the later of the commitment instant
+and the start (`kit/deal-servicing/src/market_deal_servicing/journal.py`,
+`DeliveryRecord`). A missed deadline is recorded as the seller's non-delivery, with its
+`delivery_end` filing. For a deal that is not once-only it is recorded only after a
+payment read made at or after the deadline; until then admission answers
+`awaiting_observation` and nothing is recorded or filed. The deadline is met by the
+storefront's durable `available` record, not by the site's activation (`deal-lifecycle`'s
+"Non-delivery is established at the delivery deadline").
 
-The lifecycle frame is `agreed-evidence-and-early-termination`: commitment makes
-the agreement binding; end service realizes the earliest final request, and money
-moves only at the payment and dispute authorities. A site's signed statement is
-kept evidence, not a new authority record. These authority boundaries and the
-deadline-only scope are settled.
+**What is published.** A compute option whose mechanism has a lifecycle adapter carries
+the value the composition's `delivery_deadline_for_pool` port gives, else the value the
+payments clause configures
+(`kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`;
+`kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`). The port
+defaults to none in both compute compositions. A default buyer refuses such an option
+with no deadline. Two checks read the published value: derivation refuses an option
+whose dispute window is shorter than the deadline plus the authority's minimum window,
+and acceptance requires a recurring horizon to leave the deadline plus one whole period
+(`kit/settlement-runtime/src/market_settlement_runtime/horizon.py`).
 
-### What the landed code provides
+**What a storefront can read of a pool.** The site's pool projection carries a pool's
+`label`, `enabled`, `mechanism`, `policy_tags` and `pool_views`
+(`kit/site/src/market_site/projections.py`), and storefronts read `policy_tags` from it
+verbatim. A provider's defaults are the provisioning service's composition data and are
+projected nowhere.
 
-- **Activation.** `activate-compute-leases-at-the-site` added one nullable
-  `activated_at_utc` (`kit/site/src/market_site/db.py`), written once by
-  `activate_lease` from the site's clock on a `leased` reservation with a lease end
-  (`kit/site/src/market_site/ledger.py`). Whether a lease is activated is derived from
-  it and stored nowhere else; activation changes no state, window or admission. The
-  instant shows on the site's reservation view and on the compute contract's
-  `LeaseView`. There is no compatibility path for a site without activation. The site
-  schema is `kit/site/src/market_site/migrations.py`, which both the compute
-  provisioning service and the API-credits service apply.
-- **Delivery.** `unify-compute-delivery-path` commits every compute deal through the
-  storefront's capacity effects (`CapacityEffects.commit`,
-  `kit/capacity-publication/src/market_capacity_publication/capacity.py`) from
-  `domains/compute/delivery/src/compute_delivery/path.py`, with the Agreement's window
-  and no deadline or anchor. A site refusal of the commit after reservation is recorded
-  as seller failure before dispatch, with the reservation released through end
-  service's no-dispatch path (`openspec/specs/compute-delivery/spec.md`). A refused
-  activation on a lease the site reports releasing or released is already handed to end
-  service as `activation_lapse`.
-- **The storefront's deadline.** The servicing journal records the deal's commitment
-  instant and accepted `delivery_deadline_seconds` and classifies a missed deadline as
-  non-delivery at min(term end, max(start, commitment) + deadline)
-  (`kit/deal-servicing/src/market_deal_servicing/journal.py`).
-- **Publication today.** `negotiate-open-ended-compute-terms` (archived) publishes a
-  compute option's deadline as the pool's effective value when the composition's
-  `delivery_deadline_for_pool` port supplies one, else the payments clause's own optional
-  `delivery_deadline_seconds`
-  (`kit/settlement-runtime/src/market_settlement_runtime/rate_publication.py`,
-  `kit/arkhai-payments/src/market_arkhai_payments/settlement_config.py`), as the
-  permanent `deal-lifecycle` requirement "The delivery deadline is the availability term
-  the site or the clause sets" states. Neither compute composition wires the port
-  (`domains/vms/storefront/src/market_storefront/settlement_composition.py`,
-  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/settlement_composition.py`),
-  so every published deadline is the clause's, or none. The clause value is a lifecycle
-  key in a settlement mechanism's input; negotiate kept it out of neutral publication by
-  letting the mechanism apply the precedence, but the published term can still drift
-  from any capacity policy. The default buyer refuses an option without a deadline,
-  with `--allow-no-delivery-deadline` as its waiver
-  (`kit/settlement-runtime/src/market_settlement_runtime/buyer_terms.py`). No site
-  enforces a deadline.
-- **Pool facts.** `kit/site` still imports `kit/resource-pools` directly;
-  `inject-site-pool-authority` replaces that edge with a session-scoped port. The
-  site's pool projection already carries each pool's `policy_tags`
-  (`kit/site/src/market_site/projections.py`).
+**The lease-end report.** The signed `lease_ended` record carries `claimed_deadline` and
+`deadline_phase`, required together
+(`provisioning/compute/contracts/src/compute_provisioning_contracts/lease_ends.py`). The
+site writes phase `lease` at a term end and `reservation` at a hold's expiry. The
+storefront's classifier reads the phase: `lease` at the term end is the terms' end,
+`reservation` with nothing available is a provisioning failure, and a phase it does not
+know stays unclassified
+(`domains/compute/src/arkhai_compute/end_classification.py`, `classify_site_end`).
 
-## Goals / Non-Goals
+**One commit step.** Both compute domains commit at one place, the delivery path's
+commit step, which also adopts a live hold
+(`domains/compute/delivery/src/compute_delivery/path.py`), through
+`CapacityEffects.commit` and the site client to the site's capacity route. The compute
+contract writes no lease. The path already holds the delivery record. On a payments
+deal the commitment instant is the receipt's approval instant, the payment service's
+clock. Otherwise the VM storefront records the Agreement's acceptance instant
+(`domains/vms/storefront/src/market_storefront/delivery_records.py`) and the bare-metal
+storefront records its database's clock at evidence verification
+(`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/sqlite_client.py`).
 
-**Goals:** bound capacity held between site commit and delivery; make activation
-and expiry race safely; publish the pool's deadline as the buyer's term through the wired
-port and retire the clause fallback; keep payment classifications out of the site; leave old
-leases and API-credit quota holds unchanged.
+**Pool facts.** The site ledger reads pool rows from `kit/resource-pools` directly.
+`inject-site-pool-authority` replaces that with pool facts the site's composition
+injects, read in the caller's session, and is in design. This change needs one more
+fact through that port: the pool's resolved delivery deadline, readable in the commit's
+own transaction. The port's names, its typing and how a missing fact fails follow that
+change's recorded design.
 
-**Non-goals:** the activation instant, transition and typed views
-(`activate-compute-leases-at-the-site`), renewal of active leases, lease extension,
-payment or refund operations, and delivery caller wiring.
-This is a recommended cooperative seller implementation, not a protocol requirement
-that a buyer may assume an arbitrary seller obeys.
+**Released.** `marketplace-v0.4.0` carries all of the above. Its supported VM
+configuration sets the clause's `delivery_deadline_seconds`, and its operator handbook
+has an operator end an undelivered lease by hand.
 
 ## Decisions
 
-### D1. The deadline written at commit
+### D1 — The deadline is written at commit, from the deal's accepted value
 
-This change adds its own nullable activation-deadline column to the shared site schema
-(its name is open below), applied by both hosting services; existing rows stay null.
-It adds no phase column: an unactivated lease is one whose `activated_at_utc` is null.
+A reservation gains one nullable activation deadline, in the shared site schema both
+ledger-hosting services apply. Existing rows have none. No phase is stored: an
+unactivated lease is one whose `activated_at_utc` is null.
 
-- On first commit with a resolved delivery deadline, record the deadline
-  max(committed_at_utc, lease_start_utc) + delivery_deadline_seconds,
-  where `delivery_deadline_seconds` is the deal's accepted value, supplied with the
-  commit as a fact of the deal like its window, and the pool's current effective value
-  is its ceiling: the site refuses a commit whose accepted deadline exceeds what the
-  pool now grants, or that carries one where the pool now enforces none, since the
-  seller cannot ask its site for more time than the site gives — a refusal that
-  delivery classifies as seller failure before dispatch: no provisioning occurs, and the
-  reservation the storefront already holds is released through the foundation's
-  no-dispatch path, not by the site on refusal. A pool
-  lengthened after acceptance changes nothing for the deal; a pool shortened below an
-  accepted deal's value refuses that deal rather than reclaiming it early, and the
-  listing republishes with the new value. A commit carrying no accepted deadline (a
-  buyer that opted out of the term) takes the pool's current policy as the site's own
-  capacity safeguard. `committed_at_utc` is the deal's commitment instant the storefront
-  supplies with the commit — the same instant its servicing journal records, which is
-  the payment authority's record of the buyer's approval on a hosted deal and the
-  mechanism's commitment act otherwise — so the site and the storefront compute the
-  same deadline. The site refuses an anchor after its
-  own clock and can verify nothing else about it: it knows no payment mechanism, so the
-  anchor is the storefront's word. The site's deadline is therefore the seller's own
-  capacity safeguard — it reclaims a lease its storefront never activated — and not the
-  buyer's guarantee of the accepted deadline; a storefront that sits on an approved deal
-  and supplies a later anchor lengthens its physical deadline, not its promise. The
-  buyer's deadline is judged by the dispute authority from the payment authority's own
-  approval record and the Agreement, and the storefront's journaled commit, with the
-  anchor it supplied, is evidence against it where the two disagree.
-  This protects a forward reservation without expiring it before its admitted start;
-  delivery defers dispatch/activation/access until that start (no early lead time).
-- Commit retried leaves the original deadline unchanged, whatever the pool now says.
-- The due instant of an unactivated lease is the earlier of its agreed end and a
-  non-null deadline; an activated lease is due at its agreed end. Activation writes
-  only `activated_at_utc`, as the activation contract states; the deadline stays
-  recorded as evidence of what was committed. Truncation moves only the agreed end, and
-  the due instant follows from it, so no copied deadline needs capping.
-- Admission always accounts against the agreed window. The earlier activation
-  deadline does not free capacity for a future reservation before release succeeds.
-- A pool resolving no delivery deadline records no deadline; its leases continue
-  to expire only at their end. This is not a billing classification. **Recommendation:** a pool resolving a delivery deadline requires a
-  finite end at commit; unsupported open-ended use is refused rather than creating
-  an unbounded activation.
+- **What is written.** On the first commit that carries the deal's accepted
+  `delivery_deadline_seconds`, the site records the later of the deal's commitment
+  instant and the lease start, plus that many seconds, on every pool. The commit carries
+  the accepted value as a fact of the deal, like its window. A commit that carries none
+  takes the value its pool resolves (D3), as the site's own safeguard: an option whose
+  mechanism has no lifecycle adapter, a buyer who waived the term, and a storefront that
+  predates this change all commit so. A commit that carries none, to a pool that
+  resolves none, records none.
+- **A value the pool resolves is a ceiling.** A commit whose accepted deadline exceeds
+  what the pool now resolves is refused with nothing written: a seller cannot ask its
+  site for more time than the site gives. A pool that resolves none sets no ceiling.
+  Delivery records a refused commit of a reservation it holds as seller failure before
+  dispatch and releases the reservation through end service's no-dispatch path
+  (`compute-delivery`'s "An undelivered deal is handed to the end operation with
+  classified evidence"). A pool lengthened after acceptance changes nothing for the
+  deal; a pool shortened below the accepted value refuses the deal instead of
+  reclaiming it early.
+- **The site enforces the deadline it is told, on every pool.** A pool that resolves
+  none contributes no value of the site's own (D3). It does not stop the site reclaiming
+  a lease at the deadline the deal accepted. The storefront makes the delivery promise
+  and enforces it; once the site is told the deadline, leaving an operator to end the
+  lease by hand would protect nothing.
+- **The record does not move.** A repeated commit leaves it unchanged, whatever the pool
+  now resolves. Activation writes only `activated_at_utc`. Truncation moves only the
+  agreed end.
+- **The due instant.** A lease with a deadline and no recorded activation is due at the
+  earlier of the deadline and its agreed end. Every other lease is due at its agreed
+  end. Admission accounts the agreed window throughout: an elapsed deadline frees no
+  capacity until release succeeds.
 
-### D2. Expiry claims the deadline and activation it read
+The site's deadline is the seller's capacity safeguard, not the buyer's guarantee. The
+site knows no payment mechanism, so the commitment instant is the storefront's word. The
+buyer's deadline is judged by the dispute authority from the payment authority's
+approval record and the Agreement, and the storefront's journaled commit is evidence
+where the two disagree.
 
-The due query returns the agreed end, deadline and whether `activated_at_utc` was null
-when the row became due, plus whether the cause is activation lapse or ordinary term
-end. Before a teardown side effect, expiry conditionally claims `state == leased` and
-exact equality of that observed tuple inside the ledger's serialized transaction. If
-activation or truncation changed the tuple, the claim fails with no event, outbox item
-or provider call; the next pass reevaluates. A matching claim begins `releasing`;
-activation then cannot undo it, since activation is refused from `releasing`. No
-database lock spans a provider call.
+Rejected:
 
-**The deadline is enforced by the claim, not by the clock.** Activation after an
-elapsed deadline is allowed while the row remains unclaimed; it is a capacity fact
-and not delivery — the lifecycle classifies a deal whose buyer could not use the
-resource by the accepted deadline as non-delivery whatever the site records, and
-starts no new billing on it (foundation D8). Refusing it merely
-because a watchdog poll has not happened would turn poll latency into an eviction.
-The agreed end remains an independent bound, so activation never extends service
-past it. On a tie between activation deadline and term end, report ordinary term
-end (recommendation: it avoids attributing an unavoidable term end to failed delivery).
+- A site-wide deadline, or reuse of the hold's time to live. Providers differ in how
+  long delivery takes.
+- A stored phase beside `activated_at_utc`. Activation derives it and stores it nowhere.
+- The deadline as a movable agreed end. It changes what admission accounts.
+- Reclaiming a lease early when its pool is shortened. The deal was accepted at the
+  longer value.
+- A commercial flag on the commit. The site stays independent of how a deal is billed
+  and of its class, which is read from its early-termination entitlements.
 
-The claim condition supplements the existing release guard: it does not permit
-freeing capacity while a create is in flight or teardown is unproven. It must be
-carried through direct release, deferred release and failure paths, not checked
-only after a provider action.
+### D2 — Expiry claims the lease as it read it
 
-### D3. Provider-declared delivery deadline: the pool's term, published and enforced
+The due read returns, for each due lease, what made it due: its agreed end, any
+deadline, and whether an activation was recorded. Before any teardown effect, expiry's
+transition into `releasing` is conditioned on the reservation still being `leased` and
+on those values being unchanged, inside the ledger's serialized transaction. If
+activation or truncation changed them, the claim fails with no write, no event, no
+outbox entry and no provider call, and the next pass reads again. A claim that matches
+begins `releasing`, which activation cannot undo.
 
-`delivery_deadline_seconds` is a Resource Pool policy tag: the seconds after
-max(commitment instant, lease start) within which the site activates the lease, the site's reclaim rule for a lease never activated. It is
-also the buyer's term: the storefront reads the pool's effective value from the site's
-pool projection at publication and publishes it as the option's
-`lifecycle.delivery_deadline_seconds` (foundation D5), under the same name. The
-accepted value travels with the commit, and the site enforces exactly what was
-accepted, bounded by its own current policy (D1), from an anchor it cannot verify. The
-site's deadline is the seller's safeguard against its own storefront's absence; the
-promise the buyer read is checked by the dispute authority against the payment
-authority's approval record, which the buyer holds. It is not money or a minimum spend.
-The two readings of the tag — publication's and commit's — can differ when an operator
-edits it between them; the accepted value wins where the pool still grants it, and the
-commit is refused where it does not, so no deal is silently given more time than it
-promised or less than it was promised.
+The deadline is enforced by the claim, not by the clock. Activation stays admissible on
+any `leased` reservation with a lease end, so a lease whose deadline has elapsed and
+that expiry has not claimed can still be activated. Refusing it would turn the
+watchdog's polling interval into an eviction. Such an activation is a capacity fact:
+the storefront's own deadline rule decides whether the deal was delivered.
 
-The clause value publication falls back to today is retired. Each compute composition
-wires `delivery_deadline_for_pool` to the pool's effective value from the site's pool
-projection (D6); `deal-lifecycle`'s "The delivery deadline is the availability term the
-site or the clause sets" and "Lifecycle terms are part of the selected option" are
-re-amended to the pool's term enforced by the site; and the payments clause's
-`delivery_deadline_seconds` is removed, so no settlement mechanism's input carries a
-lifecycle key. The storefront journal keeps
-classifying a missed accepted deadline as non-delivery; the site adds capacity reclaim
-when the storefront is absent.
+The claim supplements the release guard. It does not free capacity while a create is in
+flight or teardown is unproven, and no database lock spans a provider call.
 
-Each provider declares, as plain composition-supplied data, whether it supports
-a delivery deadline and its default. Compute providers `vm.ansible` and
-`bare_metal.ansible` declare one; the API-credits provider declares none.
+The rule is stated over what made the lease due, not over the activation deadline by
+name, so another deadline a site enforces joins the same claim (D4).
 
-**Recommendation:** initial defaults are 1800 seconds for VM and 7200 seconds for
-bare metal, reflecting different provisioning paths. They are operator-tunable
-recommendations, not protocol bounds or a claimed measured SLA. Packaged compute
-seed pools state those defaults. A later default edit does not reset deadlines
-on committed leases.
+Rejected: provider calls under a row lock; refusing activation by the clock alone.
 
-**Recommended validation:** a supporting provider's pool may override the default
-with a positive integer number of seconds. Absence means use the provider default, not disable protection;
-zero, negatives, booleans, fractional values and null are refused at create,
-replace, patch and document import. A provider declaring none resolves no delivery deadline
-and refuses an explicit override. Validation-only and applying writes agree and
-imports remain atomic. Commit snapshots the resolved duration into its deadline;
-later pool edits do not alter existing leases.
+### D3 — A pool states a deadline, nothing, or none
 
-**Recommendation:** add the explicit compute-composition setting
-`activation_deadlines_enabled`, default false. Provider support/defaults and pool
-validation remain declared even while disabled; an invalid override never becomes
-valid because the switch is off. The injected pool-facts port resolves no effective
-delivery deadline while disabled, so new leases retain a null deadline. This is an
-operator composition setting, not a pool tag or caller-supplied commit flag. Enabling
-applies only to new commits; disabling does not clear deadlines already snapshotted.
+`delivery_deadline_seconds` is a Resource Pool policy tag with three states. The pool
+resolves one value from it, and that value is what the site contributes. It does not
+decide whether a deadline a deal accepted is enforced (D1).
 
-The session-scoped pool-facts port from `inject-site-pool-authority` supplies the
-effective delivery deadline in the commit transaction. The site does not import the pool
-authority or infer a provider from a domain or billing kind. API-credit quota holds
-therefore receive no deadline by the same generic rule, with no site exemption.
-If the dependency stalls, reconsider the port contract with its owner; passing a
-storefront-selected delivery deadline is not an authorized fallback. The storefront
-supplies the anchor instant, a fact of the deal like the window, and the accepted value
-it published; the duration's ceiling is the pool's alone.
+| The pool states | Hint to the listing | Ceiling on a commit | Deadline for a commit that carries none |
+|---|---|---|---|
+| A number of seconds | That number | That number | That number |
+| Nothing | Its provider's declared default, or none where the provider declares none | The same | The same |
+| None | No hint | No ceiling | No deadline |
 
-A delivery-deadline overrun enters ordinary guarded release. The storefront supplies
-classified failure evidence to the foundation's single end-plus-optional-filing
-operation, through the delivery path's existing `activation_lapse` hand-off. The
-foundation owns cause classification and the financial intent's fixed timing basis.
-Consume D8's pre-start exception (journal now, act at accepted start), never a
-future-dated command. delivery_end is the seller's dispute-adapter filing, journaled
-with the end; the seller sends no stop/reverse. Mediation alone mechanically rules its
-standard-delivery_end claim with payee agreement and mapping/time/replay guards;
-receipt-backed payer claims qualify too. The site computes no financial instant/amount
-and its report is not a refund prerequisite. The caller supplies verified
-buyer/ruling/payment evidence for classification; term clock or payee stop alone does
-not erase established non-delivery. Rate billing starts after ready evidence and
-activation; the deadline authorizes no billing.
+- **What the site contributes varies by pool; enforcement does not.** A site may give
+  its VM pools a deadline and its bare-metal pools none. On those bare-metal pools a
+  seller's clause deadline is still enforced by the site once committed, and a deal that
+  accepted no deadline gets none. No service-level or site-wide setting exists, and
+  nothing is shipped off to be turned on.
+- **Per lease, the deadline is the one the deal accepted**, never above a value the pool
+  resolves (D1). A committer cannot opt a lease out: the commit carries what the deal
+  accepted (D6), and the pool's value applies where the deal accepted none.
+- **None is the site's omission.** Under `docs/development/ARCHITECTURE.md`, "Omission
+  states no commitment", a pool that states none commits the site to nothing of its own:
+  publication gets no hint, a commit meets no ceiling, and a commit that carries no
+  deadline gets none. The option then carries the clause's deadline where the seller
+  configures one, and that is the only delivery promise the buyer reads. The storefront
+  enforces it, and so does the site once the commit carries it. Stating none costs only
+  the site, which gives up its safeguard for commits that carry no deadline.
+- **Providers declare their default as data.** Each provisioning adapter exports its
+  declaration and the composition merges them, as with the host requirement. The VM and
+  bare-metal providers declare one. The API-credits provider declares none and its
+  commits carry no deadline, so its quota holds get none by the same rule, with no
+  exemption in the site.
+- **A pool edit changes no recorded deadline** (D1).
+- **Upgrading.** A pool written before this change states nothing, so it resolves its
+  provider's default for new commits once the provisioning service is upgraded. A 0.4.0
+  storefront commits with no accepted deadline and no commitment instant and published
+  its clause's value. Where the pool's value is shorter, the site reclaims the lease
+  before the storefront's own deadline, and the storefront's activation attempt is
+  handed to end service as an activation lapse. The operator handbook's upgrade step
+  covers it: upgrade the storefronts first, or state none, or a value at least the
+  clause's, on the pools they sell until they are upgraded. A 0.4.0 storefront's commit
+  carries no deadline, so on a pool that states none its leases record none.
 
-### D4. Renewal and renewal-lapse policy are deferred seller options
+Rejected:
 
-**Revisit condition:** a site operator separate from the storefront operator needs
-to bound its exposure to an absent storefront. This is the seller's choice about
-its hardware, not a buyer, payment-authority or dispute-authority requirement.
-No renewal API, renewal timer or lapse-policy tag ships in the present change.
+- A composition switch shipped off and turned on after qualification. Every compute
+  commit passes one step, so there are no callers left to wait for.
+- A permanent site-wide setting. What a site contributes differs by pool, and enforcing
+  a deadline a deal accepted needs no setting.
+- The tag's presence as the opt-in. A pool that states nothing takes its provider's
+  default, so a compute commit that carries no deadline still gets one.
+- A per-lease opt-out. The party the deadline protects is not the committer.
+- A pool stating none recording the deal's deadline for an operator to act on by hand.
+  Nothing is protected by holding capacity past a deadline at which the storefront's own
+  rule already counts the deal as not delivered.
+- A pool stating none discarding the deadline the commit carries. The site would hold
+  capacity for a deal it was told how long to wait for.
 
-Retained option for that future design:
+### D4 — An end calculated from what a deal has funded is `end-delivery-when-funding-runs-out`'s
 
-- An active lease may carry an independent renewable deadline, separate from the
-  agreed end and from this change's activation deadline. Renewal moves it later only,
-  never beyond that end; it is refused after release is claimed. A stale renewal
-  cannot shorten or resurrect a lease. Admission still uses the full agreed window.
-- Expiry compares the observed tuple as in D2. An elapsed but unclaimed
-  deadline may be renewed. Activation and renewal remain distinct transitions;
-  a future activation target would need its own explicit design, never a payment
-  fact inferred from this option.
-- A site-selected pool policy could be `reclaim` (release on lapse), bounded
-  `grace` (release later, with the duration and effective deadline visible), or
-  `continue` (serve to the agreed end). A site-wide default and any maximum grace
-  are choices for that future design. The site need not know why renewal lapsed.
-- The view and physical-end record would expose the deadline, policy and
-  cause `renewal_lapsed`. They would remain evidence, never a billing stop.
+This change's deadline reads no money. It answers when a lease that was never activated
+is reclaimed, from the time since the deal's commitment. When a running deal's delivery
+ends, calculated from what the deal has funded, is one calculation for every class of
+deal, and `end-delivery-when-funding-runs-out` holds it.
 
-**Cost of active reclaim:** `reclaim` can destroy a working VM merely because the
-storefront crashed. Billing does not stop on site silence or on that reclaim.
-Honest recovery files `delivery_end(cause=payee)` at the physical end through the dispute
-adapter: mediation rules the self-penalty, including the premature-stop penalty
-capped by earned amounts still held after refunds; bond award is reserved for hosted bonds, even though the original failure was only bookkeeping.
-`grace` only delays that cost; `continue` leaves unpaid-service exposure with the
-seller until the agreed end or a recovered end-service action. None is a buyer
-guarantee. Renewal must be justified by a separate operator's concrete needs before
-this trade-off is reintroduced.
+That change has the storefront end delivery itself and leaves the site untouched, so it
+uses nothing built here. It rejects a deadline on an active lease that a storefront
+renews and the site enforces, to be revisited when a site's operator is not its
+storefront's. This change stays built so that such a deadline can follow it:
 
-### D5. Lease-end intent evidence
+- one activation deadline, written at commit and never rewritten;
+- an expiry claim over what made the lease due (D2);
+- a lease-end report that names which deadline was claimed (D5).
 
-The foundation supplies the signed `lease_ended` record and durable outbox; this
-change adds `activation_deadline_lapsed`, which the record's cause set already admits
-without a contract change. The record carries the reservation/deal correlation, the
-claimed deadline and the base report's intended effective end instant.
-The report is recorded before teardown: it is not proof of physical completion.
-Proven guarded release remains a separate completion fact, including on failures. The deadline is the reason release was claimed,
-not a fabricated instant of proven VM teardown. A term end that wins the due
-comparison keeps its ordinary cause. Retrying the event preserves its identity
-and signed content; the evidence store keeps the original bytes.
+No renewal of a deadline on an active lease, and no site policy for one that lapses,
+is built by any change.
 
-The site's reservation view and the compute contract's `LeaseView` already expose
-`activated_at_utc`; this change adds the activation deadline to both and exposes no
-renewal-lapse policy, because none is implemented. End service may consume the site's report as a local final request
-with actor, cause and source; the payment/dispute adapters still own all financial
-actions. This cause does not require an event before the seller files for failed
-delivery. Delivery admission must also honor an expiry claim that wins activation.
+Rejected:
 
-### D6. Both compositions wire the pool port
+- One neutral due instant, holding the delivery deadline before activation and a funded
+  instant after it. It has the site enforce a funded instant, which that change
+  rejects, and it needs activation to write more than `site-capacity`'s "Activation
+  records its instant once and changes nothing else" allows.
+- Waiting for that change. The gap this change closes is released and reads no funding.
 
-`delivery_deadline_for_pool(site, pool)` is the seam negotiate left: each compute
-composition supplies a function returning the pool's effective
-`delivery_deadline_seconds` — the validated override, else the provider's declared
-default — from the site's pool projection (`kit/site/src/market_site/projections.py`),
-or none where the pool resolves none or `activation_deadlines_enabled` is off. While the
-switch is off the published term and the site agree by both being absent, so wiring the
-port ships before the switch changes; the clause fallback's retirement waits until the
-port resolves a value wherever a seller relied on its clause. How a seller with a
-configured clause value migrates (the value dropped with a configuration refusal, or
-copied into a pool override) is open below.
+### D5 — An activation lapse is lease-end evidence
 
-### D7. Whether the clause fallback is retired, or kept where no site enforces
+When expiry claims a lease at its activation deadline, the `lease_ended` record states a
+cause for the lapse, the deadline as its claimed deadline, and a phase naming that
+deadline, beside the phases `lease` and `reservation`. The cause and the phase are open
+strings, so the record's version does not change (`site-capacity`'s "Every ending
+transition records one event").
 
-Open. Goal 8's earlier disposition (D2 (c1), 2026-11-10) had this change retire the
-payments clause's `delivery_deadline_seconds`, since it puts a lifecycle key in a
-mechanism's input. Negotiate's implementation triage later made the fallback
-permanent text: `deal-lifecycle`'s "The delivery deadline is the availability term the
-site or the clause sets" carries the site's deadline where the site enforces one and
-the clause's where it enforces none (owner record R21,
-`openspec/changes/archive/2026-11-12-negotiate-open-ended-compute-terms/reviews/01-implementation-owner.triage.md`).
-The design session decides between retiring the fallback once every compute site
-enforces (task 4.2c) and keeping it for a site that enforces none, recording why the
-lifecycle key may stay in that case. The default buyer's missing-deadline refusal is
-unchanged either way: the MVP keeps it as built, its sellers configuring a clause
-deadline (`switch-on-hosted-per-period-vm`).
+- The record is written with the claim, before teardown. It states an intended end.
+  Proven release stays the separate fact the capacity-released callback carries.
+- It authorizes nothing about money and is no prerequisite. The storefront's own
+  deadline rule and its `delivery_end` filing do not wait for it.
+- The storefront's classification of a site's end gains this phase.
+- The site's reservation view and the compute contract's lease view show the deadline
+  beside `activated_at_utc`.
 
-## Rejected alternatives
+Rejected: a refund triggered by the site's event; a second event format.
 
-- Billing horizon or payee-advanced vouch — protects only an honest crashed seller,
-  not a dishonest seller; the buyer's own stop and disputes over held money suffice.
-- Funded-horizon activation or active renewal now — conflates the seller's internal
-  lease policy with payment; activate every deal to its agreed end and defer renewal.
-- Site-event-triggered refund — the foundation classifies delivery failure and
-  supplies a valid command instant, with the buyer's case as backstop; reports are evidence.
-- Seller-direct exceptional-end correction or backdated payee stop — the seller
-  files a dispute, not its own stop/reverse, and mediation alone applies the standard
-  self-penalty (`openspec/changes/archive/2026-11-03-agreed-evidence-and-early-termination/design.md#the-standard-self-penalty`).
-- Compound payment termination authority — deferred until hosted bonds are designed;
-  foundation records this alternative and its required dispute-authority recording,
-  not a new site capability.
-- Minimum-spend requirement — churn is the seller's pricing/acceptance choice;
-  a setup `once` part is the recommended default, not a site delivery-deadline rule.
-- A seller-internal deadline the buyer never reads (this design's first form, replaced
-  2026-10-29) — a buyer could not tell a short horizon from an undeliverable one, and a
-  seller activating late inside a long term had not failed; the pool's tag is now the
-  value the option publishes, under one name, and the deadline's anchor is the deal's
-  commitment instant rather than the storefront's own commit time.
-- The seller-configured payments-clause value as a permanent fallback (negotiate's
-  precedence today) — it keeps a lifecycle key in a settlement mechanism's input and
-  lets the published term drift from the capacity policy the site enforces.
-- Storefront-local scheduled stop — authority-hosted pending stops survive a dead
-  storefront; the site deadline schedules neither notice nor billing.
-- A stored activation phase beside `activated_at_utc` — the activation contract derives
-  the phase from the instant and stores it nowhere else.
-- Deadline as a movable agreed end, or a separate cap over it — changes admission
-  meaning and requires extension; keep the agreed end and provisional deadline distinct.
-- Open-ended compute commit with eventual storefront truncation — a dead storefront
-  leaves capacity unbounded; a finite agreed end remains required for these pools.
-- Provider calls under a row lock — release orchestration keeps external calls
-  outside transactions; compare-and-set claims provide the race boundary.
-- Clock-only activation refusal — makes watchdog latency evict a resource whose
-  expiry has not been claimed; claim order decides.
-- Shipping the activation transition in this change (its first form, split
-  2026-10-29) — the transition reads no pool and four changes needed it before the
-  pool-authority port; it is `activate-compute-leases-at-the-site`, now landed.
-- Commercial flag on commit — the provider/pool delivery deadline is sufficient and leaves
-  the site independent of billing shape.
-- Site-wide delivery deadline, reuse of hold TTL, or no deadline until billing starts —
-  ignores provider differences or leaves the commit-to-delivery gap unbounded.
-- Storefront-selected grace as buyer protection — no seller-local lapse policy
-  supplies an authority-backed billing guarantee; the whole renewal policy is deferred.
+### D6 — The storefront supplies the deal's facts and publishes the pool's value
 
-## Implementation cadence and gates
+- **The commit.** The delivery path's commit step sends the deal's accepted
+  `delivery_deadline_seconds` and its commitment instant, as end service's delivery
+  record holds them, through `CapacityEffects.commit` and the site client. Both domains
+  commit through that step, so neither derives the values for itself.
+- **Publication.** Each compute composition supplies `delivery_deadline_for_pool`,
+  returning the pool's resolved deadline, or none where the pool resolves none.
 
-One site-focused implementation round after `inject-site-pool-authority`:
-delivery-deadline validation/provider declarations, the commit snapshot, conditional
-expiry and the lapse cause. Then the storefront round: the port wiring in both compositions, the
-commit carrying the accepted value and anchor, the clause fallback's retirement and the
-`deal-lifecycle` re-amendment. Every commit and recovery caller is already wired, so
-this change owns its own enablement: it ships `activation_deadlines_enabled` false,
-qualifies every wired commit and recovery caller in explicitly enabled owned lanes,
-then changes the repository composition default; hosted operators independently
-confirm readiness. Public evidence records readiness and public release versions, not
-hosted target identifiers. Existing null-deadline leases remain unchanged when enabling.
-Site-only evidence never enables protection or proves campaign readiness.
+Rejected: each domain deriving what its commit carries.
 
-## Review history
+### D7 — The clause-configured deadline is kept
 
-The coordinated unify reviews settled reservation-only activation, the
-max(commitment, start) anchor with zero early-dispatch lead time, foundation-owned
-pre-start journaling, the off-by-default switch with owned-lane qualification before
-the default changes, the distinction between site end intent and proven physical
-completion, and activation before billing. The final owner decision made activation
-lapse evidence for a journaled delivery_end filing through the dispute adapter, not
-seller payment self-correction; seller stops are entitlements only. The records live
-with `unify-compute-delivery-path`.
+Publication takes the pool's value where the port gives one, else the payments clause's
+`delivery_deadline_seconds`. `deal-lifecycle`'s "The delivery deadline is the
+availability term the site or the clause sets" and `storefront-publication`'s "A compute
+option's delivery deadline is its pool's, else its clause's" already state that, and
+this change modifies neither. A pool that states none (D3) gives publication no value,
+so the clause's deadline is what its options promise. The storefront enforces it, and
+the site does too once the commit carries it (D1).
 
-## Open questions
+Where a pool's value replaces a different value a clause configures, publication reports
+it, naming the clause and both values, so a seller's configured promise is never
+silently changed.
 
-- **The activation-deadline column's name.** The landed schema has only
-  `activated_at_utc`; this change adds one nullable column for the deadline, and its
-  name is for the design session.
-- **Migrating a configured clause deadline (D6).** Whether retiring the payments
-  clause's `delivery_deadline_seconds` refuses a configuration that still sets it, or
-  copies it into a pool override, and in which release.
-- **Retiring or keeping the clause fallback (D7).** Against the permanent requirement
-  negotiate's owner record R21 wrote.
-- **Which specification owns the enablement switch.** The delta states the
-  `activation_deadlines_enabled` requirement under `resource-pool-management`; it
-  governs the site's commit rather than pool administration, and may belong under
-  `site-capacity` instead.
+Rejected: retiring the clause key in stages. Marketplace 0.4.0 ships it as the supported
+configuration, and it would be safe only once no pool could state none.
 
-Default values, strict override validation, finite-end refusal, tie attribution,
-forward-start anchor and off-by-default composition switch above are recommendations
-supplied by this design; implementation re-verifies them against the landed
-dependency interfaces. D4's policy choices remain explicitly deferred.
+## Open Questions
 
-## Permanent documentation destinations
+Each is decided in this change's design session.
 
-| Accepted decision | Destination |
-|---|---|
-| D1, D2 deadline, claim and admission | `openspec/specs/site-capacity/spec.md` and `openspec/specs/site-capacity/architecture.md`; capacity reservation in `docs/development/ARCHITECTURE.md` |
-| D3 declaration and validation | `openspec/specs/resource-pool-management/spec.md`; pool policy configuration in `docs/development/DEPLOYMENT_AND_CONFIG.md` |
-| D3, D6 publication through the wired port, pool-and-site source and retired clause fallback | `openspec/specs/storefront-publication/spec.md`, `openspec/specs/deal-lifecycle/spec.md`, `openspec/specs/settlement-configuration/spec.md` |
-| D7 missing-deadline refusal for rate options | `openspec/specs/buyer-orchestration/spec.md`, if the refusal changes |
-| D3 retired abandoned-lease runbook | `docs/operator-handbook.md` |
-| D5 watchdog/event | `openspec/specs/physical-provisioning/spec.md`; recovery workers in `docs/development/ARCHITECTURE.md` |
-| D4 deferred renewal | Remains in this change; not promoted as current behavior |
+### Q1 — The late-anchor row, and a lane scenario of this change's own
 
-Directory naming: `renewable-compute-lease-deadlines` stays the campaign identifier
-while the active proposal is the delivery deadline alone; a rename would touch every
-sibling without changing the acceptance boundary.
+`converge-ongoing-compute-leases` gives this change the row in which a storefront
+commits with a later anchor than the payment authority's approval, the site enforces the
+longer deadline, and the buyer's case is ruled non-delivery at the accepted one. Three
+facts bear on its form. The commit reads the delivery record's commitment instant, so a
+storefront never sends another. No buyer command files a case on a running deal. A
+lane's dispute authority rules only as the scenario programs it.
+
+- (a) A lane row. It needs a way to make the storefront send a later anchor, either a
+  control in the storefront or the harness committing in its place; a case the harness
+  files through the mediation kit; and a programmed ruling.
+- (b) Two integration proofs. At the site, a later anchor that is not in the future
+  yields the later deadline. In the delivery path, the site's deadline never precedes
+  the delivery record's for one deal. The ruling stays the accepted limitation Goal 8
+  states.
+
+Separately, whether this change adds a lane scenario of its own: the storefront's loops
+held before delivery, lane time set past the deadline, the lease watchdog stepped, the
+site reclaiming, and the report reaching the storefront once its loops resume.
+
+- (c) In both compute lanes.
+- (d) In the VM lane only, the path being the compute family's.
+- (e) None; the site's integration suite and a first-use trace through the typed
+  clients.
+
+Recommended: (b) and (d). (b) proves what this repository's code decides, at the lowest
+level that can. (d) is the change's premise end to end, once. It would move to (c) if
+convergence's design settles that such rows run in both lanes.
+
+### Q2 — How the resolved deadline reaches publication
+
+D6 has each composition return the pool's resolved deadline. A storefront reads the
+tag from the projection but not the provider's default. Today's projected pool:
+
+```json
+{"pool_id": "vm-default",
+ "pool_metadata": {"label": "VM default", "enabled": true, "mechanism": "vm.ansible",
+                   "policy_tags": {"deliverable_modes": ["vm"], "capacity_backing": "backed"}}}
+```
+
+- (a) An allowlisted pool-metadata field carrying the resolved number, absent where the
+  pool resolves none:
+
+  ```json
+  {"pool_id": "vm-default",
+   "pool_metadata": {"label": "VM default", "enabled": true, "mechanism": "vm.ansible",
+                     "policy_tags": {"deliverable_modes": ["vm"], "capacity_backing": "backed"},
+                     "delivery_deadline_seconds": 1800}}
+  ```
+
+- (b) A versioned `pool_views` key:
+
+  ```json
+  {"pool_id": "vm-default",
+   "pool_metadata": {"label": "VM default", "enabled": true, "mechanism": "vm.ansible",
+                     "policy_tags": {"deliverable_modes": ["vm"], "capacity_backing": "backed"},
+                     "pool_views": {"delivery_deadline.v1": {"seconds": 1800}}}}
+  ```
+
+- (c) No new field. The storefront reads the tag from `policy_tags` and holds the
+  providers' defaults itself. A default then lives in two services, and a storefront
+  publishes a term the site may not enforce.
+
+Under (a) and (b) a 0.4.0 storefront ignores the addition, and a 0.4.0 site omits it, so
+the port gives none and the clause's value is published. Either changes
+`site-capacity`'s "Resource-pool projection metadata".
+
+Recommended: (a). The value is one neutral number any provider may have; `pool_views`
+holds content a domain shapes. The projected number and the one the site's commit reads
+come from one resolution.
+
+### Q3 — A future, late or missing commitment instant
+
+On a payments deal the commitment instant is the payment service's clock, and the site
+compares it with its own process's time source. A commit that follows approval quickly,
+from a payment service a few seconds ahead, carries an instant the site reads as future.
+An instant later than the true approval lengthens only the seller's own safeguard (D1).
+A commit from a 0.4.0 storefront, and a deal whose delivery record holds none, carry no
+instant. That matters only where a deadline is recorded: the pool resolves a value, or
+the commit carries a deadline with no instant.
+
+For an instant after the site's clock:
+
+- (a) Refuse the commit. Clock skew then becomes a seller-failure filing.
+- (b) Use the site's clock in its place. The safeguard shortens by the skew.
+
+For no instant:
+
+- (c) The later of the site's commit instant and the lease start.
+- (d) Refuse the commit.
+
+Recommended: (b) and (c). Neither turns a clock difference or an older storefront into a
+failed deal.
+
+### Q4 — A pool value a clause's window or horizon cannot cover
+
+Once a pool's value is published in place of a clause's, a larger value can fail the
+two checks that read it. An option that publishes today is then omitted, with the
+diagnostic `dispute_window_before_delivery_deadline`, or its shortest horizons are
+refused at acceptance.
+
+- (a) The existing per-option diagnostic alone.
+- (b) The storefront refuses to start.
+- (c) The existing diagnostic, and a line in the storefront's startup report.
+
+Recommended: (c). The cause is another service's pool, so a refusal to start would make
+the storefront's availability depend on it.
+
+### Q5 — The providers' default values
+
+- (a) 1800 seconds for VM and 7200 for bare metal. Neither is measured; 1800 is the
+  value 0.4.0's VM example configures in its clause.
+- (b) One value for both until bare-metal delivery is measured.
+
+Two things follow whichever is chosen. The packaged seed pools state nothing, so they
+follow a default that changes later. The lanes' listings compose their deadline from
+`PAYMENTS.VM_DELIVERY_DEADLINE_SECONDS`, which `test-compatibility`'s "VM payment
+scenarios declare their configured delivery allowance" requires; the lanes' pools state
+that same value, or none, so the requirement stays true. Either way the site enforces
+the value the deal accepted.
+
+Whichever is chosen, a default is a statement of how long a provider's delivery takes.
+The records of the real-host runs made for earlier releases may hold delivery
+durations for both providers; where they do, the values are taken from them and not
+from the VM example's clause.
+
+Recommended: (a), with the lanes' pools stating the lanes' value, replaced by measured
+durations where the run records hold them.
+
+### Q6 — The bare-metal commitment instant read from the database clock
+
+For a deal not paid through Arkhai payments, the bare-metal storefront records
+`SELECT unixepoch()` as the commitment instant. That reads the database's wall clock,
+which the time-read check does not see, and under injected time it differs from every
+other party's. D6 makes that instant an input to the site.
+
+- (a) Fix it here: the instant comes from the process's time source.
+- (b) Fix it here and derive the instant alike in both domains. The VM storefront
+  records the Agreement's acceptance instant for the same case.
+- (c) Table it as unowned work in the campaign index.
+
+Recommended: (a). It is small and understood, and this change is what makes the instant
+matter outside the storefront. (b) needs a decision on which instant commits such a
+deal.
+
+### Q7 — Provisional answers
+
+Each follows from something settled or from the nearest precedent, and is confirmed or
+moved in the design session.
+
+- **Classifying the lapse report.** `deal-lifecycle`'s "Cause classification is owned by
+  end service" already names an activation lapse a seller failure. The report is an echo
+  where the storefront recorded its own deadline failure, a seller failure where nothing
+  was available and no earlier lawful end exists, and unclassified while a deal that is
+  not once-only waits for its payment read.
+- **The cause and the phase.** A cause of its own and a phase naming the activation
+  deadline, as `expiry` pairs with `lease` and `hold_expired` with `reservation`.
+- **The column's name.** `activation_deadline_utc`: `deal-lifecycle` already calls it
+  "the site's activation deadline", and the site's instants end in `_utc`.
+- **How none is spelled.** The word `none`. An explicit null is hard to tell from
+  absence in a patch and in a pool document, and zero reads as "immediately".
+- **Validation.** One shared check on every pool write surface, as the hold and SLA
+  preferences have: a stated value is a positive whole number of seconds or none.
+- **A number stated for a provider that declares no default.** Doubtful, and the least
+  settled item here. It was to be refused while a provider with no default meant one
+  whose leases take no deadline. The site now enforces a carried deadline on every pool,
+  so declaring no default says only that the provider contributes none, and a pool of
+  its own stating a number is not obviously wrong. Against accepting it: the one such
+  provider's commits have no lease end, which a recorded deadline needs.
+- **Which specification states what.** `resource-pool-management` states the tag and
+  what a pool resolves; `site-capacity` states what the ledger does with the resolved
+  value. The tag is documented with the pool document's format, in the operator
+  handbook and `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- **One publication function.** Both compositions pass the same function, which reads
+  the pool through the resolver every reader of the pool projection already uses.
+- **The handbook.** "Leases the storefront has not delivered" is rewritten: the site
+  reclaims a lease that has a recorded deadline. The manual procedure remains for a
+  lease with none: one committed before the site recorded deadlines, and one whose
+  commit carried no deadline to a pool that resolves none.
+- **A tie.** A lease due at its deadline and its agreed end at one instant reports the
+  ordinary term end.
+- **A finite end.** A commit that would record a deadline requires a lease end. The only
+  commits with no end are API credits' quota holds, which carry no deadline to a pool
+  that resolves none.
+- **The anchor.** The later of the commitment instant and the lease start, as
+  `deal-lifecycle` defines the term; delivery dispatches nothing before the start.
+- **Test levels.** The claim in both orders and the pool-edit and anchor cases are
+  library integration in `kit/site`; the tag is unit in `kit/resource-pools-contracts`
+  and library integration in `kit/resource-pools`; the migration is each hosting
+  service's chain test; the commit's fields and the refused commit are the delivery
+  path's integration suite.
+
+### Q8 — Implementation cadence
+
+Recommended: two rounds, after `inject-site-pool-authority` lands. First the site: the
+tag and its resolution, the column, the commit, the due read, the claim, the report and
+the views, one session. Then the storefront: the commit's fields, publication, the
+classification, the handbook and whatever Q1 settles, one session.
+
+### Q9 — Reclaiming a lease whose create is still running
+
+A lease can end while its create is in flight today, and the release guard holds its
+capacity until the create settles and teardown is proven. With a deadline recorded at
+commit, that stops being rare: every delivery slower than its deadline is reclaimed
+mid-create. The site's part, the claim and the guard, is proven in `kit/site` and in a
+lane, where a provisioning job is held at a gate under lane time. What a lane cannot
+show is that a real host is left clean when teardown follows an interrupted create.
+That behaviour is the provisioning roles', which this change does not touch, and the
+observations the validation runbook owes cover teardown of delivered machines only.
+
+- (a) Nothing here. The path is unchanged, and a real-host run is owed when a change
+  touches the provisioning roles or how an adapter runs them.
+- (b) One real-host observation of a reclaim during a create, made with this change,
+  because this change is what makes the case routine.
+- (c) Table it with Goal 1's qualification work, as an observation the runbook lacks.
+
+Recommended: (c). The gap is in the provisioning roles' evidence and exists without
+this change; (b) would make this change wait on a host for behaviour it does not alter.

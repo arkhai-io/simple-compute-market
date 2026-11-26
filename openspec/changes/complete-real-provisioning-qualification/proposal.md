@@ -113,9 +113,9 @@ None.
 - `never-strand-the-host-on-passthrough` is blocked in closeout on a rented host
   with out-of-band console access. A GPU purchase scenario prepares a GPU host, so
   design checks whether the two can share that host.
-- `activate-per-period-compute-servicing` also waits on a hosted mediation service
-  and a qualified real bare-metal host. Design checks whether the hosted dispute
-  scenario is shared.
+- `qualify-per-period-bare-metal-and-setup-charges` makes its live observations
+  against a hosted dispute authority on mock provisioning, and waits on no real host.
+  Design checks whether the hosted dispute scenario is shared.
 
 ## Permanent documentation impact
 

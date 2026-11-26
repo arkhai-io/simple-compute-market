@@ -737,6 +737,38 @@ waits for an operator's `retry-release` or `force-release`. A storefront that la
 learns of the termination from the site's report classifies it as the seller's own
 withdrawal and files the payee's `delivery_end`, as its deadline would have.
 
+### A deal ending on a pending release
+
+A deal listed `ending` with `release_pending` has a recorded end whose resource the
+site has not yet reported released. For a delivered deal the storefront records the
+release when the site's provisioning service delivers its capacity-released event. The
+service sends that event once the lease's teardown is proven, or once an operator
+force-releases the lease, and sends it again on every lease-watchdog cycle until the
+storefront acknowledges it. No storefront command clears the code, so clear it at the
+site, as the provisioning service's administrator. A site that has stopped serving listings
+clears its leases the same way: its provisioning service must be running to answer
+these requests and to deliver the event.
+
+Find the deal's lease among the site's leases; its `deal_ref.negotiation_id` names
+the storefront's deal:
+
+```text
+GET /api/v1/contract/leases
+```
+
+Then act on the lease's `status`:
+
+| Lease `status` | What it means | What to do |
+|---|---|---|
+| `active` | The recorded end is still ahead, or the storefront's termination has not reached the site | Once the end has passed, run a servicing cycle at the storefront, `POST /api/v1/admin/lifecycle/deal-servicing/run-cycle`, or terminate the lease at the site as under "End a lease its storefront cannot service" above |
+| `releasing` | The teardown is running, or is being run again | Wait: a lease still `releasing` past `lease_watchdog_grace_period_seconds` becomes `release_failed` |
+| `release_failed` | The teardown failed or timed out; `failure_reason` and `failure_message` say which | If the teardown has since finished, `POST /api/v1/contract/leases/<reservation>/retry-release` re-observes it and releases the lease. Otherwise verify the host holds nothing of the deal, removing what the teardown would have removed, then `POST /api/v1/contract/leases/<reservation>/force-release` with a `reason` and `evidence` saying what you checked ([What the upgrade from v0.3.0 changes](#what-the-upgrade-from-v030-changes) gives the steps for a teardown that never started) |
+| `released` or `force_released` | The site has released the lease and the storefront has not acknowledged the event | Run one lease-watchdog cycle, `POST /api/v1/system/check-leases`, which delivers every release still unacknowledged. The provisioning service logs a delivery that fails (`Could not deliver capacity-released event`): restore its route to the storefront and run the cycle again |
+
+A force-release returns the capacity on your word, without a teardown's proof, so make
+it only after checking the host. Once the storefront acknowledges the event, its next
+list shows the deal without `release_pending`.
+
 ### Draining payment deals before a receipt key change
 
 Each environment's payments receipt identity is assumed stable for a deal's life. A
@@ -781,7 +813,7 @@ outstanding:
 
 | Code | What is outstanding | What the operator does |
 |---|---|---|
-| `release_pending` | The resource is not yet proven released | Follow the lease at the site |
+| `release_pending` | The resource is not yet proven released | Clear it at the site: [A deal ending on a pending release](#a-deal-ending-on-a-pending-release) |
 | `payment_running` | A payment part has no verified stop or end at the payment authority | See the ruled end with no stop below; otherwise wait for the stop the deal's terms give |
 | `case_open` | A case is open at the dispute authority | Nothing: the authority rules or dismisses it |
 | `case_unobserved` | The dispute authority has not yet been read | Wait for the next servicing cycle; if it persists, prove the storefront's reach of the authority with `check-mediation` ("Payments access" above) |
