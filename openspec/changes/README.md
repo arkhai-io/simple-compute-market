@@ -463,11 +463,11 @@ add-inference-domain-contract (archived) ─┴──► compose-inference-domai
 The family kit precedes the stack, and it is not this campaign's: Goal 4's
 [`compose-api-family-kit`](archive/2026-10-26-compose-api-family-kit/) refactors API credits onto
 an `api` family vocabulary and kit, standing on `dev` alone, with its digests
-pinned byte-for-byte. Inference then composes that kit, contributing only its
+pinned byte-for-byte. Inference composes that kit, contributing only its
 listing schema, its publication guard, its materialization, its service root,
-and its wiring; its contract binds the kit's purchase shape and its row gains
-the family attribute in the stack change. Metering mutates the kit-composed
-authority once, after the stack has proven a deal.
+and its wiring; its contract binds the kit's purchase shape, and its row in the
+architecture registry carries the family attribute. Metering mutates the
+kit-composed authority once, the stack having proven a deal.
 
 The campaign's sequencing rule is stated once, in
 [`add-inference-domain-contract`](archive/2026-11-26-add-inference-domain-contract/)'s `design.md`.

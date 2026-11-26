@@ -148,16 +148,16 @@ charge per request and integer rates for cached prompt tokens and images, and
 MUST reject fractional or negative values. Rate-card amounts and the derived
 charge MUST be carried on the wire as decimal-digit strings in the uint256
 domain, never as JSON numbers, so a signed listing or usage-evidence body
-stays canonical at any asset precision. The materialization handed to
-issuance MUST carry the accepted listing and the rate card the grant is to pin,
-and that card MUST equal the listing's card.
+stays canonical at any asset precision. A materialization, the record of what
+a grant was issued under, MUST carry the accepted listing and the rate card
+the grant pins, and that card MUST equal the listing's card.
 
 #### Scenario: Handoff carries a card other than the accepted listing's
 
 - **WHEN** a materialization carries the accepted listing and a rate card with
   higher rates than that listing's card
-- **THEN** the materialization codec refuses it, so issuance cannot pin a card
-  the buyer did not accept
+- **THEN** the materialization codec refuses it, so no record of a grant shows
+  a card the buyer did not accept
 
 #### Scenario: Handoff omits the accepted listing
 

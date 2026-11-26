@@ -19,7 +19,7 @@ fulfillment reference, and the issuance label those are spelled under. It
 depends on pydantic and the identity kit alone, so it names no sibling's label;
 each domain passes its own.
 
-The family's kit is ten distributions beneath it, each installed only by the
+The family's kit is eleven distributions beneath it, each installed only by the
 side that needs it. Where they sit and why each is split is repository-wide
 placement, in [Family kits](../../../docs/development/ARCHITECTURE.md#family-kits).
 
@@ -33,6 +33,7 @@ placement, in [Family kits](../../../docs/development/ARCHITECTURE.md#family-kit
 | `kit/api/buying` | a domain's buyer plugin |
 | `kit/api/buying-alkahest`, `buying-arkhai-payments` | a buyer plugin whose stage table composes that mechanism |
 | `kit/api/gate` | an application that admits requests with a bearer key |
+| `kit/api/gateway` | a domain's gateway executable, in front of a service the seller does not modify |
 
 The negotiation and delivery carriers — message, terms, materialization,
 receipt, and result — extend core schemas, so they cannot be vocabulary, and a
@@ -78,7 +79,8 @@ extension its product needs. Its values are its own design's.
 The public-result extension takes a third argument, a frozen delivery context
 naming the agreed settlement mechanism and the stage's settlement reference,
 because the issuance result carries neither and a domain's public record may
-need both. API credits supplies no extension, so its delivery is as it was.
+need both. API credits supplies no extension, and its delivery carries no
+such record.
 
 ## The accepted listing and the issuance projection
 

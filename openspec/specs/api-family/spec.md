@@ -6,8 +6,8 @@ The `api` market family: the vocabulary and kit every domain selling prepaid
 bearer access to an HTTP API composes — the purchase shape, issuance and its
 digests, issuance evidence, the authority's key service and ledger, the
 storefront's issuance and settlement composition, the buyer flows, the
-mechanism stages, and the bearer gate — and the contributions through which a
-domain composes them. See the [architecture companion](architecture.md).
+mechanism stages, the bearer gate, and the gateway in front of a service — and
+the contributions through which a domain composes them. See the [architecture companion](architecture.md).
 
 ## Requirements
 

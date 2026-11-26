@@ -411,7 +411,7 @@ authorities:
 - `compose.inference.yml` composes the inference registry, the inference
   service, the gateway in front of a model server, the deterministic model
   stub, and the inference storefront, from `domains/inference/compose.yml`. The
-  stub is a test image answering an OpenAI-style API with fixed text; the
+  stub is a test image answering an OpenAI-style API with a digest of the prompt; the
   `vllm` profile adds a CPU model server under the stub's model name, and the
   gateway fronts it when `INFERENCE_MODEL_BASE_URL` names it.
 - `docker-compose.yml` is the full local stack: it includes `compose.vms.yml`,

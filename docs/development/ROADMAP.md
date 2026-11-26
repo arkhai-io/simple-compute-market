@@ -444,14 +444,9 @@ authority service, a gateway in front of a model server, and a buyer plugin
 compose the `api` family kit; a local stack runs them with a deterministic
 model stub; and the inference end-to-end lane buys credits, calls the model
 through the gateway, and consumes the balance. Nothing meters a request: a
-listing publishes only at a flat charge per request. The nearest thing is API
-credits, which sells prepaid finite units for a named service and consumes one
-configured fixed amount per admitted request; its architecture companion records
-that variable-cost metering is not established. The vLLM API-credits cookbook
-sells a model server behind that domain today, which demonstrates the gap: a
-listing naming `service_name: vllm-chat` cannot be compared with another
-seller's because nothing on it names the model, its context, its quantization,
-or its price per token.
+listing publishes only at a flat charge per request, as API credits consumes
+one configured fixed amount per admitted request; that domain's architecture
+companion records that variable-cost metering is not established.
 
 What is reusable is real and specific. The settlement runtime, the negotiation
 runtime, the storefront shell, the capacity/publication kit, and the registry
@@ -459,8 +454,8 @@ are domain-neutral and need nothing. The credits authority's consumption route
 already accepts a variable amount with an idempotency key, though every caller
 passes one. Issuance — the immutable request with its digest, the deterministic
 fulfillment identity, the client, the rollback, the signed evidence — is generic
-to any market that delivers a bearer credential and is currently namespaced to
-API credits, with its schema strings inside the digests. What is not reusable
+to any market that delivers a bearer credential, and the `api` family holds it
+under each domain's own label. What is not reusable
 is the consumption rule itself: API credits charges a fixed amount before the
 request; inference must reserve a worst-case charge, run the request, and settle
 from measured usage, because the cost is unknown until the response is complete

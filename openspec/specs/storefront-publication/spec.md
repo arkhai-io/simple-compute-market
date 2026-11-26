@@ -204,7 +204,7 @@ A domain that supports seller publication MUST provide its publication source an
 The shared storefront role MUST consume the selected market-domain contract for listing, message, agreed-terms, materialization, receipt, and result codecs plus the lifecycle hooks declared by that domain. A concrete storefront composition MUST supply its implementations explicitly, and generic storefront services MUST NOT import or branch on concrete domains.
 
 #### Scenario: Storefront composition selects a domain
-- **WHEN** a VM, bare-metal, or API-credit storefront is assembled
+- **WHEN** a VM, bare-metal, API-credit, or inference storefront is assembled
 - **THEN** its composition root supplies a validated domain contract used by every shared storefront service that interprets domain behavior
 
 #### Scenario: Domain validation fails
@@ -1268,7 +1268,7 @@ reason, because its source does not currently support it.
 
 ### Requirement: Registries converge on each listing's local status
 
-This requirement governs VM, API-credit, and bare-metal publication.
+This requirement governs VM, API-credit, inference, and bare-metal publication.
 
 For those, a listing's local status is the publication decision and its registries
 follow it. A new listing MUST be recorded locally, with its durable binding, before any
@@ -1277,7 +1277,7 @@ of. A close or reopen MUST change the local listing before any registry is told,
 local change that fails MUST be reported to its caller with no registry told — a
 seller's close is reported as retryable. Each registry's outcome for every publish,
 close, and reopen MUST be recorded durably. Every publication pass — each VM
-publication cycle, each API-credit capacity reconciliation, and each run of the
+publication cycle, each API-credit and inference capacity reconciliation, and each run of the
 bare-metal publication command — MUST then resend, to each configured registry whose
 recorded outcome disagrees with its listing's local status, exactly what that status
 implies — a close for a closed listing, and for an open one the listing republished and
@@ -3018,8 +3018,9 @@ again.
 
 ### Requirement: API-credit listing creation waits for or names an unreachable mechanism
 
-An API-credit storefront's configured seed listing MUST be created by a lifecycle loop
-step, never during startup: the step MUST wait while the credits service cannot be
+An API-credit storefront's configured seed listing, and an inference storefront's, MUST
+be created by a lifecycle loop step, never during startup: the step MUST wait while the
+storefront's authority — the credits service, or the inference service — cannot be
 reached or a mechanism the seed's clauses use is unknown, MUST stop after logging once on
 a configuration failure, and MUST stop once the listing exists. A create request refused
 only because a mechanism's readiness is unknown MUST answer 503 naming the unreached
@@ -3052,6 +3053,13 @@ MUST NOT build the storefront's services or open its database in their own proce
 - **WHEN** an operator runs the storefront CLI's publish command
 - **THEN** the listing is created by the running storefront through its create route, and
   the command fails naming the storefront when it cannot be reached
+
+#### Scenario: An inference storefront starts before its authority answers
+
+- **WHEN** an inference storefront with a configured seed starts while the inference
+  service cannot be reached, and the service later answers
+- **THEN** the storefront starts, no seed listing is created while the service is
+  unreachable, and it is published once the service answers, without a restart
 
 ### Requirement: A bare-metal delivery that conflicts with its recorded result is refused
 
@@ -3202,7 +3210,7 @@ declare its new minimum version.
 
 ### Requirement: A storefront retires registry listings it does not hold open
 
-This requirement governs VM, API-credit, and bare-metal publication, beside the convergence of the listings a storefront records.
+This requirement governs VM, API-credit, inference, and bare-metal publication, beside the convergence of the listings a storefront records.
 
 Every publication pass MUST list, at each configured registry it can reach, the open listings published under the storefront's own publisher principal for the offering modes it serves, and MUST close at that registry each one the storefront does not hold open locally, whether it is closed locally or unknown to the storefront. Listings of an offering mode the storefront does not serve MUST be left as they are. The pass MUST read every page of a registry's listings before closing any listing there, and MUST treat a registry it cannot reach, or whose read fails on any page, as unreachable: it closes nothing there and a later pass sweeps it. A listing the storefront holds open locally, including one held while its site's projection is unavailable, MUST NOT be closed. A preview pass MUST report each such close without making it.
 

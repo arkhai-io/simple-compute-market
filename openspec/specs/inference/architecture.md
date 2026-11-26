@@ -117,8 +117,9 @@ magnitude living in the charge.
 
 ### The rate card at issuance
 
-The materialization handed to issuance carries the accepted listing and its
-rate card, and the codec refuses a card other than that listing's. A grant that
+Issuance takes the accepted listing, whose rate card the grant pins. The
+materialization is the record of that grant, carrying the accepted listing and
+its rate card, and the codec refuses a card other than that listing's. A grant that
 records the card it was issued under lets a seller's republication reprice new
 purchases only: credits already bought consume at the rate the buyer saw when
 paying, after the settlement mechanism has closed and the buyer has no other
@@ -199,8 +200,9 @@ authority's ledger, not a capacity binding to a resource pool.
 Four distributions compose the market, each a thin root over the family kit:
 the storefront, the authority service, the gateway executable, and the buyer
 plugin. The issuance label and the accepted-terms payload live in the domain
-package, because the storefront, the service, and the gateway each need them
-and one composition root cannot import another.
+package, because two roots use each and one composition root cannot import
+another: the storefront and the service compose the label, and the storefront
+and the gateway build the terms payload.
 
 The storefront fills the family's selling contributions. Its publish request
 carries a model card, and its publication mapping fills the card's resource,
@@ -258,7 +260,7 @@ their digest, so a proof can refuse a credential whose seller changed the
 attestation or the price since the buyer accepted, or verify against the
 accepted envelope the authority holds. The buyer plugin runs a hook before it
 proposes settlement, with the listing's attestation envelope. The gateway image
-is built reproducibly from a digest-pinned base, so it can be measured. No
+is built from a digest-pinned base, the input a measurement of it needs. No
 proof `kind` is defined.
 
 ## Current limits

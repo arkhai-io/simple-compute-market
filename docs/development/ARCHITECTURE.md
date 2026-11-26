@@ -121,7 +121,7 @@ The compute family's delivery order is a second family library, `domains/compute
 
 The mechanism's routes are a worked instance of the five-piece route pattern under [`production-code.md`, "Route contracts and their HTTP binding"](../guidance/repository/production-code.md#route-contracts-and-their-http-binding), with every piece but the binding the family's. The route contract is a template, `MockRouteMount` in `compute_provisioning_contracts`, whose declarations for rule add, list, delete, and resume and for job evaluation are generated under a prefix and an operation-name prefix; the wire models sit beside it; the route service is `MockRuleRouteService` in the family kit; and the typed clients are `MockRuleClient` and `SyncMockRuleClient` in `compute_provisioning_client`, constructed over the family client's transport with a mount. Each domain's adapter binds the routes and contributes its mount's declarations, so a domain states only its two prefixes; only the evaluated job's request, whose fields are the domain's job parameters, stays the domain's.
 
-In the api family, `kit/api` (`arkhai_api`) is the vocabulary, and the family's kit is ten distributions beneath it, each split off for a rule the layers above state rather than for tidiness:
+In the api family, `kit/api` (`arkhai_api`) is the vocabulary, and the family's kit is eleven distributions beneath it, each split off for a rule the layers above state rather than for tidiness:
 
 | Distribution | Holds | Exists because |
 |---|---|---|
@@ -131,6 +131,7 @@ In the api family, `kit/api` (`arkhai_api`) is the vocabulary, and the family's 
 | `kit/api/selling` | issuance and settlement composition, negotiation, publication, lifecycle, route services, storefront authentication and persistence, and `SellingContributions` | dependency weight: the storefront runtimes |
 | `kit/api/buying` | the buy, negotiate, settle, and listing flows and `BuyingContributions` | dependency weight: the buyer's orchestration |
 | `kit/api/gate` | the bearer gate third-party applications embed | its contract is httpx alone, so it depends on no family package |
+| `kit/api/gateway` | the reverse proxy in front of an OpenAI-style service: the model check, the verification hook, the charge through the gate, and the forward | a domain's gateway executable composes it, and a second domain's would copy it otherwise; it depends on the gate and httpx |
 | `kit/api/selling-alkahest`, `selling-arkhai-payments` | each mechanism's seller stage | a specialization that knows a mechanism carries it in its name, split by side so a buyer installs no selling code |
 | `kit/api/buying-alkahest`, `buying-arkhai-payments` | each mechanism's buyer stage | the same, for the buyer side |
 
