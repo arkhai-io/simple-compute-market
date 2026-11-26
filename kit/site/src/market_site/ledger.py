@@ -1185,8 +1185,11 @@ class CapacityLedgerService:
                 # unbacked, as admission judges it, and its declarations keep
                 # their own ``enabled`` whatever host they name. A pool whose
                 # modes cannot be read, a missing pool among them, is judged
-                # to deliver, so the read fails closed rather than offering
-                # what admission would refuse.
+                # to deliver, so wherever it needs a host the host rule
+                # applies rather than being skipped: its declarations are
+                # offered enabled only with a usable host. Admission refuses them whatever their host,
+                # since such a pool delivers no mode it can read, so this
+                # read can show enabled a declaration admission refuses.
                 backed = facts.deliverable_modes is None or bool(
                     facts.deliverable_modes
                 )

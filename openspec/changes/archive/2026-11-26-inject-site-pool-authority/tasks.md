@@ -456,6 +456,20 @@ closeout parts (`openspec/README.md`, "This repository's closeout parts") order 
   `physical-provisioning/architecture.md`, whose reason for not checking declarations at
   write cited the removed edge, now cites the port's lack of backing. Both deltas merge
   at archive; neither capability has an `index.md`.
+  Closeout triage fix (32 F1, the owner directing the comment's correction): the
+  promoted companion paragraph and its source comment in `ledger.py` said a missing or
+  unreadable pool made the offered read refuse what admission refuses; they now say the
+  host rule applies to it wherever it needs a host, while admission refuses it whatever
+  its host, so the offered read can show enabled what admission refuses. The same claim
+  in the `PoolFacts` docstring (`pool_facts.py`) and one test docstring in
+  `test_ledger_host_requirement.py` was corrected with it. No behaviour changed.
+  Evidence: `make -C kit/site test` (unit and integration) 394 passed. Fresh-context
+  check of the diff: the statements match the code and tests; it asked to qualify "the
+  host rule applies" to pools that need a host, reflow one overlong line, and correct
+  the two docstrings, all done; it also suggested rewording the `site-capacity`
+  scenario "The offered read meets a pool the reader does not find" ("as admission
+  judges it"), declined: the phrase refers to judging the host, and a requirement's
+  scenario is not reworded outside a delta.
 - [x] 4.9 Guidance placement: read the sections 4.8 added or rewrote in
   `package-layers.md` and `dependencies.md` against the layer test — the principle in
   `dependencies.md` must hold in any repository and name nothing of this one, with

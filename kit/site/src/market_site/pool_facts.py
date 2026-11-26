@@ -28,7 +28,7 @@ class PoolFacts(Protocol):
     A pool the reader does not find is reported as not existing, not enabled,
     with unreadable deliverable modes, and as needing a host exactly when its
     composition supplies a host requirement, so every decision refuses it and
-    the offered read fails closed.
+    the offered read applies the host rule to its declarations.
     """
 
     @property

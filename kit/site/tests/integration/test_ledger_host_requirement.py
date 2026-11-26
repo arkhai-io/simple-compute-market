@@ -470,7 +470,8 @@ def test_a_pool_delivering_a_mode_is_judged_by_its_modes_not_its_backing_label()
 
 
 def test_a_pool_whose_deliverable_modes_cannot_be_read_is_judged_to_deliver():
-    """Startup and every write refuse such a pool; the offered read fails closed."""
+    """Startup and every write refuse such a pool; the offered read applies
+    the host rule to its declarations."""
     ledger = _make_ledger(
         needs_host=True,
         deliverable_hosts=FakeDeliverableHosts(),

@@ -132,13 +132,16 @@ them, cannot drift from the capacity-bucket projection, and no projection builde
 reads a host. The read judges a pool by whether it declares a deliverable offering
 mode, as admission does, rather than by its backing, which the port does not carry:
 an unbacked pool delivers nothing, so a pool declaring no deliverable mode keeps its
-declarations' own `enabled`. A missing pool, or one whose modes do not parse, is judged to deliver, so the read fails closed rather
-than offering what admission would refuse. Applying the rule in each projection
-builder instead was rejected: it calls the rule from two places and reads hosts in a
-session apart from the declarations. This makes the ledger hold projection logic
-beside its records; a ledger would better be closer to a raw data structure, with
-projection logic kept apart from it, but the ledger already mixes the two, and
-separating them is a change of its own.
+declarations' own `enabled`. A pool whose modes cannot be read, a missing pool among
+them, is judged to deliver, so wherever it needs a host the host rule applies rather
+than being skipped: its declarations are offered enabled only with a usable host.
+Admission refuses them whatever their host, since such a pool delivers no mode it can
+read, so the offered read can show enabled a declaration that admission refuses.
+Applying the rule in each projection builder instead was rejected: it calls the rule
+from two places and reads hosts in a session apart from the declarations. This makes
+the ledger hold projection logic beside its records; a ledger would better be closer
+to a raw data structure, with projection logic kept apart from it, but the ledger
+already mixes the two, and separating them is a change of its own.
 
 The alternatives each left capacity with more than one authority. Adding vCPU, RAM,
 and disk columns to hosts would have folded sellable capacity into records whose
