@@ -145,18 +145,19 @@ def classify(
             floor=FLOOR_RELEASE,
             cause=UnsupportedCause.NOT_THIS_CHAIN,
         )
-    retired = (FLOOR_REVISION, *PRE_FLOOR_REVISIONS)
-    unknown = tuple(r for r in revisions if r not in known and r not in retired)
-    if unknown:
-        return CheckResult(CheckState.AHEAD, unknown=unknown, floor=FLOOR_RELEASE)
     if len(revisions) > 1:
         # Alembic keeps one revision for a linear history; several are no
-        # state any release of the registry left.
+        # state any image of the registry left, whatever revisions they name,
+        # so an unknown one among them is no sign of a newer image.
         return CheckResult(
             CheckState.UNSUPPORTED,
             floor=FLOOR_RELEASE,
             cause=UnsupportedCause.NOT_THIS_CHAIN,
         )
+    retired = (FLOOR_REVISION, *PRE_FLOOR_REVISIONS)
+    unknown = tuple(r for r in revisions if r not in known and r not in retired)
+    if unknown:
+        return CheckResult(CheckState.AHEAD, unknown=unknown, floor=FLOOR_RELEASE)
     revision = revisions[0]
     if revision in PRE_FLOOR_REVISIONS:
         after = PRE_FLOOR_REVISIONS[PRE_FLOOR_REVISIONS.index(revision) + 1 :]

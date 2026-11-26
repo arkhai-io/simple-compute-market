@@ -124,6 +124,28 @@ def test_several_known_revisions_are_not_the_registrys() -> None:
     assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
 
 
+@pytest.mark.parametrize(
+    "revisions",
+    [
+        ["v0_3_0_baseline", "021_from_a_newer_image"],
+        [FLOOR_REVISION, "021_from_a_newer_image"],
+        ["021_from_a_newer_image", "022_from_a_newer_image"],
+    ],
+)
+def test_several_revisions_with_an_unknown_one_are_not_the_registrys(
+    revisions: list[str],
+) -> None:
+    """No registry image leaves several revisions, so an unknown one among
+    them is refused as not the registry's, not as ahead with a newer image's
+    remedy."""
+    result = classify(TABLES, revisions, KNOWN)
+    assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
+    message = refusal_message(result, service=SERVICE, command=COMMAND)
+    assert "was not built by `registry-migrate`" in message, message
+    assert "image that wrote them" not in message, message
+
+
 def test_each_refusal_names_the_command() -> None:
     for tables, revisions in (
         (set(), None),
