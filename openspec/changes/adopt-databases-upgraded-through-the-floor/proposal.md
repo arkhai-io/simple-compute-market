@@ -58,11 +58,14 @@ fresh database built by the floor release
 - **The API-credit storefront and service gain the v0.3.0 floor**, so an existing
   database upgrades in place: the storefront from its committed floor fixture, the
   service from a new one, generated from its v0.3.0 wheels, with a repair migration
-  where its baselines do not reproduce it.
+  where its baselines do not reproduce it. The pair upgrades in the order its Compose
+  deployment already enforces: the service first, the storefront once it is healthy.
 - **A database older than the floor is told to upgrade through it.** The command and
-  the guidance say to upgrade to the floor release first, then to this one. Starting
-  on a fresh database is never the remedy for a database that can upgrade; a database
-  the chain did not build is refused as not its own.
+  the guidance say to upgrade to the floor release first, then to this one, once the
+  operator has confirmed the database is the service's, since a ledger cannot tell an
+  older database from another service's that shares its history. Starting on a fresh
+  database is never the remedy for a database that can upgrade; a database recording
+  none of the floor's migrations is refused as not the service's own.
 - **The messages say what happened.** "Ahead" keeps its meaning: an image older than
   the database, which runs the image that wrote it or restores a backup. It arises
   only on a database recording the chain's baselines.

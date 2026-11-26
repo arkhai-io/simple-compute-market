@@ -53,7 +53,7 @@ Each stateful service — compute provisioning, the VM storefront, the bare-meta
 
 ### Requirement: A chain begins at its supported baseline
 
-Each in-house chain MUST begin with baseline migrations, one for each package whose tables its database's startup builds, whose bodies are fixed DDL. The baselines of compute provisioning, the VM storefront, the bare-metal storefront, the API-credit storefront, and the API-credit service MUST reproduce the schema the marketplace v0.3.0 release builds at startup; the registry's chain MUST begin with one Alembic baseline revision reproducing its v0.3.0 schema. Every service's migration command MUST adopt a database its floor release ran on — one that records every migration the floor release's chain recorded and none of the chain's baselines, or, for the registry, one at its floor revision — whatever else it records: in one transaction, without running the baselines, it MUST remove every recorded ID its chain does not list and record the baselines, then apply the migrations after the baseline. A database older than the floor MUST be refused as unsupported, naming the migrations it lacks and directing the operator to upgrade it through the floor release first, never to a fresh database. A non-empty database the chain did not build that records none of its floor's migrations MUST be refused as unsupported, as not the service's database. A defect in data or schema a supported database carries MUST be repaired by an ordinary migration after the baseline, so that an adopted database is one the release can serve; a table an earlier release created that the release no longer reads MUST be dropped by such a migration where present. The tables and indexes the v0.3.0 release created outside its chain — when a store opened, or after the chain in the storefront's constructor — MUST be created by one such migration, which alone among migrations tolerates objects that already exist, since a v0.3.0 database may or may not hold them.
+Each in-house chain MUST begin with baseline migrations, one for each package whose tables its database's startup builds, whose bodies are fixed DDL. The baselines of compute provisioning, the VM storefront, the bare-metal storefront, the API-credit storefront, and the API-credit service MUST reproduce the schema the marketplace v0.3.0 release builds at startup; the registry's chain MUST begin with one Alembic baseline revision reproducing its v0.3.0 schema. Every service's migration command MUST adopt a database its floor release ran on — one that records every migration the floor release's chain recorded and none of the chain's baselines, or, for the registry, one at its floor revision — whatever else it records: in one transaction, without running the baselines, it MUST remove every recorded ID its chain does not list and record the baselines, then apply the migrations after the baseline. A database recording some but not all of its floor's migrations and none of the chain's baselines, or, for the registry, at a revision of its history before its floor, MUST be refused as unsupported, naming the floor release and the migrations it lacks, saying the command cannot tell an older database of the service's own from another service's sharing its history, and directing the operator, once the database is confirmed as the service's, to upgrade it through the floor release first, never to a fresh database. A non-empty database the chain did not build that records none of its floor's migrations MUST be refused as unsupported, as not the service's database. A defect in data or schema a supported database carries MUST be repaired by an ordinary migration after the baseline, so that an adopted database is one the release can serve; a table an earlier release created that the release no longer reads MUST be dropped by such a migration where present. The tables and indexes the v0.3.0 release created outside its chain — when a store opened, or after the chain in the storefront's constructor — MUST be created by one such migration, which alone among migrations tolerates objects that already exist, since a v0.3.0 database may or may not hold them.
 
 #### Scenario: A fresh database is migrated
 
@@ -77,18 +77,33 @@ Each in-house chain MUST begin with baseline migrations, one for each package wh
 
 #### Scenario: A database older than v0.3.0 is refused
 
-- **WHEN** the migration command runs against a database that records migrations but none of its chain's baselines and lacks a migration the v0.3.0 chain recorded
-- **THEN** it changes nothing and refuses the database as unsupported, naming the missing migrations and directing the operator to upgrade it through marketplace 0.3.0 first, then to this release
+- **WHEN** the migration command runs against a database that records some of the migrations the v0.3.0 chain recorded but not all, and none of its chain's baselines
+- **THEN** it changes nothing and refuses the database as unsupported, naming marketplace 0.3.0 and the missing migrations, saying it cannot tell an older database of its own from another service's, and directing the operator, once the database is confirmed as the service's, to upgrade it through marketplace 0.3.0 first, then to this release
+
+#### Scenario: Another storefront's database is refused
+
+- **WHEN** the VM storefront's migration command runs against a database the v0.3.0 bare-metal storefront built, which records migrations the two storefronts share and lacks others of the VM storefront's floor
+- **THEN** it changes nothing, does not adopt the database, and refuses it as unsupported with the same conditional direction, naming the VM storefront's floor migrations the database lacks
+
+#### Scenario: A ledger recording none of the floor's migrations is refused
+
+- **WHEN** a service's migration command runs against a database that records migrations, none of them its chain's baselines or its floor's
+- **THEN** it changes nothing and refuses the database as unsupported, saying the command did not build it, and directs the operator neither to a fresh database nor to an upgrade
 
 #### Scenario: A v0.3.0 API-credit database is adopted
 
 - **WHEN** the API-credit storefront's or service's migration command runs against a database the v0.3.0 release's API-credit storefront or service built
 - **THEN** it records the baselines as applied without running them, removes the v0.3.0 records, and applies the migrations after the baseline, keeping the database's rows
 
+#### Scenario: The API-credit pair upgrades in order
+
+- **WHEN** a Compose deployment holding a v0.3.0 API-credit storefront database and service database is upgraded to this release
+- **THEN** the service's migration command runs first, the storefront's runs only once the service has migrated and is healthy, and a failed service migration leaves the storefront's database unchanged and the storefront not started
+
 #### Scenario: An API-credit database is refused
 
-- **WHEN** the API-credit storefront's or service's migration command runs against a non-empty database that records none of its chain's baselines and lacks a migration its v0.3.0 floor recorded
-- **THEN** it refuses the database as unsupported, changes nothing, and directs the operator to upgrade it through marketplace 0.3.0 first
+- **WHEN** the API-credit storefront's or service's migration command runs against a database that records some of the migrations its v0.3.0 floor recorded but not all, and none of its chain's baselines
+- **THEN** it refuses the database as unsupported, changes nothing, and directs the operator, once the database is confirmed as the service's, to upgrade it through marketplace 0.3.0 first
 
 #### Scenario: A database the chain did not build is refused
 
@@ -104,7 +119,7 @@ Each in-house chain MUST begin with baseline migrations, one for each package wh
 
 ### Requirement: Every migration chain declares its floor
 
-Every in-house migration chain MUST declare a floor: the release it is supported from, by name, and the migration IDs that release's chain recorded. Chains MAY declare different floors. A chain with no earlier history MUST declare the floor `0.0.0`, recording no migration, and adopts no database. The shared migration engine MUST refuse to construct a chain that declares no floor. Each refusal of a database older than the floor MUST name the floor release, the registry's included. The migration command's `--check` mode MUST list, for a database awaiting adoption, the baselines it would record, every recorded migration adoption would remove beyond the floor's, and the pending migrations.
+Every in-house migration chain MUST declare a floor: the release it is supported from, by name, and the migration IDs that release's chain recorded. Chains MAY declare different floors. A chain with no earlier history MUST declare the floor `0.0.0`, recording no migration, and adopts no database. The shared migration engine MUST refuse to construct a chain that declares no floor. Each refusal of a database older than the floor MUST name the floor release, the registry's included. The migration command's `--check` mode MUST list, for a database awaiting adoption, the baselines it would record, the floor release whose records it replaces, by name, every recorded migration adoption would remove beyond the floor's, and the pending migrations.
 
 #### Scenario: A chain without a floor cannot be built
 
@@ -119,4 +134,4 @@ Every in-house migration chain MUST declare a floor: the release it is supported
 #### Scenario: An operator previews adopting an upgraded database
 
 - **WHEN** an operator runs the VM storefront's migration command with `--check` against a database an earlier release built and v0.3.0 then ran on
-- **THEN** it lists the baselines to be adopted, each recorded migration adoption would remove beyond the floor's, and the pending migrations, changes nothing, and exits unsuccessfully
+- **THEN** it lists the baselines to be adopted, names marketplace 0.3.0 as the floor release whose records adoption replaces, lists each recorded migration adoption would remove beyond the floor's, and the pending migrations, changes nothing, and exits unsuccessfully
