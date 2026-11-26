@@ -12,7 +12,8 @@ import logging
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import sessionmaker
 
 from eventing import (
     ABANDONED,
@@ -427,3 +428,254 @@ def test_the_default_finally_sink_logs_the_abandoned_event(
     (logged,) = [r for r in caplog.records if r.name == "eventing.finally"]
     assert recorded.id in logged.getMessage()
     assert "ConnectionError: down" in logged.getMessage()
+
+
+# One runner at a time. Each runner below has its own engine and sessions over the
+# store's file, as a second process would.
+
+
+@pytest.fixture
+def other_sessions(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'events.db'}")
+    try:
+        yield sessionmaker(engine, expire_on_commit=False)
+    finally:
+        engine.dispose()
+
+
+class Overlapping(Collect):
+    """A destination that, while it delivers the first event, runs `meanwhile` —
+    another runner's cycle — before returning."""
+
+    def __init__(self, meanwhile) -> None:
+        super().__init__()
+        self.meanwhile = meanwhile
+        self.reports: list[object] = []
+
+    def deliver(self, envelope: Envelope) -> None:
+        if not self.reports:
+            self.reports.append(self.meanwhile())
+        super().deliver(envelope)
+
+
+def holder(store: Store) -> tuple[str | None, object]:
+    with store.engine.connect() as connection:
+        row = connection.execute(
+            select(schema.consumers.c.held_by, schema.consumers.c.held_until)
+            .where(schema.consumers.c.name == "notify")
+        ).one()
+    return row.held_by, row.held_until
+
+
+def test_a_second_runner_delivers_nothing_while_the_first_holds_the_consumer(
+        store: Store, recorder: Recorder, clock: Clock, other_sessions) -> None:
+    second_peer = Collect()
+    second = Consumer("notify", session_factory=other_sessions, clock=clock,
+                      destinations={"peer": second_peer})
+    first_peer = Overlapping(second.run_cycle)
+    first = Consumer("notify", session_factory=store.sessions, clock=clock,
+                     destinations={"peer": first_peer})
+    first.register()
+    events = record(store, recorder, "j-1", "j-2")
+
+    report = first.run_cycle()
+
+    assert second_peer.received == []
+    assert first_peer.subjects == ["j-1", "j-2"]
+    (meanwhile,) = first_peer.reports
+    assert meanwhile.held_elsewhere and meanwhile.delivered == 0 and meanwhile.read == 0
+    assert (report.delivered, report.held_elsewhere) == (2, False)
+    assert [delivery(store, "notify", "peer", e.sequence)["attempts"] for e in events] == [1, 1]
+    # The cycle released the consumer, so the second runner takes it at once.
+    assert holder(store) == (None, None)
+    assert not second.run_cycle().held_elsewhere
+
+
+class Raising(Collect):
+    """A destination raising `error` once `meanwhile` — another runner's cycle — has
+    run inside its first delivery."""
+
+    def __init__(self, meanwhile, error: Exception | None) -> None:
+        super().__init__()
+        self.meanwhile = meanwhile
+        self.error = error
+        self.reports: list[object] = []
+
+    def deliver(self, envelope: Envelope) -> None:
+        if not self.reports:
+            self.reports.append(self.meanwhile())
+            if self.error is not None:
+                raise self.error
+        super().deliver(envelope)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [None, ConnectionError("refused"), ParkDestination("unsupported")],
+    ids=["delivered", "failed", "parked"],
+)
+def test_a_runner_whose_hold_lapsed_applies_no_outcome(
+        store: Store, recorder: Recorder, clock: Clock, other_sessions, error) -> None:
+    """The hold lapses while the first runner is inside a destination's call: the
+    second runner takes the consumer, fails the first event and delivers nothing
+    more, and the first runner's outcome — delivered, failed or parked — is
+    discarded and it stops. The stored delivery keeps the
+    second runner's failure."""
+    second_peer = Collect()
+    second_peer.failing = "second runner's failure"
+    second = Consumer("notify", session_factory=other_sessions, clock=clock,
+                      destinations={"peer": second_peer}, hold=timedelta(minutes=1))
+
+    def lapse_then_second_cycle() -> object:
+        clock.advance(timedelta(minutes=2))
+        return second.run_cycle()
+
+    first_finally = Finally()
+    first_peer = Raising(lapse_then_second_cycle, error)
+    first = Consumer("notify", session_factory=store.sessions, clock=clock,
+                     destinations={"peer": first_peer}, hold=timedelta(minutes=1),
+                     finally_sink=first_finally)
+    first.register()
+    events = record(store, recorder, "j-1", "j-2")
+
+    report = first.run_cycle()
+
+    (meanwhile,) = first_peer.reports
+    assert (meanwhile.failed, meanwhile.held_elsewhere) == (1, False)
+    assert (report.delivered, report.failed, report.abandoned, report.parked,
+            report.held_elsewhere) == (0, 0, 0, [], True)
+    assert first_finally.calls == []
+    assert destination_state(store, "notify", "peer") == ACTIVE
+    head = delivery(store, "notify", "peer", events[0].sequence)
+    assert (head["state"], head["attempts"], head["last_error"]) == (
+        PENDING, 1, "ConnectionError: second runner's failure")
+    assert delivery(store, "notify", "peer", events[1].sequence)["attempts"] == 0
+    assert holder(store) == (None, None)
+
+
+def test_a_runner_whose_hold_lapsed_abandons_nothing(
+        store: Store, recorder: Recorder, clock: Clock, other_sessions) -> None:
+    """A delivery already past the first runner's maximum age fails again while its
+    hold lapses and the second runner takes the consumer: the first runner, which
+    would abandon it, abandons nothing and hands nothing to its finally sink."""
+    second_peer = Collect()
+    second_peer.failing = "second runner's failure"
+    second = Consumer("notify", session_factory=other_sessions, clock=clock,
+                      destinations={"peer": second_peer}, hold=timedelta(minutes=1))
+
+    def lapse_then_second_cycle() -> object:
+        clock.advance(timedelta(minutes=2))
+        return second.run_cycle()
+
+    first_finally = Finally()
+    first_peer = Raising(lapse_then_second_cycle, ConnectionError("refused"))
+    first = Consumer("notify", session_factory=store.sessions, clock=clock,
+                     destinations={"peer": first_peer}, hold=timedelta(minutes=1),
+                     retry=RetryPolicy(max_age=timedelta(minutes=1)),
+                     finally_sink=first_finally)
+    first.register()
+    (event_1,) = record(store, recorder, "j-1")
+    first_peer.reports.append("an earlier cycle")  # its first attempt just fails
+    first_peer.failing = "first attempt"
+    assert first.run_cycle().failed == 1
+    first_peer.failing = None
+    first_peer.reports.clear()
+    clock.advance(timedelta(seconds=90))  # past the maximum age, and the backoff
+
+    report = first.run_cycle()
+
+    (meanwhile,) = first_peer.reports
+    assert (meanwhile.failed, meanwhile.held_elsewhere) == (1, False)
+    assert (report.abandoned, report.failed, report.held_elsewhere) == (0, 0, True)
+    assert first_finally.calls == []
+    row = delivery(store, "notify", "peer", event_1.sequence)
+    assert (row["state"], row["attempts"], row["last_error"]) == (
+        PENDING, 2, "ConnectionError: second runner's failure")
+
+
+def test_a_cycle_started_while_the_same_instance_runs_one_does_nothing(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    """A manual cycle beside the timer's, on one instance and so one runner
+    identity, is kept apart by the instance itself."""
+    peer = Overlapping(lambda: same.run_cycle())
+    same = Consumer("notify", session_factory=store.sessions, clock=clock,
+                    destinations={"peer": peer}, runner="pod-0")
+    same.register()
+    record(store, recorder, "j-1", "j-2")
+
+    report = same.run_cycle()
+
+    (meanwhile,) = peer.reports
+    assert (meanwhile.held_elsewhere, meanwhile.delivered) == (True, 0)
+    assert peer.subjects == ["j-1", "j-2"]
+    assert report.delivered == 2
+
+
+def test_a_runner_registering_a_consumer_another_registered_first_does_nothing(
+        store: Store, recorder: Recorder, clock: Clock, tmp_path) -> None:
+    """Two runners find the consumer unregistered; the second one's registration
+    commits first, so the first's is refused by the consumer's key."""
+    record(store, recorder, "j-0")
+    other_engine = create_engine(f"sqlite:///{tmp_path / 'events.db'}")
+    second_peer = Collect()
+    second = Consumer("notify", session_factory=sessionmaker(other_engine), clock=clock,
+                      destinations={"peer": second_peer})
+    interleaved: list[object] = []
+
+    def second_registers_first(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("INSERT INTO eventing_consumers") and not interleaved:
+            interleaved.append(second.run_cycle())
+
+    first_peer = Collect()
+    first = Consumer("notify", session_factory=store.sessions, clock=clock,
+                     destinations={"peer": first_peer})
+    event.listen(store.engine, "before_cursor_execute", second_registers_first)
+    try:
+        report = first.run_cycle()
+    finally:
+        event.remove(store.engine, "before_cursor_execute", second_registers_first)
+        other_engine.dispose()
+
+    (meanwhile,) = interleaved
+    assert meanwhile.held_elsewhere is False
+    assert report.held_elsewhere is True
+    assert holder(store) == (None, None)
+    record(store, recorder, "j-1")
+    assert first.run_cycle().delivered == 1
+    assert first_peer.subjects == ["j-1"]
+
+
+def test_a_stopped_runners_hold_keeps_others_out_until_it_lapses(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    peer = Collect()
+    record(store, recorder, "j-0")
+    Consumer("notify", session_factory=store.sessions, clock=clock,
+             destinations={"peer": Collect()}, runner="pod-0").register()
+    record(store, recorder, "j-1")
+    with store.sessions.begin() as session:  # the process stopped holding it
+        session.execute(
+            schema.consumers.update().values(
+                held_by="pod-0", held_until=schema.to_stored(clock() + timedelta(minutes=5))))
+    other = Consumer("notify", session_factory=store.sessions, clock=clock,
+                     destinations={"peer": peer}, runner="pod-1")
+
+    assert other.run_cycle().held_elsewhere
+    clock.advance(timedelta(minutes=4))
+    assert other.run_cycle().held_elsewhere
+    assert peer.received == []
+
+    # The same runner identity, restarted, takes its own hold back at once.
+    restarted_peer = Collect()
+    restarted = Consumer("notify", session_factory=store.sessions, clock=clock,
+                         destinations={"peer": restarted_peer}, runner="pod-0")
+    assert restarted.run_cycle().delivered == 1
+    assert restarted_peer.subjects == ["j-1"]
+
+    with store.sessions.begin() as session:
+        session.execute(
+            schema.consumers.update().values(
+                held_by="pod-0", held_until=schema.to_stored(clock() + timedelta(minutes=5))))
+    record(store, recorder, "j-2")
+    clock.advance(timedelta(minutes=5))  # lapsed
+    assert other.run_cycle().delivered == 1
+    assert peer.subjects == ["j-2"]

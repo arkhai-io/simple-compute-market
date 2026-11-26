@@ -231,6 +231,53 @@ async def test_an_operators_stdout_callback_does_not_change_the_records(
     _assert_cleaned(run, scratch)
 
 
+_SITE_STDOUT_CALLBACK = """\
+from ansible.plugins.callback import CallbackBase
+
+
+class CallbackModule(CallbackBase):
+    CALLBACK_VERSION = 2.0
+    CALLBACK_TYPE = "stdout"
+    CALLBACK_NAME = "site_lines"
+
+    def v2_runner_on_failed(self, result, ignore_errors=False):
+        self._display.display(
+            "SITE-LINES failed %s %s" % (result._host.get_name(), result._task.get_name())
+        )
+"""
+
+
+async def test_an_operators_own_stdout_callback_is_found_beside_the_records(
+    tmp_path, scratch, monkeypatch
+) -> None:
+    """A stdout callback loaded only from a directory the operator's
+    ``ansible.cfg`` names, by a path relative to that file, still runs: Ansible
+    would refuse to start the playbook if it could not load it."""
+    operator = tmp_path / "operator"
+    (operator / "callbacks").mkdir(parents=True)
+    (operator / "callbacks" / "site_lines.py").write_text(_SITE_STDOUT_CALLBACK)
+    config = operator / "ansible.cfg"
+    config.write_text(
+        "[defaults]\nstdout_callback = site_lines\ncallback_plugins = ./callbacks\n"
+    )
+    monkeypatch.setenv("ANSIBLE_CONFIG", str(config))
+    monkeypatch.delenv("ANSIBLE_CALLBACK_PLUGINS", raising=False)
+    playbook = _playbook(
+        tmp_path,
+        "    - name: Fail\n      ansible.builtin.fail:\n        msg: under the site's callback\n",
+    )
+
+    run, error = await _run(tmp_path, _local_inventory(tmp_path), playbook)
+
+    assert isinstance(error, AnsibleError)
+    (record,) = error.failures
+    assert (record.task, record.msg, record.module) == (
+        "Fail", "under the site's callback", "ansible.builtin.fail",
+    )
+    assert "SITE-LINES failed node-1 Fail" in error.stdout
+    _assert_cleaned(run, scratch)
+
+
 async def test_a_run_cancelled_through_its_handle_keeps_what_it_recorded(
     tmp_path, scratch
 ) -> None:

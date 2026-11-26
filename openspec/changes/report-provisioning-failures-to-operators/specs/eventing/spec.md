@@ -53,12 +53,17 @@ The recorder MUST write at most one event per kind and dedup-key value, and MUST
 
 ### Requirement: A consumer receives each event at least once per destination, in order
 
-A named consumer MUST hold a durable position and, for each destination, a delivery state of pending, delivered, parked or abandoned, with its attempt count and last error. It MUST deliver events to each destination in `sequence` order and at least once, under the event's stable `id`, and a failing destination MUST NOT hold up another. The recorder MUST allocate `sequence` so that no event commits with a lower sequence than an event already visible to a consumer — from a single counter updated in the producer's transaction, whose lock is held until that transaction ends — so that a consumer advancing its position past every event it has read skips none.
+A named consumer MUST hold a durable position and, for each destination, a delivery state of pending, delivered, parked or abandoned, with its attempt count and last error. It MUST deliver events to each destination in `sequence` order and at least once, under the event's stable `id`, and a failing destination MUST NOT hold up another. The recorder MUST allocate `sequence` so that no event commits with a lower sequence than an event already visible to a consumer — from a single counter updated in the producer's transaction, whose lock is held until that transaction ends — so that a consumer advancing its position past every event it has read skips none. One runner MUST hold a named consumer at a time: a runner MUST take the consumer's hold — its identity and an expiry, stored with the consumer — before it registers, reads or delivers, MUST do nothing while another runner holds it unexpired, and MUST record no outcome once another runner has taken it, so two runners never deliver to a destination together.
 
 #### Scenario: Two producers record events concurrently
 
-- **WHEN** two transactions each record an event, the one that recorded first commits after the other, and a consumer reads between the two commits
-- **THEN** the first event's sequence is the higher of the two, and the consumer delivers both
+- **WHEN** a transaction records an event while another transaction that recorded one first has not yet ended, and a consumer reads between the two commits
+- **THEN** the second cannot allocate its sequence until the first ends, its event's sequence is the higher of the two, and the consumer delivers both in sequence order
+
+#### Scenario: Two runners of one consumer overlap
+
+- **WHEN** a second runner runs a cycle of a consumer while a first runner holds it, and later the first runner's hold lapses while it is still delivering an event
+- **THEN** the second runner delivers nothing while the first holds the consumer, then takes it once the hold has lapsed, and the first runner records no outcome after the second has taken it
 
 #### Scenario: A destination fails
 

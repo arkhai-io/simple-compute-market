@@ -211,7 +211,9 @@ def test_no_second_recording_allocates_while_a_first_holds_the_counter(
         store: Store, recorder: Recorder, clock: Clock, tmp_path: Path) -> None:
     # A second producer whose database will not wait is refused while the first
     # transaction holds its allocation, and records after it commits, above it: no
-    # event can commit with a lower sequence than one already visible.
+    # event can commit with a lower sequence than one already visible. The consumer
+    # reads between the two commits; on SQLite, whose writers wait for one another,
+    # a cycle cannot take its hold while a producer's transaction is open.
     impatient_engine = create_engine(f"sqlite:///{tmp_path / 'events.db'}",
                                      connect_args={"timeout": 0})
     impatient = sessionmaker(impatient_engine)
@@ -230,8 +232,8 @@ def test_no_second_recording_allocates_while_a_first_holds_the_counter(
             with pytest.raises(OperationalError, match="locked"):
                 with impatient.begin() as second:
                     recorder.record(second, job("j-2"))
-            consumer.run_cycle()  # nothing is committed yet
-            assert received == []
+        consumer.run_cycle()  # between the two commits
+        assert received == ["j-1"]
         with impatient.begin() as second:
             second_event = recorder.record(second, job("j-2"))
     finally:

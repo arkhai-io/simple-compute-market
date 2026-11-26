@@ -106,11 +106,19 @@ second gap open against D1.
 
 ### D3 — A real failure is classified from Ansible's own result records
 
-The family kit's Ansible distribution ships a notification callback plugin. The
-runner enables it per process through `ANSIBLE_CALLBACK_PLUGINS` and
-`ANSIBLE_CALLBACKS_ENABLED`, which outrank any `ansible.cfg`, beside whatever stdout
-callback runs. It writes one JSON record per failed or unreachable task to an
-owner-only file the runner names per run and removes when the run ends: host, play,
+The family kit's Ansible distribution ships a notification callback plugin that
+needs no enabling. The runner puts its directory on the plugin path per process
+through `ANSIBLE_CALLBACK_PLUGINS`, beside whatever stdout callback runs. Ansible
+has no setting that adds a directory: the variable replaces the path an
+`ansible.cfg`'s `callback_plugins` or Ansible's defaults would give. So the runner
+sets it to that path with the plugin's directory in front — the variable's own
+value when the environment gives one, else the `callback_plugins` of the
+configuration file Ansible reads, resolved as Ansible resolves it, else the
+defaults — and an operator's own stdout and notification callbacks still load
+(implementation review 23 F1). The runner sets no `ANSIBLE_CALLBACKS_ENABLED`,
+which would replace the operator's `callbacks_enabled`. It writes one JSON record
+per failed or unreachable task to an owner-only file the runner names per run and
+removes when the run ends: host, play,
 role, task name, task tags, module, `rc`, `msg`, `stdout`/`stderr`, and whether the
 failure was ignored or rescued. Results under `no_log` arrive censored.
 
@@ -317,6 +325,27 @@ repository's services. *Rejected:* a free-running sequence whose consumers stop 
 gap until it is proven unused, which needs PostgreSQL's transaction snapshots in a
 component meant to be portable, or, by a time horizon, still loses an event whose
 transaction outlives it.
+
+**One runner per consumer** (implementation review 23 F2). A named consumer is held
+by one runner at a time: a cycle takes the consumer's hold — a holder and an expiry
+on the consumer's row — or does nothing while another runner holds it unexpired;
+each of its transactions renews the hold and applies nothing once another runner has
+taken it; the cycle releases it at its end. Without it, two runs of one consumer
+read the same head delivery, both call the destination, and the slower one's outcome
+overwrites the faster one's after the faster has delivered the next event — out of
+order, and a delivered event shown pending. The hold is kept in the consumer's clock,
+as the retry schedule is, since other runners compare it; it is longer than any
+delivery attempt, so only a runner stuck past it inside a destination's call can be
+superseded, and then the event is delivered again under its `id`, as at-least-once
+delivery allows. A runner identity names one process, and one stable across its
+restarts takes its own hold back at once; a consumer instance runs one cycle at a
+time, so a timer's cycle and a manual one on the same instance are kept apart too.
+One mechanism covers registering and reading as well as delivering, at a
+throughput of one runner per consumer, ample at these volumes. *Rejected:* a claim
+per destination, which lets several runners serve one consumer's destinations at
+once but leaves concurrent registering and reading to fail on their keys; leaving
+the rule to each deployment (one replica, a process-local lock), which a second
+process or a cycle run by hand breaks silently.
 
 **Retention.** By time, configured per table — the events, the delivery state, and
 any table a record-time hook writes — and never ahead of a pending destination: an

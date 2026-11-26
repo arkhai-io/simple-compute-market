@@ -14,7 +14,8 @@ whole output is already kept as the job's logs: the message keeps its start,
 the output its end, where a failing command reports what failed.
 
 Only the standard library and Ansible are imported: Ansible loads this file by
-path, in its own interpreter.
+path, in its own interpreter. The distribution declares that import as its
+``ansible`` extra.
 """
 
 from __future__ import annotations

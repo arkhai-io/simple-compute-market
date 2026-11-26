@@ -22,27 +22,46 @@ transactions:
    process stopped after delivering — is delivered again under the same event `id`,
    so a destination sees each event at least once.
 
+One runner holds a named consumer at a time. A cycle — and each of the three phases
+run on its own — first takes the consumer's hold, a holder and an expiry stored on
+the consumer's row, or does nothing when another runner holds it unexpired; every
+transaction of the cycle renews the hold, and applies nothing once another runner
+has taken it, so a delivery's outcome is recorded only by the runner still holding
+the consumer. A `Consumer` runs one cycle at a time: a cycle started while another of
+the same instance runs does nothing. Two processes, or two cycles of one instance,
+therefore never deliver to a destination together; a runner identity names one
+process, and two instances given one identity are not kept apart. A runner that
+stops holding it leaves the hold to lapse, so the hold is longer than any delivery
+attempt: a holder still inside a destination's call when its hold lapses loses the
+consumer once another runner takes it, records no outcome, and that runner delivers
+the event again under the same `id`.
+
 A destination parks itself by raising `ParkDestination`, or is parked explicitly;
 nothing is delivered to it until it is resumed, and resuming delivers, in order, the
 pending events still retained. A consumer's retry policy may bound a delivery's
 retries by a maximum age: a delivery that fails once older than that is abandoned,
 keeping its last error, and the event is handed to the finally sink.
 
-Retries are scheduled, and a delivery's age measured, in the time of the world the
-consumer's clock reads, not on the monotonic clock: the schedule is stored and
-outlives the process. Where that time is held, a retry comes due only when it is
-moved forward.
+Retries are scheduled, a delivery's age measured, and the hold's expiry kept in the
+time of the world the consumer's clock reads, not on the monotonic clock: the
+schedule and the hold are stored, outlive the process and are compared by other
+runners. Where that time is held, a retry comes due, and a stopped runner's hold
+lapses, only when it is moved forward; a runner identity stable across restarts lets
+a restarted process take its own hold back at once.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
+from uuid import uuid4
 
-from sqlalchemy import ColumnElement, CursorResult, and_, func, insert, select, update
+from sqlalchemy import ColumnElement, CursorResult, and_, func, insert, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from eventing import schema
@@ -57,6 +76,15 @@ DELIVERED = "delivered"
 ABANDONED = "abandoned"
 
 RETIRED_ERROR = "destination retired: not configured"
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_HOLD = timedelta(minutes=5)
+"""How long a runner holds a consumer past its latest transaction."""
+
+
+class _HoldLost(Exception):
+    """Another runner took the consumer: the transaction raising it rolls back."""
 
 
 class ParkDestination(Exception):
@@ -122,6 +150,10 @@ class CycleReport:
     parked: list[str] = field(default_factory=list)
     abandoned: int = 0
     retired: list[str] = field(default_factory=list)
+    held_elsewhere: bool = False
+    """Another runner held the consumer, or another cycle of this instance was
+    running, so the cycle did nothing; or another runner took the consumer during
+    the cycle, which then stopped without applying its pending outcome."""
 
 
 def _all(destinations: Collection[str]) -> Callable[[Envelope], Collection[str]]:
@@ -133,7 +165,11 @@ class Consumer:
 
     `select` names the destinations an event goes to; by default, every configured
     destination. `clock` reads the time of the world as an aware datetime, against
-    which retries are scheduled and a delivery's age is measured.
+    which retries are scheduled, a delivery's age is measured and the hold kept.
+    `runner` names this runner as the hold's holder, unique to the instance by
+    default; a name given is one process's, stable across its restarts. `hold` is how
+    long it holds the consumer past each transaction, longer than any delivery
+    attempt.
     """
 
     def __init__(
@@ -147,6 +183,8 @@ class Consumer:
         select: Callable[[Envelope], Collection[str]] | None = None,
         finally_sink: FinallySink | None = None,
         batch_size: int = 100,
+        runner: str | None = None,
+        hold: timedelta = DEFAULT_HOLD,
     ) -> None:
         self.name = name
         self._sessions = session_factory
@@ -156,22 +194,131 @@ class Consumer:
         self._select = select or _all(tuple(self._destinations))
         self._finally = finally_sink or LogFinallySink()
         self._batch_size = batch_size
+        self.runner = runner or uuid4().hex
+        self._hold = hold
+        self._running = threading.Lock()
 
     def run_cycle(self) -> CycleReport:
-        """Register, read past the position, and deliver what is due."""
-        report = CycleReport()
-        self.register(report)
-        self.read(report)
-        self.deliver(report)
-        return report
+        """Register, read past the position, and deliver what is due, holding the
+        consumer's hold throughout."""
+        return self._held(self._register, self._read, self._deliver)
 
-    def register(self, report: CycleReport | None = None) -> None:
+    def register(self, report: CycleReport | None = None) -> CycleReport:
         """Record the consumer and its configured destinations, retiring each stored
-        destination absent from the configuration."""
+        destination absent from the configuration, under the consumer's hold."""
+        return self._held(self._register, report=report)
+
+    def read(self, report: CycleReport | None = None) -> CycleReport:
+        """Write a pending delivery of each event past the position for each
+        destination selected for it, advancing the position past every event read,
+        under the consumer's hold."""
+        return self._held(self._read, report=report)
+
+    def deliver(self, report: CycleReport | None = None) -> CycleReport:
+        """Attempt each active destination's due deliveries, in sequence order, under
+        the consumer's hold."""
+        return self._held(self._deliver, report=report)
+
+    def _held(
+        self, *phases: Callable[[CycleReport], None], report: CycleReport | None = None
+    ) -> CycleReport:
+        """Run `phases` in order while this runner holds the consumer, releasing it
+        after; with another runner holding it, or another cycle of this instance
+        running, run nothing."""
         report = report if report is not None else CycleReport()
-        now = schema.to_stored(self._clock())
+        if not self._running.acquire(blocking=False):
+            report.held_elsewhere = True
+            return report
+        try:
+            if not self._acquire():
+                report.held_elsewhere = True
+                return report
+            try:
+                for phase in phases:
+                    phase(report)
+            except _HoldLost:
+                report.held_elsewhere = True
+            except BaseException:
+                self._release_quietly()
+                raise
+            self._release()
+            return report
+        finally:
+            self._running.release()
+
+    def _acquire(self) -> bool:
+        """Take the consumer's hold if it is free, lapsed or already this runner's,
+        registering a new consumer at the latest event."""
+        now = self._clock()
+        values = {"held_by": self.runner,
+                  "held_until": schema.to_stored(now + self._hold)}
+        try:
+            with self._sessions.begin() as session:
+                known = session.execute(
+                    select(schema.consumers.c.name).where(schema.consumers.c.name == self.name)
+                ).first()
+                if known is None:
+                    latest: int | None = session.execute(
+                        select(func.max(schema.events.c.sequence))
+                    ).scalar_one()
+                    session.execute(
+                        insert(schema.consumers).values(
+                            name=self.name, position=int(latest or 0),
+                            created_at=schema.to_stored(now), **values,
+                        )
+                    )
+                    return True
+                taken: CursorResult[tuple[()]] = session.execute(  # type: ignore[assignment]
+                    update(schema.consumers)
+                    .where(
+                        schema.consumers.c.name == self.name,
+                        or_(schema.consumers.c.held_by.is_(None),
+                            schema.consumers.c.held_by == self.runner,
+                            schema.consumers.c.held_until <= schema.to_stored(now)),
+                    )
+                    .values(**values)
+                )
+                return taken.rowcount == 1
+        except IntegrityError:
+            # Another runner registered the consumer first; this cycle leaves it to
+            # that runner.
+            return False
+
+    def _renew(self, session: Session, now: datetime) -> None:
+        """Extend this runner's hold in `session`'s transaction, or raise
+        `_HoldLost` when another runner has taken the consumer."""
+        renewed: CursorResult[tuple[()]] = session.execute(  # type: ignore[assignment]
+            update(schema.consumers)
+            .where(schema.consumers.c.name == self.name,
+                   schema.consumers.c.held_by == self.runner)
+            .values(held_until=schema.to_stored(now + self._hold))
+        )
+        if renewed.rowcount == 0:
+            raise _HoldLost
+
+    def _release_quietly(self) -> None:
+        """Release the hold while another error propagates, logging a failure to
+        release rather than replacing that error; the hold then lapses."""
+        try:
+            self._release()
+        except Exception:
+            logger.exception("consumer %s: could not release its hold", self.name)
+
+    def _release(self) -> None:
         with self._sessions.begin() as session:
-            position = self._position(session, now)
+            session.execute(
+                update(schema.consumers)
+                .where(schema.consumers.c.name == self.name,
+                       schema.consumers.c.held_by == self.runner)
+                .values(held_by=None, held_until=None)
+            )
+
+    def _register(self, report: CycleReport) -> None:
+        clock_now = self._clock()
+        now = schema.to_stored(clock_now)
+        with self._sessions.begin() as session:
+            self._renew(session, clock_now)
+            position = self._position(session)
             stored: dict[str, str] = {
                 row.name: row.state
                 for row in session.execute(
@@ -202,14 +349,13 @@ class Consumer:
                     report.abandoned += self._retire(session, name, now)
                     report.retired.append(name)
 
-    def read(self, report: CycleReport | None = None) -> None:
-        """Write a pending delivery of each event past the position for each
-        destination selected for it, advancing the position past every event read."""
-        report = report if report is not None else CycleReport()
+    def _read(self, report: CycleReport) -> None:
         while True:
             with self._sessions.begin() as session:
-                now = schema.to_stored(self._clock())
-                position = self._position(session, now)
+                clock_now = self._clock()
+                self._renew(session, clock_now)
+                now = schema.to_stored(clock_now)
+                position = self._position(session)
                 receiving: set[str] = set(
                     session.execute(
                         select(schema.destinations.c.name).where(
@@ -244,9 +390,7 @@ class Consumer:
                     .values(position=rows[-1][0])
                 )
 
-    def deliver(self, report: CycleReport | None = None) -> None:
-        """Attempt each active destination's due deliveries, in sequence order."""
-        report = report if report is not None else CycleReport()
+    def _deliver(self, report: CycleReport) -> None:
         for name in sorted(self._destinations):
             self._deliver_to(name, report)
 
@@ -265,6 +409,7 @@ class Consumer:
         while True:
             now = self._clock()
             with self._sessions.begin() as session:
+                self._renew(session, now)
                 state: str = session.execute(
                     select(schema.destinations.c.state).where(self._destination(name))
                 ).scalar_one()
@@ -294,6 +439,7 @@ class Consumer:
                 destination.deliver(envelope)
             except ParkDestination as parked:
                 with self._sessions.begin() as session:
+                    self._renew(session, self._clock())
                     self._attempted(session, name, due.event_sequence, attempts, now,
                                     last_error=str(parked))
                     park_destination(session, self.name, name, str(parked), now)
@@ -303,6 +449,7 @@ class Consumer:
                 last_error = f"{type(error).__name__}: {error}"
                 age = now - schema.from_stored(due.created_at)
                 with self._sessions.begin() as session:
+                    self._renew(session, self._clock())
                     if self._retry.max_age is not None and age >= self._retry.max_age:
                         self._attempted(session, name, due.event_sequence, attempts, now,
                                         last_error=last_error, state=ABANDONED)
@@ -316,6 +463,7 @@ class Consumer:
                 report.failed += 1
                 return
             with self._sessions.begin() as session:
+                self._renew(session, self._clock())
                 self._attempted(session, name, due.event_sequence, attempts, now,
                                 state=DELIVERED)
             report.delivered += 1
@@ -350,19 +498,12 @@ class Consumer:
             .values(**values)
         )
 
-    def _position(self, session: Session, now: datetime) -> int:
-        """The consumer's position, registering it at the last event if it is new."""
-        position = session.execute(
+    def _position(self, session: Session) -> int:
+        """The consumer's position, registered when this runner took its hold."""
+        position: int = session.execute(
             select(schema.consumers.c.position).where(schema.consumers.c.name == self.name)
-        ).scalar_one_or_none()
-        if position is not None:
-            return int(position)
-        latest: int | None = session.execute(select(func.max(schema.events.c.sequence))).scalar_one()
-        position = int(latest or 0)
-        session.execute(
-            insert(schema.consumers).values(name=self.name, position=position, created_at=now)
-        )
-        return position
+        ).scalar_one()
+        return int(position)
 
     def _retire(self, session: Session, name: str, now: datetime) -> int:
         pending = session.execute(

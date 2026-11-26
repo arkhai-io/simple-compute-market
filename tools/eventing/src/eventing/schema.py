@@ -77,6 +77,8 @@ consumers = Table(
     Column("name", String, primary_key=True),
     Column("position", BigInteger, nullable=False),
     Column("created_at", DateTime, nullable=False),
+    Column("held_by", String),
+    Column("held_until", DateTime),
 )
 
 destinations = Table(
@@ -175,6 +177,8 @@ _VERSION_1 = (
         name VARCHAR NOT NULL,
         position BIGINT NOT NULL,
         created_at TIMESTAMP NOT NULL,
+        held_by VARCHAR,
+        held_until TIMESTAMP,
         PRIMARY KEY (name)
     )
     """,

@@ -21,6 +21,7 @@ their reader on the run's outcome, never through the file.
 from __future__ import annotations
 
 import asyncio
+import configparser
 import json
 import logging
 import os
@@ -28,6 +29,7 @@ import re
 import select
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -368,12 +370,16 @@ class MaterializedInventory:
         self.cleanup()
 
 
-#: Ansible's default callback plugin directories, which an explicit
-#: ``ANSIBLE_CALLBACK_PLUGINS`` would otherwise replace.
-_DEFAULT_CALLBACK_PATHS = (
-    "~/.ansible/plugins/callback",
-    "/usr/share/ansible/plugins/callback",
-)
+def _default_callback_paths(environment: Mapping[str, str], config: Path | None) -> list[str]:
+    """Ansible's default callback plugin directories, searched when neither the
+    environment nor the configuration names any: ``plugins/callback`` under Ansible's
+    home — ``ANSIBLE_HOME``, else the configuration's ``home``, else ``~/.ansible`` —
+    then the system directory."""
+    home = environment.get("ANSIBLE_HOME")
+    if not home and config is not None:
+        configured = _config_value(config, "home")
+        home = _resolve_config_path(configured, config) if configured else None
+    return [f"{home or '~/.ansible'}/plugins/callback", "/usr/share/ansible/plugins/callback"]
 
 
 def _create_records_file() -> Path:
@@ -388,22 +394,92 @@ def _create_records_file() -> Path:
     return path
 
 
+def _ansible_config_file(environment: Mapping[str, str]) -> Path | None:
+    """The configuration file Ansible reads, found in Ansible's own order.
+
+    ``ANSIBLE_CONFIG`` (a directory meaning the ``ansible.cfg`` in it), then the
+    working directory's ``ansible.cfg`` unless that directory is world-writable,
+    then ``~/.ansible.cfg``, then ``/etc/ansible/ansible.cfg``: the first that
+    exists and is readable.
+    """
+    candidates: list[Path] = []
+    named = environment.get("ANSIBLE_CONFIG")
+    if named is not None:
+        path = Path(os.path.expanduser(os.path.expandvars(named)))
+        candidates.append(path / "ansible.cfg" if path.is_dir() else path)
+    try:
+        cwd = Path.cwd()
+        if not cwd.stat().st_mode & stat.S_IWOTH:
+            candidates.append(cwd / "ansible.cfg")
+    except OSError:
+        pass
+    candidates += [Path("~/.ansible.cfg").expanduser(), Path("/etc/ansible/ansible.cfg")]
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.R_OK):
+            return candidate
+    return None
+
+
+def _config_value(config: Path, key: str) -> str | None:
+    """``config``'s ``[defaults]`` value for ``key``, read as Ansible reads the
+    file, or ``None`` when it names none or cannot be read — in which case Ansible
+    applies its default, or reports the file itself."""
+    parser = configparser.ConfigParser(inline_comment_prefixes=(";",))
+    try:
+        parser.read(config, encoding="utf-8")
+        value = parser.get("defaults", key, raw=True, fallback=None)
+    except (configparser.Error, OSError, UnicodeDecodeError):
+        return None
+    return value.strip() if value and value.strip() else None
+
+
+def _resolve_config_path(entry: str, config: Path) -> str:
+    """A path ``config`` names, resolved as Ansible resolves it: ``{{CWD}}`` the
+    working directory, ``~`` and variables expanded, a relative path taken from the
+    directory the file is named in, its links not followed."""
+    base = os.path.dirname(os.path.abspath(config))
+    entry = entry.replace("{{CWD}}", os.getcwd())
+    return os.path.normpath(os.path.join(base, os.path.expanduser(os.path.expandvars(entry))))
+
+
+def _configured_callback_paths(config: Path) -> list[str] | None:
+    """The ``callback_plugins`` directories ``config`` names, resolved, or ``None``
+    when it names none."""
+    value = _config_value(config, "callback_plugins")
+    if value is None:
+        return None
+    return [
+        _resolve_config_path(entry.strip(), config)
+        for entry in value.split(os.pathsep)
+        if entry.strip()
+    ]
+
+
 def playbook_environment(failures_path: Path) -> dict[str, str]:
     """The environment a playbook runs in: this process's, with the callback.
 
-    ``ANSIBLE_CALLBACK_PLUGINS`` outranks an ``ansible.cfg``'s
-    ``callback_plugins``, so the callback is found whatever configuration an
-    operator names. The variable replaces Ansible's own default directories
-    too, so they follow the callback's, after any path this process's
-    environment already gives; a directory only an operator's ``ansible.cfg``
-    names is outranked, while a collection's callback is found as before. The
-    callback needs no enabling, so the configuration's enabled callbacks and
-    stdout callback are left as they are.
+    Ansible has no setting that adds a callback directory: ``ANSIBLE_CALLBACK_PLUGINS``
+    replaces the search path, outranking an ``ansible.cfg``'s ``callback_plugins``
+    and Ansible's default directories. So the variable is the path Ansible would
+    otherwise search, with the callback's directory in front: a value this
+    process's environment already gives; else the ``callback_plugins`` of the
+    configuration file Ansible reads; else Ansible's defaults. A stdout or
+    notification callback an operator's configuration loads from its own
+    directory is still found. The callback needs no enabling, so the runner sets
+    no enabled callbacks and no stdout callback.
     """
     environment = dict(os.environ)
     existing = environment.get("ANSIBLE_CALLBACK_PLUGINS")
+    if existing:
+        searched = [existing]
+    else:
+        config = _ansible_config_file(environment)
+        configured = _configured_callback_paths(config) if config is not None else None
+        searched = (
+            configured if configured is not None else _default_callback_paths(environment, config)
+        )
     environment["ANSIBLE_CALLBACK_PLUGINS"] = os.pathsep.join(
-        [str(CALLBACK_PLUGINS_DIR), *([existing] if existing else []), *_DEFAULT_CALLBACK_PATHS]
+        [str(CALLBACK_PLUGINS_DIR), *searched]
     )
     environment[FAILURE_RECORDS_ENV] = str(failures_path)
     return environment

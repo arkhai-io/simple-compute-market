@@ -136,6 +136,8 @@ consumer = Consumer(
     retry=RetryPolicy(max_age=timedelta(days=1)),
     finally_sink=LogFinallySink(),   # the default
     clock=now,
+    runner="worker-0",               # unique to the instance by default
+    hold=timedelta(minutes=5),       # the default
 )
 consumer.run_cycle()
 ```
@@ -165,9 +167,26 @@ the position into pending deliveries, then delivers what is due:
 - With `RetryPolicy.max_age`, a delivery that fails once older than that is
   abandoned, keeping its last error, and the event goes to the finally sink. With
   none, a delivery is retried without limit.
-- Retries are scheduled, and ages measured, in the time of the world `clock` reads,
-  since the schedule is stored and outlives the process: where that time is held, a
-  retry comes due only when it is moved forward.
+- One runner holds a named consumer at a time. A cycle, and `register()`, `read()`
+  and `deliver()` each run alone, first take the consumer's hold — its holder,
+  `runner`, and an expiry `hold` ahead, stored on the consumer's row — or do nothing,
+  reporting `held_elsewhere`, while another runner holds it unexpired. Every
+  transaction of the cycle renews the hold and applies nothing once another runner has
+  taken it, and the cycle releases the hold when it ends. A `Consumer` also runs one
+  cycle at a time, a second started meanwhile doing nothing, so neither two processes
+  nor a timer's cycle and a manual one deliver to a destination together. A runner that stops holding it leaves the hold to lapse: `hold` is longer than any
+  delivery attempt, since a runner still inside a destination's call when its hold
+  lapses loses the consumer once another runner takes it, records no outcome, and that
+  runner delivers the event again under its `id`.
+- Taking, renewing and releasing the hold are writes, so every cycle writes, an idle
+  one included. On SQLite, whose writers wait for one another, a cycle waits behind an
+  open producer transaction, up to the connection's busy timeout.
+- Retries are scheduled, ages measured, and the hold's expiry kept in the time of the
+  world `clock` reads, since the schedule and the hold are stored, outlive the process
+  and are compared by other runners: where that time is held, a retry comes due, and a
+  stopped runner's hold lapses, only when it is moved forward. A `runner` identity
+  stable across restarts — the process's instance name — lets a restarted process take
+  its own hold back at once; two processes given one identity are not kept apart.
 
 The finally sink (`FinallySink.abandoned`) defaults to the log: a warning on the
 `eventing.finally` logger carrying the event's envelope and last error.
