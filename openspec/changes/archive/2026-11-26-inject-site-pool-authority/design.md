@@ -289,6 +289,79 @@ as `versioning.md`, "Before 1.0.0", asks (10 F3); the versions named are those t
 pre-1.0 rule gives, confirmed against `make check-version-bumps`. The sessions touch
 disjoint code, and the split is mechanical, so one review reads both.
 
+## Judgements made in implementation
+
+Decisions the plan did not spell out, taken in implementation and accepted by the
+round's review and its triage; kept here from the task notes.
+
+- **The offered read reads the deliverable-hosts report lazily** (D4): at most once
+  per read, and only once a pool needs a host, since the ledger no longer knows whether
+  a requirement was supplied. A composition with no requirement makes the same reads
+  as before, and every projected `enabled` is unchanged.
+- **A poolless row is skipped before any port read in the offered read too** (D7): it
+  is reported not offered and logged ("not offered"), so the advisory snapshot
+  (`GET /api/v1/capacity/snapshot`) no longer lists it. Before, it was judged as a
+  missing pool. Neither projection includes such a row and admission admits nothing
+  against it, so no projected `enabled` and no refusal moves. It is the only result D7
+  allows without a port read; the fresh-context check flagged it against the
+  proposal's non-goal, and the round's review recommended keeping it, which its triage
+  (19) recorded. A poolless row is therefore logged twice per projection read ("not
+  offered" by the ledger, "not projected" by the projection); collapsing that was
+  declined, since D7 has the ledger log it.
+- **An unreadable deliverable declaration refuses admission** (D4) through the
+  ledger's `_pool_delivers_mode`, where the old helper raised.
+- **`kit/site`'s reader double is one shared module** (D9),
+  `kit/site/tests/pool_facts_double.py`, which both test levels import through
+  `pythonpath = ["src", "tests"]`, as `kit/settlement-runtime` shares its test helpers,
+  rather than a copy in each conftest. The tests reach it through `ledger._pool_facts`,
+  as the suite already reaches `ledger._session_factory`; holding a separate reference
+  was declined to keep `_make_ledger`'s callers unchanged. Two host-requirement cases
+  that tested how a provider resolves against a requirement collapsed into `needs_host`
+  cases, since that resolution is now `pool_needs_host`'s, held by `kit/resource-pools`.
+- **Ledgers in `kit/fulfillment`, `provisioning/compute` and the storefronts' tests get
+  `ResourcePoolFacts()` with no requirement** (D9): none of those ledgers had been given
+  one; only the scheduler had, and it keeps it. Passing the requirement to the reader
+  would have made the ledger refuse holds the placement cases need.
+- **The API-credit container gained a seam** (D3): a module-level
+  `build_capacity_ledger(session_factory)`, so a unit test checks the composed reader
+  without a migrated database.
+- **The VM listings package's local imports moved to module level** (D6): their
+  recorded reason, that buyers install the package without the pool authority, no
+  longer held once the readers are in the contracts package, a runtime dependency of
+  it. `listing_shapes.py`'s older local import, untouched by the change, stays.
+- **Consumers whose tests import a moved name raise their floors** (D11): the API-credit
+  and provisioning services raise `arkhai-kit-resource-pools-contracts` to `>=0.5.0`,
+  and the storefronts raise `arkhai-kit-site` to `>=0.15.0`, the first version whose
+  ledger takes `pool_facts`.
+- **`e2e_pool_declared_modes` joined the VM lane** (round triage, 20 A2/A3): it had
+  joined no lane since it was written, so validation had credited it by inference. To
+  meet the lane's rules it takes the VM lane's four timer holds, and asserts rather than
+  skips when the site offers no resource with a free unit. `e2e_bare_metal_deal` needs a
+  real whole host and stays in no lane; the bare-metal lane's
+  `e2e_bare_metal_mock_deal` and `e2e_bare_metal_payment_deal` exercise bare-metal
+  admission and commit instead.
+
 ## Open questions
 
 None.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — the site's pool facts come through an injected port | `openspec/specs/site-capacity/spec.md`, "The site authority reads pool facts through an injected port" (merged at archive); `site-capacity/architecture.md`, "Declared capacity and connection identity" (`openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`); `ARCHITECTURE.md`, "Kit areas" (`docs/development/ARCHITECTURE.md#kit-areas`) |
+| D1 — principle: a kit-to-kit edge the kit-area order forbids is removed, not sanctioned | `package-layers.md`, "Where the current tree diverges" (`docs/guidance/repository/package-layers.md#where-the-current-tree-diverges`) |
+| D2 — the pool authority is provider-neutral and repository-wide | `resource-pool-management/architecture.md`, "Ownership boundary" (`openspec/specs/resource-pool-management/architecture.md#ownership-boundary`); `ARCHITECTURE.md`, "Kit areas" (`docs/development/ARCHITECTURE.md#kit-areas`); the kit-areas diagram no longer marks `kit/site` as divergent (`docs/development/diagrams/kit-areas.drawio` and its SVG) |
+| D3 — API credits composes the real reader with no host requirement | `site-capacity/architecture.md`, "Declared capacity and connection identity" (`openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`); `site-capacity/testing.md`, "Host Requirement Enforcement" (`openspec/specs/site-capacity/testing.md#host-requirement-enforcement`) |
+| D4 — the port's operation, its structural values, and the decision's session | `openspec/specs/site-capacity/spec.md` (merged at archive) and its companion, "Declared capacity and connection identity"; the implementation: `openspec/specs/resource-pool-management/spec.md`, "The pool authority answers the site's pool facts" (merged at archive), its companion's "Ownership boundary", and its Evidence |
+| D4 — principle: a port a lower component defines is satisfied structurally | `dependencies.md`, "A port is satisfied structurally" (`docs/guidance/engineering/dependencies.md#a-port-is-satisfied-structurally`) |
+| D5 — the site owns `DeliverableHosts` and the usable-host predicate; the pool authority keeps the provider mapping | `site-capacity/architecture.md`, "Declared capacity and connection identity" (`openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`); `site-capacity/testing.md`, "Host Requirement Enforcement" (`openspec/specs/site-capacity/testing.md#host-requirement-enforcement`); `ARCHITECTURE.md`, "Resource pools" (`docs/development/ARCHITECTURE.md#resource-pools`) |
+| D6 — the declaration and asking-rate readers are in the contracts distribution | `openspec/specs/resource-pool-management/spec.md`, "The pool wire contract and client are thin distributions" (merged at archive) and its Evidence; `resource-pool-management/architecture.md`, "Advertisement, delivery, and backing" (`openspec/specs/resource-pool-management/architecture.md#advertisement-delivery-and-backing`); `ARCHITECTURE.md`, "Kit areas" (`docs/development/ARCHITECTURE.md#kit-areas`); the moved tests' citations in `openspec/specs/storefront-publication/spec.md`, "Evidence", and the reader's package in `openspec/specs/api-credits/architecture.md`; `package-layers.md` no longer lists the modules as a divergence |
+| D7 — `capacity_buckets.pool_id` stays nullable, and a poolless row is skipped before any port read, the offered read included | `site-capacity/architecture.md`, "Declared capacity and connection identity" (`openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`), the poolless-row paragraph |
+| D8 — `DEFAULT_POOL_ID` stays in the pool authority | No permanent destination: nothing moves |
+| D9 — the ledger requires its reader; `kit/site`'s tests use their own double | `site-capacity/testing.md`, "Host Requirement Enforcement" (`openspec/specs/site-capacity/testing.md#host-requirement-enforcement`); the required reader in `site-capacity/architecture.md` (`openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`) |
+| D10 — the two boundary tests | `site-capacity/architecture.md`, "Declared capacity and connection identity" (`openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity`); `resource-pool-management/architecture.md`, "Ownership boundary" (`openspec/specs/resource-pool-management/architecture.md#ownership-boundary`); `site-capacity/testing.md` (`openspec/specs/site-capacity/testing.md#host-requirement-enforcement`); `package-layers.md` (`docs/guidance/repository/package-layers.md#where-the-current-tree-diverges`) |
+| D11 — implementation cadence | No permanent destination: it governed this change's implementation |
+| The edge's removal changes a reason elsewhere | `physical-provisioning/architecture.md` (`openspec/specs/physical-provisioning/architecture.md`): a write-time check of a declaration's backing-dependent rules is partial because the port carries no backing |
+| Roadmap currency | `docs/development/ROADMAP.md` owes nothing: the change serves the POOLS lesser goal, which the roadmap does not carry, and closes no goal's gap row |
+| Campaign index currency | `openspec/changes/README.md`: this change's row under "Lesser goal — POOLS capacity and fulfillment foundation" brought to closeout and pointed at the archive; the third sequence's paragraph under "Lesser goal — Package and release readiness" now says the `kit/site` edge is gone and both boundary tests forbid it |

@@ -8,6 +8,10 @@ A Resource Pool groups candidate Physical Resources and records the provider kin
 
 It does not choose a Settlement Resource and does not define the FulfillmentProvider contract. Keeping those responsibilities separate prevents administrative configuration from becoming an implicit scheduling algorithm and avoids a reverse dependency from the pool authority into fulfillment.
 
+The authority is provider-neutral, so it is a repository-wide kit rather than compute-family knowledge. It stores a pool's provider as an opaque string and validates configuration through provider-owned handlers; playbooks live in the domain adapters and the provisioning service's configuration; API credits, a domain with no family, runs a pool through it; and `kit/fulfillment`, a repository-wide kit, depends on it. A pool behaviour that is intrinsically compute belongs to a provider's handler or to the compute family kit, never to this kit. Moving it under the compute family would put fulfillment and both API-credit packages out of scope.
+
+The site authority decides on a pool's facts but reads none of its storage: it defines a pool-facts port, and this authority answers it with `ResourcePoolFacts` in `market_resource_pools.pool_facts`, which reads the stored pool in the caller's session and resolves its provider against the composition's host requirement into whether its declarations need a host (`pool_needs_host` in `market_resource_pools.host_requirement`, the one host rule this kit keeps). The port is structural, the values it returns included, so the reader returns its own `StoredPoolFacts` and imports nothing from the site authority: each composition root builds the reader and hands it to the ledger, and the edge runs from the root to both authorities, never between them ([site capacity, "Declared capacity and connection identity"](../site-capacity/architecture.md#declared-capacity-and-connection-identity)). `kit/resource-pools/tests/unit/test_import_boundaries.py` forbids `market_site` in this kit, every import form included, since nothing else would catch a reverse edge: the layer and scope rules cannot see the kit-area order, and acyclicity fails only once both directions exist.
+
 ## Provider configuration
 
 The generic pool package stores opaque provider configuration only after a provider-owned handler validates and normalizes it. This allows an adapter to enforce its own schema without teaching the pool authority about Ansible, Kubernetes, bare metal, or a future executor.
@@ -125,6 +129,15 @@ carries them) from a defective one (some pool lacks them). For the same reason a
 consumer reads them only through the shared resolver, and advertisement membership
 exists only on a resolved declaration: a raw read would turn an absent declaration
 into an empty one and erase that distinction.
+
+The readers of a site's projected pool declarations live in the contracts package
+beside that resolver: `site_declarations`, which reads each pool's declarations per
+projection generation (`read_site_declarations`), and the asking-rate resolution, in
+`asking_rates` beside the structural checks it applies, so one module holds an asking
+rate's declaration, contract, and resolution. Both import only the standard library
+and the contracts package, so the VM, bare-metal, and API-credit storefronts and the
+VM listings package read a site's pools without installing the authority, SQLAlchemy,
+or PyYAML; the authority does not re-export them.
 
 ## Capacity bounds and listing terms
 

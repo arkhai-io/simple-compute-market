@@ -22,8 +22,7 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   `kit/resource-pools-contracts/tests/unit/test_site_declarations.py`. (D6.) Verify:
   `make -C kit/resource-pools-contracts test` passes, unit level, with the moved cases
   unchanged in what they assert.
-  Done: moved with `git mv`; `.backing` and `.hints` imported relatively; the moved test's
-  diff is its import lines alone. `make -C kit/resource-pools-contracts test`: unit, 503
+  Done: moved with `git mv`, the moved test changed only in its imports. Unit, 503
   passed.
 - [x] 1.2 Move the asking-rate declaration resolution from
   `kit/resource-pools/src/market_resource_pools/asking_rates.py` into the contracts
@@ -38,19 +37,16 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   `kit/resource-pools-contracts/pyproject.toml` (`pydantic`, admissibility, shape). Verify:
   `make -C kit/resource-pools-contracts test` passes, unit level; `make
   check-architecture` passes.
-  Done: the contracts module now carries the authority module's docstring (declaration,
-  contract and resolution) and its resolution below the structural checks; it adds only
-  standard-library imports (`Callable`, `Iterable`, `dataclass`, `field`), within the
-  allowlist. The moved test's diff is its one import line. Unit, 503 passed (with 1.1);
-  `make check-architecture`: layers, scope, dependencies and kinds hold.
+  Done: the resolution joins the contracts package's `asking_rates.py` below the
+  structural checks, adding only standard-library imports, within the allowlist. Unit,
+  503 passed; `make check-architecture` passed.
 - [x] 1.3 Delete the two modules from `kit/resource-pools` and their exports from
   `market_resource_pools/__init__.py`, re-exporting neither (D6); keep the existing
   re-exports of the contracts package's asking-rate structural checks, which predate the
   move. Verify: `make -C kit/resource-pools test` passes, unit and library integration;
   `grep -rn "site_declarations\|resolve_asking_rates" kit/resource-pools/src` finds
   nothing.
-  Done: `make -C kit/resource-pools test`: unit and library integration, 117 passed; the
-  grep finds nothing.
+  Done: unit and library integration, 117 passed; the grep finds nothing.
 - [x] 1.4 Switch the readers to the contracts package (D6):
   `domains/vms/storefront/src/market_storefront/services/listing_sources.py`,
   `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/site_reading.py`,
@@ -63,20 +59,12 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   where they are now (the engineering guidance's section "Imports go at module level").
   Verify: `grep -rn "market_resource_pools\b" <each package>/src` finds no import of the
   authority.
-  Done, the grep finding none in the four packages' `src`. Differing from the plan: the
-  VM listings package's two function-local imports and its `TYPE_CHECKING` import of
-  `ResolvedPool` now sit at module level, as does `_reconciler_cases.py`'s local import.
-  Their recorded reason was that buyers install the listings package without the pool
-  authority; the contracts package is a runtime dependency of it, so that reason is gone,
-  and `resolve_vm_asking_rates` now declares `AskingRateResolution` as its return type
-  rather than `Any`. Outside the plan's list, three more tests imported a moved name from
-  the authority and now take it from the contracts package:
+  Done; the grep finds no authority import in the four packages' `src`. The VM listings
+  package's local imports moved to module level (`design.md`, "Judgements made in
+  implementation"). Three further tests importing a moved name switched too:
   `domains/apicredits/service/tests/integration/test_default_pool.py`,
-  `domains/apicredits/service/tests/integration/test_signed_authority.py` and
-  `provisioning/compute/service/tests/integration/test_capacity_api.py`; both services
-  raise their contracts floor for them (1.5). The bare-metal storefront's
-  `site_reading.py` docstring and `_policy_tags` comment now name the contracts package's
-  reader rather than the resource-pool kit's.
+  `test_signed_authority.py`, and
+  `provisioning/compute/service/tests/integration/test_capacity_api.py`.
 - [x] 1.5 Packaging (D6, D11, `versioning.md` "Before 1.0.0", `locks.md`): bump
   `arkhai-kit-resource-pools-contracts` to 0.5.0 and `arkhai-kit-resource-pools` to 0.11.0
   (the bump also covering what section 2 adds to it); in the VM and bare-metal storefronts
@@ -87,24 +75,13 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   as `make check-version-bumps` requires; relock with `make lock PROJECTS="..."` naming
   every project whose lock installs a changed package. Verify: `make check-version-bumps`
   and `make check-packaging` pass.
-  Done. Versions: contracts 0.4.0 → 0.5.0, the authority 0.10.1 → 0.11.0, the listings
-  package 0.9.0 → 0.10.0 (minor: its `pools` extra is removed), and the three storefronts
-  by a patch, their change being internal: VM and bare-metal 0.29.0 → 0.29.1, API credits
-  0.23.0 → 0.23.1. The VM storefront's exact pin on the bare-metal storefront moves to
-  `==0.29.1`, and its listings requirement becomes `arkhai-vms-listings[overrides]>=0.10.0`.
-  The VM and bare-metal storefronts keep `arkhai-kit-resource-pools>=0.11.0` in `dev`
-  for the pool rows their ledger tests seed; the API-credit storefront and the listings
-  package keep it nowhere. Outside the plan: the API-credit service (0.8.0 → 0.8.1) and
-  the provisioning service (0.28.0 → 0.28.1) raise `arkhai-kit-resource-pools-contracts`
-  to `>=0.5.0`, the first version exporting the reader their tests now import (1.4); a
-  patch, since neither's runtime changes, which section 3's bump of each may supersede
-  with a larger one. The authority keeps its contracts floor at `>=0.4.0`: it imports
-  nothing 0.5.0 adds. `docs/guidance/repository/published-packages.md`'s table of
-  internal dependencies is updated for the four readers, as
-  `scripts/tests/test_publish_matrix.py` requires. Relocked with `make lock
-  PROJECTS="..."` over the 26 projects whose lock names a changed package, then the two
-  services again for their bump. `make check-version-bumps`, `make check-locks`: passed.
-  `make check-packaging`: passed, in the pre-commit run 1.6 records.
+  Done. Contracts 0.4.0 → 0.5.0, the authority 0.10.1 → 0.11.0, `arkhai-vms-listings`
+  0.9.0 → 0.10.0 (its `pools` extra removed), the VM and bare-metal storefronts 0.29.0 →
+  0.29.1, the API-credit storefront 0.23.0 → 0.23.1; the API-credit service (0.8.1) and
+  the provisioning service (0.28.1) raise their contracts floor to `>=0.5.0` for their
+  tests. The VM and bare-metal storefronts keep the authority in `dev` for seeded pool
+  rows. `published-packages.md`'s internal-dependency table updated. `make
+  check-version-bumps`, `make check-locks`, `make check-packaging`: passed.
 - [x] 1.6 Verification point. Focused suites: `make -C kit/resource-pools-contracts test`
   (unit), `make -C kit/resource-pools test` (unit, library integration), and the suites
   of the four readers — `make -C domains/vms/storefront test`, `make -C
@@ -118,48 +95,15 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   rates, stages 05b–05d), `e2e_compute_dynamic_listings` (VM publication from the site's
   projected declarations), and `e2e_credits_deal` (the API-credit listing's pool read).
   No CI evidence is owed: `tests.yml`'s targets are those `make validate-local` runs.
-  Done. `make -C kit/resource-pools-contracts test`: unit, 503 passed. `make -C
-  kit/resource-pools test`: unit and library integration, 117 passed. `make -C
-  domains/vms/storefront test`: unit 1199 passed, 1 skipped; integration 653 passed.
-  `make -C domains/bare_metal/storefront test`: 694 passed. `make -C
-  domains/apicredits/storefront test`: 298 passed. The asking-rate cases ran through each
-  storefront's app and its typed clients (`StorefrontClient`, `PoolOverrideClient`):
-  `test_http_publication_rates.py`, whose 12 cases hold the bare-metal asking-rate cases
-  among others, all passed, and `test_pool_overrides_api.py -k rate`, 8 passed. `make -C domains/vms/listings test` does not exist: the listings package has no
-  Makefile, tests or lock of its own, and its derivation and asking-rate cases run in the
-  VM storefront's suite. For the three tests outside the plan (1.4): `make -C
-  domains/apicredits/service test`, 91 passed, and `make -C provisioning/compute/service
-  test`, unit 639 and integration 579 passed. `change-workflow run pre-commit
-  inject-site-pool-authority`: its first run failed on four cases of
-  `scripts/tests/test_publish_matrix.py` (the published-packages table, fixed in 1.5) and
-  on the history-wording check (a `pyproject.toml` comment, since removed), every other
-  suite and `make check-packaging` passing; the run after the fixes is recorded in the
-  section's notes.
-  End-to-end, as the plan names them: `e2e_bare_metal_publication`,
-  `e2e_compute_dynamic_listings` and `e2e_credits_deal` reach the moved readers once
-  deployed; none was run in this section, and validation runs them. No CI evidence is
-  owed.
+  Done. Focused suites passed: contracts 503; the authority 117; VM storefront 1199 +
+  653; bare-metal storefront 694; API-credit storefront 298; API-credit service 91;
+  provisioning service 639 + 579. The asking-rate cases ran through each storefront's
+  app and typed clients. `domains/vms/listings` has no suite of its own; its cases run
+  in the VM storefront's. `change-workflow run pre-commit inject-site-pool-authority`:
+  passed. End-to-end left to validation (validation 30, below).
 
-Section 1 notes: the move is mechanical and every assertion is unchanged. Section 2
-finds `kit/resource-pools` already at 0.11.0, and the contracts package at 0.5.0; section
-3 finds the API-credit service at 0.8.1 and the provisioning service at 0.28.1, each
-bumped once already. Correction to the section's opening paragraph: the authority left
-each reader's direct runtime dependencies, but the VM storefront still installs it,
-through `arkhai-kit-fulfillment`, which depends on it by design, and through
-`arkhai-kit-site` until section 3 drops that edge. Left as it is:
-`domains/vms/listings/src/arkhai_vms_listings/listing_shapes.py` keeps an older
-function-local import of the contracts package whose comment says buyers install the
-listings package without the pool kit; the section did not touch that import, so it is
-not moved here. The citations of the moved
-tests in `openspec/specs/storefront-publication/spec.md` and
-`openspec/specs/resource-pool-management/spec.md`, "Evidence", still name their old paths
-until closeout's 4.8 rewrites them; the citations check resolves only `openspec/`,
-`docs/`, `tools/`, `scripts/`, `e2e-tests/` and `.agents/` paths, so it cannot report
-these `kit/` paths, and 4.8 must find them itself. After the fresh-context check's fixes,
-`change-workflow run pre-commit inject-site-pool-authority` passed: `make validate-local`
-(`check-packaging` and `make test`, every suite) and `make check-repository` (comment
-hygiene, documentation citations, history wording, version bumps, local imports,
-capability index, guidance).
+Section 1 notes: the VM storefront still installs the authority through
+`arkhai-kit-fulfillment`, which depends on it by design.
 
 ## 2. Add the pool-facts port, the site's host-delivery module, and the pool authority's reader
 
@@ -174,9 +118,7 @@ tests.
   `PoolFactsReader` (`pool_facts(self, db: Session, pool_id: str) -> PoolFacts`), each
   docstring stating the session the read takes and the missing-pool report (D4), and
   export both from `market_site`. Verify: `make -C kit/site test` passes.
-  Done: `kit/site/src/market_site/pool_facts.py`; `PoolFacts` states the missing-pool
-  report and the decision's session, and `PoolFactsReader.pool_facts` states both too.
-  `make -C kit/site test`: unit and library integration, 384 passed.
+  Done: `make -C kit/site test`, 384 passed.
 - [x] 2.2 Add `kit/site/src/market_site/deliverable_hosts.py` with the `DeliverableHosts`
   protocol and `declaration_has_usable_host(host_id, *, needs_host, backed, deliverable)`,
   with the behaviour of the authority's predicate given `needs_host` (D5), exported from
@@ -185,8 +127,7 @@ tests.
   Enforcement" (a host in the report, a host absent from it, no host named, an empty
   report, an unbacked pool, a pool needing no host, and named hosts usable with no report).
   Verify: `make -C kit/site test` passes, unit level.
-  Done: the predicate takes `needs_host`, `backed` and `deliverable` as keywords; its
-  seven cases are in `test_deliverable_hosts.py`, unit, all passing within the 384.
+  Done: the seven cases in `test_deliverable_hosts.py` pass.
 - [x] 2.3 Add `kit/resource-pools/src/market_resource_pools/pool_facts.py` with the frozen
   dataclass `StoredPoolFacts` and `ResourcePoolFacts(host_requirement: HostRequirement |
   None = None)`, whose `pool_facts(db, pool_id)` reads the `ResourcePool` row in the
@@ -201,12 +142,10 @@ tests.
   pool with and without a requirement, an unreadable deliverable declaration, and a
   read seeing the caller's own uncommitted write in its session. Verify: `make -C
   kit/resource-pools test` passes, library integration level.
-  Done: `ResourcePoolFacts` keeps the requirement as `host_requirement`, which section
-  3's composition test reads. `test_pool_facts.py` builds its table with the pool
-  baseline migration (`BASELINE.apply`), not `create_all`, and adds a disabled pool
-  keeping its modes, a provider the requirement says needs no host, and a pool declaring
-  no mode reporting an empty set. `make -C kit/resource-pools test`: unit and library
-  integration, 128 passed (117 before).
+  Done: `ResourcePoolFacts` keeps the requirement as `host_requirement`.
+  `test_pool_facts.py` builds its table with the pool baseline migration and adds a
+  disabled pool, a provider needing no host, and a pool declaring no mode. Unit and
+  library integration, 128 passed.
 - [x] 2.4 Add the conformance test to
   `provisioning/compute/service/tests/unit/test_authority_composition.py` (D4, 10 F2):
   every member `typing.get_protocol_members(PoolFacts)` returns is a field of
@@ -215,49 +154,21 @@ tests.
   test fails when a member is added to `PoolFacts` alone (checked by hand, not
   committed).
   Done: the test compares parameter names and kinds, not annotations, which differ by
-  design (`PoolFacts` against `StoredPoolFacts`); `typing.get_protocol_members` needs
-  Python 3.13, the root `.python-version`. `make -C provisioning/compute/service reinit
-  test-unit`: unit, 640 passed. By hand: with a `delivery_deadline_seconds` property
-  added to the installed `market_site/pool_facts.py` alone, the test failed on the
-  members assertion; `make reinit` restored the wheel and it passed again. The module
-  docstring now says the root holds the reader to the port. Outside the plan, here
-  rather than in 3.7: the service's floors rise to `arkhai-kit-site>=0.15.0` and
-  `arkhai-kit-resource-pools>=0.11.0`, the first versions exporting what this test
-  imports, with their `pyproject.toml` comment saying so; the service stays at 0.28.1.
+  design; unit, 640 passed, and a member added to the installed `PoolFacts` alone failed
+  it. The service's floors rose to `arkhai-kit-site>=0.15.0` and
+  `arkhai-kit-resource-pools>=0.11.0` here.
 - [x] 2.5 Bump `arkhai-kit-site` to 0.15.0 (D11); `arkhai-kit-resource-pools` is already
   at 0.11.0 from task 1.5. Verify: `make check-version-bumps` passes.
-  Done: `make check-version-bumps` passed. The bump needs the relock section 3's 3.10
-  names, since `check-locks` refuses a lock pinning a version the tree no longer builds:
-  `make lock PROJECTS="..."` over the eleven projects whose lock installs
-  `arkhai-kit-site` (`domains/apicredits/service`, `domains/bare_metal/provisioning/adapter`,
-  `domains/bare_metal/storefront`, `domains/vms/provisioning/adapter`,
-  `domains/vms/storefront`, `e2e-tests`, `kit/fulfillment`, `kit/site`,
-  `provisioning/compute/ansible`, `provisioning/compute/service`, `provisioning/compute`),
-  each moving `arkhai-kit-site` 0.14.0 to 0.15.0 and nothing else.
+  Done: `make check-version-bumps` passed; the eleven projects installing
+  `arkhai-kit-site` relocked.
 - [x] 2.6 Verification point. Focused suites: `make -C kit/site test` (unit, library
   integration), `make -C kit/resource-pools test` (unit, library integration), `make -C
   provisioning/compute/service test-unit` (unit); then `change-workflow run pre-commit
   inject-site-pool-authority`. End-to-end: none — nothing deployed reaches the new code
   until section 3 wires it, and none is owed. No CI evidence is owed.
-  Done. `make -C kit/site test`: 384 passed. `make -C kit/resource-pools test`: 128
-  passed. `make -C provisioning/compute/service test-unit`: 640 passed. `change-workflow
-  run pre-commit inject-site-pool-authority`: passed — `make check-packaging`, `make
-  test` (every suite), and `make check-repository`. After the fresh-context check's
-  comment and docstring fixes, `make check-repository` and `make check-locks` passed
-  again, and both kits' suites. End-to-end: confirmed none; nothing deployed reaches the
-  new code until section 3 wires it.
-
-Section 2 notes: the section is additive, so `DeliverableHosts` and the usable-host
-predicate exist both in `market_site.deliverable_hosts` and in
-`market_resource_pools.host_requirement` until 3.4 deletes the authority's copy. The
-docstrings of `market_site.pool_facts`, `market_site.deliverable_hosts` and
-`market_resource_pools.pool_facts` describe the system once section 3 wires the ledger
-and both roots: at this commit the ledger still reads `ResourcePool` rows, and
-`deliverable_hosts.py` cites the site-capacity companion's "Declared capacity and
-connection identity", which names the authority's module until closeout's 4.8 rewrites
-it. Section 3 must leave them true; the round's review reads both commits together. The
-by-hand failure check edits the service's installed wheel copy, which `make reinit`
-restores, rather than the source, so no rebuild is needed to undo it.
+  Done. `kit/site` 384, `kit/resource-pools` 128, provisioning service unit 640, all
+  passed; `change-workflow run pre-commit inject-site-pool-authority`: passed. No
+  end-to-end owed.
 
 ## 3. Cut the site ledger over to the port and the site-owned predicate
 
@@ -281,25 +192,10 @@ caller can be left on the old constructor at a commit the functional checks pass
   and every docstring naming `market_resource_pools`. Remove every `market_resource_pools`
   and `market_resource_pools_contracts` import from `kit/site/src`. Verify: `grep -rn
   "market_resource_pools" kit/site/src` finds nothing.
-  Done; the grep finds nothing. `pool_facts` is the first keyword-only argument and
-  has no default. Each decision keeps one `PoolFacts` per pool in a local cache; the
-  mode check is a module-level `_pool_delivers_mode` (enabled, modes readable, mode in
-  them), which refuses a pool whose declaration cannot be read where the old helper
-  would have raised. Two judgements the plan did not spell out, for the round's review:
-  - the offered read now reads the deliverable-hosts report lazily, at most once and
-    only once a pool needs a host, since the ledger no longer knows whether a
-    requirement was supplied; before, it read it once whenever a requirement was
-    supplied and never otherwise, so the reads a composition with no requirement makes
-    are unchanged, and every `enabled` is the same;
-  - a declaration recording no pool is skipped before any port read in the offered
-    read too (D7), reported not offered and logged ("not offered"). Before, it was
-    judged as a missing pool: stored `enabled` with no requirement, or offered with a
-    usable host under one. Neither projection includes such a row, and admission
-    admits nothing against it, so no projected `enabled` and no refusal moves; the
-    snapshot (`GET /api/v1/capacity/snapshot`) no longer lists it. The fresh-context
-    check flagged this against the proposal's non-goal; it is kept as the only result
-    D7 allows without a port read for a poolless row, and is the owner's to confirm
-    or send back to design.
+  Done; the grep finds nothing. `pool_facts` is a required keyword argument; each
+  decision caches one `PoolFacts` per pool. The lazy report read, the poolless row in
+  the offered read, and the refusal of an unreadable declaration are recorded in
+  `design.md`, "Judgements made in implementation".
 - [x] 3.2 Give `kit/site`'s tests their own reader double (D9): a mapping from pool id to
   a test record, in `kit/site/tests/integration/conftest.py` and a unit-level fixture
   where the unit tests need one, replacing the `ResourcePool` rows and
@@ -311,26 +207,10 @@ caller can be left on the old constructor at a commit the functional checks pass
   read judging the declaration as backed and needing a host, with and without a report).
   Verify: `make -C kit/site test` passes, unit and library integration, including the
   one-report-read-per-decision and file-backed write-held-off cases.
-  Done, differing from the plan in where the double lives: one module,
-  `kit/site/tests/pool_facts_double.py` (`PoolFactsDouble` over `PoolRecord`s, recording
-  each read and its session), which both levels import through `pythonpath = ["src",
-  "tests"]` in `kit/site/pyproject.toml`, as `kit/settlement-runtime` shares its test
-  helpers, rather than a copy in each conftest. A test changes a pool by replacing its
-  record. The host-requirement suite now states each pool's `needs_host` (and what a
-  missing pool reports) instead of a requirement; two of its cases tested how a provider
-  resolves against a requirement — a provider the requirement does not name, and
-  `{"test": False}` beside no requirement — which is now `pool_needs_host`'s, held by
-  `kit/resource-pools`' unit tests and `test_pool_facts.py`, so they collapsed into the
-  `needs_host` cases. The file-backed write probes update `capacity_buckets`, since the
-  site's database no longer holds `resource_pools`. Added: registration naming a missing
-  pool refused, reading only that pool; a declaration moved into a missing pool left
-  unchanged with the capacity version; the offered read meeting a missing pool, without
-  a report (offered only naming a host) and with one (only with a usable host), each
-  refused by admission; the offered read reading each pool once, in its session, beside
-  one report read, and never reading the report where no pool needs a host; admission
-  reading each pool once in the session that reserves; and a poolless row not offered,
-  with no read for it. `make -C kit/site test`: unit and library integration, 394
-  passed, the report-read and write-held-off cases among them.
+  Done, with the double as one shared module, `kit/site/tests/pool_facts_double.py`
+  (`design.md`, "Judgements made in implementation"). The missing-pool cases,
+  per-decision read counts, and a poolless row read for nothing are added. `make -C
+  kit/site test`: 394 passed.
 - [x] 3.3 Add `kit/site/tests/unit/test_import_boundaries.py` forbidding
   `market_resource_pools` and `market_resource_pools_contracts` in every module of
   `kit/site/src`, and `kit/resource-pools/tests/unit/test_import_boundaries.py`
@@ -340,27 +220,17 @@ caller can be left on the old constructor at a commit the functional checks pass
   `kit/site/pyproject.toml`'s runtime dependencies, keeping either in its `dev` group
   only if a test still needs it (D4, D10). Verify: both boundary tests pass, and each
   fails against a planted import (checked by hand, not committed).
-  Done: both walk every module (`rglob`) and every import node (`ast.walk`), absolute
-  imports only, since a relative one stays in its package. No `kit/site` test needs
-  either distribution, so neither stays in `dev`; `kit/site`'s lock drops the authority
-  and keeps the contracts package only through `arkhai-kit-site-client` in `dev`. By
-  hand: a function-local import of `market_resource_pools_contracts` planted in
-  `kit/site/src/market_site/_planted.py`, and a `TYPE_CHECKING` import of
-  `market_site.ledger` in `kit/resource-pools/src/market_resource_pools/_planted.py`,
-  each failed its test naming the file and line; both files were removed. `change-workflow
-  run test-before` of the site test at the section's starting commit (`5ee4ee910`):
-  failed there, on `ledger.py:55`, as it should. `kit/site/pyproject.toml` also gains
-  `"tests"` on its pytest path (3.2).
+  Done: both tests walk every module and import node; neither distribution stays in
+  `kit/site`'s `dev`. Each failed against a planted import, and the site test failed at
+  the section's starting commit (`change-workflow run test-before`).
 - [x] 3.4 Narrow `kit/resource-pools/src/market_resource_pools/host_requirement.py` to
   `HostRequirement` and `pool_needs_host`, deleting `DeliverableHosts` and
   `declaration_has_usable_host` and their exports, and moving their docstring's account of
   the usable-host rule to `market_site.deliverable_hosts` (D5); trim
   `kit/resource-pools/tests/unit/test_host_requirement.py` to `pool_needs_host`'s cases.
   Verify: `make -C kit/resource-pools test` passes; the module imports no SQLAlchemy.
-  Done: the module's docstring keeps the provider mapping and points to
-  `market_site.deliverable_hosts` for the rule; it imports only `collections.abc`.
-  `make -C kit/resource-pools test`: unit and library integration, 115 passed (fourteen
-  predicate cases left with the predicate; the boundary test added).
+  Done: the module imports only `collections.abc`. Unit and library integration, 115
+  passed.
 - [x] 3.5 Switch `kit/fulfillment/src/market_fulfillment/scheduler.py` to call
   `market_site`'s predicate with `needs_host=pool_needs_host(pool.provider,
   requirement)`, and `scheduling_persistence.py` to take `DeliverableHosts` from
@@ -372,25 +242,16 @@ caller can be left on the old constructor at a commit the functional checks pass
   `>=0.11.0` in `kit/fulfillment/pyproject.toml`, and bump it as `make
   check-version-bumps` requires (D11). Verify: `make -C kit/fulfillment test` passes,
   unit and library integration, its placement cases unchanged.
-  Done, differing from the plan: the three tests' ledgers get `ResourcePoolFacts()`
-  with no requirement, because none of them was ever given one — only the scheduler
-  was, and it keeps it — so passing the requirement to the reader would have made the
-  ledger refuse holds the placement cases need. `test_scheduler.py`'s pausing-ledger race
-  case builds its ledger through a subclass and was a fifth construction. The boundary
-  test's allowlist needed no change: `scheduler.py` and `scheduling_persistence.py` still
-  import both `market_resource_pools` and `market_site`. Bumped 0.9.0 → 0.9.1, the
-  change being internal; both floors carry a comment. `make -C kit/fulfillment test`:
-  unit and library integration, 213 passed.
+  Done; the five ledger constructions get `ResourcePoolFacts()` with no requirement
+  (`design.md`, "Judgements made in implementation"). `kit/fulfillment` 0.9.0 → 0.9.1.
+  213 passed.
 - [x] 3.6 Switch `provisioning/compute/src/compute_provisioning/relays/deliverability.py`
   to take `DeliverableHosts` from `market_site`; give
   `provisioning/compute/tests/integration/test_release.py` the real `ResourcePoolFacts`;
   raise `arkhai-kit-site` to `>=0.15.0` in `provisioning/compute/pyproject.toml` and bump
   it as required (D5, D11). Verify: `make -C provisioning/compute test` passes.
-  Done; `test_release.py`'s two ledgers get `ResourcePoolFacts()`, having had no
-  requirement. Bumped 0.30.0 → 0.30.1. Outside the plan: its `arkhai-kit-resource-pools`
-  floor rises to `>=0.11.0` too, the first version exporting the reader its tests
-  compose, as 3.5 does for fulfillment. `make -C provisioning/compute test`: unit and
-  library integration, 605 passed.
+  Done; `provisioning/compute` 0.30.0 → 0.30.1, its `arkhai-kit-resource-pools` floor
+  raised to `>=0.11.0` too. 605 passed.
 - [x] 3.7 Wire the provisioning service (D4, D11):
   `provisioning/compute/service/src/compute_provisioning_service/container.py` builds a
   `ResourcePoolFacts` provider from the merged host requirement and passes it to
@@ -410,19 +271,11 @@ caller can be left on the old constructor at a commit the functional checks pass
   `test_relay_drain_api.py`; add to `test_capacity_api.py` a reserve through the typed
   client refused because its pool does not declare the claim's mode, if no case there
   does.
-  Done: the container's `pool_facts` provider is a `ResourcePoolFacts` over the merged
-  `host_requirement` provider, which the scheduler and the adapter composition also
-  take. The floors were raised in section 2 (2.4) and the service stays at 0.28.1.
-  `test_capacity_api.py` had no such case, so one was added: a reserve through
-  `SiteCapacityClient` against a declaration in a pool declaring no deliverable mode is
-  refused 409 naming the pool, with the declaration's availability and the capacity
-  version unchanged. In `test_authority_composition.py`, the deliverable-hosts test now
-  asserts the ledger's reader carries the scheduler's requirement object, and a new test
-  asserts the ledger holds the container's one `ResourcePoolFacts`, carrying the merged,
-  non-empty requirement. `make -C provisioning/compute/service test`: unit 641 passed;
-  application integration 580 passed, through the typed clients, `test_capacity_api.py`,
-  `test_host_requirement_api.py`, `test_deliverable_hosts_api.py` and
-  `test_relay_drain_api.py` among them.
+  Done: the container's `pool_facts` is a `ResourcePoolFacts` over the merged
+  requirement the scheduler also takes; a reserve refused for a pool declaring no mode
+  was added to `test_capacity_api.py`; `test_authority_composition.py` asserts the
+  ledger holds the container's one reader with the merged requirement. Unit 641,
+  application integration 580, passed.
 - [x] 3.8 Wire the API-credit service (D3, D11):
   `domains/apicredits/service/src/apicredits_service/container.py` passes
   `ResourcePoolFacts()` — no host requirement — as `pool_facts`; update
@@ -432,43 +285,25 @@ caller can be left on the old constructor at a commit the functional checks pass
   `pyproject.toml`; bump as required. The table, the seed and `load_pool_directory` stay
   unchanged. Verify: `make -C domains/apicredits/service test` passes, unit and
   application integration, including `test_default_pool.py` and `test_migrations.py`.
-  Done, with one seam added: the container's ledger is built by a module-level
-  `build_capacity_ledger(session_factory)`, which `init()` calls, so
-  `tests/unit/test_composition.py` checks the composed reader (a `ResourcePoolFacts`
-  with `host_requirement is None`) without a migrated database; the comment that sat in
-  `init()` moved into its docstring. The service stays at 0.8.1, its floors raised with a
-  comment. `make -C domains/apicredits/service test`: unit and application integration,
-  92 passed, `test_default_pool.py` and `test_migrations.py` among them.
+  Done, through a module-level `build_capacity_ledger` seam;
+  `tests/unit/test_composition.py` checks the reader carries no requirement. 92 passed.
 - [x] 3.9 Give the storefront tests that construct a ledger the real `ResourcePoolFacts`
   (D9): `domains/vms/storefront/tests/integration/test_capacity_reservation_boundary.py`,
   `domains/vms/storefront/tests/integration/test_shape_feasibility.py`,
   `domains/bare_metal/storefront/tests/integration/test_site_reservation.py`, with
   `arkhai-kit-resource-pools` in each storefront's `dev` group where task 1.5 did not
   already keep it. Verify: those suites pass.
-  Done; each ledger gets `ResourcePoolFacts()`, having had no requirement, and both
-  storefronts already kept the authority in `dev` (1.5). After the fresh-context check:
-  the VM storefront's runtime `arkhai-kit-site` floor and the bare-metal storefront's
-  `dev` one rise to `>=0.15.0`, the first version whose ledger takes `pool_facts`, and
-  their `dev` comments name the reader too; both stay at 0.29.1. `make -C
-  domains/vms/storefront test`: unit 1199 passed, 1 skipped; integration 653 passed.
-  `make -C domains/bare_metal/storefront test`: 694 passed.
+  Done; both storefronts' `arkhai-kit-site` floor rises to `>=0.15.0`. VM storefront
+  1199 + 653, bare-metal storefront 694, passed.
 - [x] 3.10 Relock every project whose lock installs `arkhai-kit-site`,
   `arkhai-kit-resource-pools` or `kit/fulfillment` (`make lock PROJECTS="..."`), and
   check that no comment or docstring the section touched names `market_resource_pools`
   where it now means `market_site` (`grep -rn "market_resource_pools.declaration_has_usable_host\|market_resource_pools.host_requirement" --include=*.py .`
   outside virtual environments finds none). Verify: `make check-version-bumps` and
   `make check-packaging` pass.
-  Done: `make lock PROJECTS="..."` over the twelve projects whose lock names a changed
-  package (`domains/apicredits/service`, `domains/bare_metal/provisioning/adapter`,
-  `domains/bare_metal/storefront`, `domains/vms/provisioning/adapter`,
-  `domains/vms/storefront`, `e2e-tests`, `kit/fulfillment`, `kit/resource-pools`,
-  `kit/site`, `provisioning/compute`, `provisioning/compute/ansible`,
-  `provisioning/compute/service`), then the two storefronts and `e2e-tests` again for
-  the storefront floors. The grep finds none. Outside the plan:
-  `docs/guidance/repository/published-packages.md`'s row for `arkhai-kit-site` drops both
-  pool distributions, as `scripts/tests/test_publish_matrix.py` requires (`make
-  test-release-tooling TESTS=scripts/tests/test_publish_matrix.py`: 183 passed). `make
-  check-version-bumps`, `make check-locks` and `make check-packaging`: passed.
+  Done: twelve projects relocked; the grep finds none; `published-packages.md`'s
+  `arkhai-kit-site` row drops both pool distributions. `make check-version-bumps`, `make
+  check-locks`, `make check-packaging`: passed.
 - [x] 3.11 Verification point. Focused suites: `make -C kit/site test`, `make -C
   kit/resource-pools test`, `make -C kit/fulfillment test` (unit, library integration),
   `make -C provisioning/compute test`, `make -C provisioning/compute/service test` and
@@ -481,91 +316,64 @@ caller can be left on the old constructor at a commit the functional checks pass
   offered read's host rule), `e2e_bare_metal_mock_deal` and `e2e_bare_metal_payment_deal`
   (bare-metal admission and commit), and `e2e_credits_deal` (the API-credit ledger with no
   host requirement). No CI evidence is owed.
-  Done. Focused suites, as recorded in 3.2–3.9: `kit/site` 394, `kit/resource-pools`
-  115, `kit/fulfillment` 213, `provisioning/compute` 605, the provisioning service unit
-  641 and integration 580, the API-credit service 92, the VM storefront 1199 + 653, the
-  bare-metal storefront 694, all passed. `change-workflow run pre-commit
-  inject-site-pool-authority`: passed — `make check-packaging`, `make test` (every
-  suite) and `make check-repository`. After the fresh-context check's fixes (the
-  storefront floors and their relock, two `kit/site` tests): `kit/site` and both
-  storefront suites again, `make check-locks`, `make check-packaging`, `make
-  check-version-bumps` and `make check-repository` passed. End-to-end, confirmed as the
-  plan names them: `e2e_pool_declared_modes`, `e2e_buy`, `e2e_deal`,
-  `e2e_bare_metal_publication`, `e2e_bare_metal_deal` and `e2e_credits_deal`, which
-  reach the rewired ledger once deployed; none was run here, and validation runs them.
-  No CI evidence is owed.
-  Round triage (20 A2 / 20 A3): validation 20 credited `e2e_pool_declared_modes` and
-  `e2e_bare_metal_deal` as passed by inference from lane totals, but no lane selected
-  either. `e2e_pool_declared_modes` had joined no lane since it was written; adding it
-  to the VM lane (`E2E_MODULE` in `e2e-tests/Makefile`) is outside the plan. To meet
-  the lane's rules its module now takes the VM lane's four timer holds
-  (`test_scenario_lane_holds.py`), and asserts rather than skips when the site offers
-  no resource with a free unit, choosing one that has, since a resource unable to meet
-  the claim is passed over before its pool's modes are read. `e2e_bare_metal_deal`
-  needs a real whole host and stays in no lane, so the plan's End-to-end line above
-  now names the bare-metal lane's deals, `e2e_bare_metal_mock_deal` and
-  `e2e_bare_metal_payment_deal`; the bare-metal entry in the Done line above is the
-  plan's earlier one. Evidence: collecting the VM lane's marker expression selects 514
-  tests, `test_pool_declared_offering_modes.py` among them, against the 513 the lane ran
-  at validation 20 (system-test collection, no run); `test_scenario_lane_holds.py`,
-  `test_scenario_cleanup_order.py` and `test_qualification_modules.py` (unit): 161
-  passed. `change-workflow run pre-commit inject-site-pool-authority`: the first run
-  failed on `test_scenario_lane_holds.py[E2E_MODULE]`, the module lacking the lane's
-  holds; after the holds were added it passed — `after-functional-change` (no lock
-  changed), `pre-commit-functional` (`check-packaging` and `test`, every suite) and
-  `pre-commit` (`make check-repository`: every check passed). The fresh-context check
-  found the missing holds, the resource choice that could miss the claim, the skip a
-  lane must not take, and the "holds nothing" wording that collides with the lane's
-  timer holds; all were fixed. The scenario has not run deployed: the fix commit's
-  validation runs it in the VM lane.
-
-Section 3 notes: the docstrings section 2 left ahead of the wiring — `market_site.pool_facts`,
-`market_site.deliverable_hosts`, `market_resource_pools.pool_facts` — are now true of the
-code; three permanent documents still describe the old edge until closeout's 4.8 rewrites
-them, and the citations check does not report them: the site-capacity companion's
-"Declared capacity and connection identity" (cited by the new modules' docstrings and both
-boundary tests), its `testing.md`, and `ARCHITECTURE.md`'s kit-areas paragraph. The
-poolless-row change to the snapshot (3.1) is the one behaviour change; the round's review
-and the owner decide whether it stands, and if it does, closeout's 4.8 should say so in the
-site-capacity companion beside D7. The tests reach the double through `ledger._pool_facts`,
-as the suite already reaches `ledger._session_factory`; the fresh-context check suggested
-holding a reference instead, which was declined to keep `_make_ledger`'s many callers
-unchanged. A poolless row is now logged twice per projection read ("not offered" by the
-ledger, "not projected" by the projection), also declined, since D7 has the ledger log it.
-`PoolFactsDouble.declare` takes modes as one iterable, so `_declare_pool(ledger, id, *modes)`
-passes the tuple.
+  Done. Every focused suite above passed, and `change-workflow run pre-commit
+  inject-site-pool-authority` passed. The round's triage (20 A2/A3) added
+  `e2e_pool_declared_modes` to the VM lane and named the bare-metal lane's deals in
+  place of `e2e_bare_metal_deal`, which is in no lane (`design.md`, "Judgements made in
+  implementation"). End-to-end evidence: validation 30, pipeline run 45877829599, all
+  three lanes passed (4.7).
 
 ## 4. Closeout
 
 Ends the change as the workflow guidance's section "Closeout" and this repository's own
 closeout parts (`openspec/README.md`, "This repository's closeout parts") order it.
 
-- [ ] 4.1 Comment hygiene: run `make check-comment-hygiene`, and confirm the comments and
+- [x] 4.1 Comment hygiene: run `make check-comment-hygiene`, and confirm the comments and
   docstrings the change added in `kit/site`, `kit/resource-pools`,
   `kit/resource-pools-contracts`, `kit/fulfillment`, `compute_provisioning` and both
   service roots describe the current system and name no change, task or change document.
   Anything to fix returns the change to implementation.
-- [ ] 4.2 Import placement: confirm every import the change added sits at module level
+  Done: `make check-comment-hygiene` passed. The comments and docstrings the change
+  added — `market_site.pool_facts`, `market_site.deliverable_hosts`, the ledger,
+  `market_resource_pools.pool_facts` and `host_requirement`, the scheduler, both roots —
+  describe the current system and name no change, task or change document.
+- [x] 4.2 Import placement: confirm every import the change added sits at module level
   (the engineering guidance's section "Imports go at module level"); one that should move
   returns the change to implementation.
-- [ ] 4.3 Documentation compliance: re-check D1–D11 against the workflow's placement
+  Done: every import the change added is at module level; it removed four function-local
+  imports and added none (`make check-local-imports` passed).
+- [x] 4.3 Documentation compliance: re-check D1–D11 against the workflow's placement
   rules and `openspec/README.md`, "Documentation placement", and confirm each permanent
   document written in 4.8 describes the current state with no wording relative to the
   change.
-- [ ] 4.4 Narrative compression: shorten completed task notes in this file to final
+  Done: D1–D11 checked against the placement tables; each decision's destination is the
+  design-promotion record in `design.md`, every one a capability companion,
+  `testing.md`, a delta-covered `spec.md`, `ARCHITECTURE.md`, or the repository or
+  engineering guidance as its kind requires. Each document 4.8 wrote describes the
+  current state with no wording relative to the change.
+- [x] 4.4 Narrative compression: shorten completed task notes in this file to final
   behaviour, material validation evidence and destinations, moving anything else into
   `design.md` first.
-- [ ] 4.5 Roadmap currency: record in the design-promotion record that
+  Done: completed notes shortened to results, evidence and destinations; the
+  implementation's judgements, alternatives declined, and the round triage's lane change
+  moved to `design.md`, "Judgements made in implementation".
+- [x] 4.5 Roadmap currency: record in the design-promotion record that
   `docs/development/ROADMAP.md` owes nothing — the change serves the POOLS lesser goal,
   which the roadmap does not carry, and closes no goal's gap row.
-- [ ] 4.6 Campaign index currency: in `openspec/changes/README.md`, set this change's
+  Done: `docs/development/ROADMAP.md` owes nothing, recorded in the design-promotion
+  record.
+- [x] 4.6 Campaign index currency: in `openspec/changes/README.md`, set this change's
   row under "Lesser goal — POOLS capacity and fulfillment foundation" to what is true at
   closeout, and correct the third sequence's paragraph under "Lesser goal — Package and
   release readiness" whose sentence says `kit/site`'s own boundary test guards the edge,
   to say the edge is gone and `kit/site`'s boundary test now forbids it; leave
   `renewable-compute-lease-deadlines`' `Depends on` for archive cleanup. Run `make
   check-change-index`. Name both updates in the design-promotion record.
-- [ ] 4.7 This repository's own closeout parts, as `openspec/README.md` gives them:
+  Done: the row set to `in closeout` with closeout-true notes, and the third sequence's
+  paragraph corrected; `renewable-compute-lease-deadlines`' `Depends on` left for
+  archive cleanup. `make check-change-index` passed. Both named in the design-promotion
+  record.
+- [x] 4.7 This repository's own closeout parts, as `openspec/README.md` gives them:
   - **Packaging:** run `make check-packaging` and resolve every failure; run `make
     check-architecture-change CHANGE=inject-site-pool-authority` (the change owns no row);
     `make check-agent-skills` is not owed, as the change touches no agent directory.
@@ -575,7 +383,22 @@ closeout parts (`openspec/README.md`, "This repository's closeout parts") order 
     `e2e_bare_metal_mock_deal`, `e2e_bare_metal_payment_deal`,
     `e2e_compute_dynamic_listings`, `e2e_credits_deal` — from that validation's record.
     `e2e_bare_metal_deal` is in no lane, as `e2e-tests/Makefile` says.
-- [ ] 4.8 Promotion: write the design-promotion record in this file, and the permanent
+  Done. **Packaging:** `change-workflow run pre-archive inject-site-pool-authority`
+  passed at `4845f2bfa`: `make check-packaging` (locks, wheelhouse, layers, scope,
+  dependencies and kinds among it) and `make check-architecture-change` ("owns no
+  architecture row"); `make check-agent-skills` not owed, no agent directory touched.
+  **End-to-end pipeline:** validation 30 (`reviews/30-validation.md`) at `4845f2bfa`,
+  the commit this closeout builds on, closeout changing no code: `e2e.yml` run
+  45877829599, success — VM lane 514 passed, bare-metal 249, API-credit 4. The VM lane
+  selects `e2e_pool_declared_modes`, `e2e_buy`, `e2e_deal` and
+  `e2e_compute_dynamic_listings`; the bare-metal lane `e2e_bare_metal_publication`,
+  `e2e_bare_metal_mock_deal` and `e2e_bare_metal_payment_deal`; the API-credit lane
+  `e2e_credits_deal`. Per-scenario results are inferred from the lanes' selection and
+  totals, the output being quiet; `e2e_pool_declared_modes`' own `PASSED` line was read
+  in run 45873966406 at the pre-merge commit (26 triage). The helm lane passed but
+  serves none of these scenarios. `e2e_bare_metal_deal` is in no lane. No section owed
+  an observation by validation.
+- [x] 4.8 Promotion: write the design-promotion record in this file, and the permanent
   documents:
   - D1, D3, D4, D5, D10: `openspec/specs/site-capacity/architecture.md`, "Declared
     capacity and connection identity" — the ledger reads pool facts through the injected
@@ -620,13 +443,37 @@ closeout parts (`openspec/README.md`, "This repository's closeout parts") order 
     `openspec/specs/resource-pool-management/spec.md` at archival; neither capability has
     an `index.md`, so no index entries are owed. D7, D8 and D11 have no permanent
     destination, as the proposal records.
-- [ ] 4.9 Guidance placement: read the sections 4.8 added or rewrote in
+  Done: the design-promotion record is in `design.md`, as the closeout skill places it,
+  rather than here. Written: the `site-capacity` companion ("Declared capacity and
+  connection identity": the port, the readers, the boundary test, the predicate's owner,
+  the lazy report read, the poolless row in the offered read) and its `testing.md`; the
+  `resource-pool-management` companion ("Ownership boundary", "Advertisement, delivery,
+  and backing") and its Evidence; `ARCHITECTURE.md` ("Kit areas", the contracts
+  paragraph, "Resource pools") and the kit-areas diagram, whose `kit/site` box loses the
+  dashed divergence border; `package-layers.md` and `dependencies.md`; the moved tests'
+  citations in `storefront-publication/spec.md` and the reader's package in
+  `api-credits/architecture.md`. Beyond the plan's list:
+  `physical-provisioning/architecture.md`, whose reason for not checking declarations at
+  write cited the removed edge, now cites the port's lack of backing. Both deltas merge
+  at archive; neither capability has an `index.md`.
+- [x] 4.9 Guidance placement: read the sections 4.8 added or rewrote in
   `package-layers.md` and `dependencies.md` against the layer test — the principle in
   `dependencies.md` must hold in any repository and name nothing of this one, with
   `engineering` and `dependencies` tags only — and run `make check-guidance`.
-- [ ] 4.10 Documentation citations: run `make check-doc-citations
+  Done: `dependencies.md`'s new section holds in any repository, names nothing of this
+  one, with a prose example and the file's existing `engineering` and `dependencies`
+  tags; `package-layers.md`'s principle is repository guidance spanning its kits, beside
+  the rule it qualifies. `make check-guidance` passed.
+- [x] 4.10 Documentation citations: run `make check-doc-citations
   CHANGE=inject-site-pool-authority` and resolve every match; then
   `change-workflow openspec validate inject-site-pool-authority --strict`.
-- [ ] 4.11 Archival: `change-workflow openspec archive inject-site-pool-authority -y`,
+  Done: `make check-doc-citations CHANGE=inject-site-pool-authority` passed; the `kit/`
+  and `provisioning/` paths the promoted documents cite, which the check does not
+  resolve, were confirmed to exist by hand. `change-workflow openspec validate
+  inject-site-pool-authority --strict`: valid.
+- [x] 4.11 Archival: `change-workflow openspec archive inject-site-pool-authority -y`,
   merging both deltas (no `--skip-specs`: neither `spec.md` was edited by hand for a
   requirement the deltas cover; the Evidence edits in 4.8 sit outside them).
+  Done: archived as `openspec/changes/archive/2026-11-26-inject-site-pool-authority/`,
+  merging both deltas: `resource-pool-management` one added and one modified requirement,
+  `site-capacity` one added; each merged diff read and holds exactly the delta.
