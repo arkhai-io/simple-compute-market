@@ -1,159 +1,47 @@
+"""The storefront peer's client: how it is built and when it is rebuilt."""
+
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from compute_provisioning_contracts import LifecycleEvent
-from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
+from market_identity import Ed25519Signer, TrustedIdentitySet
 
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 from compute_provisioning_service.services.deal_event_sink import (
-    StorefrontLifecycleEventSink,
-    notify_storefront_capacity_released,
+    StorefrontPeer,
+    storefront_peer_url,
 )
 
 
-def _authority(principal):
-    return SimpleNamespace(
-        active_principals=lambda role: TrustedIdentitySet(
-            identities=(principal,)
-        )
-    )
-
-
-@pytest.mark.parametrize(
-    ("service", "storefront_signer"),
-    (
-        (Ed25519Signer(b"\x11" * 32), Ed25519Signer(b"\x12" * 32)),
-        (Eip191Signer(b"\x21" * 32), Eip191Signer(b"\x22" * 32)),
-    ),
-)
-@pytest.mark.asyncio
-async def test_release_event_uses_service_signer_site_and_storefront_pin(
-    service,
-    storefront_signer,
-):
-    storefront = MagicMock()
-    storefront.notify_capacity_released = AsyncMock(return_value={})
-    storefront.close = AsyncMock()
+def test_the_peer_s_client_is_rebuilt_when_the_pinned_principals_change():
+    principals = [TrustedIdentitySet(identities=(Ed25519Signer(b"\x12" * 32).identity,))]
+    authority = SimpleNamespace(active_principals=lambda role: principals[-1])
     identity = ProvisioningIdentityContext(
-        signer=service,
-        storefront_principal=storefront_signer.identity,
+        signer=Ed25519Signer(b"\x11" * 32),
+        storefront_principal=principals[0].identities[0],
         admin_principal=Ed25519Signer(b"\x13" * 32).identity,
         storefront_site_id="site-west",
     )
-    sink = StorefrontLifecycleEventSink(
-        SimpleNamespace(storefront_url="https://configured.example/"),
-        identity,
-        _authority(storefront_signer.identity),
+    peer = StorefrontPeer("https://configured.example", identity, authority)
+
+    first = peer.client()
+    assert peer.client() is first
+    principals.append(TrustedIdentitySet(identities=(Ed25519Signer(b"\x14" * 32).identity,)))
+    assert peer.client() is not first
+    peer.close()
+
+
+def test_no_configured_storefront_is_refused_when_a_delivery_needs_it():
+    peer = StorefrontPeer("", MagicMock(), MagicMock())
+
+    with pytest.raises(RuntimeError, match="storefront_url"):
+        peer.client()
+
+
+def test_the_peer_url_drops_a_trailing_slash():
+    assert storefront_peer_url(SimpleNamespace(storefront_url="https://configured.example/")) == (
+        "https://configured.example"
     )
-    reservation = {
-        "capacity_reservation_id": "alloc-7",
-        "offering_mode": "vm",
-        "released_at": "2026-07-13T12:00:00+00:00",
-        "deal_ref": {"storefront_url": "https://untrusted.example/"},
-    }
-    event_id = "capacity_released:alloc-7:2026-07-13T12:00:00+00:00"
-    request_id = "capacity-release-" + hashlib.sha256(event_id.encode()).hexdigest()
-
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=storefront) as client:
-        delivered = await notify_storefront_capacity_released(
-            SimpleNamespace(storefront_url="https://configured.example/"),
-            reservation,
-            sink=sink,
-        )
-        await sink.close()
-
-    assert delivered is True
-    client.assert_called_once_with(
-        base_url="https://configured.example",
-        signer=service,
-        caller_role="service",
-        expected_publishers=TrustedIdentitySet(
-            identities=(storefront_signer.identity,)
-        ),
-    )
-    storefront.notify_capacity_released.assert_awaited_once_with(
-        "alloc-7",
-        site_id="site-west",
-        released_at="2026-07-13T12:00:00+00:00",
-        request_id=request_id,
-    )
-    storefront.close.assert_awaited_once_with()
-
-
-@pytest.mark.parametrize("event_kind", ["usage_ready", "provisioning_started"])
-@pytest.mark.asyncio
-async def test_the_sink_sends_nothing_for_an_event_other_than_capacity_release(event_kind):
-    """A storefront learns every other fulfillment transition by reading the
-    fulfillment, so the sink refuses such an event: it builds no client and
-    reports the event undelivered."""
-    service = Ed25519Signer(b"\x11" * 32)
-    storefront_signer = Ed25519Signer(b"\x12" * 32)
-    identity = ProvisioningIdentityContext(
-        signer=service,
-        storefront_principal=storefront_signer.identity,
-        admin_principal=Ed25519Signer(b"\x13" * 32).identity,
-        storefront_site_id="default",
-    )
-    sink = StorefrontLifecycleEventSink(
-        SimpleNamespace(storefront_url="https://configured.example"),
-        identity,
-        _authority(storefront_signer.identity),
-    )
-    event = LifecycleEvent(
-        event_id=f"{event_kind}:alloc-7",
-        capacity_reservation_id="alloc-7",
-        deal_ref={},
-        offering_mode="vm",
-        event_kind=event_kind,
-        payload={},
-        occurred_at=datetime.now(timezone.utc),
-    )
-
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient") as client:
-        assert await sink.deliver(event) is False
-
-    client.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_uncertain_ack_retry_reuses_the_same_client_and_request_identity():
-    service = Ed25519Signer(b"\x11" * 32)
-    storefront_signer = Ed25519Signer(b"\x12" * 32)
-    storefront = MagicMock()
-    storefront.notify_capacity_released = AsyncMock(
-        side_effect=[RuntimeError("ack lost"), {}]
-    )
-    identity = ProvisioningIdentityContext(
-        signer=service,
-        storefront_principal=storefront_signer.identity,
-        admin_principal=Ed25519Signer(b"\x13" * 32).identity,
-        storefront_site_id="default",
-    )
-    sink = StorefrontLifecycleEventSink(
-        SimpleNamespace(storefront_url="https://configured.example"),
-        identity,
-        _authority(storefront_signer.identity),
-    )
-    reservation = {
-        "capacity_reservation_id": "alloc-7",
-        "offering_mode": "vm",
-        "released_at": "2026-07-13T12:00:00+00:00",
-    }
-
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=storefront) as client:
-        assert await notify_storefront_capacity_released(
-            SimpleNamespace(storefront_url="ignored"), reservation, sink=sink
-        ) is False
-        assert await notify_storefront_capacity_released(
-            SimpleNamespace(storefront_url="ignored"), reservation, sink=sink
-        ) is True
-
-    client.assert_called_once()
-    first, second = storefront.notify_capacity_released.await_args_list
-    assert first.kwargs["request_id"] == second.kwargs["request_id"]
-    assert first.kwargs["site_id"] == second.kwargs["site_id"] == "default"
+    assert storefront_peer_url(SimpleNamespace(storefront_url=None)) == ""

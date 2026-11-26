@@ -51,49 +51,25 @@ class ProvisioningReplayReservation(Base):
     )
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
-class CapacityReleaseCallbackOutbox(Base):
-    """Durable acknowledgement state for one released reservation callback."""
+class LeaseEndReport(Base):
+    """One lease end's signed statement, as the site signed it when the end was
+    recorded: the authenticated lease read serves it, and the storefront peer's
+    consumer delivers it. Kept under its own retention, independent of the
+    event it was recorded with."""
 
-    __tablename__ = "capacity_release_callback_outbox"
-
-    capacity_reservation_id = Column(String, primary_key=True)
-    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
-    last_error = Column(Text, nullable=True)
-    # Pending callbacks are delivered oldest first, so creation is stamped from
-    # the process's time source rather than the database's clock.
-    created_at = Column(
-        DateTime(timezone=True),
-        default=injected_time.now_datetime,
-        server_default=func.now(),
-        nullable=False,
-    )
-    last_attempted_at = Column(DateTime(timezone=True), nullable=True)
-    delivered_at = Column(DateTime(timezone=True), nullable=True)
-
-
-
-class LeaseEndReportOutbox(Base):
-    """One immutable signed report and its own peer acknowledgement."""
-
-    __tablename__ = "lease_end_report_outbox"
+    __tablename__ = "lease_end_reports"
 
     event_id = Column(String, primary_key=True)
     capacity_reservation_id = Column(String, nullable=False, index=True)
-    peer = Column(String, nullable=False)
     report = Column(Text, nullable=False)
-    parked = Column(Boolean, nullable=False, default=False, server_default="0")
-    attempt_count = Column(Integer, nullable=False, default=0, server_default="0")
-    last_error = Column(Text, nullable=True)
-    # Reports are read and delivered in creation order, so creation is stamped
-    # from the process's time source rather than the database's clock.
+    # Reports are read in creation order and retained by age, so creation is
+    # stamped from the process's time source rather than the database's clock.
     created_at = Column(
         DateTime(timezone=True),
         default=injected_time.now_datetime,
-        server_default=func.now(),
         nullable=False,
+        index=True,
     )
-    last_attempted_at = Column(DateTime(timezone=True), nullable=True)
-    delivered_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class ProvisioningTrustedPrincipal(Base):

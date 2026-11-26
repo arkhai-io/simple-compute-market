@@ -334,8 +334,9 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             "(fulfillment_convergence_watchdog_enabled=false)"
         )
 
-    # The event delivery worker delivers what the routes select and prunes by
-    # the configured retention; its controls hold and step it.
+    # The event delivery worker delivers what the routes select, and the
+    # storefront peer's lease-end reports and capacity-released callbacks, and
+    # prunes by the configured retention; its controls hold and step it.
     tasks.append(
         ComputeProvisioningBackgroundTask(
             "event-delivery-worker",
@@ -352,7 +353,8 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
 
 
 async def close_storefront_client() -> None:
-    await container.lifecycle_event_sink().close()
+    for peer in container.storefront_peers():
+        peer.close()
 
 
 

@@ -71,9 +71,10 @@ from compute_provisioning_service.middleware.auth import (
 from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning import ReleaseEffects, TeardownRerunPolicy, compose_adapter_bundles
 from compute_provisioning_service.services.deal_event_sink import (
-    SqlAlchemyCapacityReleaseOutbox,
-    StorefrontLifecycleEventSink,
-    notify_storefront_capacity_released,
+    CAPACITY_RELEASED_CONSUMER,
+    StorefrontPeer,
+    capacity_released_consumer,
+    storefront_peer_url,
 )
 from compute_provisioning_service.services.capacity_reservation_watchdog import CapacityReservationWatchdog
 from compute_provisioning_service.services.fulfillment_convergence import FulfillmentConvergenceWatchdog
@@ -88,10 +89,15 @@ from compute_provisioning_service.services.operator_events import (
     event_catalogue,
     event_pruner,
     event_recorder,
+    event_runner,
     event_sink_consumer,
     events_settings,
 )
-from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
+from compute_provisioning_service.services.lease_end_reports import (
+    LEASE_END_REPORT_CONSUMER,
+    LeaseEndReports,
+    lease_end_report_consumer,
+)
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
 )
@@ -320,10 +326,34 @@ def _make_event_service(session_factory):
     return EventService(session_factory, clock=injected_time.now_datetime)
 
 
-def _make_event_delivery_worker(consumer, pruner, settings):
+def _make_event_delivery_worker(consumers, pruner, settings):
     return EventDeliveryWorker(
-        (consumer,), pruner, interval_seconds=settings.delivery_interval_seconds
+        consumers, pruner, interval_seconds=settings.delivery_interval_seconds
     )
+
+
+def _make_storefront_peers(cfg, identity, principal_authority) -> tuple[StorefrontPeer, ...]:
+    """The configured storefront, once for each of its two consumers: a
+    consumer's cycles run one at a time, while the two consumers' may run
+    together, so neither shares the other's client."""
+    url = storefront_peer_url(cfg)
+    return tuple(StorefrontPeer(url, identity, principal_authority) for _ in range(2))
+
+
+def _make_storefront_consumers(session_factory, peers, identity):
+    """The storefront peer's consumers, each over its own peer: its signed
+    lease-end reports and its capacity-released callbacks, held under this
+    process's runner name."""
+    runner = event_runner(identity.storefront_site_id)
+    reports, callbacks = peers
+    return (
+        lease_end_report_consumer(session_factory, reports, runner=runner),
+        capacity_released_consumer(session_factory, callbacks, runner=runner),
+    )
+
+
+#: The consumers a lease's transitions record for: the storefront peer's.
+STOREFRONT_CONSUMERS = (LEASE_END_REPORT_CONSUMER, CAPACITY_RELEASED_CONSUMER)
 
 
 def _make_teardown_rerun_policy(cfg) -> TeardownRerunPolicy:
@@ -409,23 +439,17 @@ def _make_lease_lifecycle(
     site_authority,
     release_executor,
     release_status,
-    lifecycle_event_sink,
-    capacity_release_outbox,
-    lease_end_reports,
+    event_delivery_worker,
     jobs,
 ):
+    """The lease lifecycle, delivering what its transitions record for the
+    storefront through the event delivery worker before each command returns."""
     return LeaseLifecycleService(
         cfg,
         site_authority,
         release_executor=release_executor,
         release_status=release_status,
-        capacity_released_notifier=(
-            lambda reservation: notify_storefront_capacity_released(
-                cfg, reservation, sink=lifecycle_event_sink
-            )
-        ),
-        capacity_release_outbox=capacity_release_outbox,
-        lease_end_report_drain=lambda: lease_end_reports.drain(lifecycle_event_sink.deliver_lease_end),
+        deliver_events=lambda: event_delivery_worker.deliver(*STOREFRONT_CONSUMERS),
         jobs=jobs,
     )
 
@@ -484,9 +508,13 @@ class Container(containers.DeclarativeContainer):
     # The service's eventing system. One recorder, shared by the site ledger,
     # the job engine and, through the site's release-failure transition, the
     # lease lifecycle, records every kind in the transaction of the change it
-    # reports; the delivery worker delivers and prunes.
+    # reports, a lease end's signed report with it; the delivery worker
+    # delivers, through the event-sink consumer and the storefront peer's two,
+    # and prunes.
     events_settings = providers.Singleton(events_settings, cfg=config)
-    event_catalogue = providers.Singleton(event_catalogue)
+    event_catalogue = providers.Singleton(
+        event_catalogue, signer=identity_context.provided.signer
+    )
     event_recorder = providers.Singleton(
         event_recorder,
         catalogue=event_catalogue,
@@ -506,9 +534,30 @@ class Container(containers.DeclarativeContainer):
         catalogue=event_catalogue,
         settings=events_settings,
     )
+    principal_authority = providers.Singleton(
+        SqlAlchemyProvisioningPrincipalAuthority,
+        session_factory=session_factory,
+        bootstrap=identity_context,
+    )
+    storefront_peers = providers.Singleton(
+        _make_storefront_peers,
+        cfg=config,
+        identity=identity_context,
+        principal_authority=principal_authority,
+    )
+    storefront_consumers = providers.Singleton(
+        _make_storefront_consumers,
+        session_factory=session_factory,
+        peers=storefront_peers,
+        identity=identity_context,
+    )
     event_delivery_worker = providers.Singleton(
         _make_event_delivery_worker,
-        consumer=event_sink_consumer,
+        consumers=providers.Callable(
+            lambda sinks, storefront: (sinks, *storefront),
+            event_sink_consumer,
+            storefront_consumers,
+        ),
         pruner=event_pruner,
         settings=events_settings,
     )
@@ -518,11 +567,7 @@ class Container(containers.DeclarativeContainer):
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
     )
 
-    lease_end_reports = providers.Singleton(
-        LeaseEndReports, session_factory=session_factory,
-        signer=identity_context.provided.signer,
-        peer=providers.Callable(lambda cfg: str(getattr(cfg, "storefront_url", "") or "").rstrip("/"), config),
-    )
+    lease_end_reports = providers.Singleton(LeaseEndReports, session_factory=session_factory)
 
     connection_codecs = providers.Singleton(_make_connection_codecs, cfg=config)
 
@@ -559,7 +604,6 @@ class Container(containers.DeclarativeContainer):
         ),
         release_effect=release_effects,
         site_id=identity_context.provided.storefront_site_id,
-        lease_end_effect=lease_end_reports.provided.record,
         event_recorder=event_recorder,
     )
 
@@ -782,35 +826,13 @@ class Container(containers.DeclarativeContainer):
         unit_of_work=fulfillment_unit_of_work,
     )
 
-    principal_authority = providers.Singleton(
-        SqlAlchemyProvisioningPrincipalAuthority,
-        session_factory=session_factory,
-        bootstrap=identity_context,
-    )
-
-    lifecycle_event_sink = providers.Singleton(
-        StorefrontLifecycleEventSink,
-        settings=config,
-        identity=identity_context,
-        principal_authority=principal_authority,
-    )
-
-
-    capacity_release_outbox = providers.Singleton(
-        SqlAlchemyCapacityReleaseOutbox,
-        session_factory=session_factory,
-    )
-
-
     lease_lifecycle_service = providers.Singleton(
         _make_lease_lifecycle,
         cfg=config,
         site_authority=site_authority,
         release_executor=release_executor,
         release_status=release_status,
-        lifecycle_event_sink=lifecycle_event_sink,
-        capacity_release_outbox=capacity_release_outbox,
-        lease_end_reports=lease_end_reports,
+        event_delivery_worker=event_delivery_worker,
         jobs=job_engine,
     )
 

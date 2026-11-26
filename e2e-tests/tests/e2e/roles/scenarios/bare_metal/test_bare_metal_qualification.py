@@ -562,8 +562,9 @@ class TestStage11a1_RefusedReclaimKeepsCapacity:
         """The reclaim job queued for retry, its error recorded and a next
         retry set, its log naming the foreign descendant, the lease
         ``releasing`` and its capacity unadvertised; then only the fixture
-        repaired. The recorded error and scheduled retry, read through the
-        operator's typed job API, are the actionable operator notification."""
+        repaired. The attempt's ``provisioning.teardown_attempt_held`` event,
+        read through the provisioning service's typed event API beside the
+        job's recorded error and retry, is the operator's notification."""
         if cleanup_cycle != "refusal":
             pytest.skip("the normal cycle plants no foreign descendant")
         if cleanup_qualification is None:

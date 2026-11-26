@@ -157,22 +157,28 @@ class ScriptedStatus:
         return self.status
 
 
-class RecordingNotifier:
-    def __init__(self):
-        self.released: list[str] = []
+class RecordingDelivery:
+    """Stands in for the event delivery worker: records, at each call, the
+    state of every reservation, so a test sees what had committed when the
+    lifecycle asked for its events to be delivered."""
 
-    def __call__(self, reservation):
-        self.released.append(reservation["capacity_reservation_id"])
-        return True
+    def __init__(self, site):
+        self._site = site
+        self.calls: list[dict[str, str]] = []
+
+    async def __call__(self):
+        self.calls.append(
+            {rid: str(row["state"]) for rid, row in self._site.reservations.items()}
+        )
 
 
-def _lifecycle(site, executor, status=None, notifier=None, grace=300):
+def _lifecycle(site, executor, status=None, delivery=None, grace=300):
     return LeaseLifecycleService(
         SimpleNamespace(lease_watchdog_grace_period_seconds=grace),
         site,
         release_executor=executor,
         release_status=status or ScriptedStatus(),
-        capacity_released_notifier=notifier,
+        deliver_events=delivery,
     )
 
 
@@ -302,17 +308,49 @@ async def test_a_transient_failure_to_begin_in_the_releasing_pass_is_retried_wit
 
 
 @pytest.mark.asyncio
-async def test_a_lease_nothing_was_delivered_against_is_released_directly_and_notified():
+async def test_a_lease_nothing_was_delivered_against_is_released_directly_and_delivered():
+    """The cycle that released the lease asks for its events to be delivered
+    once, after the release committed."""
     site = FakeSiteAuthority()
-    notifier = RecordingNotifier()
-    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.FREE)), notifier=notifier)
+    delivery = RecordingDelivery(site)
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.FREE)), delivery=delivery)
     site.due = [site.reservations["alloc-1"]]
 
     result = await lifecycle.check_leases()
 
     assert result["released"] == 1
     assert site.reservations["alloc-1"]["state"] == "released"
-    assert notifier.released == ["alloc-1"]
+    assert delivery.calls == [{"alloc-1": "released"}]
+
+
+@pytest.mark.asyncio
+async def test_a_cycle_that_changes_nothing_delivers_nothing():
+    site = FakeSiteAuthority(lease_end=_FUTURE)
+    delivery = RecordingDelivery(site)
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.FREE)), delivery=delivery)
+
+    result = await lifecycle.check_leases()
+
+    assert (result["checked"], result["released"], result["release_failed"]) == (0, 0, 0)
+    assert delivery.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_delivery_that_fails_leaves_the_committed_release():
+    """The release is committed before delivery is asked for; a failure to
+    deliver is the event delivery worker's to retry and fails nothing."""
+    site = FakeSiteAuthority()
+
+    async def failing():
+        raise ConnectionError("storefront down")
+
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.FREE)), delivery=failing)
+    site.due = [site.reservations["alloc-1"]]
+
+    result = await lifecycle.check_leases()
+
+    assert result["released"] == 1
+    assert site.reservations["alloc-1"]["state"] == "released"
 
 
 @pytest.mark.asyncio
@@ -446,18 +484,18 @@ async def test_no_grace_timeout_runs_while_the_create_is_in_flight():
 async def test_a_torn_down_fulfillment_releases_the_lease():
     site = FakeSiteAuthority(state="releasing")
     site.reservations["alloc-1"]["release_job_id"] = "f-1"
-    notifier = RecordingNotifier()
+    delivery = RecordingDelivery(site)
     lifecycle = _lifecycle(
         site,
         ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)),
         ScriptedStatus(ReleaseStatus(ReleaseProgress.TORN_DOWN)),
-        notifier,
+        delivery,
     )
 
     result = await lifecycle.check_leases()
 
     assert result["released"] == 1
-    assert notifier.released == ["alloc-1"]
+    assert delivery.calls == [{"alloc-1": "released"}]
 
 
 @pytest.mark.asyncio
@@ -500,6 +538,31 @@ async def test_force_release_is_the_operator_s_override_whatever_the_guard_says(
     )
 
     assert released["state"] == "force_released"
+
+
+@pytest.mark.asyncio
+async def test_each_command_delivers_after_its_transition_commits():
+    """Terminating, retrying and force-releasing each ask once for the events
+    their transitions recorded to be delivered, after those transitions."""
+    site = FakeSiteAuthority(lease_end=_FUTURE)
+    delivery = RecordingDelivery(site)
+    lifecycle = _lifecycle(site, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)), delivery=delivery)
+    await lifecycle.terminate_lease("alloc-1")
+    assert delivery.calls == [{"alloc-1": "releasing"}]
+
+    failed = FakeSiteAuthority(state="release_failed")
+    delivery = RecordingDelivery(failed)
+    lifecycle = _lifecycle(failed, ScriptedExecutor(_decision(ReleaseAction.FREE)), delivery=delivery)
+    await lifecycle.retry_release("alloc-1")
+    assert delivery.calls == [{"alloc-1": "released"}]
+
+    held = FakeSiteAuthority(state="release_failed")
+    delivery = RecordingDelivery(held)
+    lifecycle = _lifecycle(held, ScriptedExecutor(_decision(ReleaseAction.TEARDOWN)), delivery=delivery)
+    await lifecycle.force_release(
+        "alloc-1", SimpleNamespace(reason="host verified empty", evidence="console")
+    )
+    assert delivery.calls == [{"alloc-1": "force_released"}]
 
 
 class _OperatorActsDuring:

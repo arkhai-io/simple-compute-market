@@ -3,11 +3,14 @@ configuration, and the worker delivering and pruning its events.
 
 The service records the site's kinds and compute provisioning's in its own
 database, in the transactions of the changes they report, through one recorder
-the site ledger, the job engine and the lease lifecycle share. The event-sink
-consumer delivers what the deployment's routes select to the sinks
-``[Events.sinks]`` enables; ``EventDeliveryWorker`` runs it, then prunes, on its
-own timer, with a pause and a manual cycle that runs the same production cycle.
-A route or sink the eventing component refuses refuses the service's start.
+the site ledger, the job engine and the lease lifecycle share;
+``site.lease_ended`` signs and keeps its lease end's report as it is recorded.
+Three consumers deliver them: the event-sink consumer, what the deployment's
+routes select to the sinks ``[Events.sinks]`` enables, and the storefront
+peer's two, the lease-end reports and the capacity-released callbacks.
+``EventDeliveryWorker`` runs them, then prunes, on its own timer, with a pause
+and a manual cycle that runs the same production cycle. A route or sink the
+eventing component refuses refuses the service's start.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import threading
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Any
@@ -25,21 +29,18 @@ from eventing import Catalogue, Consumer, Pruner, Recorder, Retention, Route, So
 from market_delivery import SigningAs, build_delivery_sinks, load_delivery_config
 from market_delivery.event_sinks import LOG_FINALLY_SINK, build_event_sink_consumer
 from market_identity import Signer
-from market_site.events import SITE_KINDS
+from market_site.events import SITE_KINDS, SITE_LEASE_ENDED
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session, sessionmaker
 
-logger = logging.getLogger(__name__)
+from compute_provisioning_service.event_names import EVENT_SCHEMA_PREFIX, EVENT_SOURCE_SERVICE
+from compute_provisioning_service.services.lease_end_reports import lease_end_report_hook
 
-#: The service named in every event's source.
-EVENT_SOURCE_SERVICE = "compute-provisioning"
+logger = logging.getLogger(__name__)
 
 #: What a signing sink signs an event delivery as: this service, delivering an
 #: operator event.
 EVENT_DELIVERY_SIGNING = SigningAs(role="service", operation="operator_event_delivery")
-
-#: The data schema prefix of every kind this service records.
-EVENT_SCHEMA_PREFIX = "urn:arkhai:event"
 
 
 class EventRetentionDays(BaseModel):
@@ -89,9 +90,17 @@ def events_settings(cfg: Any) -> EventsSettings:
     return EventsSettings.model_validate(_plain(raw or {}))
 
 
-def event_catalogue() -> Catalogue:
-    """Every kind this service records: the site's and compute provisioning's."""
-    return Catalogue((*SITE_KINDS, *PROVISIONING_KINDS), schema_prefix=EVENT_SCHEMA_PREFIX)
+def event_catalogue(signer: Signer) -> Catalogue:
+    """Every kind this service records: the site's and compute provisioning's,
+    ``site.lease_ended`` signing and keeping its lease end's report with the
+    service's signer as it is recorded."""
+    site_kinds = tuple(
+        dataclasses.replace(kind, hook=lease_end_report_hook(signer))
+        if kind.name == SITE_LEASE_ENDED.name
+        else kind
+        for kind in SITE_KINDS
+    )
+    return Catalogue((*site_kinds, *PROVISIONING_KINDS), schema_prefix=EVENT_SCHEMA_PREFIX)
 
 
 def event_recorder(catalogue: Catalogue, *, instance: str) -> Recorder:
@@ -179,11 +188,17 @@ class EventDeliveryWorker:
     """Delivers the service's events through its consumers, then prunes.
 
     ``run_cycle`` is the one production cycle, whether the timer or an operator
-    runs it: each consumer's cycle in turn, then pruning, off the event loop. A
-    consumer runs one cycle at a time, so a timer cycle and a manual one never
-    deliver together: the later finds the consumer held and reports it. The
-    timer waits out its interval through an event a pause sets, so a pause is
-    observed at once, and holds at its gate while paused.
+    runs it: each consumer's cycle in turn, then pruning, off the event loop.
+    ``deliver`` runs the named consumers' cycles alone, for a producer that has
+    just recorded what they deliver. A consumer's cycles run one at a time, a
+    later one waiting for the one running, so one that starts after an event
+    committed always reads it: a consumer's own cycle does nothing while
+    another of the same consumer runs, and a delivery asked for then would
+    wait for the timer. Each consumer waits only for its own cycles, never for
+    another consumer's deliveries or for pruning. The timer waits out its
+    interval through an event a pause sets, so a pause is observed at once,
+    and holds at its gate while paused; a pause holds the timer only, not a
+    cycle asked for.
     """
 
     def __init__(
@@ -200,6 +215,7 @@ class EventDeliveryWorker:
         self._resume.set()
         self._pause_requested = asyncio.Event()
         self._timer_cycles_in_flight = 0
+        self._cycles = {consumer.name: threading.Lock() for consumer in self._consumers}
 
     def pause(self) -> None:
         self._resume.clear()
@@ -223,11 +239,28 @@ class EventDeliveryWorker:
     async def run_cycle(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._cycle)
 
+    async def deliver(self, *names: str) -> dict[str, Any]:
+        """Run the cycles of the consumers ``names`` names now, off the event
+        loop, and report each; pruning waits for the next full cycle."""
+        return await asyncio.to_thread(self._deliver, names)
+
     def _cycle(self) -> dict[str, Any]:
-        consumers = {
-            consumer.name: dataclasses.asdict(consumer.run_cycle()) for consumer in self._consumers
-        }
+        consumers = {consumer.name: self._run(consumer) for consumer in self._consumers}
         return {"consumers": consumers, "pruned": self._pruner.prune().removed}
+
+    def _deliver(self, names: Sequence[str]) -> dict[str, Any]:
+        unknown = sorted(set(names) - set(self._cycles))
+        if unknown:
+            raise LookupError(f"no consumer named {', '.join(unknown)}")
+        return {
+            consumer.name: self._run(consumer)
+            for consumer in self._consumers
+            if consumer.name in names
+        }
+
+    def _run(self, consumer: Consumer) -> dict[str, Any]:
+        with self._cycles[consumer.name]:
+            return dataclasses.asdict(consumer.run_cycle())
 
     async def run(self) -> None:
         """Run timer cycles until cancelled."""

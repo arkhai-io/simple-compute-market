@@ -722,7 +722,6 @@ class CapacityLedgerService:
         release_guard: CapacityReleaseGuard | None = None,
         release_effect: Callable[[Any, str, str], None] | None = None,
         site_id: str = "local-site",
-        lease_end_effect: Callable[[Session, dict[str, Any]], None] | None = None,
         host_requirement: HostRequirement | None = None,
         deliverable_hosts: DeliverableHosts | None = None,
         event_recorder: EventRecorder | None = None,
@@ -762,9 +761,7 @@ class CapacityLedgerService:
         writes in the session and never commits; raising aborts the reclaim.
 
         ``site_id`` is the configured logical site identity in immutable lease-end
-        events. ``lease_end_effect`` borrows the ending transaction to sign and
-        reserve an independent event-keyed outbox; it never commits, and raising
-        rolls back the transition. Intended-end evidence does not free capacity.
+        events. Intended-end evidence does not free capacity.
 
         ``host_requirement`` maps each fulfillment provider identity to whether
         its delivery needs a host. When supplied, a declaration with no usable
@@ -800,7 +797,6 @@ class CapacityLedgerService:
         self._release_guard = release_guard
         self._release_effect = release_effect
         self._site_id = site_id
-        self._lease_end_effect = lease_end_effect
         # Re-entrant and held across READS too: the service's SQLite
         # engine is a StaticPool — every session shares one connection,
         # so an unserialized read interleaving with a write transaction
@@ -2407,13 +2403,12 @@ class CapacityLedgerService:
             event_id=event_id, capacity_reservation_id=reservation.capacity_reservation_id,
             transition_key=transition_key, payload=payload,
         ))
-        # Flush before the effect so duplicate transition checks in this session
-        # see the immutable event. The effect may sign and reserve its outbox,
-        # but never commits: a failed reservation must roll back the end too.
+        # Flush before recording the event so duplicate transition checks in
+        # this session see the immutable record. The recorder, and any
+        # record-time hook of its kind, writes in this session and never
+        # commits: its failure rolls the end back too.
         db.flush()
         self._record_event(db, lease_ended_draft(dict(payload), transition_key=transition_key))
-        if self._lease_end_effect is not None:
-            self._lease_end_effect(db, dict(payload))
 
     def _record_event(self, db: Session, draft: EventDraft) -> None:
         if self._event_recorder is not None:

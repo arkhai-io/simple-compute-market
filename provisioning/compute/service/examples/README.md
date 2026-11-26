@@ -14,19 +14,23 @@ executor represents proven undispatched work; it does not claim to validate
 physical teardown.
 
 The output shows expiry, caller-attributed termination, direct release, release
-failure and force release. Intended-end events and their signed outbox records
-commit with the site transition. A lost acknowledgement is replayed across an
-outbox restart with unchanged signed payload. The lease route's pull projection
-returns that same report, and verification binds the configured site principal,
-logical site and reservation together. Unsupported push is parked independently
-of retained pull evidence. Release failure still holds capacity.
+failure and force release. Each lease end is recorded as a `site.lease_ended`
+event in the site transition's own transaction, which signs its report and keeps
+it in `lease_end_reports`. The lease-end report consumer delivers the stored
+report to a scripted storefront: a lost acknowledgement is replayed, once its
+retry is due, by a restarted consumer with unchanged signed payload. The lease
+route's pull projection returns that same report, and verification binds the
+configured site principal, logical site and reservation together. A 404 from an
+older receiver parks the peer's destination while the signed report stays
+readable through the pull. Release failure still holds capacity.
 
 Production composition supplies the site's configured identity and logical site
-ID, freezes the signed report in the ending transaction, and drains its own
-event-keyed outbox through the lease-watchdog step. Capacity-released callbacks
-retain their separate reservation-keyed outbox and acknowledgement. A configured
-peer change never redirects stored reports to a different owner. After a
-coordinated receiver upgrade, `LeaseEndReports.resume_peer()` explicitly re-enables
-parked push. The callback contract is `LEASE_ENDED_CALLBACK` in the compute
-contracts; storefront compositions bind it to their verified delivery ingress.
-This independent library/service example is not deployed storefront acceptance.
+ID, signs the report in the ending transaction, and runs the lease-end report
+consumer, with one destination per configured storefront peer, on the event
+delivery worker, beside the capacity-released consumer and its own
+acknowledgements. A newly configured peer is a new destination that receives no
+earlier report; the previous peer's destination is retired. An administrator
+resumes a parked destination through `POST /api/v1/events/destinations/{name}/resume`.
+The callback contract is `LEASE_ENDED_CALLBACK` in the compute contracts;
+storefront compositions bind it to their verified delivery ingress. This
+independent library/service example is not deployed storefront acceptance.

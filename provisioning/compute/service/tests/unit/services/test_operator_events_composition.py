@@ -37,7 +37,7 @@ def test_a_signing_webhook_signs_event_deliveries_as_the_provisioning_service() 
         "service", "operator_event_delivery",
     )
     consumer = event_sink_consumer(
-        sessionmaker(), event_catalogue(), _SIGNING_HOOK, signer=_SIGNER, instance="fixture-site",
+        sessionmaker(), event_catalogue(_SIGNER), _SIGNING_HOOK, signer=_SIGNER, instance="fixture-site",
     )
     assert consumer.name == "event-sinks"
     assert consumer.runner == "compute-provisioning:fixture-site"
@@ -46,5 +46,5 @@ def test_a_signing_webhook_signs_event_deliveries_as_the_provisioning_service() 
 def test_a_signing_webhook_without_the_service_signer_is_refused() -> None:
     with pytest.raises(DeliveryConfigurationError, match="ops-hook"):
         event_sink_consumer(
-            sessionmaker(), event_catalogue(), _SIGNING_HOOK, signer=None, instance="fixture-site",
+            sessionmaker(), event_catalogue(_SIGNER), _SIGNING_HOOK, signer=None, instance="fixture-site",
         )

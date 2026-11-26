@@ -103,7 +103,10 @@ async def test_held_work_is_routed_to_the_push_sink(client_and_queue, test_clien
     assert failed["attributes"]["failure_class"] == "cleanup_refused"
     assert failed["details"]["teardown_job_id"] == reclaim.id
     assert cycle.consumers["event-sinks"]["delivered"] == 2
-    (destination,) = (await clients.family.get_event_deliveries()).destinations
+    (destination,) = [
+        item for item in (await clients.family.get_event_deliveries()).destinations
+        if item.consumer == "event-sinks"
+    ]
     assert (destination.destination, destination.state, destination.delivered) == (
         "ops-push", "active", 2,
     )

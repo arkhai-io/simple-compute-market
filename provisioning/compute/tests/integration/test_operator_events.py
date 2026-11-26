@@ -276,12 +276,15 @@ class _Status:
         return self.status
 
 
-def _lifecycle(sessions, recorder, engine, status: _Status) -> tuple[LeaseLifecycleService, CapacityLedgerService]:
+def _lifecycle(
+    sessions, recorder, engine, status: _Status, *, deliver_events=None
+) -> tuple[LeaseLifecycleService, CapacityLedgerService]:
     ledger = CapacityLedgerService(sessions, site_id="fixture-site", event_recorder=recorder)
     settings = type("Settings", (), {"lease_watchdog_grace_period_seconds": 3600})()
     return LeaseLifecycleService(
         settings, LedgerSiteAuthority(ledger),
         release_executor=_Decision(), release_status=status, jobs=engine,
+        deliver_events=deliver_events,
     ), ledger
 
 
@@ -358,3 +361,24 @@ async def test_a_stale_release_failure_is_refused_and_records_no_event(database,
     assert ledger.get_reservation(LEASE)["state"] == "force_released"
     assert _events(database, "provisioning.lease_release_failed") == []
     assert [e.kind for e in _events(database, "site.capacity_released")] == ["site.capacity_released"]
+
+
+@pytest.mark.asyncio
+async def test_a_release_asks_for_delivery_once_its_events_are_committed(database, recorder, source):
+    """What the storefront's consumers deliver is recorded, its transition's
+    session closed, by the time the lifecycle asks for it to be delivered."""
+    engine = _engine(database, recorder, _Executor(JobSuccess(result=None)))
+    _releasing(database, requested_at=injected_time.now_datetime())
+    seen: list[list[str]] = []
+
+    async def deliver_events():
+        seen.append([e.kind for e in _events(database, reference=Reference(type="lease", id=LEASE))])
+
+    lifecycle, ledger = _lifecycle(database, recorder, engine, _Status(
+        ReleaseStatus(ReleaseProgress.TORN_DOWN)
+    ), deliver_events=deliver_events)
+
+    await lifecycle.force_check_leases()
+
+    assert ledger.get_reservation(LEASE)["state"] == "released"
+    assert seen == [["site.lease_ended", "site.capacity_released"]]

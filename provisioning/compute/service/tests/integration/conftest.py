@@ -126,9 +126,7 @@ from compute_provisioning_service.services.lease_end_reports import LeaseEndRepo
 from compute_provisioning_service.services.capacity_reservation_watchdog import (
     CapacityReservationWatchdog,
 )
-from compute_provisioning_service.services.deal_event_sink import (
-    SqlAlchemyCapacityReleaseOutbox,
-)
+from compute_provisioning_service.services.deal_event_sink import StorefrontPeer
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
 )
@@ -142,6 +140,8 @@ from compute_provisioning_service.services.operator_events import (
     event_recorder,
     event_sink_consumer,
 )
+
+from .storefront_peer_double import StorefrontPeerDouble
 
 
 # A deterministic development Fernet key (32 zero bytes) for this test suite
@@ -632,6 +632,14 @@ def connectivity_probe_runner(fake_ansible):
 
 
 @pytest.fixture
+def storefront_peer_double() -> StorefrontPeerDouble:
+    """The owning storefront's callback routes, at the storefront client's
+    transport: every lease-end report and capacity-released callback the
+    service delivers reaches it, acknowledged unless a test scripts otherwise."""
+    return StorefrontPeerDouble(STOREFRONT_SIGNER)
+
+
+@pytest.fixture
 def events_config() -> dict:
     """The ``[Events]`` section the app runs under: no sinks, no routes. A module
     overrides it to route events to sinks of its own."""
@@ -648,6 +656,7 @@ async def client_and_queue(
     job_retry_options,
     teardown_rerun_limit,
     events_config,
+    storefront_peer_double,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
@@ -672,7 +681,8 @@ async def client_and_queue(
         lease_watchdog_enabled=False,
         relay_grant_expiry_grace_seconds=3600,
         relay_port_reuse_margin_seconds=300,
-        # A closed loopback port keeps this refusal boundary off ambient proxies.
+        # The storefront peer is the double at its client's transport; the
+        # closed loopback port keeps any other client off ambient proxies.
         storefront_url="http://127.0.0.1:0",
         storefront_site_id="default",
         resolved_bare_metal_playbook_path=Path(
@@ -692,10 +702,12 @@ async def client_and_queue(
     )
     replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
     # The service's eventing system as the container composes it: one recorder
-    # the ledger, the job engine and the lease lifecycle share, and the
-    # delivery worker over the event-sink consumer the [Events] section names.
+    # the ledger, the job engine and the lease lifecycle share, a lease end's
+    # report signed as it is recorded, and the delivery worker over the
+    # event-sink consumer the [Events] section names and the storefront peer's
+    # consumers, whose peer is the double.
     events_settings = EventsSettings.model_validate(events_config)
-    catalogue = event_catalogue()
+    catalogue = event_catalogue(identity_context.signer)
     recorder = event_recorder(catalogue, instance=identity_context.storefront_site_id)
 
     from market_site.ledger import CapacityLedgerService
@@ -706,9 +718,7 @@ async def client_and_queue(
     # it, filled and frozen by composing the bundles below and run by the
     # ledger whenever it releases capacity.
     release_effects = _container_module._make_release_effects()
-    lease_end_reports = LeaseEndReports(
-        session_factory, signer=identity_context.signer, peer=str(mock_settings.storefront_url),
-    )
+    lease_end_reports = LeaseEndReports(session_factory)
     connection_codecs = ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)])
     host_authority = HostAuthority(
         session_factory,
@@ -728,7 +738,6 @@ async def client_and_queue(
     capacity_ledger_service = CapacityLedgerService(
         session_factory=session_factory,
         site_id=identity_context.storefront_site_id,
-        lease_end_effect=lease_end_reports.record,
         unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count",
         host_requirement=host_requirement,
         # So a declaration naming a disabled or unregistered host, or a host
@@ -893,34 +902,44 @@ async def client_and_queue(
 
     teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
 
-    from compute_provisioning.lease_lifecycle import LeaseLifecycleService
-
-    capacity_release_outbox = SqlAlchemyCapacityReleaseOutbox(session_factory)
-    lease_lifecycle_service = LeaseLifecycleService(
-        settings=mock_settings,
-        site_authority=site_authority,
-        release_executor=FulfillmentReleaseExecutor(
+    storefront_peers = tuple(
+        StorefrontPeer(
+            str(mock_settings.storefront_url),
+            identity_context,
+            principal_authority,
+            transport=storefront_peer_double.transport,
+        )
+        for _ in range(2)
+    )
+    event_delivery_worker = _container_module._make_event_delivery_worker(
+        (
+            event_sink_consumer(
+                session_factory, catalogue, events_settings,
+                signer=identity_context.signer, instance=identity_context.storefront_site_id,
+            ),
+            *_container_module._make_storefront_consumers(
+                session_factory, storefront_peers, identity_context
+            ),
+        ),
+        event_pruner(session_factory, catalogue, events_settings),
+        events_settings,
+    )
+    lease_lifecycle_service = _container_module._make_lease_lifecycle(
+        mock_settings,
+        site_authority,
+        FulfillmentReleaseExecutor(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
             teardown_port=teardown_port,
         ),
-        release_status=FulfillmentReleaseStatusPort(
+        FulfillmentReleaseStatusPort(
             settlement_repository=SettlementRepository(),
             session_factory=session_factory,
             rerun_policy=teardown_rerun_policy,
             jobs=job_engine,
         ),
-        capacity_released_notifier=AsyncMock(return_value=True),
-        capacity_release_outbox=capacity_release_outbox,
-        jobs=job_engine,
-    )
-    event_delivery_worker = _container_module._make_event_delivery_worker(
-        event_sink_consumer(
-            session_factory, catalogue, events_settings,
-            signer=identity_context.signer, instance=identity_context.storefront_site_id,
-        ),
-        event_pruner(session_factory, catalogue, events_settings),
-        events_settings,
+        event_delivery_worker,
+        job_engine,
     )
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
     from vm_provisioning_adapter.services.host_operations_service import (
@@ -986,7 +1005,6 @@ async def client_and_queue(
     app.container.identity_context.override(identity_context)
     app.container.principal_authority.override(principal_authority)
     app.container.provisioning_replay_store.override(replay_store)
-    app.container.capacity_release_outbox.override(capacity_release_outbox)
     # Wire resolved module-level variables
     _container_module.resolved_job_engine = job_engine
     _container_module.resolved_session_factory = session_factory
@@ -1049,6 +1067,8 @@ async def client_and_queue(
         yield clients, job_queue
     finally:
         await clients.family.close()
+        for peer in storefront_peers:
+            peer.close()
 
     processing_task.cancel()
     try:
@@ -1059,7 +1079,6 @@ async def client_and_queue(
     app.container.identity_context.reset_override()
     app.container.principal_authority.reset_override()
     app.container.provisioning_replay_store.reset_override()
-    app.container.capacity_release_outbox.reset_override()
     # Reset container overrides
     app.container.vm_runtime.reset_override()
     app.container.ansible_service.reset_override()

@@ -1,182 +1,349 @@
-"""Intended-end producer/outbox recovery, independent of capacity-return ACKs.
+"""Signed lease-end reports: kept as the site's evidence, delivered to the
+storefront peer by a consumer of ``site.lease_ended``.
 
-Identities and origins are public deterministic development fixtures, never for a
-public network. The API, signing codec, ledger and SQLite are real; push delivery
-is controlled at the storefront transport boundary.
+The library tests run the site ledger, the event recorder carrying the signing
+hook, the lease-end report consumer and the pruner over a SQLite database the
+service's migration chain built, with no application. The application tests
+drive the service through its typed clients. Either way the storefront peer is
+the double at its client's transport. Identities and origins are public
+deterministic development fixtures, never for a public network.
 """
 
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from __future__ import annotations
 
-import httpx
+import logging
+from collections.abc import Iterator
+
+import injected_time
 import pytest
-from storefront_client import StorefrontClient
-from market_identity import Ed25519Signer, TrustedIdentitySet, canonical_json
+import pytest_asyncio
+from injected_time import InjectedTime
+from market_identity import TrustedIdentitySet, canonical_json
+from market_site.ledger import CapacityLedgerService
 
-from compute_provisioning_contracts import LeaseForceRelease, LeaseTermination, verify_lease_end
-from compute_provisioning_service import container
-from compute_provisioning_service.db.models import LeaseEndReportOutbox
-from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
-from compute_provisioning_service.services.deal_event_sink import StorefrontLifecycleEventSink
+from compute_provisioning_contracts import (
+    LeaseTermination,
+    SignedLeaseEndedReport,
+    verify_lease_end,
+)
+from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.db.models import LeaseEndReport
 from compute_provisioning_service.identity import ProvisioningIdentityContext
+from compute_provisioning_service.services.deal_event_sink import StorefrontPeer
+from compute_provisioning_service.services.lease_end_reports import (
+    LEASE_END_REPORT_CONSUMER,
+    LeaseEndReports,
+    lease_end_report_consumer,
+    peer_destination,
+)
+from compute_provisioning_service.services.operator_events import (
+    EventsSettings,
+    event_catalogue,
+    event_pruner,
+    event_recorder,
+    event_runner,
+)
 
 from .conftest import ADMIN_SIGNER, SERVICE_AUTHORITIES, SERVICE_SIGNER, STOREFRONT_SIGNER
-from .test_leases_api import _committed, seller
+from .storefront_peer_double import (
+    LEASE_ENDED,
+    LOST,
+    UNSUPPORTED,
+    StorefrontPeerDouble,
+)
+from .test_leases_api import _committed, seller  # noqa: F401  (``seller`` is a fixture)
+
+PEER = "http://127.0.0.1:0"
+SITE = "default"
+IDENTITY = ProvisioningIdentityContext(
+    signer=SERVICE_SIGNER,
+    storefront_principal=STOREFRONT_SIGNER.identity,
+    admin_principal=ADMIN_SIGNER.identity,
+    storefront_site_id=SITE,
+)
 
 
-async def test_producer_causes_survive_restart_lost_ack_and_signed_lease_pull(client_and_queue, seller):
-    clients, _ = client_and_queue
-    ledger = container.resolved_capacity_ledger_service
-    now = datetime.now(timezone.utc)
-    ids = {name: _committed("fixture-" + name, end=now - timedelta(seconds=5) if name == "expiry"
-                            else now + timedelta(hours=1))
-           for name in ("expiry", "termination", "direct", "failure", "force")}
-    # The normal API cycle records expiry, not just a direct ledger fixture.
-    await clients.family.check_leases()
-    await seller.terminate_lease(ids["termination"], LeaseTermination(reason="fixture maintenance"))
-    await seller.terminate_lease(ids["termination"], LeaseTermination(reason="retry must not rewrite"))
-    ledger.release(capacity_reservation_id=ids["direct"])
-    ledger.begin_releasing(ids["failure"], release_job_id="fixture-release")
-    ledger.record_release_failed(ids["failure"], reason="host unreachable", release_job_id="fixture-release")
-    await clients.family.force_release_lease(ids["force"], LeaseForceRelease(reason="fixture host inspected"))
-    await clients.family.force_release_lease(ids["force"], LeaseForceRelease(reason="retry"))
-    expected = {"expiry": ["expiry"], "termination": ["termination"], "direct": ["release"],
-                "failure": ["release", "release_failed"], "force": ["force_release"]}
-    assert {name: sorted(event["cause"] for event in ledger.lease_end_events(reservation))
-            for name, reservation in ids.items()} == expected
-    assert ledger.get_reservation(ids["failure"])["state"] == "release_failed"
-    factory = container.resolved_session_factory
-    with factory() as db:
-        rows = db.query(LeaseEndReportOutbox).all()
-        assert len(rows) == 6
-        before = {row.event_id: row.report.encode() for row in rows}
-        assert all(row.delivered_at is None for row in rows)
-    # A reconstructed sender may have rotated its local signer: stored proofs,
-    # event identities and exact payload bytes must not be regenerated.
-    restarted = LeaseEndReports(factory, signer=Ed25519Signer(b"\x63" * 32), peer=rows[0].peer)
-    sent = []
+class _Principals:
+    """The principal authority's seller set: the storefront's fixture identity."""
 
-    async def lost_ack(report):
-        sent.append(canonical_json(report))
-        raise OSError("reply lost after receiver persisted")
-
-    await restarted.drain(lost_ack)
-    assert set(sent) == set(before.values())
-    with factory() as db:
-        assert all(row.attempt_count == 1 and row.delivered_at is None
-                   for row in db.query(LeaseEndReportOutbox))
-    sent.clear()
-
-    async def acknowledge(report):
-        sent.append(canonical_json(report))
-        return "delivered"
-
-    await restarted.drain(acknowledge)
-    assert set(sent) == set(before.values())
-    sent.clear()
-    await restarted.drain(acknowledge)
-    assert sent == []
-    for name, reservation in ids.items():
-        pulled = (await seller.get_lease(reservation)).end_reports
-        assert len(pulled) == len(expected[name])
-        for report in pulled:
-            event = verify_lease_end(report, capacity_reservation_id=reservation,
-                                     site_id=ledger.lease_end_events(reservation)[0]["site_id"],
-                                     expected_sites=SERVICE_AUTHORITIES)
-            assert canonical_json(report) == before[event.event_id]
-            if name == "termination":
-                assert event.reason == "fixture maintenance"
-                assert event.caller == STOREFRONT_SIGNER.identity
-            if name == "expiry":
-                assert event.deadline_phase == "lease"
-                assert event.claimed_deadline == event.effective_at
-    with factory() as db:
-        assert all(row.attempt_count == 2 and row.delivered_at is not None
-                   for row in db.query(LeaseEndReportOutbox))
+    def active_principals(self, role):
+        return TrustedIdentitySet(identities=(STOREFRONT_SIGNER.identity,))
 
 
-@pytest.mark.parametrize("status", [404, 503])
-async def test_http_receiver_refusal_parks_only_unsupported_push(client_and_queue, seller, status):
-    ledger = container.resolved_capacity_ledger_service
-    reservation = _committed("fixture-refused")
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, held at the wall instant it is installed."""
+    before = injected_time.installed()
+    installed = InjectedTime()
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
+def _ledger(session_factory, signer=SERVICE_SIGNER) -> CapacityLedgerService:
+    ledger = CapacityLedgerService(
+        session_factory,
+        site_id=SITE,
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+        event_recorder=event_recorder(event_catalogue(signer), instance=SITE),
+    )
+    ledger.register_resource(
+        resource_id="compute-kvm1-001", total_units=8, host_id="kvm1", attributes={},
+        pool_id="default",
+    )
+    return ledger
+
+
+def _leased(ledger: CapacityLedgerService, escrow: str) -> str:
+    reserved = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1, "host_id": "kvm1"},
+        deal_ref={"escrow_uid": escrow},
+    )
+    ledger.commit(
+        capacity_reservation_id=reserved["capacity_reservation_id"],
+        lease_start_utc="2030-01-01T00:00:00+00:00",
+        lease_end_utc="2030-01-02T00:00:00+00:00",
+    )
+    return reserved["capacity_reservation_id"]
+
+
+def _consumer(session_factory, double: StorefrontPeerDouble, url: str = PEER):
+    peer = StorefrontPeer(url, IDENTITY, _Principals(), transport=double.transport)
+    return lease_end_report_consumer(session_factory, peer, runner=event_runner(SITE)), peer
+
+
+def _stored(session_factory, capacity_reservation_id: str) -> bytes:
+    with session_factory() as db:
+        (row,) = db.query(LeaseEndReport).filter_by(
+            capacity_reservation_id=capacity_reservation_id
+        ).all()
+        return row.report.encode()
+
+
+# ---------------------------------------------------------------------------
+# Library integration: the ledger, the hook, the consumer and the pruner
+# ---------------------------------------------------------------------------
+
+
+def test_the_site_crashes_after_recording_an_end(session_factory, source):
+    """Recovery delivers the stored event with its original identity, instant
+    and cause, as signed when the end was recorded, though the restarted
+    process's time has moved on."""
+    ledger = _ledger(session_factory)
+    reservation = _leased(ledger, "escrow-crash")
+    ended_at = injected_time.now()
     ledger.release(capacity_reservation_id=reservation)
-    factory = container.resolved_session_factory
-    with factory() as db:
-        row = db.query(LeaseEndReportOutbox).one()
-        peer, before = row.peer, row.report.encode()
-    requests = []
+    stored = _stored(session_factory, reservation)
+    # The process stops before sending, and restarts an hour later.
+    source.set(ended_at + 3600)
+    double = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    consumer, peer = _consumer(session_factory, double)
 
-    def receiver(request):
-        requests.append(request)
-        return httpx.Response(status, json={"detail": "receiver unavailable"})
+    report = consumer.run_cycle()
+    peer.close()
 
-    async with StorefrontClient(
-        peer, signer=SERVICE_SIGNER, caller_role="service",
-        expected_publishers=TrustedIdentitySet(identities=(STOREFRONT_SIGNER.identity,)),
-        transport=httpx.MockTransport(receiver),
-    ) as client:
-        class TransportSink(StorefrontLifecycleEventSink):
-            async def _storefront(self):
-                return client
-
-        sink = TransportSink(
-            SimpleNamespace(storefront_url=peer),
-            ProvisioningIdentityContext(signer=SERVICE_SIGNER,
-                storefront_principal=STOREFRONT_SIGNER.identity,
-                admin_principal=ADMIN_SIGNER.identity, storefront_site_id="default"),
-            SimpleNamespace(),
-        )
-        reports = LeaseEndReports(factory, signer=SERVICE_SIGNER, peer=peer)
-        await reports.drain(sink.deliver_lease_end)
-        await reports.drain(sink.deliver_lease_end)
-    assert len(requests) == (1 if status == 404 else 2)
-    assert all(request.content == before for request in requests)
-    assert canonical_json((await seller.get_lease(reservation)).end_reports[0]) == before
-    with factory() as db:
-        row = db.query(LeaseEndReportOutbox).one()
-        assert row.parked == (status == 404)
-        assert row.delivered_at is None
+    assert report.delivered == 1
+    (sent,) = double.taken(LEASE_ENDED)
+    assert sent.content == stored
+    event = verify_lease_end(
+        SignedLeaseEndedReport.model_validate_json(sent.content),
+        capacity_reservation_id=reservation, site_id=SITE, expected_sites=SERVICE_AUTHORITIES,
+    )
+    assert (event.cause, event.effective_at) == ("release", ended_at)
+    assert sent.resource == reservation
+    assert consumer.run_cycle().delivered == 0
 
 
-async def test_unsupported_peer_parks_existing_and_future_events_but_preserves_pull(client_and_queue, seller):
-    ledger = container.resolved_capacity_ledger_service
-    first = _committed("fixture-first")
-    second = _committed("fixture-second")
-    ledger.release(capacity_reservation_id=first)
-    ledger.release(capacity_reservation_id=second)
-    factory = container.resolved_session_factory
-    with factory() as db:
-        peer = db.query(LeaseEndReportOutbox).first().peer
-    reports = LeaseEndReports(factory, signer=Ed25519Signer(b"\x63" * 32), peer=peer)
-    calls = []
+def test_a_repeated_release_keeps_one_report(session_factory):
+    """A release repeated after it committed records no second end, so no
+    second report is signed or kept."""
+    ledger = _ledger(session_factory)
+    reservation = _leased(ledger, "escrow-refused")
+    ledger.release(capacity_reservation_id=reservation)
+    ledger.release(capacity_reservation_id=reservation)
 
-    async def unsupported(report):
-        calls.append(canonical_json(report))
-        return "unsupported"
+    assert len(LeaseEndReports(session_factory).read(reservation)) == 1
 
-    await reports.drain(unsupported)
-    assert len(calls) == 1
-    third = _committed("fixture-after-parking")
-    ledger.release(capacity_reservation_id=third)
-    await LeaseEndReports(factory, signer=reports.signer, peer=peer).drain(unsupported)
-    assert len(calls) == 1
-    for reservation in (first, second, third):
+
+def test_signed_reports_are_kept_without_limit_unless_retention_is_set(session_factory, source):
+    ledger = _ledger(session_factory)
+    reservation = _leased(ledger, "escrow-retained")
+    ledger.release(capacity_reservation_id=reservation)
+    catalogue = event_catalogue(SERVICE_SIGNER)
+    source.set(injected_time.now() + 3 * 86400)
+
+    event_pruner(session_factory, catalogue, EventsSettings()).prune()
+    assert len(LeaseEndReports(session_factory).read(reservation)) == 1
+
+    retained_a_day = EventsSettings.model_validate({"retention_days": {"lease_end_reports": 1}})
+    event_pruner(session_factory, catalogue, retained_a_day).prune()
+    assert LeaseEndReports(session_factory).read(reservation) == []
+
+
+# ---------------------------------------------------------------------------
+# Application integration: through the service's typed clients
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def clients(source, client_and_queue):
+    yield client_and_queue[0]
+
+
+def _status(deliveries, consumer: str = LEASE_END_REPORT_CONSUMER):
+    (status,) = [item for item in deliveries.destinations if item.consumer == consumer]
+    return status
+
+
+async def test_the_storefront_recovers_by_reading_the_lease(clients, seller, storefront_peer_double):
+    """The authenticated lease read returns the original report's payload and
+    site proof, the bytes the peer was sent."""
+    reservation = _committed("fixture-recover")
+
+    await seller.terminate_lease(reservation, LeaseTermination(reason="fixture maintenance"))
+    await seller.terminate_lease(reservation, LeaseTermination(reason="retry must not rewrite"))
+
+    (sent,) = storefront_peer_double.taken(LEASE_ENDED)
+    (pulled,) = (await seller.get_lease(reservation)).end_reports
+    assert canonical_json(pulled) == sent.content
+    event = verify_lease_end(
+        pulled, capacity_reservation_id=reservation, site_id=SITE,
+        expected_sites=SERVICE_AUTHORITIES,
+    )
+    assert (event.cause, event.reason) == ("termination", "fixture maintenance")
+    assert event.caller == STOREFRONT_SIGNER.identity
+
+
+async def test_an_acknowledgement_is_lost(clients, seller, source, storefront_peer_double):
+    """The consumer retries the same event identity and payload until the
+    storefront acknowledges it."""
+    storefront_peer_double.answer(LEASE_ENDED, LOST)
+    reservation = _committed("fixture-lost-ack")
+
+    await seller.terminate_lease(reservation, LeaseTermination(reason="fixture maintenance"))
+    status = _status(await clients.family.get_event_deliveries())
+    assert (status.state, status.pending) == ("active", 1)
+
+    source.set(injected_time.now() + 11)
+    await clients.family.run_event_delivery_cycle()
+
+    first, second = storefront_peer_double.taken(LEASE_ENDED)
+    assert (first.request_id, first.content) == (second.request_id, second.content)
+    status = _status(await clients.family.get_event_deliveries())
+    assert (status.pending, status.delivered) == (0, 1)
+
+
+@pytest.mark.parametrize("answer", [404, 405, 501, UNSUPPORTED])
+async def test_an_older_receiver_is_unsupported(clients, seller, storefront_peer_double, answer):
+    """The peer's destination parks, later reports wait behind it unsent, and
+    every signed report stays readable through the lease read."""
+    storefront_peer_double.answer(LEASE_ENDED, answer)
+    first, second = _committed("fixture-unsupported-1"), _committed("fixture-unsupported-2")
+
+    await seller.terminate_lease(first, LeaseTermination(reason="fixture"))
+    await seller.terminate_lease(second, LeaseTermination(reason="fixture"))
+    await clients.family.run_event_delivery_cycle()
+
+    assert len(storefront_peer_double.taken(LEASE_ENDED)) == 1
+    status = _status(await clients.family.get_event_deliveries())
+    assert (status.destination, status.state, status.pending) == (
+        peer_destination(PEER), "parked", 2,
+    )
+    for reservation in (first, second):
         assert len((await seller.get_lease(reservation)).end_reports) == 1
-    with factory() as db:
-        assert all(row.parked and row.delivered_at is None for row in db.query(LeaseEndReportOutbox))
-    # A changed owner never redirects old statements; explicit resume belongs
-    # to the original peer after the coordinated receiver upgrade.
-    moved = LeaseEndReports(factory, signer=reports.signer, peer="https://new-owner.example")
-    moved.resume_peer()
-    await moved.drain(unsupported)
-    assert len(calls) == 1
-    reports.resume_peer()
 
-    async def acknowledge(report):
-        calls.append(canonical_json(report))
-        return "delivered"
 
-    await reports.drain(acknowledge)
-    assert len(calls) == 4
-    with factory() as db:
-        assert all(not row.parked and row.delivered_at is not None for row in db.query(LeaseEndReportOutbox))
+async def test_a_transient_failure_retries_rather_than_parking(
+    clients, seller, source, storefront_peer_double
+):
+    storefront_peer_double.answer(LEASE_ENDED, 503)
+    reservation = _committed("fixture-transient")
+
+    await seller.terminate_lease(reservation, LeaseTermination(reason="fixture"))
+    assert _status(await clients.family.get_event_deliveries()).state == "active"
+    source.set(injected_time.now() + 11)
+    await clients.family.run_event_delivery_cycle()
+
+    assert len(storefront_peer_double.taken(LEASE_ENDED)) == 2
+    assert _status(await clients.family.get_event_deliveries()).delivered == 1
+
+
+async def test_the_owning_storefront_s_peer_is_reconfigured(
+    clients, seller, storefront_peer_double, monkeypatch, caplog
+):
+    """None of the previous peer's pending reports goes to the new peer: the
+    previous peer's destination is retired, its pending reports written to the
+    finally sink and still readable through the lease read; the new peer
+    receives what is recorded after it."""
+    storefront_peer_double.answer(LEASE_ENDED, 503)
+    before = _committed("fixture-before-move")
+    await seller.terminate_lease(before, LeaseTermination(reason="fixture"))
+
+    # The service restarts configured with another storefront URL.
+    moved = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    new_url = "https://new-owner.example"
+    sessions = _container_module.resolved_session_factory
+    restarted = _container_module._make_event_delivery_worker(
+        _container_module._make_storefront_consumers(
+            sessions,
+            tuple(StorefrontPeer(new_url, IDENTITY, _Principals(), transport=moved.transport)
+                  for _ in range(2)),
+            IDENTITY,
+        ),
+        event_pruner(sessions, event_catalogue(SERVICE_SIGNER), EventsSettings()),
+        EventsSettings(),
+    )
+    monkeypatch.setattr(_container_module, "resolved_event_delivery_worker", restarted)
+    with caplog.at_level(logging.WARNING, logger="eventing.finally"):
+        await clients.family.run_event_delivery_cycle()
+
+    assert moved.requests == []
+    assert any("delivery abandoned" in record.getMessage() for record in caplog.records)
+    states = {
+        item.destination: item.state
+        for item in (await clients.family.get_event_deliveries()).destinations
+        if item.consumer == LEASE_END_REPORT_CONSUMER
+    }
+    assert states == {peer_destination(PEER): "retired", peer_destination(new_url): "active"}
+    assert len((await seller.get_lease(before)).end_reports) == 1
+
+    # Ended through the site directly: the harness's lifecycle still holds the
+    # worker composed before the restart.
+    after = _committed("fixture-after-move")
+    _container_module.resolved_capacity_ledger_service.release(capacity_reservation_id=after)
+    await clients.family.run_event_delivery_cycle()
+
+    assert [request.resource for request in moved.taken(LEASE_ENDED)] == [after]
+    assert len(storefront_peer_double.taken(LEASE_ENDED)) == 1
+
+
+@pytest.mark.parametrize("events_config", [{"retention_days": {"events": 1}}])
+async def test_an_administrator_resumes_a_parked_peer(
+    clients, seller, source, storefront_peer_double, events_config
+):
+    """Resuming delivers, in order, the reports the peer missed whose events
+    are still retained; a report whose event was pruned while the peer was
+    parked stays readable through the lease read."""
+    storefront_peer_double.answer(LEASE_ENDED, 404)
+    pruned = _committed("fixture-parked-pruned")
+    await seller.terminate_lease(pruned, LeaseTermination(reason="fixture"))
+    source.set(injected_time.now() + 2 * 86400)
+    cycle = await clients.family.run_event_delivery_cycle()
+    assert cycle.pruned.get("events", 0) >= 1
+    retained = [_committed(f"fixture-parked-{index}") for index in (1, 2)]
+    for reservation in retained:
+        await seller.terminate_lease(reservation, LeaseTermination(reason="fixture"))
+    assert len(storefront_peer_double.taken(LEASE_ENDED)) == 1
+
+    resumed = await clients.family.resume_event_destination(
+        peer_destination(PEER), consumer=LEASE_END_REPORT_CONSUMER
+    )
+    await clients.family.run_event_delivery_cycle()
+
+    assert resumed.state == "active"
+    assert [request.resource for request in storefront_peer_double.taken(LEASE_ENDED)] == [
+        pruned, *retained,
+    ]
+    assert _status(await clients.family.get_event_deliveries()).pending == 0
+    assert len((await seller.get_lease(pruned)).end_reports) == 1

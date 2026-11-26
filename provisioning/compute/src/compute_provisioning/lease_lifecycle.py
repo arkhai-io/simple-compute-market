@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 from datetime import datetime, timedelta, timezone
 
@@ -24,47 +23,9 @@ from .release import (
 
 logger = logging.getLogger(__name__)
 
-CapacityReleasedNotifier = Callable[[dict[str, Any]], Awaitable[bool] | bool]
 ParseUtc = Callable[[Any], datetime | None]
+DeliverEvents = Callable[[], Awaitable[Any]]
 
-
-class CapacityReleaseOutboxPort(Protocol):
-    """Durable delivery state for terminal capacity-release callbacks."""
-
-    def reserve(self, capacity_reservation_id: str) -> None: ...
-
-    def pending(self) -> Iterable[str]: ...
-
-    def mark_delivered(self, capacity_reservation_id: str) -> None: ...
-
-    def record_failure(
-        self,
-        capacity_reservation_id: str,
-        error: str,
-    ) -> None: ...
-
-
-class InMemoryCapacityReleaseOutbox:
-    """Process-local implementation for isolated lifecycle consumers/tests."""
-
-    def __init__(self) -> None:
-        self._pending: set[str] = set()
-
-    def reserve(self, capacity_reservation_id: str) -> None:
-        self._pending.add(capacity_reservation_id)
-
-    def pending(self) -> tuple[str, ...]:
-        return tuple(sorted(self._pending))
-
-    def mark_delivered(self, capacity_reservation_id: str) -> None:
-        self._pending.discard(capacity_reservation_id)
-
-    def record_failure(
-        self,
-        capacity_reservation_id: str,
-        error: str,
-    ) -> None:
-        return None
 
 class LeaseLifecycleError(Exception):
     """Base class for lease lifecycle command errors."""
@@ -141,12 +102,11 @@ class ReleaseStatusPort(Protocol):
 class LeaseLifecycleService:
     """Lease lifecycle state machine over site reservations, for every mode.
 
-    The lifecycle owns ``releasing``, the terminal release states, the final
-    capacity return, and the capacity-released notification. What a release
-    does follows the reservation's fulfillment aggregate (``release.py``): it
-    begins or adopts teardown, frees capacity through the site's guarded
-    release when nothing was delivered, waits while a create is in flight, or
-    leaves the lease for an operator. A release waiting on an in-flight create
+    The lifecycle owns ``releasing``, the terminal release states, and the final
+    capacity return. What a release does follows the reservation's fulfillment
+    aggregate (``release.py``): it begins or adopts teardown, frees capacity
+    through the site's guarded release when nothing was delivered, waits while
+    a create is in flight, or leaves the lease for an operator. A release waiting on an in-flight create
     is ``releasing`` with the fulfillment as its release handle, so it survives
     a restart and a second request finds it.
 
@@ -155,6 +115,13 @@ class LeaseLifecycleService:
     transition's transaction and drops with a refused one. It names the
     reservation's latest teardown job and that job's failure class, read from
     ``jobs`` when the composition gives the job authority's read.
+
+    The site records a lease's end and its capacity's release as events, in the
+    transitions' own transactions, and the storefront peer's consumers deliver
+    them: the signed lease-end report and the capacity-released callback. A
+    command or watchdog cycle that made a transition calls ``deliver_events``
+    before it returns, so what it recorded leaves for the storefront within it;
+    a delivery that fails is retried by the event delivery worker, never here.
     """
 
     TERMINAL_SUCCESS_STATES = {"released", "force_released"}
@@ -167,22 +134,16 @@ class LeaseLifecycleService:
         *,
         release_executor: ReleaseExecutorPort,
         release_status: ReleaseStatusPort,
-        capacity_released_notifier: CapacityReleasedNotifier | None = None,
-        capacity_release_outbox: CapacityReleaseOutboxPort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
-        lease_end_report_drain: Callable[[], Awaitable[None]] | None = None,
+        deliver_events: DeliverEvents | None = None,
         jobs: BoundJobReader | None = None,
     ) -> None:
         self._settings = settings
         self._jobs = jobs
-        self._lease_end_report_drain = lease_end_report_drain
+        self._deliver_events_now = deliver_events
         self._site_authority = site_authority
         self._release_executor = release_executor
         self._release_status = release_status
-        self._capacity_released_notifier = capacity_released_notifier
-        self._capacity_release_outbox = (
-            capacity_release_outbox or InMemoryCapacityReleaseOutbox()
-        )
         self._parse_utc = parse_utc_value
         self._paused = False
         self._resume_event = asyncio.Event()
@@ -246,7 +207,7 @@ class LeaseLifecycleService:
             "cause": "termination", "reason": getattr(body, "reason", None), "caller": caller,
             "effective_at": injected_time.now(),
         })
-        await self._drain_lease_end_reports()
+        await self._deliver_events()
         return self.get_lease(lease_id)
 
     def release_oversight(self, lease_id: str, body: Any) -> dict[str, Any]:
@@ -287,6 +248,7 @@ class LeaseLifecycleService:
                 state=state,
             )
         await self._request_release(reservation)
+        await self._deliver_events()
         return self.get_lease(lease_id)
 
     async def force_release(self, lease_id: str, body: Any, *, caller: dict | None = None) -> dict[str, Any]:
@@ -303,7 +265,6 @@ class LeaseLifecycleService:
         message = body.reason
         if body.evidence:
             message = f"{body.reason} Evidence: {body.evidence}"
-        self._capacity_release_outbox.reserve(lease_id)
         released = self._site_authority.record_release_success(
             lease_id,
             forced=True,
@@ -313,8 +274,7 @@ class LeaseLifecycleService:
         )
         if released is None:
             raise LeaseNotFoundError(f"Lease '{lease_id}' not found or is not held.")
-        await self._deliver_capacity_release(lease_id)
-        await self._drain_lease_end_reports()
+        await self._deliver_events()
         return released
 
     async def check_leases(self) -> dict:
@@ -339,8 +299,6 @@ class LeaseLifecycleService:
         return await self._run_cycle()
 
     async def _run_cycle(self) -> dict:
-        await self._drain_lease_end_reports()
-        await self._drain_capacity_release_outbox()
         now = injected_time.now_datetime()
         grace_seconds = int(
             getattr(self._settings, "lease_watchdog_grace_period_seconds", 3600)
@@ -399,8 +357,8 @@ class LeaseLifecycleService:
                 )
                 skipped += 1
 
-        await self._drain_lease_end_reports()
         if checked or released or release_failed:
+            await self._deliver_events()
             logger.info(
                 "[LEASE_LIFECYCLE] Cycle: checked=%d released=%d release_failed=%d skipped=%d",
                 checked, released, release_failed, skipped,
@@ -653,7 +611,6 @@ class LeaseLifecycleService:
 
     async def _finish_release(self, reservation: dict[str, Any], *, end_context: dict | None = None) -> bool:
         capacity_reservation_id = reservation["capacity_reservation_id"]
-        self._capacity_release_outbox.reserve(capacity_reservation_id)
         released = self._site_authority.record_release_success(
             capacity_reservation_id, end_context=end_context,
         )
@@ -665,55 +622,21 @@ class LeaseLifecycleService:
             reservation.get("resource_id"),
             reservation.get("escrow_uid"),
         )
-        await self._deliver_capacity_release(capacity_reservation_id)
         return True
 
-    async def _drain_lease_end_reports(self) -> None:
-        if self._lease_end_report_drain is not None:
-            await self._lease_end_report_drain()
+    async def _deliver_events(self) -> None:
+        """Deliver what this command's transitions recorded for the storefront.
 
-    async def _drain_capacity_release_outbox(self) -> None:
-        for capacity_reservation_id in self._capacity_release_outbox.pending():
-            await self._deliver_capacity_release(capacity_reservation_id)
-
-    async def _deliver_capacity_release(
-        self,
-        capacity_reservation_id: str,
-    ) -> bool:
-        reservation = self._site_authority.get_reservation(
-            capacity_reservation_id
-        )
-        if reservation is None or str(reservation.get("state")) not in (
-            self.TERMINAL_SUCCESS_STATES
-        ):
-            return False
-        delivered = await self._notify_storefront_capacity_released(reservation)
-        if delivered:
-            self._capacity_release_outbox.mark_delivered(
-                capacity_reservation_id
-            )
-            return True
-        self._capacity_release_outbox.record_failure(
-            capacity_reservation_id,
-            "signed storefront acknowledgement was not received",
-        )
-        return False
-
-    async def _notify_storefront_capacity_released(self, reservation: dict[str, Any]) -> bool:
-        if self._capacity_released_notifier is None:
-            logger.warning(
-                "[LEASE_LIFECYCLE] capacity release notifier not configured — skipping capacity-released event for reservation %s",
-                reservation.get("capacity_reservation_id"),
-            )
-            return False
+        The transitions are committed: a delivery that fails here is left to
+        the event delivery worker's retry and never fails the command.
+        """
+        if self._deliver_events_now is None:
+            return
         try:
-            result = self._capacity_released_notifier(reservation)
-            if inspect.isawaitable(result):
-                result = await result
-            return bool(result)
+            await self._deliver_events_now()
         except Exception as exc:
             logger.warning(
-                "[LEASE_LIFECYCLE] Could not deliver capacity-released event for reservation %s: %s",
-                reservation.get("capacity_reservation_id"), exc,
+                "[LEASE_LIFECYCLE] Could not deliver the storefront's events now; "
+                "the event delivery worker retries them: %s",
+                exc,
             )
-            return False
