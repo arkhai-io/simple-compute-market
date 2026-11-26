@@ -30,8 +30,10 @@ class CheckState(enum.Enum):
     baseline is still to be adopted."""
 
     AHEAD = "ahead"
-    """The database records the chain's baselines and a migration this image
-    does not know, which only a newer image leaves."""
+    """The database records a migration this image does not know on a history
+    a newer image of this chain built: a ledger recording the chain's baselines
+    and an unknown ID, or, where a service records a single revision, one that
+    neither the chain nor its history up to its floor holds."""
 
     UNSUPPORTED = "unsupported"
     """No step of the chain reaches the database: it is older than the floor, or
@@ -61,17 +63,19 @@ class CheckResult:
 
     ``pending`` lists, in the order they would apply, the migrations a run would
     apply; ``unknown`` the recorded migrations the image does not know on a
-    database recording its baselines, which take precedence over pending ones,
-    since this image cannot vouch for such a database. ``missing`` lists the
-    floor's migrations an older database never recorded. ``adopting`` lists the
-    baseline migrations a run would record, without running them, in place of
-    the floor release's records, so a preview names every ID the run records
-    even when no migration follows the baseline; ``set_aside``, sorted, every
-    other recorded ID the adoption would forget, which earlier releases wrote
-    and the chain does not list. ``current`` is the newest migration the
-    database records that the image knows, or the revision it is at, where a
-    service has one. ``floor`` names the release the chain is supported from,
-    and ``cause`` says why an unsupported database is.
+    database a newer image of the chain built -- one recording its baselines,
+    or at a single revision neither the chain nor its history up to its floor
+    holds -- which take precedence over pending ones, since this image cannot
+    vouch for such a database. ``missing`` lists the floor's migrations an older
+    database never recorded. ``adopting`` lists the baseline migrations a run
+    would record, without running them, in place of the floor release's
+    records, so a preview names every ID the run records even when no migration
+    follows the baseline; ``set_aside``, sorted, every other recorded ID the
+    adoption would forget, which earlier releases wrote and the chain does not
+    list. ``current`` is the newest migration the database records that the
+    image knows, or the revision it is at, where a service has one. ``floor``
+    names the release the chain is supported from, and ``cause`` says why an
+    unsupported database is.
     """
 
     state: CheckState
