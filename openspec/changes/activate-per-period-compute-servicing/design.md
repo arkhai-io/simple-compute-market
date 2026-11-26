@@ -34,8 +34,9 @@ Goal 8's MVP changes land first, and this design builds on what they leave:
   an option that promises no delivery deadline
   (`kit/settlement-runtime/src/market_settlement_runtime/buyer_terms.py`). The MVP's
   VM production options promise the deadline set in the seller's payments clause,
-  enforced by the storefront, which `renewable-compute-lease-deadlines` replaces with
-  the pool's site-enforced deadline.
+  enforced by the storefront; `renewable-compute-lease-deadlines` has the site enforce
+  the accepted deadline too and publishes a pool's value in place of the clause's where
+  the pool resolves one, keeping the clause.
 
 ## Goals / Non-goals
 

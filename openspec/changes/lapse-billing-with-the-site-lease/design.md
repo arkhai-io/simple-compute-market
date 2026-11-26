@@ -15,9 +15,16 @@ To be verified when the change is designed.
 > `converge-ongoing-compute-leases` builds none (its design, D4), and this change is to
 > hold one calculation of when a deal's delivery ends from what the deal has funded,
 > for every class of deal. Open for that restatement: whether the calculation needs the
-> payments service's horizon, and whether a seller opts into it. The second bullet
-> below is stale: both storefronts run the kit's servicing cycle, which keeps no
-> funding timer.
+> payments service's horizon, whether a seller opts into it, and where the funded
+> instant is enforced: at the site, as the storefront tells it, or by the storefront
+> truncating the lease. The second bullet below is stale: both storefronts run the
+> kit's servicing cycle, which keeps no funding timer. The first is stale too, as is
+> D2's account of the columns: `renewable-compute-lease-deadlines` records one
+> activation deadline at commit, which activation never rewrites, and stores no phase;
+> nothing named `renew_by_utc` or `awaiting_activation` exists. What this change builds
+> on there is the expiry claim over what made a lease due and the lease-end report's
+> claimed deadline and phase (its design, D2, D4 and D5), and its pool tag, which
+> states a number, nothing or none.
 
 - `renewable-compute-lease-deadlines` gives every compute lease a delivery deadline, on the activation phase `activate-compute-leases-at-the-site` adds,
   at commit, recorded in `renew_by_utc` with phase `awaiting_activation`, replaced

@@ -1,75 +1,44 @@
 ## ADDED Requirements
 
-### Requirement: Providers declare delivery-deadline support and defaults
+### Requirement: A pool states its delivery deadline, nothing, or none
 
-Composition MUST declare a positive integer delivery deadline default for VM/bare-metal providers and no support for API credits. A supporting pool MUST resolve its delivery_deadline_seconds override or provider default; unsupported providers MUST resolve none. The site MUST receive the effective delivery deadline through its session-scoped pool-facts port, not caller input.
+A Resource Pool's policy metadata MUST support a `delivery_deadline_seconds` tag with three states: a positive whole number of seconds; absent; or a statement that the pool enforces none. A pool stating a number MUST resolve that number. A pool stating nothing MUST resolve its provider's declared default, and none where its provider declares none. A pool stating none MUST resolve none. No service-level or site-wide setting MAY turn a pool's resolved deadline on or off. Every surface that persists a pool's policy tags MUST validate the tag through one shared check and refuse any other value without changing the pool.
 
-#### Scenario: A compute pool has no explicit override
+#### Scenario: A pool states a number
 
-- **WHEN** an enabled VM or bare-metal pool omits delivery_deadline_seconds
-- **THEN** it resolves its provider's declared default, not an absent deadline
+- **WHEN** an operator writes a pool whose tag states 900 seconds
+- **THEN** the pool resolves 900 seconds, whatever its provider's default
+
+#### Scenario: A pool states nothing
+
+- **WHEN** a pool of a provider declaring a default states no delivery deadline
+- **THEN** the pool resolves its provider's default
+
+#### Scenario: A pool states none
+
+- **WHEN** an operator writes a pool of a provider declaring a default, stating that it enforces none
+- **THEN** the pool resolves no delivery deadline
+
+#### Scenario: Two pools of one site differ
+
+- **WHEN** one site's VM pool states nothing and its bare-metal pool states none
+- **THEN** the VM pool resolves its provider's default and the bare-metal pool resolves none
+
+#### Scenario: A malformed value is written
+
+- **WHEN** an operator submits a negative or fractional delivery deadline through the pool API or a pool document
+- **THEN** the write is refused and the stored pool is unchanged
+
+### Requirement: Providers declare a default delivery deadline
+
+Each provider MAY declare a default delivery deadline, a positive whole number of seconds, and the service's composition MUST supply the providers' declarations as data. The VM and bare-metal providers MUST declare one. A provider that declares none MUST leave a pool stating nothing with no resolved deadline. The pool authority MUST supply a pool's resolved delivery deadline among the pool facts the site ledger reads in its own transaction, and the site MUST learn nothing of the tag or the default but that resolved value.
 
 #### Scenario: A quota provider declares none
 
-- **WHEN** the API-credits composition resolves its quota pool's delivery deadline
-- **THEN** no delivery deadline resolves and the site needs no API-credit-specific rule
+- **WHEN** the API-credits service composes its ledger with no provider declaring a default
+- **THEN** its pool resolves no delivery deadline
 
-#### Scenario: The ledger reads the delivery deadline
+#### Scenario: A provider's default changes
 
-- **WHEN** the site commits a reservation
-- **THEN** it reads the delivery deadline through the injected pool-facts port in the commit transaction without importing the pool authority
-
-### Requirement: Activation safeguards are explicitly enabled by composition
-
-The compute composition MUST expose activation_deadlines_enabled: false until every delivery and recovery caller `unify-compute-delivery-path` wired is qualified in explicitly enabled owned lanes, then true as the repository default for new commits, with hosted operators gating enablement on their own caller readiness.
-
-#### Scenario: The full policy is enforced
-
-- **WHEN** the compute composition changes its activation safeguard setting
-- **THEN** The compute composition MUST expose activation_deadlines_enabled: false until every delivery and recovery caller `unify-compute-delivery-path` wired is qualified in explicitly enabled owned lanes, then true as the repository default for new commits, with hosted operators gating enablement on their own caller readiness. While false, the pool-facts port MUST supply no effective delivery deadline without disabling provider support or pool validation. Enablement MUST affect only new commits; disabling MUST NOT clear snapshotted deadlines.
-
-#### Scenario: Site code lands before caller qualification
-
-- **WHEN** the site is deployed under the staged false setting
-- **THEN** new commits retain null deadline and phase and existing leases stay unchanged
-- **AND** the qualified repository default is not applied to that target before readiness
-
-#### Scenario: Qualified callers use the repository default
-
-- **WHEN** every commit and recovery caller passes owned-lane qualification and the composition default changes
-- **THEN** subsequent new compute commits snapshot their deadline without backfilling legacy leases
-
-#### Scenario: Protection is enabled then disabled
-
-- **WHEN** a qualified deployment enables protection, commits a lease, then disables it
-- **THEN** that lease retains its deadline and later new commits receive null fields
-- **AND** invalid pool overrides remain invalid in either setting
-
-### Requirement: Delivery-deadline overrides are strictly validated and snapshotted
-
-Pool create, replace, patch and document import MUST accept a delivery-deadline override only for a supporting provider and only as a positive integer number of seconds, excluding booleans. Explicit null, zero, negative and fractional values MUST be refused. Validate-only and applying writes MUST agree, and invalid imports MUST remain atomic. Pool policy changes MUST NOT alter deadlines already recorded by committed leases.
-
-#### Scenario: An operator supplies a valid override
-
-- **WHEN** a supporting pool is written with a positive integer delivery deadline
-- **THEN** its later commits use that override instead of the provider default
-
-#### Scenario: An override attempts to disable the deadline
-
-- **WHEN** an operator supplies zero, null or another invalid delivery deadline value
-- **THEN** the write is refused without changing the pool
-
-#### Scenario: A provider without support receives an override
-
-- **WHEN** a delivery-deadline override is supplied for a provider declaring none
-- **THEN** the write is refused rather than silently enabling deadline behavior
-
-#### Scenario: An invalid pool occurs in an import
-
-- **WHEN** any pool in a document has an invalid delivery deadline
-- **THEN** validate-only reports the error and applying the import changes no pool
-
-#### Scenario: Pool defaults change after commit
-
-- **WHEN** a provider default or pool override changes after a lease is committed
-- **THEN** the lease's recorded deadline remains unchanged
+- **WHEN** a provider's declared default changes between two releases
+- **THEN** a pool stating nothing resolves the new default, and a pool stating a number still resolves that number
