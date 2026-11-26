@@ -214,9 +214,13 @@ readable through the lease read. Any other failure is retried, and a report the
 table does not hold is abandoned to the finally sink, since no retry can send
 it. A peer configured beside or in place of another is a destination of its own that
 starts at the latest committed event, so a changed peer cannot redirect old
-events: a report recorded before it never reaches it. A first peer, by
-contrast, receives what was recorded since the consumer last read, so the first
-report after an upgrade or install reaches it; a report from a restart's window
+events: a report recorded before it never reaches it. A first peer, the
+consumer's first destination, by contrast receives what was recorded since the
+consumer last read, so the first report after an install, or after an upgrade
+that moved no undelivered report, reaches it. A peer whose undelivered reports
+the upgrade moved already has its destination, which keeps receiving them and
+every later report; a peer configured in its place is a change of peer, as
+above. A report from a restart's window
 sent to a first peer that does not own its reservation can park that peer until
 it is resumed. The destination of a peer the configuration does not name is retired, and
 its undelivered reports, those the consumer had not yet read included, go to

@@ -651,8 +651,8 @@ redacted unless an operator configures otherwise".
   substrings in the profile's `additional_non_retryable_errors` (default empty).
   A failed attempt is not retried, whatever its class, when one of them occurs,
   ignoring case, in the failed task's message (`msg`), its standard output or
-  standard error, as Ansible recorded them for the last failed task neither
-  ignored nor rescued, or in the failure's classified message — the job view's
+  standard error, as Ansible recorded them for the last failed or unreachable
+  task neither ignored nor rescued, or in the failure's classified message — the job view's
   `failure.message`, which a timeout or a run that recorded no task also has.
   Entries for the failures the service already refuses to retry change nothing;
   use it for a failure that a retry meets again on your hosts, such as

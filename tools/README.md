@@ -186,8 +186,8 @@ package reading the time of the world depends on it.
 
 One eventing system per service (distribution `arkhai-eventing`, import
 `eventing`): declared kinds of event under a versioned envelope, recorded in the
-producer's own database transaction, and delivered at least once, in order, to each
-destination of each named consumer, with per-destination state, park and resume, a
+producer's own database transaction, and delivered in order to each destination of
+each named consumer, each delivery retried until it succeeds or is abandoned, with per-destination state, park and resume, a
 finally sink, routes as SQL conditions evaluated by sqlglot, retention by time per
 table, and a framework-free read and status service each service binds behind its
 own administrator authentication. It depends on the standard library, SQLAlchemy,

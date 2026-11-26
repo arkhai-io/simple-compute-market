@@ -449,8 +449,8 @@ holds a versioned envelope, whose routing fields every consumer reads without kn
 an event's kind; kind declarations, collected in a catalogue; a recorder writing in
 the producer's transaction, which records an occurrence once by its kind's dedup key
 and runs the kind's record-time hook in the same transaction; consumers delivering
-each event at least once per destination, in order, with each destination's delivery
-state, park and resume, and a finally sink for an abandoned delivery; routes selecting
+each event to each destination in order, retrying each delivery until it succeeds
+or is abandoned, with each destination's delivery state, park and resume, and a finally sink for an abandoned delivery; routes selecting
 events by an SQL condition, validated with sqlglot; pruning by time, per table; and a
 framework-free read and status service. It owns no migration engine: it supplies its
 tables and one schema step per version, which each service's chain applies. Its

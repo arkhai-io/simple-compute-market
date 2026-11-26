@@ -1,9 +1,9 @@
 # eventing
 
 One eventing system per service: declared kinds of event, recorded in the
-producer's own database transaction, and delivered at least once, in order, to each
-destination of each named consumer. Every outbox, notification or peer delivery a
-service runs is a consumer of it rather than a mechanism of its own.
+producer's own database transaction, and delivered in order to each destination of
+each named consumer, each delivery retried until it succeeds or is abandoned. Every
+outbox, notification or peer delivery a service runs is a consumer of it rather than a mechanism of its own.
 
 The component (distribution `arkhai-eventing`, import `eventing`) depends on the
 standard library, SQLAlchemy 2, pydantic 2 and sqlglot, and on nothing else. It

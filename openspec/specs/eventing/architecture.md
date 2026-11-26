@@ -248,8 +248,12 @@ configured. A consumer is registered at the latest committed event when it first
 runs, or where its service's migration registers it, and a running consumer with no
 destination still reads each event, keeping its position at the last one it read. The
 provisioning service's migration registers its storefront consumers past the events
-its data migration writes, so the first report and callback after an upgrade or an
-install reach the destinations the consumers' first cycle configures.
+its data migration writes, so the first report and callback after an install reach
+the destinations the consumers' first cycle configures, as they do after an upgrade
+that moved no undelivered delivery. The data migration stores a destination for each
+storefront peer whose undelivered reports it moves, and for the callback's one
+destination when it moves a callback; such a consumer has had destinations, so a peer
+configured in place of a moved one is a change of destinations, below.
 
 After that, a change to a consumer's destinations takes effect at the latest
 committed event. A cycle first reads every committed event with the destinations as

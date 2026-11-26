@@ -286,8 +286,8 @@ operator's.
 `additional_non_retryable_errors` (default empty) lists substrings an operator marks
 non-retryable for both domains' playbook jobs. A failed attempt is not retried,
 whatever its class, when one of them occurs, ignoring case, in the deciding failure
-record's `msg`, `stdout` or `stderr` — the last failed task neither ignored nor
-rescued — or in the failure's classified message, which a timeout or a run that
+record's `msg`, `stdout` or `stderr` — the last failed or unreachable task neither
+ignored nor rescued — or in the failure's classified message, which a timeout or a run that
 recorded no task also has. The classes the executor and the codecs already refuse to
 retry need no entry; the classes and their retry decisions are
 [the architecture's "Failure classification"](architecture.md#failure-classification).

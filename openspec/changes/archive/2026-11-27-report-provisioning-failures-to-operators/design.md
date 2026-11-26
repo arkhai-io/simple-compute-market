@@ -120,7 +120,11 @@ which would replace the operator's `callbacks_enabled`. It writes one JSON recor
 per failed or unreachable task to an owner-only file the runner names per run and
 removes when the run ends: host, play,
 role, task name, task tags, module, `rc`, `msg`, `stdout`/`stderr`, and whether the
-failure was ignored or rescued. Results under `no_log` arrive censored.
+failure was ignored or rescued. Results under `no_log` arrive censored. The plugin
+imports `ansible`, which loads it in Ansible's own interpreter, so the kit declares
+that import as an optional `ansible` extra in the image's `ansible-core` range, never
+a runtime dependency, which would install a second `ansible-core` that never loads
+the plugin (implementation review 23 F3).
 
 The runner hands the records to the executor on the run's outcome, never through the
 file (design review 14 F3). `wait_for_playbook` reads and parses the file once the
@@ -558,7 +562,11 @@ the site's own route draws none. The storefront refusing one callback — 400, 4
 409 — abandons it to the finally sink (D8); its destination is registered whether or
 not a storefront URL is configured, so a callback recorded or migrated meanwhile waits
 for one (implementation review 37 F5 / validation 38 V1, the owner's choice S2; review
-37 F2). The lease watchdog no longer drains anything.
+37 F2). The lease watchdog no longer drains anything: retries are the delivery
+worker's alone, but a lease command or watchdog cycle that made a transition runs the
+two storefront consumers' cycles once after its commit, so a report or callback
+leaves within the request that recorded it, as 0.4.0's did, and the lanes' stages
+that read it at once do not race the worker's timer.
 
 One provisioning-service migration carries 0.4.0's state: each undelivered
 `lease_end_report_outbox` row becomes a `site.lease_ended` event under its original
@@ -567,7 +575,10 @@ count and last error carried; every row's signed report moves to
 `lease_end_reports`; each undelivered `capacity_release_callback_outbox` row becomes a
 pending `site.capacity_released` delivery; delivered rows need no event. The signed
 report and the callback keep their wire forms. The migration is one-time, so no
-compatibility path is kept.
+compatibility path is kept. It writes the event store's rows itself, as the recorder
+writes them — each `sequence` from the counter row, each envelope through its kind's
+validation, consumer positions and deliveries explicitly — rather than through an
+import interface the standalone component would have to grow for one migration.
 
 *Rejected.* Evidence in the event stream, which needs retention by kind (D8) or none.
 
@@ -636,3 +647,26 @@ Round 2, two sessions in sequence — producers and delivery; the move. Then clo
   missing the window before a cleanup refusal exhausts its retries.
 - **An event when a destination's delivery is abandoned, routed to the other sinks.**
   The finally sink covers it today; revisit when the log is not watched.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — one change for failure reporting | None: it groups this change's work |
+| D2 — operator-relevant state changes are an open set of event kinds | `docs/guidance/repository/operator-events.md` and its `operator-events` row in `docs/guidance/repository/README.md#tags`; `openspec/specs/physical-provisioning/spec.md#requirement-compute-provisioning-records-operator-relevant-events` (archive); `openspec/specs/physical-provisioning/architecture.md#operator-events` |
+| D3 — a real failure is classified from Ansible's own result records | `openspec/specs/physical-provisioning/spec.md#requirement-a-real-playbook-failure-is-classified-from-ansibles-own-result-records`, `#requirement-a-domain-classifies-its-own-failures-from-the-failure-record` (archive); `openspec/specs/physical-provisioning/architecture.md#failure-classification` |
+| D4 — the failure classes and their retry decisions | `openspec/specs/physical-provisioning/spec.md#requirement-a-real-playbook-failure-is-classified-from-ansibles-own-result-records` (archive); `openspec/specs/physical-provisioning/architecture.md#failure-classification`; `docs/development/VALIDATION_RUNBOOK.md#observations-the-qualification-owes`, observation 5; `docs/operator-handbook.md#operator-events` |
+| D5 — the job record keeps its structured failure beside its error | `openspec/specs/physical-provisioning/spec.md#requirement-a-job-keeps-its-structured-failure-beside-its-error`, `openspec/specs/compute-provisioning-contract/spec.md#requirement-the-job-view-carries-the-jobs-structured-failure` (archive); `docs/development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup` |
+| D6 — one eventing system; its envelope | `docs/guidance/engineering/eventing.md` and its `eventing` row in `docs/guidance/engineering/README.md#tags`; `openspec/specs/eventing/spec.md` (archive); `openspec/specs/eventing/architecture.md#one-eventing-system-per-service`, `#the-envelope`; `docs/development/ARCHITECTURE.md#events`; the `Eventing` row of `openspec/specs/README.md`, written with the archive |
+| D7 — one sink layer serves introductions and events | `openspec/specs/introduction-delivery/spec.md#requirement-a-sink-delivers-any-deliverable`, `#requirement-a-signing-webhook-signs-as-its-composition-says`, `#requirement-configured-sinks-receive-the-events-their-routes-select` (archive); `openspec/specs/introduction-delivery/architecture.md#one-sink-layer` |
+| D8 — routes, repeats, order, one runner per consumer, retention, a change of destinations, failed delivery | `openspec/specs/eventing/spec.md` (archive); `openspec/specs/eventing/architecture.md#recording-and-the-sequence`, `#dedup-keys`, `#one-runner-per-consumer` (the one-live-process assumption, 37 F3), `#routes`, `#a-change-of-destinations`, `#failed-delivery`, `#retention` (its accepted risk, and a hook's row kept while its event is); `docs/guidance/engineering/persistence.md#state-kept-for-notification-or-audit-is-retained-by-time` (retention leaves no reference dangling, 37 F4); `docs/guidance/engineering/eventing.md#delivery-is-at-least-once-per-destination-under-a-stable-identity`; `openspec/specs/physical-provisioning/configuration.md#operator-events` |
+| D9 — configuration, the delivery worker, and the operator surface | `openspec/specs/physical-provisioning/spec.md#requirement-the-provisioning-service-delivers-events-to-the-sinks-its-routes-select`, `#requirement-an-administrator-reads-events-and-their-delivery-state` (archive); `openspec/specs/physical-provisioning/configuration.md#operator-events`; `docs/development/ARCHITECTURE.md#recovery-workers`; `docs/development/DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting`; `docs/operator-handbook.md#operator-events`; `docs/guidance/repository/deterministic-tests.md#pause-the-loop-then-advance-it-explicitly` (the worker's pause and step). The chart passing `Events` through (39 O1): `docs/guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values`, `docs/guidance/repository/chart-render-tests.md#a-charts-values-schema-types-the-charts-own-values`, `openspec/specs/deployment-state/spec.md` — the generated-fragment requirement removed (archive), and `openspec/specs/deployment-state/architecture.md`'s storefront-chart paragraph; the storefront and provisioning loader refusals, an unowned row of `openspec/changes/README.md` |
+| D10 — `additional_non_retryable_errors` is matched against the failure record | `openspec/specs/physical-provisioning/spec.md#requirement-operator-configured-non-retryable-substrings-are-matched-against-the-failure-record` (archive); `openspec/specs/physical-provisioning/configuration.md#non-retryable-failure-messages`; `docs/operator-handbook.md#ansible-configuration` |
+| D11 — capabilities | None: which capabilities a change touches is the change's record |
+| D12 — implementation cadence | None: the cadence is this change's plan |
+| D13 — the first kinds | `openspec/specs/physical-provisioning/spec.md#requirement-compute-provisioning-records-operator-relevant-events`, `openspec/specs/site-capacity/spec.md#requirement-the-sites-ending-and-release-transitions-record-their-events`, `#requirement-a-failing-transition-records-a-callers-prepared-event` (archive); `docs/guidance/repository/operator-events.md#the-provisioning-services-operator-events`; `openspec/specs/physical-provisioning/architecture.md#operator-events`; `openspec/specs/site-capacity/architecture.md` |
+| D14 — the lease-end events and both outboxes move onto the eventing system | `docs/development/ARCHITECTURE.md#release`, `#site-authority`; `docs/development/ROADMAP.md`, Goal 1's current state and its two gap rows removed; `openspec/changes/README.md`, this change's row, the Goal 1 campaign graph, and the rows and proposals of `replace-polling-with-authenticated-push` and `redesign-storefront-stage-events` |
+| D15 — evidence stays domain state; delivery becomes consumers | `openspec/specs/physical-provisioning/spec.md#requirement-intended-lease-ends-are-reported-separately-from-capacity-release`, `#requirement-the-capacity-released-callback-is-a-consumer-of-the-release-event`, `openspec/specs/compute-provisioning-contract/spec.md` — "Deal-scoped lifecycle events" (archive); `openspec/specs/physical-provisioning/architecture.md#lease-end-report-delivery`; `docs/development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup`; `docs/operator-handbook.md#operator-events`; the outbox passages of `openspec/specs/site-capacity/architecture.md`, `openspec/specs/deal-lifecycle/architecture.md`, `openspec/specs/deployment-state/architecture.md` and `openspec/specs/test-compatibility/architecture.md`; a 404 parking the peer for one foreign reservation, an unowned row of `openspec/changes/README.md` |
+| D16 — the event core is a standalone component, using sqlglot | `docs/guidance/repository/package-layers.md#kind`; `openspec/specs/eventing/architecture.md#built-rather-than-adopted`, `#standalone`; `openspec/specs/eventing/spec.md#requirement-the-component-depends-on-no-internal-package-and-names-no-market-concept` (archive); `tools/README.md` and `tools/eventing/README.md`, written in implementation |
+| Typed configuration metadata, the kept half of the removed requirement (39 O1) | `openspec/specs/deployment-state/spec.md#requirement-typed-configuration-metadata-generates-templates-validation-and-references` (archive) |
+| Work found and deferred in implementation | `openspec/changes/README.md`, the unowned rows this change's implementation found (live playbook output, a timed-out playbook's forked task, the lanes not holding the event delivery worker, the 404 park); the first two also in `docs/development/ROADMAP.md`, Goal 1's gap table |
