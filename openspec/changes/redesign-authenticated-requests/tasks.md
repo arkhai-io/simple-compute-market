@@ -740,6 +740,68 @@ it, `main.py`'s unsigned-error path), `db/models.py`, a new Alembic revision und
       End-to-end: `registry`, `multi_registry`, `roles_layer_registry` — evidence once
       section 16 lands.
 
+Notes (section 6):
+
+- **Stopped before 6.1; the change returns to design.** 6.2 replaces
+  `publisher_auth.py`, and that file does more than reserve and sign: it keeps the
+  publisher's version 2 request envelope as retained evidence. Nothing in the design
+  or the delta specifications says what the registry keeps in its place once
+  publishers sign version 3. The evidence:
+  - `retained_request_evidence` (`core/registry/src/core_registry/api/publisher_auth.py`)
+    stores `{"body_base64": …, "request": <the version 2 AuthenticatedRequest>}` in
+    `listings.publisher_publication` on publish and in each `publisher_updates` entry
+    on update (`listing_routes.py`), and the registry serves both in every listing
+    read (`api/utils.py`, `order_to_dict`).
+  - Registry-discovery's permanent requirement "Seller publication evidence is
+    independently verifiable" requires "the authenticated v2 request envelope
+    including its seller proof". The change's registry-discovery delta modifies only
+    "Durable replay reservation", so the requirement still names version 2.
+  - A consumer verifies that evidence offline, at its own signed time:
+    `verified_pricing_publication`
+    (`domains/vms/buyer/src/arkhai_vms_buyer/pricing_record.py`) parses
+    `publisher_publication["request"]` as a version 2 `AuthenticatedRequest` and calls
+    `verify_request`, which binds the VM buyer's accepted pricing to the seller's
+    signed terms.
+  - D2 says the non-HTTP signed artifacts, "pricing records" among them, keep
+    `kit/identity`'s own framing, and D12 keeps version 2 readable for evidence
+    already retained. Neither covers new evidence that is itself an authenticated HTTP
+    request. A version 3 publication carries no version 2 envelope to keep. What it
+    has instead is an RFC 9421 message: the covered `Market-*` fields,
+    `Content-Digest`, `Signature-Input` and `Signature`, plus the body bytes.
+- Section 9 has the same gap, found while checking this one; it was not started.
+  `SignedEndDeliveryReceipt`
+  (`kit/deal-lifecycle-contracts/src/market_deal_lifecycle_contracts/models.py`) is a
+  wire model carrying a version 2 `AuthenticatedRequest` and `AuthenticatedResponse`.
+  Deal-servicing builds it on `end_delivery` (`routes.py`), the deal-lifecycle client
+  keeps it (`client.py`, `end_receipt`), and the buyer verifies it offline through
+  `verify_end_acknowledgement` (`kit/deal-lifecycle/src/market_deal_lifecycle/acknowledgements.py`,
+  called from `kit/deal-lifecycle-buyer/…/ending.py`). Deal-servicing's ingress also
+  keeps the buyer's version 2 end envelope as `buyer-end-envelope:` evidence
+  (`ingress.py`), and the deal-lifecycle buyer's store captures version 2 envelopes as
+  `signed_request` and `signed_response` items (`store.py`). Sections 11 and 15 meet
+  it as well: `verify_recovered_pricing` in the same `pricing_record.py` verifies VM
+  negotiation evidence items as version 2 envelopes. Sections 7 and 8 use version 2
+  envelopes only for live authentication, so this gap does not touch them.
+- The decision the design owes, with the recommendation here. Give version 3 one
+  evidence form, owned by `kit/identity` beside the profile: a captured request
+  (method, the covered field lines, the body bytes) and a captured response (status,
+  its field lines, the body bytes, and the request it binds). Add an offline verifier
+  that checks the signature and the principal against a trust set at the message's
+  own `created`, without freshness, as the version 2 readers do today with
+  `max_skew=0`. The registry's publication and update evidence, the end-delivery
+  receipt, deal-servicing's end envelope and the buyer's captured items would carry
+  that form. Each consumer would verify version 3 evidence and keep the version 2
+  reader for records already retained (D12). This needs delta specifications: at
+  least registry-discovery's "Seller publication evidence is independently
+  verifiable", and the deal-lifecycle requirement that defines the end-delivery
+  receipt. It also needs tasks in sections 6, 9, 11 and 15, plus the `kit/identity`
+  form, which section 2 did not build. The alternative is for sellers and buyers to
+  sign a separate non-HTTP artifact in `kit/identity`'s own framing inside the body,
+  as D2 has for pricing records. That changes every publisher's and buyer's payload,
+  and the transport signature would still be what the authority checks.
+- Nothing of section 6 was implemented, and no task is checked. This commit holds
+  only these notes.
+
 ## 7. The provisioning service and its hosted site on the admission core
 
 Moves the provisioning service, the site it hosts, and its typed client onto the core
