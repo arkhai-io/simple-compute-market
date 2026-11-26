@@ -1,164 +1,467 @@
-# Design
+# Design: negotiation-capacity-feasibility-probe
 
 ## Context
 
-Verified against the tree at planning time; re-verify before implementing.
+**The listing-source check.** The negotiation runtime asks each compute domain to check
+a listing against the declaration it was published from, and enforces the verdict
+itself, whatever the seller's policy chain contains. It obtains the verdict before the
+chain runs on an opening and on a buyer's counter, applies it to a seller decision that
+would counter or accept, and obtains it again before a buyer's or an administrator's
+acceptance writes anything (`kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py`,
+`_listing_source`, `_enforce_on_decision`, `_enforce_on_acceptance`). The hook receives
+the repository and the resolved listing, not the round's terms. A verdict is one of
+four outcomes, and each has its refusal: a declared mismatch is `no_matching_declaration`,
+taken capacity is `no_matching_inventory`, and a source that cannot be confirmed is a
+retryable refusal, HTTP 503 (`kit/policy/src/market_policy/listing_source.py`). The
+check has two halves, and the listing's backing delegate decides whether the second is
+asked: an unbacked listing is judged on its declaration alone
+(`kit/resource-pools-contracts/src/market_resource_pools_contracts/backing.py`,
+`judge_async`).
 
-- Negotiation is `kit/negotiation-runtime`'s lifecycle; the VM storefront injects
-  `NegotiationDomainHooks` from
-  `domains/vms/storefront/src/market_storefront/negotiation_runtime.py`.
-  `_place_capacity_hold` is reached only through the `place_hold` hook on
-  acceptance, and with the shipped `hold_ttl_seconds = 0` it returns immediately.
-  Nothing consults the site authority before settlement.
-- `kit/site`'s `probe()` runs `_expire_stale_holds`, then the same `_find_candidate`
-  used by `reserve()`, and returns the match payload without writing. It is the
-  non-consuming twin of the admission path, not an approximation of it.
-- `SiteCapacityClient.probe` and `core_storefront`'s aggregate client both expose it;
-  `vm_job_spec_service` already calls it in the fulfillment path.
-- `probe` takes the ledger's process-wide `threading.RLock`, the same lock as `reserve`,
-  `commit`, and `release`.
-- `has_matching_inventory_guard` checks a declared match against the listing's own
-  source for every listing and an advisory availability snapshot for capacity-backed
-  listings only. This change's probe replaces the advisory snapshot; it never runs for
-  an unbacked listing, whose `UnbackedBinding` is on `Acceptance` and on the opening
-  record.
-- Until `negotiation-driven-capacity-resize` lets a round carry a shape, the only shape
-  a round has is the listing's own, and the claim for it is
-  `compute_capacity_claim_from_order` over the listing record. A listing whose site has
-  nothing left is the case the advisory snapshot misses, so the probe is worth running
-  for that shape alone.
+**What the availability half asks today.**
 
-## Goals / Non-Goals
+- VM reads the bound site's snapshot, combines it with the projections the storefront
+  holds, and judges whether the quantity the listing advertises is free now
+  (`domains/vms/storefront/src/market_storefront/services/listing_source_check.py`,
+  `_pinned_site_availability` and `check_listing_source`). The snapshot states what is
+  free at the instant it is read. It says nothing of the shape the round carries, of
+  holds over the deal's window, or of a conflict on the physical host.
+- Bare metal reads the bare-metal view in the projection the storefront holds, which
+  lags the site by up to the source-confirmation window, and calls no site
+  (`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/listing_source_check.py`).
 
-**Goals:** fail an unservable shape during negotiation; keep unservable distinct from
-unacceptable; consume nothing.
+**The site's dry-run.** `POST /api/v1/capacity/probe` takes a claim and an optional
+lease window and answers the match a reserve would have made, or none
+(`kit/site/src/market_site/router.py`; `kit/site/src/market_site/ledger.py`, `probe`).
+It runs the candidate search a reserve runs, `_find_candidate`: the pool's deliverable
+modes, the usable-host rule, held quantities over the window, and physical-host
+conflicts. It reserves nothing. Like every ledger operation it first lapses expired
+holds, and it runs under the ledger's one lock, as the snapshot read does. With a window
+it counts the holds that overlap it; with none it counts every hold, whenever it runs
+(`_held_dimensions`). A claim that names no offering mode is refused. The route's
+contract admits the seller role (`kit/site/src/market_site/auth.py`), and the client
+method is `SiteCapacityClient.probe`
+(`kit/site-client/src/market_site_client/client.py`).
 
-**Non-Goals:** holding earlier, admissibility, pricing, protocol fields, or removing the
-race.
+**The storefront's capacity path.** Every capacity effect a storefront makes passes one
+guard, which acts only at the listing's bound site and only after the backing delegate
+admits the effect (`kit/capacity-publication/src/market_capacity_publication/capacity.py`,
+`CapacityEffects`). It has no probe. The aggregate client has one, which tries sites in
+its ranking order, takes no site to pin, and reads a site whose call fails as a site
+with no match (`core/storefront/src/core_storefront/aggregation.py`,
+`AggregateCapacityClient.probe`). Its one production caller is the administrator's
+settle dry-run
+(`domains/vms/storefront/src/market_storefront/services/admin_settle_service.py`,
+`evaluate_settle_dry_run`).
+
+**A round's shape, and the cap.** A VM round may carry a shape other than the
+listing's. The seller resolves the shape's policy, checks admissibility, checks
+feasibility, compares GPU model and region, and only then prices, each refusal distinct
+(`domains/vms/storefront/src/market_storefront/services/negotiation_shapes.py`,
+`check_requested_shape`). No feasibility check is composed. In its place the seller
+refuses any quantity above the listing's advertised one as `shape_exceeds_advertised`
+(`domains/vms/storefront/src/market_storefront/negotiation_runtime.py`,
+`within_advertised`), and records the check as "not checked; capped at the advertised
+shape". A flat-priced listing is shape-fixed apart from the cap. Bare metal negotiates
+no shape: its claim is one whole unit of its Physical Resource
+(`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/claims.py`,
+`whole_machine_claim`).
+
+**What bounds a shape besides the cap.** A stated listing shape may bound each quantity
+inline, as `{offer, min, max}`, and the storefront's configured default fills the
+bounds a listing leaves unstated. `settings.toml` ships no default, so a quantity whose
+listing states no maximum has none
+(`openspec/specs/storefront-publication/configuration.md`).
+
+**When the site first admits a deal.** The VM storefront ships
+`capacity.hold_ttl_seconds = 0`, so its acceptance places no hold, and the bare-metal
+storefront composes none. The first admission is the reserve at settlement, after the
+buyer has funded (`domains/compute/delivery/src/compute_delivery/path.py`,
+`_reserve_settlement`). The claim it sends is built from the agreed terms: for VM by
+`compute_capacity_claim_from_order` over the agreed order
+(`domains/vms/storefront/src/market_storefront/services/vm_job_spec_service.py`), for
+bare metal by `whole_machine_claim`.
+
+**A deal's window.** A deal billed per period states no duration of its own. Its
+horizon is resolved at acceptance by the domain's `resolve_acceptance` hook, after the
+runtime fixes the acceptance instant (`runtime.py`, `_fix_acceptance_time`). On a
+buyer's or an administrator's acceptance the source check runs before that step.
+
+**Released.** `marketplace-v0.4.0` carries all of the above, the probe route included.
 
 ## Decisions
 
-### Probe rather than hold
+### D1 — A seller asks its site whether it would admit the claim a round would reserve
 
-Holding during negotiation would guarantee the capacity, and that guarantee is exactly
-what makes it dangerous: an unbilled hold lets one buyer exclude others at no cost, and
-solving that requires the whole capacity-economics design — a billable reservation, a
-funded buyer account, and a hold lifecycle that charges for held time.
+Before a compute seller agrees terms, it asks the listing's site the question admission
+will ask at settlement: would this claim, over this deal's window, be admitted now. The
+claim is the one the settlement reserve would send, built by the same builder from the
+round's effective terms, so the probe and the reserve cannot disagree about what is
+being asked. The site answers with its existing dry-run.
 
-Probing gets most of the benefit for none of that cost. The buyer learns the shape is
-unservable at the moment they ask rather than after terms are agreed, and no state is
-created, so there is nothing to abuse and nothing to clean up. The residual gap is the
-race, addressed below.
+Both compute domains ask it. For VM the claim carries the round's shape, so a shape
+other than the advertised one is judged against capacity, and the advertised-shape cap
+is no longer what stands in for that judgement; what then bounds an ask is Q1. For bare
+metal the claim is one whole unit of the listing's Physical Resource.
 
-This ordering is deliberate: the early-failure benefit and the exclusivity guarantee are
-separable, and shipping the first without the second is what lets multidimensional shape
-negotiation proceed while capacity economics stays parked.
+A round within the advertised shape gains from it as well: a claim the site would
+refuse for a hold over the window or a physical-host conflict is refused in the round,
+where today the buyer learns of it at settlement.
 
-### Unservable and unacceptable are different outcomes
+Rejected:
 
-Collapsing them would tell a buyer "no" without saying whether to change the ask or wait.
-Those lead to opposite next moves, and a buyer who reads a transient shortage as a
-rejected shape will renegotiate a shape that was fine.
+- Folding the work into `publish-shape-bounds`. That change's work is the registry
+  carrier and publication, and its carrier is undecided; this change's is the
+  negotiation runtime and the storefront's capacity path.
+- Leaving the cap and having sellers publish every size they would sell. A catalogue of
+  sizes is the pre-partitioning Goal 2 exists to remove, and a large listing closes once
+  any of its quantity is taken.
 
-The two are also answered by different authorities: unacceptable comes from seller
-policy and declared pool bounds, unservable from the site ledger. Keeping the outcomes
-distinct keeps that separation visible instead of laundering both through one error.
+### D2 — The question is the availability half of the listing-source check
 
-### Admissibility is evaluated first, when available
+The listing-source check is given the round's effective terms, and its availability
+half asks the site D1's question. The check's verdict, its four outcomes and the
+runtime's enforcement stay as they are. The site is therefore asked before every seller
+decision, and on all four acceptance paths: an opening the seller accepts, a counter the
+seller accepts, a buyer's acceptance and an administrator's. Both compute domains
+contribute the question through the one hook.
 
-When `capacity-shape-envelope` is present, a shape outside the pool's declared bounds is
-rejected before any probe. A seller that would never sell 64 GPUs should not ask the
-site whether it has 64 free. This ordering keeps site round trips proportional to
-plausible asks rather than to all asks, which matters because of the lock below.
+Rejected:
 
-The two changes are independent and may land in either order; this one degrades to
-probing every checked round when the envelope capability is absent.
+- A second kit hook beside the listing-source check. It would need its own verdict, its
+  own enforcement on every acceptance path and its own retryable outcome, all of which
+  the check has.
+- A step inside the VM seller's round evaluation alone. A buyer's and an
+  administrator's acceptance run no seller evaluation, so two of the four acceptance
+  paths would agree terms unasked, and bare metal would be left out with no reason
+  particular to it (`docs/guidance/repository/family-kits.md`, "Sibling domains behave
+  alike").
 
-### The result is explicitly advisory
+### D3 — A probe, not a hold
 
-`probe()` and `reserve()` share `_find_candidate`, so a probe's answer is exactly what a
-reservation would have decided at that instant — and only at that instant. Two
-concurrent negotiations can both be told yes.
+The seller asks and reserves nothing. Holding capacity during negotiation would exclude
+other buyers at no cost to the holder, which is the denial the storefronts' default of
+no hold before settlement closes. Charging for held time is Goal 5's work, and
+`negotiation-time-capacity-hold` moves the hold earlier once it is charged.
 
-This is accepted rather than mitigated, and stated in the requirement rather than left
-to be discovered. The system already has this property: the projection is advisory and
-the reconciler's "ignorance is not zero" rule already treats unknown availability as
-usable, corrected authoritatively at reserve time. This check is strictly better
-information than that, arriving strictly earlier, with the same guarantee.
+Rejected: a short hold in place of the probe. Shortening the window does not remove the
+denial; it raises only the request rate an attacker needs to keep the capacity held.
 
-Implying a guarantee that does not exist would be worse than the current silence,
-because a buyer would stop expecting the reservation to fail.
+### D4 — The answer is advisory, and the race is accepted
 
-### Round-trip cost is real and is why the check is bounded
+A probe's answer is what a reserve would have decided at that instant, and only then.
+Two negotiations may both be told the site would admit them, and one may be refused at
+settlement. The reserve at settlement stays the admission. The requirement states this,
+so no caller reads the answer as a guarantee.
 
-`probe` takes the ledger's process-wide lock, so negotiation traffic contends with real
-admission traffic. The check therefore runs when the requested shape is one the seller
-would actually serve, not on every message, and not for a shape already known
-inadmissible.
+Rejected: closing the race. That takes a hold (D3).
 
-Recorded because "probe consumes nothing" invites the conclusion that it is free. It
-consumes no capacity; it does consume the ledger's serialization point.
+### D5 — A shape the seller's own policy refuses never reaches the site
 
-## Risks / Trade-offs
+Admissibility is judged before the site is asked. A seller that would not sell
+sixty-four GPUs does not ask its site whether sixty-four are free, so site calls stay
+proportional to asks the seller would consider. Admissibility is composed in every VM
+round, so this has no degraded mode.
 
-- **[Negotiation load reaches the ledger's lock]** → Bounded by ordering admissibility
-  first and checking only shapes worth checking. If it becomes a problem, the fix is the
-  ledger's concurrency, which is already flagged in the capacity-economics analysis and
-  is not this change's to make.
-- **[A probe succeeds and the reservation later fails]** → Accepted and specified. The
-  outcome is unchanged from today; only the odds improve.
-- **[Callers read the probe as a guarantee]** → The likeliest misuse. Mitigated by
-  naming it in the requirement and by keeping the non-consuming property explicit at the
-  call site rather than implicit in the method name.
-- **[Site unreachable during negotiation]** → Must not silently pass or silently fail.
-  An indeterminate check needs an explicit disposition; degrading to today's behavior —
-  proceed, and let the hold at acceptance be authoritative — is the compatible choice.
+Where the question falls among the seller's later checks, the commercial guard and
+pricing, follows the hook's shape (Q5).
 
-## Migration Plan
+### D6 — The site is unchanged, and only the listing's own site is asked
 
-Additive; no migration and no persisted state. Rollback is a code revert; negotiations
-lose the early check and fail at acceptance as they do today.
+The site's route, its route contract, its ledger and its client method are used as they
+stand. Nothing is added to the site, so no site release is needed and no pool fact is
+read that the site does not read today.
+
+The probe goes to the site the listing's binding names, and to no other. The source
+check judges a listing against "the listing's own site and pool or Physical Resource,
+never a resource elsewhere" (`storefront-publication`, "The seller's inventory guard
+checks a listing against its own source"), and a deal reserves at its binding's site.
+The aggregate client's ranked probe is not used: it cannot be pinned, and it reads a
+site that did not answer as a site with no capacity.
+
+Rejected: a dry-run flag on the reserve route, or a reason added to the probe's
+response. The released route already answers the question, and a storefront needs only
+a match or none.
+
+### D7 — The source check's outcomes carry the probe's answers
+
+- **An unbacked listing is never asked about.** The backing delegate decides whether
+  the availability half runs, as it does today, so no site is contacted for a listing
+  nothing stands behind.
+- **A site that does not answer is a retryable refusal.** It is a source the storefront
+  cannot confirm, which the check already refuses as retryable before any write. The
+  seller bears its own outage: a buyer is not led to fund a deal the seller could not
+  confirm. No setting chooses another outcome.
+- **A site that would not admit the claim is an availability refusal**, distinct from a
+  declared mismatch, from an inadmissible shape and from a commercial refusal.
+
+Each is the existing requirement applied to D2, and none is a new policy.
+
+Rejected: proceeding when the site cannot be reached, leaving settlement to find the
+answer. With no hold before settlement, that moves the seller's outage onto a buyer who
+has paid.
+
+### D8 — Nothing gates the change
+
+No other change, and no other repository, must land first. The probe route is released.
+`inject-site-pool-authority` has landed, and this change reads no pool fact and adds no
+read to the site's ledger. `settle-capacity-claim-vocabulary` adds a category to the
+claim; the probe sends whatever claim the reserve would send, so whichever of the two
+lands second reverifies against the other.
+
+### D9 — The change is Goal 2's
+
+Goal 2 is negotiating a full shape. A buyer who cannot ask above the advertised shape,
+and a seller who must publish every size, is the part of that still missing, so the
+change is listed in Goal 2's campaign and owns that gap.
+
+It is no prerequisite of Goal 5. `billable-capacity-reservations` requires only that an
+operation reserving nothing is never charged, which is true of the probe route today,
+and no Goal 5 change needs anything this change lands.
+
+Rejected: listing it as a shared prerequisite of both goals. A dependency is a
+technical gate, and there is none.
+
+### D10 — The storefront's dependency on the site authority package is not decided here
+
+The VM storefront declares `arkhai-kit-site` at runtime and imports the site's claim
+predicate, `dict_resource_satisfies_claim`, for two uses: publication's judgement of
+each listing shape against projected members, which `storefront-publication`'s "A
+listing shape is published only where a source member is feasible for it" requires to
+be the site's own predicate, and the ranking matcher of the `most_available` placement
+policy. This change touches neither. A negotiation probe goes to the listing's bound
+site and passes no ranking, and a probe cannot replace a judgement publication makes
+over projections for every listing shape.
+
+The question is recorded as unowned in the change index, under "Package and release
+readiness".
 
 ## Open Questions
 
-- **Should a probe failure be retried within the same round, or reported immediately?**
-  A transient shortage may clear in seconds. Deferrable: it is a policy detail that
-  changes no requirement, and immediate reporting is the honest default.
-- **Should the probe result inform a counter-offer with what *is* servable?** Attractive
-  — `probe` returns a match payload with availability — but it turns a feasibility check
-  into a shape recommender, which needs `capacity-shape-envelope`'s range query and a
-  negotiation vocabulary for suggestions. Deferrable and better decided once shape
-  counter-offers exist.
-- **The VM storefront's dependency on the site authority package.** *Gates the
-  "admissibility is evaluated first" step.* `domains/vms/storefront` declares
-  `arkhai-kit-site` and imports `market_site.dict_resource_satisfies_claim` in two
-  places: `services/shape_feasibility.py` (the local feasibility check this change
-  replaces with the probe) and `services/capacity_client.py` (the
-  `AggregateCapacityClient` site-ranking matcher). `kit/site` is the server-side
-  authority — FastAPI router, SQLAlchemy ledger, YAML definitions — and a storefront
-  installing it for one predicate is the enforcement-level matcher leaking into the
-  storefront, which `ARCHITECTURE.md`'s "Layered placement ownership" says must
-  *not* be shared: the ranking matcher is "deliberately a coarse, best-effort hint,
-  not shared code with the enforcement-level predicates". The edge passes the layer
-  and scope rules, so no check will ever report it; this change is where it is
-  decided. Suggested resolution: state as an outcome that the VM storefront drops
-  `arkhai-kit-site`. `shape_feasibility.py`'s use goes with the probe;
-  `capacity_client.py`'s ranking uses a storefront-local coarse matcher, or the
-  admissibility capability `capacity-shape-envelope` adds, accepting the divergence
-  the document licenses — and stating the matcher's contract where it lives: it
-  ranks sites by a hint and never decides admission, so a false positive costs one
-  fall-through and a false negative costs one site skipped for one request. If one shared predicate is wanted after all, it moves to a
-  pydantic-only home (`kit/capability-shape` or `kit/resource-pools-contracts`) and
-  is never imported from `kit/site`.
+Each is decided in this change's design session. Q1 is settled first: it decides what
+lifting the cap means.
 
-## Placement
+### Q1 — What a buyer may ask above the advertised shape where the seller stated no maximum
 
-The probe runs inside the VM `evaluate_round` composition, after admissibility
-(`capacity-shape-envelope`, if composed) and before the commercial feasibility guard
-and pricing — the order `negotiation-driven-capacity-resize` fixes for a round carrying
-a shape. Whether it is a distinct `NegotiationDomainHooks` member or a step inside the
-domain's `evaluate_round` is decided in task 1.2: a distinct hook lets the kit report
-"not checked" uniformly for a domain that composes none, which that change's contract
-requires. The distinct-outcome rule this change adds is one of the refusal reasons that
-change's "A round may revise the capacity shape" requirement enumerates; the two deltas
-are written to agree.
+The cap is today the only upper bound on a quantity whose listing states no `max`,
+since `settings.toml` ships no admissibility default. Once the probe judges a requested
+shape, a one-GPU shape-priced listing on an eight-GPU machine could sell any shape one
+machine can serve, at the published rates, though its seller stated nothing about
+selling larger.
+
+```yaml
+# A pool's hint as a 0.4.0 seller may have written it: an offer and nothing else.
+listing_shapes:
+  vm:
+    - gpu: { model: A100, count: 1 }
+      cpu: { count: 8 }
+
+# A seller stating that it sells larger.
+listing_shapes:
+  vm:
+    - gpu: { model: A100, count: { offer: 1, max: 4 } }
+      cpu: { count: { offer: 8, max: 32 } }
+```
+
+- (a) The cap lifts wherever admissibility admits. The first listing sells up to what
+  one machine can serve; the second up to four GPUs and thirty-two vCPUs.
+- (b) A quantity with no stated `max` keeps the advertised quantity as its ceiling. The
+  first listing sells at most one GPU and eight vCPUs, as under 0.4.0; the second sells
+  up to its stated maxima, and the probe judges each ask.
+- (c) A pool policy tag states whether its listings sell above their offer.
+
+A storefront setting is not among the alternatives.
+
+Recommended: (b). A seller who stated nothing keeps released behaviour
+(`docs/development/ARCHITECTURE.md`, "Omission states no commitment"), and a stated
+`max` above the offer is already the form in which a seller says it sells larger, so
+nothing is switched on. Its cost is one sentence to change: the configuration reference
+says "an `offer` alone says nothing about negotiability", and under (b) an offer alone
+is the ceiling of what may be asked, while a smaller ask stays free. It would move to
+(a) if a shape-priced listing is taken as a statement that any shape is for sale at its
+rates.
+
+Whether the refusal `shape_exceeds_advertised` survives follows this answer: under (b)
+it remains the refusal for a quantity above an unstated maximum; under (a) it is
+retired.
+
+### Q2 — A buyer asking about feasibility without opening a negotiation
+
+Under D2 a buyer learns whether a seller's site would serve a shape by opening a
+negotiation, which holds nothing and funds nothing. The Goal 5 documents speak of a
+buyer who "verifies its feasibility without proposing".
+
+- (a) No buyer-facing route. The opening is the inquiry.
+- (b) A storefront route that answers for a listing and a shape with no thread.
+
+Recommended: (a). An opening costs a buyer one signed request and already answers the
+question, and a second route would answer it through a second surface that must be kept
+in step with the first.
+
+To the owner: is an inquiry without a thread anticipated, for example for a buyer
+comparing many sellers before opening with one? If it is, (b) is a new public route
+with a contract of its own, and it is designed here.
+
+### Q3 — Whether the probe replaces the present availability judgement or joins it
+
+Today the availability half asks whether the advertised quantity is free: for VM from
+the snapshot and the held projections, for bare metal from the held projection's view.
+
+- (a) The probe replaces it for a capacity-backed listing. A VM round costs one site
+  call, as today. A shape smaller than the advertised one can then be agreed on a
+  listing whose advertised quantity is no longer free, until reconciliation closes that
+  listing.
+- (b) The probe joins it. A VM round costs two site calls, and a shape the site would
+  admit is still refused where the advertised quantity is taken.
+
+Recommended: (a). The claim the deal would reserve is the thing to judge, and one call
+answers it. It would move to (b) if a listing whose advertised quantity is taken must
+stop selling at once and not at its next reconciliation.
+
+The declared-match half is unchanged either way.
+
+### Q4 — The window the probe asks for
+
+A probe with a window counts the holds that overlap it; with none it counts every hold.
+In a seller's round a per-period deal has no resolved horizon yet.
+
+- (a) The window acceptance would resolve at this instant: the buyer's requested
+  duration, or the horizon `resolve_acceptance` would bind now. The probe then asks
+  what the reserve will ask.
+- (b) No window. A shape that would fit beside a later reservation is refused.
+- (c) One billing period. A deal whose later periods collide with another reservation
+  is agreed and then refused at settlement.
+
+Recommended: (a). On a buyer's or an administrator's acceptance the question is asked
+once the acceptance instant and horizon are fixed, so the probe's window is the
+Agreement's. It would move to (b) if resolving a horizon in a round proves to need
+state the round does not have.
+
+### Q5 — The hook's shape, and when in a round the site is asked
+
+Today the runtime calls the hook once before the policy chain, with no terms, and the
+chain's `has_matching_inventory_guard` reads that verdict at its place in the chain. A
+round's effective shape exists only once the domain's evaluation has merged a partial
+opening and judged admissibility (D5).
+
+```python
+# Today.
+verdict = await hooks.check_listing_source(repository, resolved)
+evaluation = await hooks.evaluate_round(request_with(verdict))
+
+# (a) One call, after evaluation.
+evaluation = await hooks.evaluate_round(request)
+verdict = await hooks.check_listing_source(repository, resolved, evaluation.agreed_terms)
+
+# (b) Two calls: the declaration before the chain, availability after evaluation.
+declared = await hooks.check_listing_source(repository, resolved, None)
+evaluation = await hooks.evaluate_round(request_with(declared))
+verdict = await hooks.check_listing_source(repository, resolved, evaluation.agreed_terms)
+
+# (c) One call before the chain; the domain's check resolves the shape itself.
+verdict = await hooks.check_listing_source(repository, resolved, decoded_terms)
+evaluation = await hooks.evaluate_round(request_with(verdict))
+```
+
+- (a) The guard has no verdict when the chain runs and becomes a name the runtime
+  ignores. A declared mismatch is found after the seller has priced.
+- (b) The guard keeps its place. The site is asked only for a decision that would
+  counter or accept, the decisions the verdict applies to today; a decision that
+  rejects or exits for its own reason asks nothing. The seller prices before the site
+  is asked, so the companion's evaluation order, which places feasibility before the
+  commercial guard and pricing, is restated.
+- (c) The order of the companion stands. The domain's check repeats the shape
+  resolution and admissibility that its evaluation performs.
+
+Callers of the hook, each of which must be able to ask through it alone:
+
+| Caller | What it has when it asks |
+|---|---|
+| An opening and a buyer's counter | The decoded terms before evaluation; the effective terms after it |
+| A buyer's acceptance | The terms recorded with the seller's last quote |
+| An administrator's acceptance | The same |
+| The administrator's opening preview | As an opening; it writes nothing, and a probe reserves nothing |
+| `has_matching_inventory_guard` | The verdict obtained before the chain |
+| API credits | Contributes no check; unaffected |
+
+Recommended: (b). It keeps the guard and D5, and it asks the site nothing for a round
+the seller rejects for its own reasons. It would move to (c) if the evaluation order
+must stay as the companion states it.
+
+`market-composition`'s "Kit-owned synchronous negotiation runtime" says the runtime
+obtains the verdict before every seller decision; under (a) or (b) its wording changes.
+
+### Q6 — Provisional answers
+
+Each follows from something settled or from the nearest precedent, and is confirmed or
+moved in the design session.
+
+- **Requirements this change modifies**, their deltas written once Q1 to Q5 settle:
+  `negotiation-protocol`'s "A round may revise the capacity shape", whose last sentences
+  and scenario "A revised shape exceeds the advertised shape" state the cap;
+  `storefront-publication`'s "The seller's inventory guard checks a listing against its
+  own source", whose second paragraph states what availability asks; and
+  `storefront-publication`'s "Bare-metal opening rechecks its listing against its
+  source", whose availability paragraph reads the held projection. `market-composition`'s
+  "Kit-owned synchronous negotiation runtime" only if Q5 changes when the verdict is
+  obtained. No `site-capacity` requirement changes.
+- **The requirement this change adds**, to `negotiation-protocol`: "Authoritative
+  capacity verification before agreement". It states D1, D3 and D4 for a capacity-backed
+  listing: the seller asks its site about the claim the round would reserve, the
+  question reserves nothing, and the answer guarantees nothing at settlement.
+- **The refusal a buyer reads.** `no_matching_inventory`, which the availability half
+  answers with today. Whether a requested shape the site would not admit has a reason
+  of its own follows Q1, with `shape_exceeds_advertised`.
+- **Where the call lives.** A probe on the guarded capacity path, `CapacityEffects`,
+  pinned to the binding's site and asked of the backing delegate, beside reserve and
+  commit.
+- **The administrator's settle dry-run** uses the same pinned probe in place of the
+  aggregate's ranked one. It is a small related fix this change absorbs.
+- **A thread that holds a reservation.** Its own hold would count against its probe.
+  No thread holds one before acceptance today. `negotiation-time-capacity-hold` judges
+  such a thread by resizing its reservation, and states so in its own design.
+- **No retry within a round.** A refusal is reported at once; a buyer retries.
+- **A counter-offer naming what the site could serve** is deferred. The probe returns
+  one match, not a range. It is revisited when `publish-shape-bounds` gives a buyer a
+  range to counter within.
+- **Companion text.** The `negotiation-protocol` companion's "Evaluation order" and
+  "Current limits" stop saying feasibility is not composed. The `storefront-publication`
+  companion says what availability asks. `docs/development/ARCHITECTURE.md`, "Capacity
+  reservation", gains the probe between reading snapshots and the settlement reserve,
+  and "Discovery and negotiation" loses the cap as a stand-in.
+- **Test levels.** The runtime's handling of the hook is proven once, in
+  `kit/negotiation-runtime`'s unit suite with opaque hooks
+  (`openspec/specs/negotiation-protocol/testing.md`). Each storefront proves its check
+  at application integration against a site ledger composed in process. One row in each
+  compute lane, on mock provisioning: a claim the site would not admit is refused in
+  negotiation, and in the VM lane a shape above the advertised one is agreed where the
+  site admits it.
+- **Hardware.** Nothing here needs a GPU, and nothing touches the Ansible layer or how
+  an adapter executes it, so no real-host run is owed.
+- **Documents.** `docs/configuration.md`'s row for `has_matching_inventory_guard`, and
+  the configuration reference's sentence on an offer alone if Q1 settles on (b).
+
+### Q7 — Implementation cadence
+
+Recommended: one round, one session. The hook and the pinned probe, both storefronts'
+checks, the cap's change under Q1, the lane rows and the documents are one slice: none
+is useful without the others.
+
+## Verification
+
+Provisional levels are in Q6. Every lane row is mock-provisioning evidence.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 the seller asks the site about the claim a round would reserve | `openspec/specs/negotiation-protocol/spec.md` and `architecture.md`; `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" and "Capacity reservation" |
+| D2 the availability half of the listing-source check | `openspec/specs/storefront-publication/spec.md` and `architecture.md`; `docs/configuration.md` |
+| D3 a probe, not a hold | `openspec/specs/negotiation-protocol/architecture.md`, "Evaluation order" |
+| D4 advisory, the race accepted | `openspec/specs/negotiation-protocol/spec.md` |
+| D5 admissibility before the site | `openspec/specs/negotiation-protocol/architecture.md`, "Evaluation order" |
+| D6 the site unchanged, only the listing's own site asked | `openspec/specs/storefront-publication/spec.md`; `docs/development/ARCHITECTURE.md`, "Storefront capacity boundary" |
+| D7 the source check's outcomes | `openspec/specs/storefront-publication/spec.md` |
+| D8 nothing gates the change | None |
+| D9 the change is Goal 2's | `docs/development/ROADMAP.md`, Goal 2 |
+| D10 the site authority package dependency is not decided here | None; the change index holds it |
