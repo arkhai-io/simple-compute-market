@@ -49,8 +49,7 @@ from market_identity import (
     canonical_body_hash,
     sign_request,
 )
-from market_resource_pools import read_site_declarations
-from market_resource_pools_contracts import BACKED
+from market_resource_pools_contracts import BACKED, read_site_declarations
 
 from apicredits_service.db.database import (
     IncompatibleDatabase,

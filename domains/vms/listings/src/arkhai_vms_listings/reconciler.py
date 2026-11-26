@@ -6,7 +6,7 @@ import enum
 import sqlite3
 from dataclasses import dataclass, field
 from collections.abc import Collection
-from typing import TYPE_CHECKING, Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
 from market_capability_admissibility import AdmissibilityProblem, Declaration
 
@@ -17,6 +17,7 @@ from arkhai_vms import (
     listing_shape_key,
 )
 
+from market_resource_pools_contracts import ResolvedPool, read_site_declarations
 from market_resource_pools_contracts.backing import (
     CapacityBacking,
     capacity_backing,
@@ -43,10 +44,6 @@ from arkhai_vms_listings.pricing_resolution import (
     resolve_family_rates,
     resolve_gpu_pricing,
 )
-
-
-if TYPE_CHECKING:
-    from market_resource_pools import ResolvedPool
 
 logger = logging.getLogger(__name__)
 
@@ -598,7 +595,7 @@ def _projected_pool_rows(
     site_id: str,
     member_availability: dict[tuple[str | None, str], int] | None,
     capacity_buckets: list[Mapping[str, Any]] | None,
-    declaration: "ResolvedPool",
+    declaration: ResolvedPool,
     holds: set[tuple[str, str, str]],
     report: _SiteDerivationReport,
     shape_feasible: ShapeFeasibility,
@@ -1147,10 +1144,6 @@ def _pool_rows_from_projection(
     falls back to the pre-existing resource-list computation for every
     fungible pool, not an error.
     """
-    # Buyer-side listing helpers import this module without installing the
-    # resource-pool authority package; only storefront projection needs it.
-    from market_resource_pools import read_site_declarations
-
     site_overrides = _site_pool_overrides(conn) if overrides is None else overrides
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():

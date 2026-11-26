@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
+from market_resource_pools_contracts import (
+    POOL_ENABLEMENT_UNDECLARED,
+    read_site_declarations,
+)
 from market_resource_pools_contracts.backing import (
     BACKED,
     UNBACKED,
     legacy_producer_backing,
-)
-
-from market_resource_pools import (
-    POOL_ENABLEMENT_UNDECLARED,
-    read_site_declarations,
 )
 
 

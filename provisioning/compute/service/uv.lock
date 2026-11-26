@@ -273,7 +273,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-compute-provisioning-service"
-version = "0.28.0"
+version = "0.28.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -341,7 +341,7 @@ requires-dist = [
     { name = "arkhai-kit-fulfillment", specifier = ">=0.8.0" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
-    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.5.0" },
     { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.1.0" },
     { name = "arkhai-kit-site", specifier = ">=0.14.0" },
     { name = "arkhai-vms-provisioning-adapter", marker = "extra == 'adapters'", specifier = ">=0.21.0" },
@@ -565,7 +565,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -576,7 +576,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.10.1-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -592,7 +592,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -600,7 +600,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

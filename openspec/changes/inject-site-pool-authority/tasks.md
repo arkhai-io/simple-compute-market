@@ -13,7 +13,7 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
 `kit/resource-pools`, `domains/vms/storefront`, `domains/bare_metal/storefront`,
 `domains/apicredits/storefront`, `domains/vms/listings`, and their locks.
 
-- [ ] 1.1 Move `kit/resource-pools/src/market_resource_pools/site_declarations.py` to
+- [x] 1.1 Move `kit/resource-pools/src/market_resource_pools/site_declarations.py` to
   `kit/resource-pools-contracts/src/market_resource_pools_contracts/site_declarations.py`,
   its imports made package-relative, and export `POOL_ENABLEMENT_UNDECLARED`,
   `ResolvedPool`, `SiteDeclarations` and `read_site_declarations` from
@@ -22,7 +22,10 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   `kit/resource-pools-contracts/tests/unit/test_site_declarations.py`. (D6.) Verify:
   `make -C kit/resource-pools-contracts test` passes, unit level, with the moved cases
   unchanged in what they assert.
-- [ ] 1.2 Move the asking-rate declaration resolution from
+  Done: moved with `git mv`; `.backing` and `.hints` imported relatively; the moved test's
+  diff is its import lines alone. `make -C kit/resource-pools-contracts test`: unit, 503
+  passed.
+- [x] 1.2 Move the asking-rate declaration resolution from
   `kit/resource-pools/src/market_resource_pools/asking_rates.py` into the contracts
   package's existing `market_resource_pools_contracts/asking_rates.py`, beside the
   structural checks it already imports from there (D6, as recorded in `design.md`), and
@@ -35,13 +38,20 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   `kit/resource-pools-contracts/pyproject.toml` (`pydantic`, admissibility, shape). Verify:
   `make -C kit/resource-pools-contracts test` passes, unit level; `make
   check-architecture` passes.
-- [ ] 1.3 Delete the two modules from `kit/resource-pools` and their exports from
+  Done: the contracts module now carries the authority module's docstring (declaration,
+  contract and resolution) and its resolution below the structural checks; it adds only
+  standard-library imports (`Callable`, `Iterable`, `dataclass`, `field`), within the
+  allowlist. The moved test's diff is its one import line. Unit, 503 passed (with 1.1);
+  `make check-architecture`: layers, scope, dependencies and kinds hold.
+- [x] 1.3 Delete the two modules from `kit/resource-pools` and their exports from
   `market_resource_pools/__init__.py`, re-exporting neither (D6); keep the existing
   re-exports of the contracts package's asking-rate structural checks, which predate the
   move. Verify: `make -C kit/resource-pools test` passes, unit and library integration;
   `grep -rn "site_declarations\|resolve_asking_rates" kit/resource-pools/src` finds
   nothing.
-- [ ] 1.4 Switch the readers to the contracts package (D6):
+  Done: `make -C kit/resource-pools test`: unit and library integration, 117 passed; the
+  grep finds nothing.
+- [x] 1.4 Switch the readers to the contracts package (D6):
   `domains/vms/storefront/src/market_storefront/services/listing_sources.py`,
   `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/site_reading.py`,
   `domains/apicredits/storefront/src/apicredits_storefront/listing_binding.py`,
@@ -53,7 +63,21 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   where they are now (the engineering guidance's section "Imports go at module level").
   Verify: `grep -rn "market_resource_pools\b" <each package>/src` finds no import of the
   authority.
-- [ ] 1.5 Packaging (D6, D11, `versioning.md` "Before 1.0.0", `locks.md`): bump
+  Done, the grep finding none in the four packages' `src`. Differing from the plan: the
+  VM listings package's two function-local imports and its `TYPE_CHECKING` import of
+  `ResolvedPool` now sit at module level, as does `_reconciler_cases.py`'s local import.
+  Their recorded reason was that buyers install the listings package without the pool
+  authority; the contracts package is a runtime dependency of it, so that reason is gone,
+  and `resolve_vm_asking_rates` now declares `AskingRateResolution` as its return type
+  rather than `Any`. Outside the plan's list, three more tests imported a moved name from
+  the authority and now take it from the contracts package:
+  `domains/apicredits/service/tests/integration/test_default_pool.py`,
+  `domains/apicredits/service/tests/integration/test_signed_authority.py` and
+  `provisioning/compute/service/tests/integration/test_capacity_api.py`; both services
+  raise their contracts floor for them (1.5). The bare-metal storefront's
+  `site_reading.py` docstring and `_policy_tags` comment now name the contracts package's
+  reader rather than the resource-pool kit's.
+- [x] 1.5 Packaging (D6, D11, `versioning.md` "Before 1.0.0", `locks.md`): bump
   `arkhai-kit-resource-pools-contracts` to 0.5.0 and `arkhai-kit-resource-pools` to 0.11.0
   (the bump also covering what section 2 adds to it); in the VM and bare-metal storefronts
   and `domains/vms/listings`, raise `arkhai-kit-resource-pools-contracts` to `>=0.5.0`, and
@@ -63,7 +87,25 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   as `make check-version-bumps` requires; relock with `make lock PROJECTS="..."` naming
   every project whose lock installs a changed package. Verify: `make check-version-bumps`
   and `make check-packaging` pass.
-- [ ] 1.6 Verification point. Focused suites: `make -C kit/resource-pools-contracts test`
+  Done. Versions: contracts 0.4.0 → 0.5.0, the authority 0.10.1 → 0.11.0, the listings
+  package 0.9.0 → 0.10.0 (minor: its `pools` extra is removed), and the three storefronts
+  by a patch, their change being internal: VM and bare-metal 0.29.0 → 0.29.1, API credits
+  0.23.0 → 0.23.1. The VM storefront's exact pin on the bare-metal storefront moves to
+  `==0.29.1`, and its listings requirement becomes `arkhai-vms-listings[overrides]>=0.10.0`.
+  The VM and bare-metal storefronts keep `arkhai-kit-resource-pools>=0.11.0` in `dev`
+  for the pool rows their ledger tests seed; the API-credit storefront and the listings
+  package keep it nowhere. Outside the plan: the API-credit service (0.8.0 → 0.8.1) and
+  the provisioning service (0.28.0 → 0.28.1) raise `arkhai-kit-resource-pools-contracts`
+  to `>=0.5.0`, the first version exporting the reader their tests now import (1.4); a
+  patch, since neither's runtime changes, which section 3's bump of each may supersede
+  with a larger one. The authority keeps its contracts floor at `>=0.4.0`: it imports
+  nothing 0.5.0 adds. `docs/guidance/repository/published-packages.md`'s table of
+  internal dependencies is updated for the four readers, as
+  `scripts/tests/test_publish_matrix.py` requires. Relocked with `make lock
+  PROJECTS="..."` over the 26 projects whose lock names a changed package, then the two
+  services again for their bump. `make check-version-bumps`, `make check-locks`: passed.
+  `make check-packaging`: passed, in the pre-commit run 1.6 records.
+- [x] 1.6 Verification point. Focused suites: `make -C kit/resource-pools-contracts test`
   (unit), `make -C kit/resource-pools test` (unit, library integration), and the suites
   of the four readers — `make -C domains/vms/storefront test`, `make -C
   domains/bare_metal/storefront test`, `make -C domains/apicredits/storefront test`,
@@ -76,6 +118,48 @@ readers stop installing the pool authority. Touches `kit/resource-pools-contract
   rates, stages 05b–05d), `e2e_compute_dynamic_listings` (VM publication from the site's
   projected declarations), and `e2e_credits_deal` (the API-credit listing's pool read).
   No CI evidence is owed: `tests.yml`'s targets are those `make validate-local` runs.
+  Done. `make -C kit/resource-pools-contracts test`: unit, 503 passed. `make -C
+  kit/resource-pools test`: unit and library integration, 117 passed. `make -C
+  domains/vms/storefront test`: unit 1199 passed, 1 skipped; integration 653 passed.
+  `make -C domains/bare_metal/storefront test`: 694 passed. `make -C
+  domains/apicredits/storefront test`: 298 passed. The asking-rate cases ran through each
+  storefront's app and its typed clients (`StorefrontClient`, `PoolOverrideClient`):
+  `test_http_publication_rates.py`, whose 12 cases hold the bare-metal asking-rate cases
+  among others, all passed, and `test_pool_overrides_api.py -k rate`, 8 passed. `make -C domains/vms/listings test` does not exist: the listings package has no
+  Makefile, tests or lock of its own, and its derivation and asking-rate cases run in the
+  VM storefront's suite. For the three tests outside the plan (1.4): `make -C
+  domains/apicredits/service test`, 91 passed, and `make -C provisioning/compute/service
+  test`, unit 639 and integration 579 passed. `change-workflow run pre-commit
+  inject-site-pool-authority`: its first run failed on four cases of
+  `scripts/tests/test_publish_matrix.py` (the published-packages table, fixed in 1.5) and
+  on the history-wording check (a `pyproject.toml` comment, since removed), every other
+  suite and `make check-packaging` passing; the run after the fixes is recorded in the
+  section's notes.
+  End-to-end, as the plan names them: `e2e_bare_metal_publication`,
+  `e2e_compute_dynamic_listings` and `e2e_credits_deal` reach the moved readers once
+  deployed; none was run in this section, and validation runs them. No CI evidence is
+  owed.
+
+Section 1 notes: the move is mechanical and every assertion is unchanged. Section 2
+finds `kit/resource-pools` already at 0.11.0, and the contracts package at 0.5.0; section
+3 finds the API-credit service at 0.8.1 and the provisioning service at 0.28.1, each
+bumped once already. Correction to the section's opening paragraph: the authority left
+each reader's direct runtime dependencies, but the VM storefront still installs it,
+through `arkhai-kit-fulfillment`, which depends on it by design, and through
+`arkhai-kit-site` until section 3 drops that edge. Left as it is:
+`domains/vms/listings/src/arkhai_vms_listings/listing_shapes.py` keeps an older
+function-local import of the contracts package whose comment says buyers install the
+listings package without the pool kit; the section did not touch that import, so it is
+not moved here. The citations of the moved
+tests in `openspec/specs/storefront-publication/spec.md` and
+`openspec/specs/resource-pool-management/spec.md`, "Evidence", still name their old paths
+until closeout's 4.8 rewrites them; the citations check resolves only `openspec/`,
+`docs/`, `tools/`, `scripts/`, `e2e-tests/` and `.agents/` paths, so it cannot report
+these `kit/` paths, and 4.8 must find them itself. After the fresh-context check's fixes,
+`change-workflow run pre-commit inject-site-pool-authority` passed: `make validate-local`
+(`check-packaging` and `make test`, every suite) and `make check-repository` (comment
+hygiene, documentation citations, history wording, version bumps, local imports,
+capability index, guidance).
 
 ## 2. Add the pool-facts port, the site's host-delivery module, and the pool authority's reader
 

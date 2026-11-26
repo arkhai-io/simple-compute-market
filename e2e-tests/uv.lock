@@ -211,7 +211,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.29.0"
+version = "0.29.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -240,7 +240,6 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-pool-overrides" },
-    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -254,7 +253,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.29.1-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -825,7 +824,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.10.1"
+version = "0.11.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -836,7 +835,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.10.1-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -852,7 +851,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
@@ -860,7 +859,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -993,7 +992,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -1004,15 +1003,12 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.10.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
 overrides = [
     { name = "arkhai-kit-pool-overrides" },
-]
-pools = [
-    { name = "arkhai-kit-resource-pools" },
 ]
 
 [[package]]
@@ -1058,7 +1054,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.29.0"
+version = "0.29.1"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -1091,7 +1087,6 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-pool-overrides" },
-    { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "arkhai-kit-schema-migrations" },
     { name = "arkhai-kit-settlement-runtime" },
@@ -1099,7 +1094,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-kit-storefront" },
     { name = "arkhai-vms" },
-    { name = "arkhai-vms-listings", extra = ["overrides", "pools"] },
+    { name = "arkhai-vms-listings", extra = ["overrides"] },
     { name = "arkhai-vms-negotiation" },
     { name = "arkhai-vms-settlement" },
     { name = "dynaconf" },
@@ -1117,7 +1112,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.29.1-py3-none-any.whl" },
 ]
 
 [[package]]

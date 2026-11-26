@@ -29,8 +29,7 @@ from arkhai_bare_metal.fixtures.publication_view import (
 )
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_resource_pools_contracts import PoolCreate
-from market_resource_pools import read_site_declarations
-from market_resource_pools_contracts import resolve_pool_declarations
+from market_resource_pools_contracts import read_site_declarations, resolve_pool_declarations
 from market_site_client.fixtures.resource_pools import (
     validate_resource_pool_projection,
 )
