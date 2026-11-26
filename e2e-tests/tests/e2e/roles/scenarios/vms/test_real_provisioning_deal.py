@@ -92,6 +92,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage10b_LeaseCycleBeginsTeardown,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
+    Stage11c_LeaseEventsRecorded,
 )
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to, latest_stage_event_id, wait_for_stage_event,
@@ -747,6 +748,10 @@ class TestStage11a3_TeardownJobSucceeded:
 
 
 class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestStage11c_LeaseEventsRecorded(Stage11c_LeaseEventsRecorded):
     pass
 
 

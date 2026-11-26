@@ -8,7 +8,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+import injected_time
 from dependency_injector import containers, providers
+from eventing import EventService
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning import JobExecutorTable
@@ -52,6 +54,7 @@ from market_site.ledger import CapacityLedgerService
 
 from bare_metal_provisioning_adapter.runtime import (
     HOST_REQUIREMENT as BARE_METAL_HOST_REQUIREMENT,
+    OPERATOR_REPAIRABLE_FAILURES as BARE_METAL_REPAIRABLE_FAILURES,
     build_bare_metal_runtime,
 )
 from vm_provisioning_adapter.runtime import (
@@ -80,6 +83,14 @@ from compute_provisioning_service.services.system_status import (
     SystemStatusService,
 )
 from compute_provisioning_service.services.lease_watchdog import LeaseWatchdog
+from compute_provisioning_service.services.operator_events import (
+    EventDeliveryWorker,
+    event_catalogue,
+    event_pruner,
+    event_recorder,
+    event_sink_consumer,
+    events_settings,
+)
 from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
@@ -288,13 +299,30 @@ def _make_host_key_probes(runner) -> Mapping[str, HostKeyProbe]:
     return MappingProxyType({})
 
 
-def _make_job_engine(session_factory, job_executors, host_authority, cfg):
-    """The one job authority every domain submits to and every route reads."""
+def _make_job_engine(session_factory, job_executors, host_authority, cfg, recorder):
+    """The one job authority every domain submits to and every route reads.
+
+    It records its jobs' operator events through the service's recorder; a
+    teardown held for a class an operator repairs is reported for the classes
+    the domains raise.
+    """
     return JobEngine(
         session_factory,
         executors=job_executors,
         host_lookup=host_authority.lookup,
         retry_policy=retry_policy_from(cfg),
+        event_recorder=recorder,
+        held_failure_classes=BARE_METAL_REPAIRABLE_FAILURES,
+    )
+
+
+def _make_event_service(session_factory):
+    return EventService(session_factory, clock=injected_time.now_datetime)
+
+
+def _make_event_delivery_worker(consumer, pruner, settings):
+    return EventDeliveryWorker(
+        (consumer,), pruner, interval_seconds=settings.delivery_interval_seconds
     )
 
 
@@ -384,6 +412,7 @@ def _make_lease_lifecycle(
     lifecycle_event_sink,
     capacity_release_outbox,
     lease_end_reports,
+    jobs,
 ):
     return LeaseLifecycleService(
         cfg,
@@ -397,6 +426,7 @@ def _make_lease_lifecycle(
         ),
         capacity_release_outbox=capacity_release_outbox,
         lease_end_report_drain=lambda: lease_end_reports.drain(lifecycle_event_sink.deliver_lease_end),
+        jobs=jobs,
     )
 
 
@@ -451,6 +481,39 @@ class Container(containers.DeclarativeContainer):
     # Declared ahead of the ledger, which runs it whenever it releases capacity.
     release_effects = providers.Singleton(_make_release_effects)
 
+    # The service's eventing system. One recorder, shared by the site ledger,
+    # the job engine and, through the site's release-failure transition, the
+    # lease lifecycle, records every kind in the transaction of the change it
+    # reports; the delivery worker delivers and prunes.
+    events_settings = providers.Singleton(events_settings, cfg=config)
+    event_catalogue = providers.Singleton(event_catalogue)
+    event_recorder = providers.Singleton(
+        event_recorder,
+        catalogue=event_catalogue,
+        instance=identity_context.provided.storefront_site_id,
+    )
+    event_sink_consumer = providers.Singleton(
+        event_sink_consumer,
+        session_factory=session_factory,
+        catalogue=event_catalogue,
+        settings=events_settings,
+        signer=identity_context.provided.signer,
+        instance=identity_context.provided.storefront_site_id,
+    )
+    event_pruner = providers.Singleton(
+        event_pruner,
+        session_factory=session_factory,
+        catalogue=event_catalogue,
+        settings=events_settings,
+    )
+    event_delivery_worker = providers.Singleton(
+        _make_event_delivery_worker,
+        consumer=event_sink_consumer,
+        pruner=event_pruner,
+        settings=events_settings,
+    )
+    event_service = providers.Singleton(_make_event_service, session_factory=session_factory)
+
     host_requirement = providers.Object(
         _merge_host_requirements(VM_HOST_REQUIREMENT, BARE_METAL_HOST_REQUIREMENT)
     )
@@ -497,6 +560,7 @@ class Container(containers.DeclarativeContainer):
         release_effect=release_effects,
         site_id=identity_context.provided.storefront_site_id,
         lease_end_effect=lease_end_reports.provided.record,
+        event_recorder=event_recorder,
     )
 
     # Filled and frozen by adapter composition; the job engine resolves each
@@ -516,6 +580,7 @@ class Container(containers.DeclarativeContainer):
         job_executors=job_executor_table,
         host_authority=host_authority,
         cfg=config,
+        recorder=event_recorder,
     )
 
     teardown_rerun_policy = providers.Singleton(_make_teardown_rerun_policy, cfg=config)
@@ -746,6 +811,7 @@ class Container(containers.DeclarativeContainer):
         lifecycle_event_sink=lifecycle_event_sink,
         capacity_release_outbox=capacity_release_outbox,
         lease_end_reports=lease_end_reports,
+        jobs=job_engine,
     )
 
     lease_route_service = providers.Singleton(
@@ -826,3 +892,5 @@ resolved_relay_service: Any | None = None
 resolved_physical_settlement_scheduler: "PhysicalSettlementScheduler | None" = None
 resolved_fulfillment_service: "FulfillmentOrchestrator | None" = None
 resolved_capacity_reservation_watchdog: "CapacityReservationWatchdog | None" = None
+resolved_event_delivery_worker: "EventDeliveryWorker | None" = None
+resolved_event_service: "EventService | None" = None

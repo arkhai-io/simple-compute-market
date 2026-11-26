@@ -74,7 +74,8 @@ class FakeSiteAuthority:
         return reservation
 
     def record_release_failure(
-        self, capacity_reservation_id, *, reason, message=None, release_job_id=None, end_context=None
+        self, capacity_reservation_id, *, reason, message=None, release_job_id=None, end_context=None,
+        event=None,
     ):
         reservation = self.reservations[capacity_reservation_id]
         if reservation["state"] not in {"reserved", "leased", "releasing"}:

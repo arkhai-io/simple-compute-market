@@ -97,7 +97,8 @@ def expected_order(*, mock: bool, ending: tuple[str, ...]) -> list[str]:
     """The shared stages a purchase declares, in run order.
 
     The canonical deal's readiness, the purchase stages, the stages from
-    fulfillment onwards, one ending, and teardown completion; a mock lane arms
+    fulfillment onwards, one ending, teardown completion, and the lease's
+    recorded events; a mock lane arms
     and releases each job's gate around the stage that dispatches it.
     """
     def gate(name: str) -> list[str]:
@@ -127,6 +128,7 @@ def expected_order(*, mock: bool, ending: tuple[str, ...]) -> list[str]:
         *ending,
         *gate("Stage11a2_ReleaseTeardownGateAndDrain"),
         "Stage11b_TeardownCompletion",
+        "Stage11c_LeaseEventsRecorded",
     ]
 
 

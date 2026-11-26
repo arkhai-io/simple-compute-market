@@ -28,6 +28,7 @@ from compute_provisioning.relays.db import Base as RelaysBase
 from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.migrations import CHAIN, FLOOR_IDS
 from compute_provisioning_service.db.models import Base as ServiceBase
+from eventing import metadata as EventingMetadata
 from market_fulfillment.db import Base as FulfillmentBase
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
@@ -167,6 +168,23 @@ def test_a_released_job_keeps_its_error_and_reads_no_structured_failure(tmp_path
         ]
 
 
+def test_the_chain_builds_the_event_store_fresh_and_on_a_released_database(tmp_path):
+    """A fresh database and one the release built and the chain brought forward
+    both hold every table of the eventing component, its sequence counter at
+    zero, and record its steps."""
+    fresh = create_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
+    migrate_database(fresh)
+    adopted = create_engine(f"sqlite:///{create_floor_database(tmp_path / 'adopted.db')}")
+    migrate_database(adopted)
+
+    for engine in (fresh, adopted):
+        assert set(EventingMetadata.tables) <= set(inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT value FROM eventing_sequence")).all() == [(0,)]
+            recorded = {row[0] for row in connection.execute(text("SELECT id FROM schema_migrations"))}
+        assert "eventing_0001" in recorded
+
+
 def test_every_mapped_table_and_column_is_one_the_chain_creates(tmp_path):
     """The models are read against the migrated schema and create none of it,
     so a column added to a model without a migration fails here."""
@@ -180,10 +198,11 @@ def test_every_mapped_table_and_column_is_one_the_chain_creates(tmp_path):
 
     missing = []
     for base in (
-        PoolsBase, RelaysBase, VmBase, HostsBase, JobsBase, ServiceBase,
-        FulfillmentBase, SiteBase,
+        PoolsBase.metadata, RelaysBase.metadata, VmBase.metadata, HostsBase.metadata,
+        JobsBase.metadata, ServiceBase.metadata, FulfillmentBase.metadata,
+        SiteBase.metadata, EventingMetadata,
     ):
-        for table in base.metadata.sorted_tables:
+        for table in base.sorted_tables:
             if table.name not in stored:
                 missing.append(table.name)
                 continue

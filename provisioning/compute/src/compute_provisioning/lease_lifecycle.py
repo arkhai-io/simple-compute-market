@@ -12,7 +12,9 @@ from datetime import datetime, timedelta, timezone
 import injected_time
 from market_site.authority import SiteAuthorityPort
 
+from .operator_events import lease_release_failed_draft
 from .release import (
+    BoundJobReader,
     ReleaseAction,
     ReleaseDecision,
     ReleaseProgress,
@@ -107,6 +109,10 @@ def _datetime_value(value: Any) -> str | None:
     return isoformat() if callable(isoformat) else str(value)
 
 
+def _optional_str(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
 def _handle_read(reservation: dict[str, Any]) -> str | None:
     """The release handle a reservation carried when it was read, if releasing."""
     if str(reservation.get("state")) != "releasing":
@@ -143,6 +149,12 @@ class LeaseLifecycleService:
     leaves the lease for an operator. A release waiting on an in-flight create
     is ``releasing`` with the fulfillment as its release handle, so it survives
     a restart and a second request finds it.
+
+    Every transition into ``release_failed`` carries a prepared
+    ``provisioning.lease_release_failed`` event, which the site records in that
+    transition's transaction and drops with a refused one. It names the
+    reservation's latest teardown job and that job's failure class, read from
+    ``jobs`` when the composition gives the job authority's read.
     """
 
     TERMINAL_SUCCESS_STATES = {"released", "force_released"}
@@ -159,8 +171,10 @@ class LeaseLifecycleService:
         capacity_release_outbox: CapacityReleaseOutboxPort | None = None,
         parse_utc_value: ParseUtc = parse_utc,
         lease_end_report_drain: Callable[[], Awaitable[None]] | None = None,
+        jobs: BoundJobReader | None = None,
     ) -> None:
         self._settings = settings
+        self._jobs = jobs
         self._lease_end_report_drain = lease_end_report_drain
         self._site_authority = site_authority
         self._release_executor = release_executor
@@ -591,12 +605,22 @@ class LeaseLifecycleService:
         released; the lifecycle then leaves it as it is.
         """
         capacity_reservation_id = reservation["capacity_reservation_id"]
+        teardown_job_id, failure_class = self._latest_teardown(capacity_reservation_id)
         recorded = self._site_authority.record_release_failure(
             capacity_reservation_id,
             reason=reason,
             message=message,
             release_job_id=expected_handle,
             end_context={**(end_context or {}), "cause": "release_failed", "reason": message or reason},
+            event=lease_release_failed_draft(
+                capacity_reservation_id=capacity_reservation_id,
+                reason=reason,
+                message=message,
+                release_handle=expected_handle,
+                offering_mode=_optional_str(reservation.get("offering_mode")),
+                teardown_job_id=teardown_job_id,
+                failure_class=failure_class,
+            ),
         )
         if recorded is None:
             return self._yield_to_current_state(capacity_reservation_id, "record a failure")
@@ -605,6 +629,15 @@ class LeaseLifecycleService:
             capacity_reservation_id, reason, message or "",
         )
         return "release_failed"
+
+    def _latest_teardown(self, capacity_reservation_id: str) -> tuple[str | None, str | None]:
+        """The reservation's latest teardown job and its failure class, if any."""
+        if self._jobs is None:
+            return None, None
+        jobs = self._jobs.bound_jobs(capacity_reservation_id, "teardown")
+        if not jobs:
+            return None, None
+        return jobs[-1].job_id, jobs[-1].failure_class
 
     def _yield_to_current_state(self, capacity_reservation_id: str, write: str) -> str:
         """Honour a state another actor recorded since this cycle read the lease."""

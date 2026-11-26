@@ -23,7 +23,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from .events import DeliveryEvent
-from .sinks import ConfiguredSink, DeliveryError
+from .sinks import ConfiguredSink, Deliverable, DeliveryError
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +49,7 @@ def _failure_description(exc: BaseException) -> str:
 
 def _run_sink(
     configured: ConfiguredSink,
-    event: DeliveryEvent,
+    event: Deliverable,
     box: list[BaseException | None],
 ) -> None:
     try:
@@ -107,6 +107,27 @@ def deliver(
     return tuple(outcomes)
 
 
+def deliver_one(configured: ConfiguredSink, item: Deliverable) -> str | None:
+    """Run one sink under its bound; the failure's safe description, or None.
+
+    A sink that overruns its bound is abandoned, as in ``deliver``.
+    """
+
+    box: list[BaseException | None] = [None]
+    thread = threading.Thread(
+        target=_run_sink,
+        args=(configured, item, box),
+        name=f"delivery-{configured.name}",
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=configured.timeout_seconds)
+    if thread.is_alive():
+        return f"timed out after {configured.timeout_seconds:g}s"
+    failure = box[0]
+    return None if failure is None else _failure_description(failure)
+
+
 async def deliver_async(
     sinks: Sequence[ConfiguredSink],
     event: DeliveryEvent,
@@ -128,5 +149,6 @@ __all__ = [
     "DeliveryOutcome",
     "deliver",
     "deliver_async",
+    "deliver_one",
     "describe_outcomes",
 ]

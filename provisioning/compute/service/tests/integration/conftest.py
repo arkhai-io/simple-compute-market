@@ -135,6 +135,13 @@ from compute_provisioning_service.services.fulfillment_convergence import (
 from compute_provisioning_service.services.principal_authority import (
     SqlAlchemyProvisioningPrincipalAuthority,
 )
+from compute_provisioning_service.services.operator_events import (
+    EventsSettings,
+    event_catalogue,
+    event_pruner,
+    event_recorder,
+    event_sink_consumer,
+)
 
 
 # A deterministic development Fernet key (32 zero bytes) for this test suite
@@ -383,8 +390,6 @@ from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
 from vm_provisioning_adapter.codec import VmAnsibleCodec
-from compute_provisioning.jobs.engine import JobEngine
-from compute_provisioning_service.services.job_retry import retry_policy_from
 from compute_provisioning_ansible import MockAnsibleRunner
 from vm_provisioning_adapter.services.mock_output import vm_mock_output
 from compute_provisioning_service.services.system_status import SystemStatusService
@@ -626,6 +631,13 @@ def connectivity_probe_runner(fake_ansible):
     return fake_ansible
 
 
+@pytest.fixture
+def events_config() -> dict:
+    """The ``[Events]`` section the app runs under: no sinks, no routes. A module
+    overrides it to route events to sinks of its own."""
+    return {}
+
+
 @pytest_asyncio.fixture
 async def client_and_queue(
     session_factory,
@@ -635,6 +647,7 @@ async def client_and_queue(
     bare_metal_plan_options,
     job_retry_options,
     teardown_rerun_limit,
+    events_config,
     monkeypatch,
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue]]:
     """Yield an authenticated provisioning client and fresh async job queue."""
@@ -678,6 +691,12 @@ async def client_and_queue(
         identity_context,
     )
     replay_store = SqlAlchemyProvisioningReplayStore(session_factory)
+    # The service's eventing system as the container composes it: one recorder
+    # the ledger, the job engine and the lease lifecycle share, and the
+    # delivery worker over the event-sink consumer the [Events] section names.
+    events_settings = EventsSettings.model_validate(events_config)
+    catalogue = event_catalogue()
+    recorder = event_recorder(catalogue, instance=identity_context.storefront_site_id)
 
     from market_site.ledger import CapacityLedgerService
     # The providers' host requirement exactly as the production container
@@ -719,6 +738,7 @@ async def client_and_queue(
         # so capacity is freed here only on the proof it needs there.
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),
         release_effect=release_effects,
+        event_recorder=recorder,
     )
 
     from market_resource_pools import ResourcePoolService
@@ -744,11 +764,8 @@ async def client_and_queue(
     # The executor table starts empty, as there: composing the adapter bundles
     # below fills and freezes it.
     job_executor_table = JobExecutorTable()
-    job_engine = JobEngine(
-        session_factory,
-        executors=job_executor_table,
-        host_lookup=host_authority.lookup,
-        retry_policy=retry_policy_from(mock_settings),
+    job_engine = _container_module._make_job_engine(
+        session_factory, job_executor_table, host_authority, mock_settings, recorder
     )
     # Every job's submission, as the container builds it; the queue is read
     # when a job is submitted, after it is created below.
@@ -895,6 +912,15 @@ async def client_and_queue(
         ),
         capacity_released_notifier=AsyncMock(return_value=True),
         capacity_release_outbox=capacity_release_outbox,
+        jobs=job_engine,
+    )
+    event_delivery_worker = _container_module._make_event_delivery_worker(
+        event_sink_consumer(
+            session_factory, catalogue, events_settings,
+            signer=identity_context.signer, instance=identity_context.storefront_site_id,
+        ),
+        event_pruner(session_factory, catalogue, events_settings),
+        events_settings,
     )
     from vm_provisioning_adapter.runtime import VmProvisioningRuntime
     from vm_provisioning_adapter.services.host_operations_service import (
@@ -991,6 +1017,10 @@ async def client_and_queue(
         capacity_reservation_watchdog
     )
     _container_module.resolved_fulfillment_service = fulfillment_service
+    _container_module.resolved_event_delivery_worker = event_delivery_worker
+    _container_module.resolved_event_service = _container_module._make_event_service(
+        session_factory
+    )
 
     _container_module.resolved_job_queue = job_queue
     _container_module.resolved_vm_operations_service = app.container.vm_operations_service()

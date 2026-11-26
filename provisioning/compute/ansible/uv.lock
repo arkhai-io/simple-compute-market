@@ -56,6 +56,7 @@ source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
+    { name = "arkhai-eventing" },
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-fulfillment" },
@@ -141,6 +142,19 @@ dependencies = [
 ]
 wheels = [
     { path = "arkhai_core-0.6.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-eventing"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "sqlalchemy" },
+    { name = "sqlglot" },
+]
+wheels = [
+    { path = "arkhai_eventing-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -301,9 +315,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-site"
-version = "0.14.0"
+version = "0.15.0"
 source = { registry = "../../../.dist" }
 dependencies = [
+    { name = "arkhai-eventing" },
     { name = "arkhai-injected-time" },
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
@@ -315,7 +330,7 @@ dependencies = [
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_site-0.14.0-py3-none-any.whl" },
+    { path = "arkhai_kit_site-0.15.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1546,6 +1561,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/18/a0/22e52a672c377c9ff0856ec23af0cb62a87c95b8d247603d0ffdfe35f47a/sqlalchemy-2.1.2-cp315-cp315t-win_amd64.whl", hash = "sha256:8cecb59b29285ebb7e4dc676b2beba53030a47315a034e30e20650ad8126b131", size = 2498983, upload-time = "2026-10-02T05:17:17.071Z" },
     { url = "https://files.pythonhosted.org/packages/3d/16/99a5b57e95770362ff1ebb8f2c597ef2449015391265e7b3ae7de450ee01/sqlalchemy-2.1.2-cp315-cp315t-win_arm64.whl", hash = "sha256:835ea5779a8301e06a2a7c19e11912552125915f775deda35d3b689675f79e86", size = 2417862, upload-time = "2026-10-02T05:20:30.001Z" },
     { url = "https://files.pythonhosted.org/packages/80/df/e54318f5d645b8bf0c76b02fdd4430610afee31eada2d7ac59bee30b4715/sqlalchemy-2.1.2-py3-none-any.whl", hash = "sha256:d82dbb7e9fad337c1cfb1ecf042dc9507c0b9d287c3c6a0e0b7fdd621e2d7c27", size = 2052389, upload-time = "2026-10-02T05:14:19.853Z" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "30.35.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/4d/4d544c0ecc71c6decd643297c9ca8150aaa3477e285ccc50bc7549b1eb04/sqlglot-30.35.0.tar.gz", hash = "sha256:cca0d94bd12026184b0ba9f0f9c78a34a932d730a598de7893de448debb0149d", size = 6295274, upload-time = "2026-11-24T20:15:24.424Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/4e/71e145862b2925aea5020d19fcf47a4a2683cf6a3ff5cdd1e296aad7e552/sqlglot-30.35.0-py3-none-any.whl", hash = "sha256:136757a9845f4225f25613b26fc4e778e679c7a40b15bcc9b84e61bfc50c6dd8", size = 846417, upload-time = "2026-11-24T20:15:22.11Z" },
 ]
 
 [[package]]

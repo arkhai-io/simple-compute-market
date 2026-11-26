@@ -51,6 +51,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
 import injected_time
+from eventing import EventDraft
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
     DeliverableHosts,
@@ -64,6 +65,12 @@ from market_resource_pools_contracts import (
 )
 
 from .declarations import CapacityDeclaration
+from .events import (
+    CapacityReleasedDetails,
+    EventRecorder,
+    capacity_released_draft,
+    lease_ended_draft,
+)
 from .db import (
     HELD_RESERVATION_STATES,
     ReservationState,
@@ -718,6 +725,7 @@ class CapacityLedgerService:
         lease_end_effect: Callable[[Session, dict[str, Any]], None] | None = None,
         host_requirement: HostRequirement | None = None,
         deliverable_hosts: DeliverableHosts | None = None,
+        event_recorder: EventRecorder | None = None,
     ) -> None:
         """``required_attributes`` is an optional coarse local eligibility
         invariant: a resource matches only when its attributes give each
@@ -773,8 +781,17 @@ class CapacityLedgerService:
         from it has no usable host. The ledger learns only host identifiers
         from it and owns no host record. With a requirement but no report,
         every named host is usable.
+
+        ``event_recorder``, if supplied, records the site's events in the
+        transaction of the transition each reports (``market_site.events``):
+        ``site.lease_ended`` with every immutable ``lease_ended`` record,
+        ``site.capacity_released`` with every release that frees capacity,
+        and a caller's prepared event with an accepted release failure. A
+        recorder that raises rolls the transition back. A ledger composed
+        with none records no events, a caller's prepared event included.
         """
         self._session_factory = session_factory
+        self._event_recorder = event_recorder
         self._host_requirement = host_requirement
         self._deliverable_hosts = deliverable_hosts
         self._required_attributes = tuple(required_attributes)
@@ -1790,11 +1807,25 @@ class CapacityLedgerService:
                 context=end_context, cause="force_release" if forced else "release",
                 reason=failure_message or failure_reason,
             )
+            after_release_failure = (
+                reservation.state == ReservationState.release_failed.value
+            )
             reservation.state = state
             reservation.released_at = injected_time.now_datetime().isoformat()
             reservation.failure_reason = failure_reason
             reservation.failure_message = failure_message
             self._run_release_effect(db, reservation.capacity_reservation_id, state)
+            self._record_event(db, capacity_released_draft(
+                CapacityReleasedDetails(
+                    capacity_reservation_id=reservation.capacity_reservation_id,
+                    site_id=self._site_id,
+                    state=state,
+                    released_at=reservation.released_at,
+                    failure_reason=failure_reason,
+                ),
+                forced=forced,
+                after_release_failure=after_release_failure,
+            ))
             db.add(
                 CapacityEvent(
                     kind="released",
@@ -2124,6 +2155,7 @@ class CapacityLedgerService:
         message: str | None = None,
         release_job_id: str | None = None,
         end_context: Mapping[str, Any] | None = None,
+        event: EventDraft | None = None,
     ) -> dict[str, Any] | None:
         """Record that a release failed, if the reservation is still releasable.
 
@@ -2133,6 +2165,10 @@ class CapacityLedgerService:
         cannot reach a reservation an operator took over or force-released, nor
         one already released. ``None`` means refused, and nothing was written.
         No capacity event: a failed release still holds the units.
+
+        ``event`` is the caller's prepared event, recorded in this transaction
+        when the transition is accepted, without the site reading its kind; a
+        refused transition records nothing.
         """
         with self.serialized(), self._session_factory() as db:
             reservation = db.get(CapacityReservation, capacity_reservation_id)
@@ -2151,6 +2187,8 @@ class CapacityLedgerService:
             reservation.state = ReservationState.release_failed.value
             reservation.failure_reason = reason
             reservation.failure_message = message
+            if event is not None:
+                self._record_event(db, event)
             db.commit()
             return self._reservation_payload(reservation)
 
@@ -2373,8 +2411,13 @@ class CapacityLedgerService:
         # see the immutable event. The effect may sign and reserve its outbox,
         # but never commits: a failed reservation must roll back the end too.
         db.flush()
+        self._record_event(db, lease_ended_draft(dict(payload), transition_key=transition_key))
         if self._lease_end_effect is not None:
             self._lease_end_effect(db, dict(payload))
+
+    def _record_event(self, db: Session, draft: EventDraft) -> None:
+        if self._event_recorder is not None:
+            self._event_recorder.record(db, draft)
 
     def lease_end_events(self, capacity_reservation_id: str) -> list[dict[str, Any]]:
         with self.serialized(), self._session_factory() as db:

@@ -114,6 +114,10 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_capacity_reservation_watchdog = (
         container.capacity_reservation_watchdog()
     )
+    # Built here so a sink, route or finally sink the eventing component
+    # refuses refuses the service's start, naming it.
+    _container_module.resolved_event_delivery_worker = container.event_delivery_worker()
+    _container_module.resolved_event_service = container.event_service()
 
 
 def import_contributed_definitions_if_configured() -> None:
@@ -329,6 +333,17 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             "Fulfillment convergence watchdog disabled "
             "(fulfillment_convergence_watchdog_enabled=false)"
         )
+
+    # The event delivery worker delivers what the routes select and prunes by
+    # the configured retention; its controls hold and step it.
+    tasks.append(
+        ComputeProvisioningBackgroundTask(
+            "event-delivery-worker",
+            lambda: _container_module.resolved_event_delivery_worker.run(),
+            "Event delivery worker started (interval=%gs)",
+            (container.events_settings().delivery_interval_seconds,),
+        )
+    )
 
     contributed = _container_module.resolved_background_tasks
     if contributed is None:

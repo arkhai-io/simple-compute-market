@@ -229,3 +229,22 @@ identifier = ""
 [admin_identity]
 scheme = ""
 identifier = ""
+# Operator events: the kinds this service records, delivered to the sinks a
+# deployment's routes select. Sinks are [Events.sinks], shaped as a storefront's
+# [Delivery] (`enabled` names the instances; each [Events.sinks.<name>] names its
+# `sink` and its settings, secret ones in the Secret overlay). Each
+# [Events.routes.<name>] states a `where` SQL condition over the event's
+# envelope fields and its kind's attributes and the `sinks` it selects; a route
+# or sink the service cannot use refuses its start. A sink failing an event is
+# retried until the delivery is `sink_max_age_seconds` old, then abandoned to
+# `finally`: "log", or an enabled sink instance. Retention is in days per table,
+# 0 keeping every row; an event is never pruned while a destination still owes it.
+[Events]
+delivery_interval_seconds = 10
+sink_max_age_seconds = 86400
+finally = "log"
+
+[Events.retention_days]
+events = 30
+deliveries = 30
+lease_end_reports = 0

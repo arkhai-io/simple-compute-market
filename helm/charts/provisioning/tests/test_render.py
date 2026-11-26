@@ -395,6 +395,84 @@ def test_real_provisioning_refuses_a_missing_ssh_key_secret_name() -> None:
             assert refusal in rendered.stderr, (values, rendered.stderr)
 
 
+_EVENTS = {
+    "retention_days": {"events": 14},
+    "sinks": {
+        "enabled": ["ops-push", "ops-mail"],
+        "ops-push": {"sink": "apprise", "title": "Provisioning"},
+        "ops-mail": {
+            "sink": "smtp", "host": "mail.example.invalid",
+            "sender": "ops@example.invalid", "recipients": ["ops@example.invalid"],
+        },
+    },
+    "routes": {
+        "held-work": {"where": "severity = 'action_required'", "sinks": ["ops-push", "ops-mail"]},
+    },
+}
+
+
+def _profile(manifest: str) -> dict:
+    """The rendered ``config-production.yml``, which the chart writes as JSON."""
+    lines = manifest.split("config-production.yml: |\n", 1)[1].splitlines()
+    body = []
+    for line in lines:
+        if line.strip() and not line.startswith("    "):
+            break
+        body.append(line)
+    return json.loads(textwrap.dedent("\n".join(body)))
+
+
+def test_the_events_section_renders_into_the_profile_as_given() -> None:
+    rendered = _render({"config": {"Events": _EVENTS}})
+    assert rendered.returncode == 0, rendered.stderr
+    events = _profile(rendered.stdout)["Events"]
+    assert events == _EVENTS
+
+    python = os.environ.get("PROVISIONING_PYTHON")
+    if not python:
+        print("skip: PROVISIONING_PYTHON unset; the [Events] parser did not run")
+        return
+    consume = """
+import json, sys
+from compute_provisioning_service.services.operator_events import EventsSettings
+
+settings = EventsSettings.model_validate(json.loads(sys.stdin.read()))
+assert settings.routes["held-work"].sinks == ["ops-push", "ops-mail"]
+assert settings.retention_days.events == 14
+"""
+    loaded = subprocess.run(
+        [python, "-c", consume], input=json.dumps(events),
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert loaded.returncode == 0, loaded.stderr
+
+
+def test_a_secret_sink_setting_in_public_config_is_refused() -> None:
+    """A sink's secret settings belong in the runtime Secret's overlay; the
+    schema refuses each in public config, whatever instance carries it."""
+    for instance, secret in (
+        ({"sink": "apprise", "urls": ["ntfy://ntfy.example.invalid/topic"]}, "urls"),
+        ({"sink": "webhook", "url": "https://hooks.example.invalid/token"}, "url"),
+        ({"sink": "smtp", "host": "mail.example.invalid", "sender": "a@example.invalid",
+          "recipients": ["a@example.invalid"], "username": "a", "password": "fixture"}, "password"),
+    ):
+        events = {"sinks": {"enabled": ["ops"], "ops": instance}}
+        rendered = _render({"config": {"Events": events}})
+        assert rendered.returncode != 0, f"{secret} was accepted"
+        assert secret in rendered.stderr, rendered.stderr
+
+
+def test_an_events_setting_the_service_does_not_read_is_refused() -> None:
+    for events, key in (
+        ({"delivery_interval": 10}, "delivery_interval"),
+        ({"routes": {"held-work": {"where": "TRUE", "sinks": ["a"], "sink": "a"}}}, "sink"),
+        ({"retention_days": {"events": -1}}, "events"),
+    ):
+        rendered = _render({"config": {"Events": events}})
+        assert rendered.returncode != 0, f"{key} was accepted"
+        assert key in rendered.stderr, rendered.stderr
+
+
 if __name__ == "__main__":
     test_empty_definitions_render_no_document_mount_or_path()
     test_each_definition_renders_its_document_mount_and_path_alone()
@@ -413,4 +491,7 @@ if __name__ == "__main__":
     test_mock_provisioning_mounts_no_ssh_key_and_needs_no_secret_name()
     test_real_provisioning_mounts_the_ssh_key_from_its_secret()
     test_real_provisioning_refuses_a_missing_ssh_key_secret_name()
+    test_the_events_section_renders_into_the_profile_as_given()
+    test_a_secret_sink_setting_in_public_config_is_refused()
+    test_an_events_setting_the_service_does_not_read_is_refused()
     print("provisioning chart render checks passed")

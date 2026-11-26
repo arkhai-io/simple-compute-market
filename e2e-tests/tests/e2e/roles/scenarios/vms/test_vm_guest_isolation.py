@@ -648,6 +648,10 @@ class TestStage11b_TeardownCompletion(real_deal.TestStage11b_TeardownCompletion)
     pass
 
 
+class TestStage11c_LeaseEventsRecorded(real_deal.TestStage11c_LeaseEventsRecorded):
+    pass
+
+
 class TestStage11c_GuestGoneFromHost(real_deal.TestStage11c_GuestGoneFromHost):
     pass
 

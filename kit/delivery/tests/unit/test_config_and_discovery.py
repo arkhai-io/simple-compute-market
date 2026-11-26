@@ -7,6 +7,7 @@ from market_delivery import (
     ConfiguredSink,
     DeclaredSink,
     DeliveryConfigurationError,
+    SigningAs,
     SinkSettings,
     build_delivery_sinks,
     discover_sink_settings_models,
@@ -282,6 +283,23 @@ def test_signing_requires_a_signer() -> None:
     )
     with pytest.raises(DeliveryConfigurationError, match="no marketplace signer"):
         build_delivery_sinks(config, factories={"webhook": _recording_factory([])})
+
+
+def test_a_signing_instance_is_handed_the_signer_and_what_it_signs_as() -> None:
+    handed: list[dict] = []
+
+    def factory(settings, **kwargs):
+        handed.append(kwargs)
+        return lambda event: None
+
+    config = load_delivery_config(
+        {"enabled": ["hook"], "hook": {"sink": "webhook", "url": "https://x.invalid", "sign": True}}
+    )
+    signing = SigningAs(role="service", operation="operator_event_delivery")
+    with pytest.raises(DeliveryConfigurationError, match="no role and operation"):
+        build_delivery_sinks(config, factories={"webhook": factory}, signer="signer")
+    build_delivery_sinks(config, factories={"webhook": factory}, signer="signer", signing=signing)
+    assert handed == [{"signer": "signer", "signing": signing}]
 
 
 def test_installed_built_in_sinks_declare_their_settings_models() -> None:

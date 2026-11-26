@@ -1,11 +1,11 @@
-"""Deliver each event through Apprise to the services its URLs name.
+"""Deliver each deliverable through Apprise to the services its URLs name.
 
 Apprise reaches email, chat, SMS, and push services from one URL each
 (``mailto://``, ``slack://``, ``tgram://``, ``sns://``, and many more), so an
-operator can be told about a reveal wherever they read things without the
-marketplace implementing any of those services. The URLs routinely embed the
-service's own token, so they are secret settings, and a failure names neither
-a URL nor what was being carried.
+operator can be told about a reveal, or an operator event, wherever they read
+things without the marketplace implementing any of those services. The URLs
+routinely embed the service's own token, so they are secret settings, and a
+failure names neither a URL nor what was being carried.
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from typing import Any
 import apprise
 from market_delivery import (
     DeclaredSink,
+    Deliverable,
     DeliveryError,
-    DeliveryEvent,
     DeliverySink,
     SinkSettings,
 )
@@ -43,7 +43,7 @@ def build_apprise_sink(settings: Mapping[str, Any]) -> DeliverySink:
             # The position, never the URL: the URL is usually the credential.
             raise ValueError(f"apprise sink url {index} is not a URL Apprise recognises")
 
-    def deliver_through_apprise(event: DeliveryEvent) -> None:
+    def deliver_through_apprise(event: Deliverable) -> None:
         try:
             delivered = notifier.notify(title=config.title, body=event.rendered)
         except Exception as exc:  # noqa: BLE001 - reported by class alone

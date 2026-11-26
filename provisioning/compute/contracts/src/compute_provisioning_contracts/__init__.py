@@ -63,6 +63,17 @@ from .hosts import (
     HostResponse,
     HostUpdate,
 )
+from .events import (
+    EventDeliveriesResponse,
+    EventDeliveryCycleResponse,
+    EventDeliveryHead,
+    EventDestinationResumeResponse,
+    EventDestinationStatus,
+    EventListResponse,
+    EventReference,
+    EventSource,
+    OperatorEvent,
+)
 from .jobs import (
     JobCredentialsResponse,
     JobListResponse,
@@ -137,6 +148,15 @@ from .routes import (
 )
 
 __all__ = [
+    "EventDeliveriesResponse",
+    "EventDeliveryCycleResponse",
+    "EventDeliveryHead",
+    "EventDestinationResumeResponse",
+    "EventDestinationStatus",
+    "EventListResponse",
+    "EventReference",
+    "EventSource",
+    "OperatorEvent",
     "ACCESS_DELIVERY_KIND",
     "ACCESS_DELIVERY_SCHEMA_VERSION",
     "AccessDelivery",

@@ -30,6 +30,7 @@ from compute_provisioning.jobs.migrations import BASELINE as JOBS_BASELINE
 from compute_provisioning.jobs.migrations import MIGRATIONS as JOBS_MIGRATIONS
 from compute_provisioning.relays.migrations import BASELINE as RELAYS_BASELINE
 from compute_provisioning_ansible.connection import SSH_CONNECTION_KIND, SshConnectionCodec
+from eventing import SCHEMA_STEPS as EVENTING_SCHEMA_STEPS
 from market_fulfillment.migrations import BASELINE as FULFILLMENT_BASELINE
 from market_resource_pools.migrations import BASELINE as POOLS_BASELINE
 from market_schema_migrations import Chain, Migration
@@ -300,6 +301,13 @@ FLOOR_IDS: tuple[str, ...] = (
 )
 """Every ID the v0.3.0 release's chain recorded on a database it built."""
 
+#: The eventing component's schema, one migration per step it supplies, in its
+#: order: the service's event store, which the site ledger, the job engine and
+#: the delivery worker share with the rest of its database.
+EVENTING_MIGRATIONS: tuple[Migration[Connection], ...] = tuple(
+    Migration(step.name, step.apply) for step in EVENTING_SCHEMA_STEPS
+)
+
 CHAIN: Chain[Connection] = Chain(
     service=SERVICE,
     command=COMMAND,
@@ -318,6 +326,7 @@ CHAIN: Chain[Connection] = Chain(
         SSH_CONNECTIONS_VERSION_2,
         *JOBS_MIGRATIONS,
         SSH_CONNECTIONS_VERSION_3,
+        *EVENTING_MIGRATIONS,
     ),
     floor_ids=FLOOR_IDS,
 )

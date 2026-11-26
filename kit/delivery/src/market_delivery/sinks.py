@@ -1,10 +1,12 @@
 """The sink contract: what an installed delivery backend implements.
 
-A sink is a plain synchronous callable. Blocking is expected -- writing a file,
-running a program, opening a socket -- and the dispatcher, not the sink, owns
-running it off the caller's critical path and bounding how long it may take.
-That keeps a third-party sink to a few lines and keeps every timeout policy in
-one place.
+A sink is a plain synchronous callable over a ``Deliverable``: it reads only
+``rendered``, ``payload()`` and ``reference``, so one installed sink serves a
+revealed introduction and an operator event alike. Blocking is expected --
+writing a file, running a program, opening a socket -- and the dispatcher, not
+the sink, owns running it off the caller's critical path and bounding how long
+it may take. That keeps a third-party sink to a few lines and keeps every
+timeout policy in one place.
 """
 
 from __future__ import annotations
@@ -14,8 +16,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from .events import DeliveryEvent
 
 #: Installed sinks are discovered here, the same way buyer domains are.
 SINK_ENTRY_POINT_GROUP = "market.delivery_sinks"
@@ -37,11 +37,37 @@ class DeliveryConfigurationError(ValueError):
     """Configuration that cannot produce a working sink set."""
 
 
+class Deliverable(Protocol):
+    """What a sink delivers: a rendering for a person, the structured form a sink
+    transmits, and the reference naming what it is about."""
+
+    @property
+    def rendered(self) -> str: ...
+
+    @property
+    def reference(self) -> str: ...
+
+    def payload(self) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SigningAs:
+    """The role and operation a signing sink signs its requests as.
+
+    A composition states them, so each service signs its deliveries as itself:
+    a storefront's introductions as the seller, a provisioning service's events
+    as that service.
+    """
+
+    role: str
+    operation: str
+
+
 @runtime_checkable
 class DeliverySink(Protocol):
-    """Deliver one event, or raise."""
+    """Deliver one deliverable, or raise."""
 
-    def __call__(self, event: DeliveryEvent) -> None: ...
+    def __call__(self, event: Deliverable) -> None: ...
 
 
 class SinkFactory(Protocol):
@@ -94,9 +120,11 @@ __all__ = [
     "SINK_ENTRY_POINT_GROUP",
     "ConfiguredSink",
     "DeclaredSink",
+    "Deliverable",
     "DeliveryConfigurationError",
     "DeliveryError",
     "DeliverySink",
     "SinkFactory",
+    "SigningAs",
     "SinkSettings",
 ]

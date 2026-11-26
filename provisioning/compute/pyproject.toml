@@ -8,9 +8,12 @@ dependencies = [
     # The job view carrying its structured failure, and ProvisioningErrorEnvelope.
     "arkhai-compute-provisioning-contracts>=0.18.0",
     "arkhai-core>=0.4.0",
+    # The operator event kinds the lease lifecycle and the job engine record.
+    "arkhai-eventing>=0.1.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-config",
-    "arkhai-kit-site>=0.10.0",
+    # The site's event recorder and a release failure's prepared event.
+    "arkhai-kit-site>=0.15.0",
     "arkhai-kit-resource-pools>=0.3.0",
     # The pool declarations a resource view's pool context carries.
     "arkhai-kit-resource-pools-contracts>=0.3.0",
