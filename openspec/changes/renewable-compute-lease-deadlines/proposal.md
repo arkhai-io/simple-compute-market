@@ -89,8 +89,9 @@ None.
 
 ## Non-Goals
 
-- Renewing a deadline on an active lease, a policy for a lapsed one, and any end of
-  delivery calculated from what a deal has funded: `lapse-billing-with-the-site-lease`
+- Any end of delivery calculated from what a deal has funded:
+  `end-delivery-when-funding-runs-out`, which leaves the site untouched. Renewing a
+  deadline on an active lease, and a policy for a lapsed one, are built by no change
   (design D4).
 - Retiring the clause-configured deadline (D7).
 - A service-level or site-wide setting for enforcement, a way for a pool to decline a
@@ -120,7 +121,8 @@ None.
   and `serve-running-rate-deals` (end service's deadline rule).
 - `converge-ongoing-compute-leases` gives this change its late-anchor row (that
   change's design, D5). The form in which this change proves it is open in the design.
-- `lapse-billing-with-the-site-lease` depends on this change and holds what D4 names.
+- `end-delivery-when-funding-runs-out` holds what D4 names. It does not depend on this
+  change.
 - `activate-per-period-compute-servicing` depends on this change.
 - `capacity-reservation-lifecycle-hardening` indexes hold expiry on the same table. The
   two coordinate migration order; neither depends on the other's behaviour.

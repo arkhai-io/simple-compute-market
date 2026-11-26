@@ -183,10 +183,11 @@ as such (row 13). An accepted case is not recoverable money; the authority's per
 answer is what the buyer sees.
 
 The buyer's end runs live exactly as the foundation's "The buyer's end" states it,
-with the storefront's signed receipt kept as evidence. Where a seller enables
-convergence's funding timer, verify at funding expiry that the payment read comes first:
-renewal replaces timer, verified exhaustion is an authority end, and only
-unreachable/unverifiable evidence permits bare-timer end and later self-penalty filing.
+with the storefront's signed receipt kept as evidence. Where
+`end-delivery-when-funding-runs-out` has landed, verify at a deal's funded instant that
+the payment read comes first: a later funded instant replaces the earlier one, and
+verified exhaustion is the authority's end. A funded instant the authority cannot
+confirm cannot be made live and stays lane-double evidence.
 
 For nonzero notice, end_delivery is explicit end-now or outage fallback, not normal
 follow-up to payer stop. Operator VM emergency files delivery_end in on-demand

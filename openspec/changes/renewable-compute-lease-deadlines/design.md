@@ -209,31 +209,31 @@ Rejected:
 - A pool stating none discarding the deadline the commit carries. The site would hold
   capacity for a deal it was told how long to wait for.
 
-### D4 — An end calculated from what a deal has funded is `lapse-billing-with-the-site-lease`'s
+### D4 — An end calculated from what a deal has funded is `end-delivery-when-funding-runs-out`'s
 
 This change's deadline reads no money. It answers when a lease that was never activated
 is reclaimed, from the time since the deal's commitment. When a running deal's delivery
 ends, calculated from what the deal has funded, is one calculation for every class of
-deal, and `lapse-billing-with-the-site-lease` designs it, with any renewal of a deadline
-on an active lease and what a site does when one lapses.
+deal, and `end-delivery-when-funding-runs-out` holds it.
 
-This change is built so that work can follow it:
+That change has the storefront end delivery itself and leaves the site untouched, so it
+uses nothing built here. It rejects a deadline on an active lease that a storefront
+renews and the site enforces, to be revisited when a site's operator is not its
+storefront's. This change stays built so that such a deadline can follow it:
 
 - one activation deadline, written at commit and never rewritten;
 - an expiry claim over what made the lease due (D2);
 - a lease-end report that names which deadline was claimed (D5).
 
-Where a funded instant is enforced, at the site as the storefront tells it or by the
-storefront truncating the lease, is that change's question. This change is right under
-either. Under the second, nothing here is touched; under the first, the claim and the
-report are what it builds on.
+No renewal of a deadline on an active lease, and no site policy for one that lapses,
+is built by any change.
 
 Rejected:
 
 - One neutral due instant, holding the delivery deadline before activation and a funded
-  instant after it. It decides that change's question here, and it needs activation to
-  write more than `site-capacity`'s "Activation records its instant once and changes
-  nothing else" allows.
+  instant after it. It has the site enforce a funded instant, which that change
+  rejects, and it needs activation to write more than `site-capacity`'s "Activation
+  records its instant once and changes nothing else" allows.
 - Waiting for that change. The gap this change closes is released and reads no funding.
 
 ### D5 — An activation lapse is lease-end evidence

@@ -97,8 +97,8 @@ its owners.
       residual hosted payment/dispute matrix in design D4: priced payer stop plus
       hint, authority partialPeriod billing in bare metal (and `prorated` if
       offered), setup once, seller
-      notice surviving storefront absence, read-before-timer-end where the funding
-      timer is enabled, delivery_end dispute filing and sole qualifying mechanical
+      notice surviving storefront absence, the payment read before an end at a
+      deal's funded instant, delivery_end dispute filing and sole qualifying mechanical
       payee ruling, buyer-half same-key outage stop retry with billing until landing,
       receipt evidence and receipt-backed delivery_end or triage, case extend/lift
       and partial reverse after stop, and the buyer's independent recovery

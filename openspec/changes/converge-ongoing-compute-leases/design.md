@@ -132,15 +132,15 @@ already records, made by the party that cannot check it. Rejected too: recording
 condition under which to revisit, since a site can always run its provisioning service
 again.
 
-### D4 — The funding timer is `lapse-billing-with-the-site-lease`'s
+### D4 — The funding timer is `end-delivery-when-funding-runs-out`'s
 
 This change builds no funding timer. When a deal's delivery ends for want of funds is
-to be calculated by one mechanism from what the deal has funded, for every class of
-deal, and `lapse-billing-with-the-site-lease` is where that is designed, with the site
-lease it lapses. Whether a seller opts into it, and what it asks of the payments
-service, are that change's questions. Until it lands, a running rate deal's funding end
-reaches end service only as the payment authority's recorded stop, as `deal-lifecycle`'s
-companion states under "Current limits".
+calculated by one rule from what the deal has funded, for every class of deal, and
+`end-delivery-when-funding-runs-out` holds it: the storefront ends delivery itself, the
+calculation always runs, and nothing is asked of the site or the payments service.
+Until it lands, a running rate deal's funding end reaches end service only as the
+payment authority's recorded stop, as `deal-lifecycle`'s companion states under
+"Current limits".
 
 Rejected: a seller's opt-in timer for rate deals here. It would be one of several
 mechanisms each ending delivery for its own category of deal.

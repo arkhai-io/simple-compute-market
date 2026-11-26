@@ -74,7 +74,7 @@ None.
 ## Non-Goals
 
 - A funding timer, or any end of delivery calculated from what a deal has funded:
-  `lapse-billing-with-the-site-lease` (D4).
+  `end-delivery-when-funding-runs-out` (D4).
 - Operator recovery with the storefront stopped, its evidence export and its command
   envelope: `recover-deals-from-the-storefront-cli`, deferred (D2).
 - A storefront command acknowledging a release the site has not proven (D3).
@@ -91,7 +91,9 @@ None.
   `drive-the-storefront-clock-in-lanes` and `switch-on-hosted-per-period-vm`.
 - `activate-per-period-compute-servicing` depends on it: it runs the matrix against the
   hosted authorities.
-- `lapse-billing-with-the-site-lease` depends on it and takes the funding timer.
+- `end-delivery-when-funding-runs-out` takes the funding timer and does not depend on
+  this change. Both modify `deal-lifecycle`'s "Each deal's servicing steps run in one
+  kit-owned order"; whichever lands second reverifies against the other.
 - `renewable-compute-lease-deadlines` takes the late-anchor row.
 - `recover-deals-from-the-storefront-cli` takes operator recovery.
 
