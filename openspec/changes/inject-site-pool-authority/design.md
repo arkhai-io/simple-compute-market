@@ -206,7 +206,11 @@ lines and put a provider mapping in the foundation area. Redefining the protocol
 `site_declarations.py` and `asking_rates.py` move from `kit/resource-pools` into
 `kit/resource-pools-contracts`, beside the `listing_terms` and `capacity_bounds`
 resolvers it already holds; both import only the standard library and the contracts
-package, within its allowlist. The authority does not re-export them. The VM, bare-metal
+package, within its allowlist. The contracts package already has an `asking_rates.py`
+holding the structural checks the resolution imports, so the resolution joins that
+module, one module for an asking rate's declaration, contract and resolution, as the
+authority's module already described itself; `site_declarations.py` keeps its name. The
+authority does not re-export them. The VM, bare-metal
 and API-credit storefronts and `arkhai_vms_listings` import them from contracts and drop
 `arkhai-kit-resource-pools` from their runtime dependencies, keeping it in their `dev`
 group only where tests seed pool rows. `host_requirement.py` stays with the authority as
