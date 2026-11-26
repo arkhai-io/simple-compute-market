@@ -103,8 +103,9 @@ None.
   site is untouched.
 - `discover-open-ended-compute-listings` settles how a class is read. The rule reads no
   class (D5).
-- `activate-per-period-compute-servicing` completes Goal 8, which waits for this
-  change (D8). Whether it depends on this change is open in the design.
+- Goal 8 waits for this change: the roadmap's "Done when" names its closeout (D8).
+  `qualify-per-period-bare-metal-and-setup-charges` does not depend on it and adds no
+  live scenario for it.
 - **Builds on**, all archived: `agreed-evidence-and-early-termination` (end service and
   its journal), `spot-deals-through-arkhai-payments` (the rate adapter and its
   observations), `serve-running-rate-deals` (the servicing cycle and the payment-stop

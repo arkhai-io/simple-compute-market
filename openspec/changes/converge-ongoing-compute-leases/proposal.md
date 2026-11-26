@@ -82,15 +82,18 @@ None.
   `renewable-compute-lease-deadlines` (D5).
 - Re-anchoring a running deal across a receipt key change. A key change is a drained
   cutover, and the gap is tabled in Goal 8's unowned work.
-- Payment arithmetic, the mandate codec, authority policy, buyer acceptance policy, and
-  hosted qualification, which is `activate-per-period-compute-servicing`'s.
+- Payment arithmetic, the mandate codec, authority policy and buyer acceptance policy.
+- Live verification against hosted authorities:
+  `qualify-per-period-bare-metal-and-setup-charges` adds the live twins of the rows
+  here that reach an authority.
 
 ## Dependencies and Related Changes
 
 - Nothing gates this change. It builds on the archived `serve-running-rate-deals`,
   `drive-the-storefront-clock-in-lanes` and `switch-on-hosted-per-period-vm`.
-- `activate-per-period-compute-servicing` depends on it: it runs the matrix against the
-  hosted authorities.
+- `qualify-per-period-bare-metal-and-setup-charges` depends on it, for its design: that
+  design names which of the rows landed here get a live verification twin, each sharing
+  its row's assertion.
 - `end-delivery-when-funding-runs-out` takes the funding timer and does not depend on
   this change. Both modify `deal-lifecycle`'s "Each deal's servicing steps run in one
   kit-owned order"; whichever lands second reverifies against the other.

@@ -247,8 +247,9 @@ authority would not. The gate is external to this repository and is recorded in 
 campaign index as one, not as a dependency on a change.
 
 Vendoring is not deployment. Whether the authority a given option names runs the
-revision is Q6; qualifying a hosted authority on it is
-`activate-per-period-compute-servicing`'s.
+revision is Q6. This change makes its own live observation of the shape against a hosted
+dispute authority that maps it (Q9): Goal 8 waits for this change's closeout, and no
+other change verifies a hold shape live.
 
 Rejected:
 
@@ -545,7 +546,8 @@ moved in the design session.
   and what an unknown shape does; `settlement-servicing` the derivation per shape;
   `settlement-configuration` the seller's key and, under Q6 (a), the advertisement
   field; `buyer-orchestration` the display; `cli-query-language` the projection;
-  `test-compatibility` the lane row and the double's mapping check.
+  `test-compatibility` the lane row, its live verification twin and the double's
+  mapping check.
 - **Documents a seller or buyer reads.** `docs/seller-quickstart.md`, "Payout", and
   `docs/buyer-quickstart.md`, on the penalty and on disputes, state today's hold and
   gain the shape; `kit/arkhai-payments/README.md` describes the derivation.
@@ -553,8 +555,13 @@ moved in the design session.
   unit tests in their kits. The mapping's expected hold is the mediation kit's vector
   replay. One VM lane scenario on lane time runs an after-earning deal past the window,
   shows an early period released and a seller's filing whose penalty is capped by what
-  is still held, as lane-double evidence. Hosted evidence is
-  `activate-per-period-compute-servicing`'s.
+  is still held, as lane-double evidence. One live verification scenario is that
+  scenario's twin: it gives a hosted dispute authority that maps the shape the seller's
+  filing on an after-earning deal and compares the ruling through the lane scenario's
+  assertion, on wall time and mock provisioning, with its topology requirements stated
+  in `e2e-tests/README.md` (`test-compatibility`'s "Each live verification scenario
+  states its topology requirements"). It needs the deployed authority to run the
+  revision of D5, which is the capability this change waits on.
 
 ### Q10 — Implementation cadence
 
@@ -591,5 +598,6 @@ against these, by title.
 - `storefront-publication`: "Recurring presets expose the premature-stop penalty" under
   Q3 (b) or (c).
 - `test-compatibility`: "Lanes run a mediation double that answers from programmed
-  rules" and "The in-lane payments double mirrors the service and proves its engine's
-  surface".
+  rules", "The in-lane payments double mirrors the service and proves its engine's
+  surface" and, for the live twin, "Rate deals and dispute filings are verified live
+  against a prepared topology".

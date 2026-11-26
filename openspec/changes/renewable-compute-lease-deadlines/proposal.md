@@ -123,7 +123,8 @@ None.
   change's design, D5). The form in which this change proves it is open in the design.
 - `end-delivery-when-funding-runs-out` holds what D4 names. It does not depend on this
   change.
-- `activate-per-period-compute-servicing` depends on this change.
+- No change depends on this one. Goal 8 waits for it: the roadmap's "Done when" names
+  its closeout.
 - `capacity-reservation-lifecycle-hardening` indexes hold expiry on the same table. The
   two coordinate migration order; neither depends on the other's behaviour.
 

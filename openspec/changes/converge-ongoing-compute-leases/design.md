@@ -260,11 +260,11 @@ presets disabled until a hosted dispute authority is qualified on the vendored
 
 - (a) The lane storefronts declare `setup = true`, in the lane configuration only, as
   they declared `charged` and `returned` before either was a supported configuration.
-- (b) The setup rows go to `activate-per-period-compute-servicing`, which switches
-  setup charges on.
+- (b) The setup rows go to `qualify-per-period-bare-metal-and-setup-charges`, which
+  makes a setup charge a supported seller configuration.
 
 Recommended: (a). The rows prove this repository's handling against the doubles, and
-activation then repeats them against the hosted authorities.
+that change then gives the ones that reach an authority a live verification twin.
 
 ### Q7 — Provisional answers
 

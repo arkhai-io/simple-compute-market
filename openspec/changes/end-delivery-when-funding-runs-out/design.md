@@ -218,8 +218,17 @@ open gaps, listed in its table with the change that owns it, and the goal is not
 complete while it is open. The products the goal sells are the ones whose funded instant
 moves while the deal runs.
 
+The roadmap carries that order: its "Done when" names this change's closeout among
+those the goal waits for. No change depends on this one for it.
+`qualify-per-period-bare-metal-and-setup-charges`, which makes Goal 8's remaining live
+observations, adds none for this change: funds running out with the payment authority
+readable is already compared live, and a funded instant the authority cannot confirm
+cannot be made live, so it stays lane-double evidence.
+
 Rejected: keeping it outside the goal as preserved work. The goal's own current state
-names the missing funding timer.
+names the missing funding timer. Rejected too: a dependency of
+`qualify-per-period-bare-metal-and-setup-charges` on this change, which would gate
+nothing that change does and make the goal's order a property of one change's index row.
 
 ## Open Questions
 
@@ -379,19 +388,7 @@ Recommended: (a). The rule needs an end and its instant, not its reason, and the
 classification that needs the reason already has it. It would move to (b) if a deal
 approved after its mandate's end can be delivered.
 
-### Q6 — Whether `activate-per-period-compute-servicing` depends on this change
-
-That change's closeout is Goal 8's completion, and under D8 the goal waits for this
-one.
-
-- (a) It depends on this change, and its live matrix runs funds running out under the
-  rule. A funded instant the authority cannot confirm cannot be made live; it stays
-  lane-double evidence.
-- (b) No dependency. The roadmap names both closeouts as the goal's completion.
-
-Recommended: (a), so the goal keeps one completing change.
-
-### Q7 — Provisional answers
+### Q6 — Provisional answers
 
 Each follows from something settled or from the nearest precedent, and is confirmed or
 moved in the design session.
@@ -423,7 +420,7 @@ moved in the design session.
 - **The operator handbook.** "Serving rate deals" says what a storefront does at a
   funded instant, and "Pool definitions" documents the tag if Q1 settles on one.
 
-### Q8 — Implementation cadence
+### Q7 — Implementation cadence
 
 Recommended: two rounds. First the port, the rule with its read outcomes and the
 payments adapter's report, with their kit and application integration tests, one
@@ -432,9 +429,8 @@ the lane rows, one session, or two if Q3 finds the Alkahest read large.
 
 ## Verification
 
-Provisional levels are in Q7. Nothing here is proven against a hosted authority: every
-lane row is lane-double evidence, and the live case is
-`activate-per-period-compute-servicing`'s if Q6 settles that way.
+Provisional levels are in Q6. Nothing here is proven against a hosted authority: every
+lane row is lane-double evidence, and no live scenario is added (D8).
 
 ## Design promotion record
 

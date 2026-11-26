@@ -83,7 +83,8 @@ knows an authority maps a shape, the projection's form, and where the seller sta
 - `buyer-orchestration`: the display per shape, and the default buyer's answer to a
   stated shape.
 - `cli-query-language`: the projection among the common lifecycle fields.
-- `test-compatibility`: a lane scenario, and the mediation double's mapping check.
+- `test-compatibility`: a lane scenario, its live verification twin, and the mediation
+  double's mapping check.
 - `storefront-publication`: only if the design settles a publication report or refusal
   for a penalty the hold cannot back.
 
@@ -101,8 +102,6 @@ None.
 - A seller-funded bond, the codec's reserved `bond` term.
 - The payments service's payout delay after release, which is the service's own.
 - What a seller owes its site and when.
-- Hosted qualification of the shape, which is
-  `activate-per-period-compute-servicing`'s.
 
 ## Dependencies and Related Changes
 
@@ -124,8 +123,10 @@ None.
 - `filter-listings-by-capacity-bounds` owns the registry's bound filters. This change
   adds a lifecycle projection, which needs nothing of the filter grammar that change
   extends.
-- `activate-per-period-compute-servicing` depends on this change and qualifies hosted
-  whatever shape it offers.
+- Goal 8 waits for this change: the roadmap's "Done when" names its closeout. No
+  change depends on it. `qualify-per-period-bare-metal-and-setup-charges` verifies no
+  hold shape live, so this change makes its own live observation of an after-earning
+  deal, against a hosted dispute authority that maps the shape.
 
 ## Impact
 
