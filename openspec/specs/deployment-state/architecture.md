@@ -134,6 +134,8 @@ The settlement cutover deliberately rejects runtime aliases. Migration tooling i
 
 Typed settlement metadata generates role-appropriate templates, edit validation, environment schema fragments, and reference output. Each storefront chart's values schema carries a generated definition that refuses secret-marked, role-inapplicable, and unknown typed fields under the pass-through configuration, in any spelling, with no defaults and no required fields; the storefronts' generators also refuse the payments `api_key_env` and every `[[DisputeCredential]]` entry there, since no variable the chart sets holds a key and a credential entry is incomplete without its token. Drift checks keep those surfaces aligned while omitting secrets and role-inapplicable fields.
 
+A chart passing a service's configuration through carries no schema of that configuration, which the service validates at startup ([`helm.md`, "A chart's values schema types the chart's own values"](../../../docs/guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)): the provisioning chart's schema refuses under its `config` only the keys the chart derives itself or delivers from a Secret, and retired ones, so a section the service adds, such as `[Events]`, deploys through values alone. The storefront charts' generated definitions stand in for refusals the storefront's loader does not yet make — a secret in its public file, an unknown key, a key stated in two spellings — and no requirement asks for them. Moving those refusals into the loader and removing the definitions, their generator runs and drift tests is unowned work recorded in the [change index](../../changes/README.md), as is the provisioning loader's refusal of a secret sink setting stated in its public profile.
+
 
 
 ## Multi-domain storefront activation
@@ -195,8 +197,10 @@ Legacy Stripe consumer settings are rejected, not mapped to Arkhai accounts, man
 Seller evidence, end/admission/effect journals and cursors live in the storefront's
 own database and ordered migrations. Buyer exact-byte evidence and retry plans
 live under a composition-supplied profile-adjacent root, not in replay caches.
-Site event/outbox records live in provisioning persistence, independently of
-capacity-release acknowledgements. These stores contain evidence or physical
+The site's lease-end records, its signed lease-end reports and the provisioning
+service's event store live in provisioning persistence, where a lease-end report's
+delivery and a capacity-released callback's belong to separate consumers, each
+acknowledged on its own. These stores contain evidence or physical
 progress, never a copy of authority ledger/case state to decide money from.
 
 The option envelope is a forward-only wire boundary: coordinate registries,

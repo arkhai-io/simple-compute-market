@@ -114,6 +114,18 @@ Where the charts differ:
   write JSON syntax into that YAML profile so 0x-prefixed EIP-191
   identifiers remain strings when Dynaconf reads it
   ([`helm.md`, "A hex value stays a string"](../guidance/engineering/helm.md#a-hex-value-stays-a-string)).
+- The provisioning chart passes its `config` through into the service's profile,
+  `config-production.yml`, as given, every section alike: its values schema types the chart's own values and refuses
+  under `config` only the keys the chart derives itself or delivers from a Secret,
+  and retired ones, so a section the service reads deploys through values alone
+  ([`helm.md`, "A chart's values schema types the chart's own values"](../guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)).
+  `Events`, the service's operator events, travels there: its sinks, routes,
+  retention and delivery settings in `config`, and its secret sink settings — an
+  Apprise URL, a webhook URL, an SMTP password — in the
+  `config-provisioning-secrets.yml` profile of the runtime Secret
+  `sshDecryptionKey.secretName` names, which `ACTIVE_PROFILES` loads after
+  `production`. The service, not the chart, validates the section at startup
+  ([`physical-provisioning`'s configuration](../../openspec/specs/physical-provisioning/configuration.md)).
 - A file a setting names by path, rather than a value, reaches the
   provisioning service through the chart's `configFiles` map: each entry's
   content renders verbatim into the ConfigMap and mounts read-only at
@@ -348,7 +360,12 @@ without its token and belongs in the overlay entire. `api_key_env` stays a field
 of the shared payments model, the form a buyer's provider reads, so the storefront
 generators refuse it rather than the model. Untyped sections such as
 `provisioning`, `negotiation`, and `pricing` pass through unchecked, and a
-misspelled key there is ignored by the storefront.
+misspelled key there is ignored by the storefront. A chart passing a service's
+configuration through otherwise carries no schema of it, as the provisioning chart
+carries none; the storefront charts' generated definitions stand in for refusals the
+storefront's loader does not yet make, and moving those refusals into the loader is
+unowned work recorded in the [change index](../../openspec/changes/README.md)
+([`chart-render-tests.md`, "A chart's values schema types the chart's own values"](../guidance/repository/chart-render-tests.md#a-charts-values-schema-types-the-charts-own-values)).
 
 Retired keys have two homes, one per kind. A key of the storefront's own
 configuration that it no longer reads is retired in the storefront's one
@@ -709,6 +726,11 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   every job the earlier engine recorded reads null in both, and is never
   classified as never started, since that engine recorded no start before it
   acted on the host.
+- Compute provisioning then adds a job's structured failure, `ansible_jobs.failure`
+  (`20261126_001_ansible_jobs_failure`), nullable and not backfilled: every job the
+  earlier engine recorded reads null and keeps its failure text in `error`. This
+  and the migration above are the job authority's, which
+  `compute_provisioning.jobs.migrations` exports to the chain.
 - Compute provisioning then adds `hosts.host_key_adoption_pending` and rewrites
   every host's `ssh` connection stored at version 2 to version 3 with the same
   public fields and protected values and no `host_keys`, marking each host it
@@ -717,6 +739,24 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   refuses a row or a row already states `host_keys`. The first check of a marked
   host records the key it presents as its pin
   ([`physical-provisioning`, "The host registry owns the connection"](../../openspec/specs/physical-provisioning/architecture.md#the-host-registry-owns-the-connection)).
+- Compute provisioning then creates its event store, the eventing component's
+  tables and its sequence counter at 0 (`eventing_0001`, the component's schema
+  step for version 1, applied under the step's own name; see
+  [`ARCHITECTURE.md`, "Events"](ARCHITECTURE.md#events)).
+- Compute provisioning then carries its two storefront outboxes into the event
+  store and drops them (`20261126_002_storefront_outboxes_to_event_store`). Every
+  signed report of `lease_end_report_outbox` moves to `lease_end_reports`. Each
+  undelivered report becomes a `site.lease_ended` event under its own event
+  identity, in the order the reports were created, pending to the peer it was
+  signed for with its attempts and last error, that peer's destination parked if
+  the peer had parked its reports. Each undelivered row of
+  `capacity_release_callback_outbox` whose reservation is released becomes a pending
+  `site.capacity_released` delivery to the storefront; one whose reservation was
+  never released was never due and is dropped. Delivered rows need no event. Both
+  storefront consumers are registered past every moved event. An undelivered
+  report naming no recorded lease end, or a callback whose release records no time
+  or lease end, refuses the migration, which then writes nothing. The signed report
+  and the callback keep their wire forms.
 - Each compute storefront creates the tables v0.3.0 created only when a store
   opened — deal servicing's, and the bare-metal lifecycle cursor — with
   `IF NOT EXISTS`, leaving any present as they are
