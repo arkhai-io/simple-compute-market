@@ -1,42 +1,35 @@
 ## ADDED Requirements
 
-### Requirement: The compute watchdog enforces unactivated lease deadlines
+### Requirement: The lease watchdog releases a lease the site reports due
 
-The lease watchdog MUST consider the earlier of the agreed lease end and a non-null lease deadline, using the site's conditional expiry claim before provider effects. An activation-lapsed lease MUST follow the existing release lifecycle and capacity guard. An activated lease MUST have no renewable liveness deadline earlier than its agreed end. Provider calls MUST remain outside ledger transactions.
+The lease watchdog MUST act on the site's due read and MUST claim each due lease through the site's conditional transition before any provider effect. A lease whose claim the site refuses MUST be left untouched for a later cycle. A lease claimed at its activation deadline MUST follow the same release lifecycle and release guard as a lease claimed at its end, with provider calls outside the ledger's transactions. An activation deadline MUST NOT end a lease whose activation is recorded.
 
-#### Scenario: A storefront disappears before activation
+#### Scenario: A storefront stops before delivery
 
-- **WHEN** an unactivated compute lease becomes due and expiry claims its observed tuple
-- **THEN** the watchdog releases through the ordinary guarded path without contacting a storefront or payment service
+- **WHEN** an unactivated lease passes its activation deadline and the watchdog's claim succeeds
+- **THEN** the watchdog releases it through the ordinary guarded path, needing neither a storefront nor a payment service to do so
 
-#### Scenario: The storefront disappears after activation
+#### Scenario: A storefront stops after activation
 
-- **WHEN** an activated lease passes its former provisional deadline while its agreed end remains in the future
-- **THEN** the watchdog does not reclaim it for absent storefront renewal
+- **WHEN** an activated lease passes its activation deadline with its lease end still ahead
+- **THEN** the watchdog does not release it
 
-#### Scenario: Creation is already dispatched
+#### Scenario: A create is in flight at the deadline
 
-- **WHEN** activation lapse is claimed for a lease whose create operation is still in flight
-- **THEN** the lifecycle adopts its result and completes the ordinary teardown path rather than freeing capacity ahead of proven release
+- **WHEN** a lease is claimed at its activation deadline while its create operation is still in flight
+- **THEN** the lifecycle adopts the create's result and completes teardown, and capacity is not freed ahead of proven release
 
-### Requirement: Activation lapse is signed lease-end evidence
+### Requirement: An activation lapse is reported as an intended lease end
 
-> **Stale.** "claimed deadline/phase" names a stored phase the landed activation does not have; the intended record carries the claimed deadline, with activation derived from `activated_at_utc`.
+The `lease_ended` report for a lease claimed at its activation deadline MUST state a cause for the lapse, that deadline as its claimed deadline, and a phase naming the activation deadline. It MUST state an intended end, as every `lease_ended` report does, and MUST NOT authorize a payment effect or be a prerequisite of the seller's `delivery_end` filing.
 
-The signed lease_ended record MUST carry activation_deadline_lapsed, claimed deadline/phase and the base identity, correlation and intended effective end. It MUST NOT claim proven physical completion; guarded release supplies that separate fact. The outbox MUST preserve identity and signed bytes across retries. This evidence MUST NOT authorize payment effects.
+#### Scenario: The watchdog claims an activation lapse
 
-#### Scenario: The watchdog releases for activation lapse
+- **WHEN** the watchdog's claim of an unactivated lease at its activation deadline succeeds
+- **THEN** the site records one `lease_ended` report carrying the lapse's cause, the deadline and its phase
+- **AND** capacity return is still reported separately, once release is proven
 
-- **WHEN** the deadline wins the due comparison and its claim records an end intent
-- **THEN** the event records the activation-lapse cause, claimed deadline and phase, and intended effective end under the base event contract
-- **AND** physical completion remains pending until guarded release is proven
+#### Scenario: No report has reached the storefront
 
-#### Scenario: Event acknowledgement is lost
-
-- **WHEN** delivery of the signed lease-ended record is retried
-- **THEN** the original identity and signed evidence are preserved
-
-#### Scenario: Delivery fails without a site event
-
-- **WHEN** no signed lease-ended record has arrived at the storefront
-- **THEN** the site contract supplies no payment operation and imposes no event prerequisite on the seller's exceptional-end dispute filing
+- **WHEN** a deal misses its delivery deadline and no `lease_ended` report has reached its storefront
+- **THEN** nothing the site provides makes the seller's `delivery_end` filing wait for one

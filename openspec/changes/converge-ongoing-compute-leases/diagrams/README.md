@@ -1,37 +1,28 @@
-# Rate-part servicing scenarios
+# Rate servicing scenarios
 
-Nine sequence diagrams illustrate cases 0–8 of [the design](../design.md#scenarios-and-evidence).
-The qualification matrix also includes maximum term, the seller emergency,
-identity-rotation overlap, the seller that never files, the late anchor, asserted
-availability and a case over paid-out money (rows 9–13). Rows 7 and 9 record the
-buyer acceptance policy the terms change ships.
-`serve-running-rate-deals` qualifies reduced forms of rows 0, 6, 7 and 9 in
-the VM lane — charged treatment, no setup part, no funding timer — without
-promoting these diagrams; they show the full product and are promoted at this
-change's closeout. Diagram 06 shows the seller's opt-in funding timer; with the
-timer disabled, the verified exhaustion stop alone ends delivery.
-Lane absence/crash arrows mean pause/resume; durable restart is integration evidence.
-Buyer client, end service (physical P / authority-work F), site, payment authority
-and dispute authority are separate lifelines. Numbered arrows give scenario order;
-self-arrows are local transitions. A diagram is design, not evidence of a run.
-delivery_end is one claim for either filer and either cause. Payee filing or valid SignedDeliveryEndClaim concurrence enables mechanical ruling only with clean mapping, ended_at >= Agreement start and no prior mechanical end ruling. Receipt-backed payer claims qualify; unsigned, contested, repeat and unanswered cases stay with operators, never a silence default. Cause=payee uses returned rates, refunds and capped penalty; cause=payer preserves notice/treatment and pays no penalty. Setup returns iff delivered=false for either cause. Seller sends no payment effects for its case. The end_delivery receipt embeds the reusable signed claim; buyer payment-stop retry remains separate. SCM polls unanswered cases and signs matching durable facts or contests them.
+Nine sequence diagrams, one for each of rows 0 to 8 of
+[the design's scenario table](../design.md#scenarios-and-evidence); rows 9 to 13 have
+none. The buyer client, end service (physical work P, authority work F), the site, the
+payment authority and the dispute authority are separate lifelines. Numbered arrows give
+the order; self-arrows are local transitions. An absence or crash arrow means the
+storefront's loops are held. A diagram is design, not evidence of a run.
 
-| # | Diagram | Guarantee |
-|---|---|---|
-| 0 | [On-demand baseline](00-on-demand-baseline.svg) | authority stop and physical recovery earn separate facts |
-| 1 | [Payments-down buyer end](01-buyer-cancel-payments-down.svg) | signed end_delivery acknowledgement supports delivery_end; physical work is independent |
-| 2 | [Site withdrawal, storefront absent](02-site-withdraws-storefront-dead.svg) | buyer stop/case and held money, then seller self-penalty filing on recovery |
-| 3 | [Crash during case effects](03-crash-during-case-effects.svg) | original filing identity, partial ruling effects after stop, revised request with prior-ruling netting |
-| 4 | [Stop before disclosure](04-payer-stop-before-disclosure.svg) | local end blocks disclosure; remote observation has a measured window |
-| 5 | [Activation expiry](05-prepaid-activation-deadline-expires.svg) | failed rate delivery corrects delivery_end at start, including setup once |
-| 6 | [Funding/exhaustion](06-funds-exhausted.svg) | with the seller's opt-in timer: read before end; renewal replaces timer, exhaustion supplies authority end |
-| 7 | [Spot notice](07-spot-preemption-with-notice.svg) | authority-hosted pending stop survives absent storefront; earliest stop wins |
-| 8 | [Started but undelivered](08-start-before-delivery.svg) | payee-agreed delivery_end or contested-case human backstop |
+| # | Diagram | Draws | State |
+|---|---|---|---|
+| 0 | [On-demand baseline](00-on-demand-baseline.svg) | The authority's stop and the physical release as separate facts | Its last step, "Record both completion facts", predates `deal-lifecycle`'s "The seller half lists deals"; redraw once the design's Q2 is settled |
+| 1 | [Buyer end, payment authority unreachable](01-buyer-cancel-payments-down.svg) | The signed `end_delivery` receipt backing a `delivery_end` case; physical work independent of both authorities | Current |
+| 2 | [Site withdrawal, storefront not servicing](02-site-withdraws-storefront-dead.svg) | The buyer's stop and case over held money, then the seller's filing | Its title and its restart arrow assume a stopped storefront; redraw once Q4 is settled |
+| 3 | [Interrupted case effects](03-crash-during-case-effects.svg) | One filing identity, partial ruling effects, a revised request netted by the authority | Its revised request depends on Q3 |
+| 4 | [Stop before disclosure](04-payer-stop-before-disclosure.svg) | A local end blocking disclosure | The row is proven at integration, not in a lane (Q7); the diagram still draws the admission order |
+| 5 | [Delivery deadline](05-prepaid-activation-deadline-expires.svg) | A rate deal never delivered, filed at the Agreement's start | Needs redrawing: it draws a deadline the site enforces and a site-signed end before activation. The storefront enforces the deadline, after a payment read made past it; site enforcement is `renewable-compute-lease-deadlines`' |
+| 6 | [Funding timer and exhaustion](06-funds-exhausted.svg) | A seller's funding timer read before an end | Not this change's: the end of a deal at its funded instant is `end-delivery-when-funding-runs-out`'s (design D4), which builds no seller opt-in timer and redraws this pair once its design settles what a storefront does at a funded instant it cannot confirm. Kept until then. Funds running out with no timer runs in both lanes |
+| 7 | [Spot notice](07-spot-preemption-with-notice.svg) | A pending stop the payment authority holds; the earliest stop wins | Current |
+| 8 | [Started, never available](08-start-before-delivery.svg) | A payee's `delivery_end` filing, with the buyer's case as the backstop | Current |
 
-Each SVG is rendered from its adjacent `.drawio` XML and embeds that exact editable
-source in its content attribute. Update source and regenerate the rendering
-together; never edit the SVG alone. At servicing closeout, promote the pairs to
-`docs/development/diagrams/` and cite them from deal-lifecycle's architecture
-companion, which owns end-service behavior. The 05 filename retains `prepaid` as a
-stable link: its fixture is a prepaid-balance rate deal, not a once-only scenario.
-Activation does not promote a second copy.
+Each SVG is rendered from the `.drawio` file beside it and embeds that source. Change
+the source and regenerate the rendering together; never edit the SVG alone. The 05
+file keeps `prepaid` in its name as a stable link.
+
+At closeout the pairs that draw the product as it is are promoted to
+`docs/development/diagrams/` and cited from `deal-lifecycle`'s companion; a pair marked
+for redrawing is redrawn first or left behind.
