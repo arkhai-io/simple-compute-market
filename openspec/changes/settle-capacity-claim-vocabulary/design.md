@@ -148,8 +148,9 @@ Rejected:
   The key is on two administrator routes of both storefronts and inside retained VM
   settlement evidence, and no participant reads its name; the spelling is settled by
   what is released (D2). Neither changes what a seller or a buyer can do.
-- Closing the change and recording the resource type as unowned. A CPU-only shape sells,
-  but a buyer cannot ask for one, and the type that would say so is a constant.
+- Closing the change and recording the resource type as unowned. A shape without GPUs
+  sells, but a buyer cannot ask for supply by the work it suits, and the type that would
+  say so is a constant.
 - A change for the resource type and another for bare metal. They edit the same field,
   the same rows and the same two matching functions.
 
@@ -178,12 +179,35 @@ Rejected:
 - Leaving the question open. `publish-shape-bounds` shows a buyer a shape and its bounds
   and has to know which names a listing carries.
 
-### D3 — The category is a class of supply a seller states and a buyer can find
+### D3 — A category is a seller's label for the work supply suits, published and filterable, and it constrains no shape
 
-A category names a class of compute supply, such as `compute.gpu` or `compute.cpu`. A
-seller states it; a listing publishes it; and a buyer narrows a registry query by it. A
-buyer who wants machines without GPUs asks for `compute.cpu` and is answered with those
-listings and no others, which no query can do today.
+A category is a broad label for the kind of work a listing's supply suits. A seller
+states it, it travels to the listing, and a buyer narrows a registry query by it, to find
+shapes by how they are typically used. Three are documented, and they do not close the
+list:
+
+| Category | The listings it tends to hold |
+|---|---|
+| `compute.gpu` | supply oriented to GPU-heavy work |
+| `compute.cpu` | supply oriented to CPU-heavy work |
+| `compute.db` | supply oriented to database work, which tends to be bound by disk I/O |
+
+A category constrains nothing about the shapes listed under it. No party checks a shape
+against its category: no site refuses a claim or a declaration, and no storefront
+withholds a listing, because a shape does not fit a category, and no category is derived
+from a shape. `compute.cpu` does not mean a shape without GPUs. A query for it is
+answered with the listings their sellers labelled for CPU-heavy work, whatever those
+shapes state, and a buyer who needs particular quantities bounds them in the same query
+(the published field's name is Q4's):
+
+```sh
+market listing list --resource 'category=compute.db disk_gb>=2000'
+```
+
+A label is what the published quantities cannot say. A seller knows what its supply is
+suited to, and no family of the compute schema separates database work from any other,
+so no rule over a shape could define `compute.db`. A name that carries no rule can be
+added without one, which is why the list stays open.
 
 Rejected:
 
@@ -191,9 +215,13 @@ Rejected:
   machine without GPUs. It corrects what an operator reads and changes nothing anyone can
   do.
 - A category internal to the site, used to keep classes apart in placement and in the
-  scheduler's fairness state. A seller already keeps classes apart by pool, since a
-  CPU-only shape is published only from a pool that states it, and a buyer would still
-  be unable to find the supply.
+  scheduler's fairness state. A seller already keeps supply apart by pool, and a buyer
+  would still be unable to find it.
+- A category that fixes what a shape may state, such as `compute.cpu` for a shape
+  without GPUs and `compute.gpu` for one with, whether checked at the pool write, at
+  publication or at admission, or derived from the shape. It repeats what the published
+  quantities already say, has nothing to check for database work, and needs a new rule
+  for every name.
 
 ### D4 — The pool states the categories it sells, and the claim, the reservation and scheduling carry the one a deal is in
 
@@ -218,6 +246,9 @@ reservation and advances the cursor of that category; which declarations it may 
 place the reservation on is Q3's. Scheduling takes a kind from its composition's default
 only for a reservation that records none.
 
+Each of these compares or carries a name. The site sets the claim's category beside the
+pool's statement and reads nothing of the claim's dimensions against it (D3).
+
 A pool that states no category admits what it admits today, and a statement left as
 released behaves as released: a claim naming `compute.gpu` is matched against a
 declaration typed `compute.gpu`, a bare-metal reservation is scheduled as it is under
@@ -235,10 +266,11 @@ Rejected:
 
 - The category on the declaration, matched by equality, with the claim's derived from its
   shape. A host carries one declaration, so a CPU-only shape could never use a GPU
-  host's spare capacity, and every operator would retype every declaration.
+  host's spare capacity, every operator would retype every declaration, and no category
+  is derived from a shape (D3).
 - The category on the claim alone, derived from the shape, with no statement by the
-  seller. The seller would not choose what its supply is sold as, and a category that no
-  shape can derive could not exist.
+  seller. The seller would not choose what its supply is sold as, and a category no
+  shape can derive, such as `compute.db`, could not exist (D3).
 - A set of categories on each declaration. It puts a commercial choice on the record of
   a machine and repeats it for every machine of a pool.
 - Scheduling by the composition's default kind, or by a kind the storefront restates in
@@ -248,9 +280,12 @@ Rejected:
 ### D5 — The change is Goal 2's
 
 Goal 2 sells and negotiates full shapes, and a shape need not state GPUs. Finding supply
-by its class is the part of that a buyer still lacks, so the change is listed in Goal
-2's campaign and owns three of the goal's gaps: the constant resource type, bare metal's
-type, and the query that cannot select supply without GPUs.
+by the work it suits is the part of that a buyer still lacks, so the change is listed in
+Goal 2's campaign and owns three of the goal's gaps: the constant resource type, bare
+metal's type, and the listing that publishes no class of compute for a buyer to search
+by. That last gap is recorded with a second half, that no query selects exactly the
+listings stating no GPU field. A label does not answer it (D3); Q6 says what becomes of
+it.
 
 It delivers nothing of Goal 3. A host still carries one declaration and a pool one
 provider, so one machine is not sold in two modes by this change.
@@ -262,14 +297,18 @@ place if the category were internal to the site (D3).
 
 Each is decided in this change's design session.
 
-### Q1 — Which categories exist, and what a name nobody knows does
+### Q1 — Whether the names are an open set, and what a name nobody knows does
+
+D3 documents three names and says they do not close the list. It does not say who may
+add a fourth, so every alternative below admits those three and differs in how another
+arrives.
 
 - (a) An open set. A pool states any non-empty names, the site and the registry carry
-  them opaquely, as offering modes are carried, and `compute.gpu` and `compute.cpu` are
-  the two the documentation names. A name no buyer asks for is published and matches no
-  query.
-- (b) A closed vocabulary in `arkhai_compute`. A storefront reports a pool stating a name
-  outside it and holds that pool's listings; the registry's schema enumerates the names.
+  them opaquely, as offering modes are carried, and D3's three are the ones the
+  documentation names. A name no buyer asks for is published and matches no query.
+- (b) A vocabulary enumerated in `arkhai_compute`, which gains a name in a release. A
+  storefront reports a pool stating a name outside it and holds that pool's listings; the
+  registry's schema enumerates the names.
 - (c) Open at the site and the storefront, enumerated where a registry chooses to: the
   compute filter specification types the published field as a string and may list the
   names it admits, as it lists GPU models, and a registry's operator edits that list.
@@ -293,42 +332,56 @@ policy_tags:
       - {cpu: {count: 8}, memory: {gib: 32}}
 ```
 
-- (a) Derived from the shape: a shape that names the `gpu` family is `compute.gpu`, any
-  other `compute.cpu`, and a listing is published only where its pool states the category
-  its shape derives. The first listing above is `compute.gpu` and the second
-  `compute.cpu`. It needs no new form and covers exactly those two names.
+D3 bears on this without deciding it: no category is derived from a shape and no listing
+is withheld for its shape, so only a statement by the seller can choose among several.
+What is open is where the seller makes it.
+
+- (a) Ruled out by D3. Derived from the shape: a shape that names the `gpu` family is
+  `compute.gpu`, any other `compute.cpu`, and a listing is published only where its pool
+  states the category its shape derives. It derives a category from a shape, withholds a
+  listing whose shape does not fit, and can never yield `compute.db`.
 - (b) Stated on each listing shape, beside its families: `{category: compute.cpu, cpu:
   {count: 8}, memory: {gib: 32}}`. It reaches any name and changes the listing-shape
-  form that pool hints, storefront overrides, the VM default and bare metal's derived
-  shapes share.
-- (c) A pool states at most one category and every listing of it takes that one. A pool
-  of GPU hosts that also sells CPU-only shapes then publishes them under the wrong
-  class, or not at all.
+  form that pool hints and storefront overrides share. A listing with nowhere to state
+  one, which is bare metal's derived shape and the VM default, takes its pool's category
+  where the pool states exactly one and publishes none where it states several.
+- (c) A pool states at most one category and every listing of it takes that one. A
+  seller cannot then label part of a pool's supply for GPU-heavy work and part for
+  CPU-heavy work; a host belongs to one pool, so a GPU host's spare vCPUs and memory are
+  sold under that pool's one label.
+- (d) Every listing of a pool takes every category the pool states, and the published
+  field is a list. A query for any of them finds the listing. D4 has a deal in one
+  category, so the claim then needs a rule for which one it names.
 
-Recommended: (a). A bare-metal shape is derived from its declaration and a VM default is
-generated, so neither has a place to state a category, and both derive one by the same
-rule. A third category that no shape derives adds (b) as a further case without editing
-(a). It would move to (b) now if Q9 names a category a shape cannot derive.
+Recommended: (b). It reaches any name, it lets one pool hold supply under more than one
+label, which a pool of GPU hosts that also sells its spare vCPUs for CPU-heavy work
+needs, and it gives bare metal and the VM default a category without a form of their
+own. It would move to (c) if one label for a pool's whole supply is enough for sellers,
+which is the smaller change and leaves the listing-shape form alone; and to (d) if a
+category stated on a pool is meant to reach each of that pool's listings whole.
 
 ### Q3 — What a declaration's `resource_type` does in a pool that states categories
 
 D4 keeps today's equality between a claim's type and a declaration's for a pool that
-states no category. For a pool that states one:
+states no category. D3 bears on the rest without deciding it. (b) and (c) below compare
+type strings, not shapes, so D3 does not rule them out; but D3 gives a category one
+effect, reaching the listing for a buyer to filter by, and (b) and (c) give it a second,
+deciding which machines may serve a deal. For a pool that states a category:
 
 - (a) Nothing. The site matches the claim's category against the pool's statement and
   does not compare the declaration's type, at admission and at scheduling alike. A
   declaration typed `compute.gpu` in a pool stating `compute.cpu` serves `compute.cpu`
   claims, and the declaration's field is a label an operator may leave as written.
 - (b) Both. The pool must state the category and the declaration's type must equal it. An
-  operator retypes each declaration to adopt a category, and a GPU host cannot serve a
-  CPU-only claim, which is what D4 keeps available.
+  operator retypes each declaration to adopt a category, and a GPU host typed
+  `compute.gpu` cannot serve a `compute.cpu` claim, which is what D4 keeps available.
 - (c) The pool's statement governs matching, and registration refuses a declaration
   whose type is not among its pool's categories.
 
 A claim and the reservation it makes, under (a):
 
 ```yaml
-# the claim for the CPU-only listing of Q2's pool
+# the claim for the second listing of Q2's pool, sold as `compute.cpu`
 {resource_type: compute.cpu, offering_mode: vm, pool_id: vm-california,
  dimensions: {vcpu_count: 8, ram_gb: 32}}
 # what the site records
@@ -352,7 +405,8 @@ the refusal a pool move has.
   keys saying nearly the same thing on one claim.
 - **The published listing field and its filter.** Not `resource_type`: on a listing
   resource payload that key already says whether the payload is compute or a token.
-  (a) `category`; (b) `compute_category`; (c) `resource_category`.
+  (a) `category`; (b) `compute_category`; (c) `resource_category`. It holds one name, or
+  a list if Q2 settles on (d).
 - **Scheduling.** The cursor's key stays `resource_kind`, and holds the category.
 
 A listing and a query, under (a) of each:
@@ -392,9 +446,11 @@ bare-metal declaration keeps working as written. What is open is the string
   {capacity_reservation_id: 0193a1c2, market: bare_metal, resource_id: host-ca-h200-01}
   ```
 
-- (b) Bare-metal declarations are retyped to their category and the storefront sends
-  that. Every operator edits every bare-metal declaration, and a deal reserved before
-  the edit and scheduled after it finds no candidate.
+- (b) Bare-metal declarations are retyped to a category their pool states and the
+  storefront sends that. A declaration has no category of its own to take, since none is
+  derived from a machine's shape (D3), so the name is copied from the pool. Every operator
+  edits every bare-metal declaration, and a deal reserved before the edit and scheduled
+  after it finds no candidate.
 - (c) The storefront goes on sending and checking `compute.bare-metal` for a pool that
   states no category, and the category for one that does. Two rules in one domain, and
   neither is VM's.
@@ -414,8 +470,9 @@ deal in flight is stranded.
   A seller appears in a search for `compute.cpu` once its pool says so.
 - (b) Missing passes. Every listing of a `marketplace-v0.4.0` storefront matches every
   category query, which answers a buyer with supply that claimed nothing.
-- (c) The storefront publishes the category a shape derives even where the pool states
-  none. It publishes a statement the seller did not make.
+- (c) Ruled out by D3. The storefront publishes the category a shape derives even where
+  the pool states none. It derives a category from a shape, and publishes a statement the
+  seller did not make.
 
 The missing-value rule is one question for the filter grammar, and one other change
 meets it: `filter-listings-by-capacity-bounds`, for a listing that states no bound.
@@ -424,19 +481,30 @@ constraint is ever added. The evaluator's ordering, which decides a missing valu
 before an `exists` test, belongs to the same question. The two changes take one answer,
 from whichever is designed first.
 
-Recommended, subject to that: (a), with the `exists` ordering left to the grammar's
-owner. The category filter gives a buyer supply without GPUs whether or not
-`exists:false` is ever repaired.
+D3 bears on the `exists` ordering without deciding it. A category selects what sellers
+labelled, not the listings that state no GPU field, so the item this change took, that
+no filter can select supply that omits a field, is answered only when `exists:false`
+matches such a listing. Either the ordering is repaired here, or by
+`filter-listings-by-capacity-bounds` with the missing-value rule, or the item returns to
+the change index as unowned.
+
+Recommended, subject to that: (a) for the missing-value rule, and the `exists` ordering
+repaired by whichever of the two changes settles that rule, since both are the same
+evaluator code. If neither takes it, the item returns to the index and D5's third gap
+closes by half.
 
 ### Q7 — What an operator edits to adopt a category
 
 Provisional text for `docs/operator-handbook.md`, "Pool definitions", assuming Q3 (a):
 
 > A pool may state the categories of compute it sells, as `categories` in `policy_tags`:
-> `categories: [compute.cpu]`. Its listings then publish their category and buyers can
-> search by it. A pool that states none sells as before and its listings publish no
-> category. State a category only once the site and every storefront that reads it run a
-> release that knows categories. No capacity declaration changes.
+> `categories: [compute.cpu]`. A category is a label for the work the supply suits:
+> `compute.gpu` for GPU-heavy work, `compute.cpu` for CPU-heavy work, `compute.db` for
+> database work, which tends to be bound by disk I/O. Nothing checks a shape against it.
+> Its listings then publish their category and buyers can search by it. A pool that
+> states none sells as before and its listings publish no category. State a category only
+> once the site and every storefront that reads it run a release that knows categories.
+> No capacity declaration changes.
 
 Open: whether a pool write refuses a malformed `categories` value, as it refuses a
 malformed mode set, or accepts it and leaves the storefront to report it. Recommended:
@@ -479,16 +547,7 @@ What D4 settles, and what each remaining case needs:
 Recommended: (b) for the first, and (a) for the second unless the schedule request or
 response changes shape, which is then a new major by the contract's own rule.
 
-### Q9 — A third category
-
-An archived design and a roadmap row since replaced named `compute.db` beside
-`compute.gpu` and `compute.cpu`. No code, test or specification says what it is, and no
-family of the compute schema would distinguish it. This change documents `compute.gpu`
-and `compute.cpu`. What a third category would mean, and whether one is wanted, is the
-owner's to say; Q1 and Q2 are written so that one can be added without editing either
-answer.
-
-### Q10 — Provisional answers
+### Q9 — Provisional answers
 
 Each follows from something settled or from the nearest precedent, and is confirmed or
 moved in the design session.
@@ -521,13 +580,16 @@ moved in the design session.
   publication and the claim at application integration through its typed clients; the
   filter is registry application integration; a category search and purchase runs in
   the VM lane, beside its deal without GPUs, and a bare-metal deal in a pool that states
-  a category runs in the bare-metal lane, both on mock provisioning.
+  a category runs in the bare-metal lane, both on mock provisioning. One storefront test
+  publishes and sells a shape that states GPUs under `compute.cpu`, which shows no party
+  checks a shape against a category (D3).
 - **Hardware.** Nothing here needs a GPU, and nothing touches the Ansible layer or how
   an adapter executes it, so no real-host run is owed.
 - **Documents.** Both seller quickstarts and the operator handbook's pool and capacity
-  definitions; `docs/buyer-quickstart.md` for the search.
+  definitions, which say what each documented category is for and that it constrains no
+  shape; `docs/buyer-quickstart.md` for the search and the same three names.
 
-### Q11 — Implementation cadence
+### Q10 — Implementation cadence
 
 Recommended: two rounds. First the site half: the pool's statement and the pool fact,
 the claim's category at admission, the reservation's record, scheduling by it, and bare
@@ -537,7 +599,7 @@ filter, the buyer's query, the lane rows and the documents, one session.
 
 ## Verification
 
-Provisional levels are in Q10. Every lane row is mock-provisioning evidence.
+Provisional levels are in Q9. Every lane row is mock-provisioning evidence.
 
 ## Design promotion record
 
@@ -545,6 +607,6 @@ Provisional levels are in Q10. Every lane row is mock-provisioning evidence.
 |---|---|
 | D1 one meaning for the resource type in both compute domains | `openspec/specs/site-capacity/spec.md` and `architecture.md`; `docs/development/ARCHITECTURE.md`, "One name per concept" |
 | D2 the flat dimension names stand | `openspec/specs/market-composition/architecture.md`, "The compute family vocabulary" |
-| D3 a class of supply a seller states and a buyer finds | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/registry-discovery/spec.md`; `docs/buyer-quickstart.md` |
+| D3 a seller's label for the work supply suits, published and filterable, constraining no shape; `compute.gpu`, `compute.cpu` and `compute.db` documented | `openspec/specs/storefront-publication/spec.md`; `openspec/specs/registry-discovery/spec.md`; `docs/operator-handbook.md`, "Pool definitions"; `docs/buyer-quickstart.md` |
 | D4 the pool states it; the claim, the reservation and scheduling carry it | `openspec/specs/resource-pool-management/spec.md`; `openspec/specs/site-capacity/spec.md` and `architecture.md`; `openspec/specs/fulfillment/spec.md`; `docs/operator-handbook.md`, "Pool definitions" |
 | D5 the change is Goal 2's | `docs/development/ROADMAP.md`, Goal 2 |
