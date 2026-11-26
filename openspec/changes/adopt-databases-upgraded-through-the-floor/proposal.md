@@ -131,7 +131,7 @@ None.
 
 ## Permanent documentation impact
 
-- [ ] `docs/development/ARCHITECTURE.md`
+- [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification: `deployment-state`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
@@ -143,7 +143,8 @@ None.
   `openspec/specs/deployment-state/architecture.md`, "Compatibility is the exact set"
   and "The baseline and adoption"; `docs/guidance/engineering/migrations.md`;
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup";
-  `docs/operator-handbook.md`, "Supported databases".
+  `docs/development/ARCHITECTURE.md`, "Accepted representations and application
+  views"; `docs/operator-handbook.md`, "Supported databases".
 - D2: no permanent destination — resolved by D1; nothing is declared.
 - D3 — both API-credit chains have the v0.3.0 floor:
   `openspec/specs/deployment-state/spec.md` (archive) and its architecture companion;
@@ -172,8 +173,10 @@ None.
 - D10 — the refusals' causes and remedies, and upgrading through the floor:
   `openspec/specs/deployment-state/spec.md` (archive);
   `docs/guidance/engineering/migrations.md`;
-  `docs/guidance/repository/migrations-at-startup.md`;
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup";
+  `docs/guidance/repository/migrations-at-startup.md`, "The application's open and
+  the check mode"; `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at
+  startup"; `docs/development/ARCHITECTURE.md`, "Accepted representations and
+  application views";
   `docs/release-handbook.md`, "The migration floor"; `docs/operator-handbook.md`,
   "Supported databases" and "The procedure".
 - D11: no permanent destination — the implementation cadence is this change's plan.
