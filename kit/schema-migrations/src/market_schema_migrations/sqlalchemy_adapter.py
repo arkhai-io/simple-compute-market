@@ -6,6 +6,7 @@ Only a consumer holding SQLAlchemy imports this module, through the package's
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -14,7 +15,7 @@ from sqlalchemy import Connection, Engine, inspect, text
 
 from market_schema_migrations.engine import LEDGER_DDL, LEDGER_TABLE, Chain, check
 from market_schema_migrations.result import CheckResult
-from market_schema_migrations.sqlite import check_sqlite_file
+from market_schema_migrations.sqlite import _compact, _compaction_owed, check_sqlite_file
 
 
 class SqlAlchemyMigrationConnection:
@@ -64,6 +65,30 @@ class SqlAlchemyMigrationConnection:
             self._connection.execute(
                 text(f"DELETE FROM {LEDGER_TABLE} WHERE id = :id"), rows
             )
+
+    def owe_compaction(self) -> None:
+        if self._sqlite() is not None:
+            self._connection.exec_driver_sql("PRAGMA user_version = 1")
+
+    def compaction_owed(self) -> bool:
+        driver = self._sqlite()
+        return driver is not None and _compaction_owed(driver)
+
+    def compact(self) -> None:
+        """VACUUM a SQLite database through its driver connection, outside any
+        transaction and leaving the connection's isolation level as it was; any
+        other database returns the space itself and owes no compaction."""
+
+        driver = self._sqlite()
+        if driver is not None:
+            _compact(driver)
+
+    def _sqlite(self) -> sqlite3.Connection | None:
+        if self._connection.dialect.name != "sqlite":
+            return None
+        driver = self._connection.connection.driver_connection
+        assert isinstance(driver, sqlite3.Connection)
+        return driver
 
 
 def check_engine(chain: Chain[Any], engine: Engine) -> CheckResult:

@@ -71,6 +71,34 @@ class SqliteMigrationConnection:
             f"DELETE FROM {LEDGER_TABLE} WHERE id = ?", [(i,) for i in ids]
         )
 
+    def owe_compaction(self) -> None:
+        _owe_compaction(self._connection)
+
+    def compaction_owed(self) -> bool:
+        return _compaction_owed(self._connection)
+
+    def compact(self) -> None:
+        # VACUUM cannot run inside a transaction; the engine calls this after its
+        # own, where the connection is outside one.
+        _compact(self._connection)
+
+
+# The database header's user_version records a compaction owed: written in the
+# transaction applying a migration that frees space, so it commits or rolls back
+# with it, and cleared only once VACUUM has run, so a failed VACUUM is retried by
+# the next run. Nothing else in a service's database uses user_version.
+def _owe_compaction(connection: sqlite3.Connection) -> None:
+    connection.execute("PRAGMA user_version = 1")
+
+
+def _compaction_owed(connection: sqlite3.Connection) -> bool:
+    return bool(connection.execute("PRAGMA user_version").fetchone()[0])
+
+
+def _compact(connection: sqlite3.Connection) -> None:
+    connection.execute("VACUUM")
+    connection.execute("PRAGMA user_version = 0")
+
 
 def connect_read_only(path: str | Path) -> sqlite3.Connection:
     """Open an existing database file so that nothing can write to it.

@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-kit-schema-migrations"
-version = "0.1.0"
+version = "0.2.0"
 description = "One migration engine for every in-house stateful service: chains that begin at a baseline, atomic recording, a read-only startup check, and its refusal message"
 # As wide as its narrowest-supporting consumer, the settlement runtime: the
 # engine uses nothing of the standard library newer than Python 3.10.

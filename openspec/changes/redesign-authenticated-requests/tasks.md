@@ -594,17 +594,72 @@ Delivers a migration's declaration that it frees space, and the migrate command'
 space is followed by compaction"). Touches `kit/schema-migrations`
 (`src/market_schema_migrations/engine.py`, `sqlite.py`, the command's entry, tests).
 
-- [ ] 5.1 Let a `Migration` declare that it frees space, and have the migrate command
+- [x] 5.1 Let a `Migration` declare that it frees space, and have the migrate command
       run `VACUUM` on a SQLite connection after the chain, outside any transaction, when
       a migration so declared was applied in that run; the SQLAlchemy adapter on a
       non-SQLite dialect does nothing. Verify by library integration tests: a chain
       dropping a populated table leaves a smaller file; a chain with no such migration
       does not vacuum.
-- [ ] 5.2 Keep the check mode read-only: `--check` lists the pending space-freeing
+      `Migration(..., frees_space=True)`. Applying such a migration records, in its
+      own transaction, that the database owes a compaction
+      (`MigrationConnection.owe_compaction`; on SQLite the header's `user_version`);
+      every run of `migrate` then performs an owed compaction once, after its last
+      migration (`compact`: `VACUUM`, outside any transaction, then the record
+      cleared), so a compaction that fails — `CompactionFailed`, naming the command —
+      is performed by the next run, even one applying nothing. The SQLAlchemy
+      adapter runs it through the SQLite driver connection, leaving the connection's
+      isolation level as it was, and owes nothing on any other dialect.
+      `MigrateReport.compacted` says whether the run compacted. Library integration,
+      `kit/schema-migrations/tests/integration/test_compaction.py`, over real SQLite
+      files through the SQLAlchemy adapter and the `sqlite3` adapter under each of its
+      three transaction controls: a chain dropping a populated table that frees space
+      leaves a file smaller by more than half the table's bytes, its free list empty;
+      the same chain not declaring it leaves the pages on the free list; a rerun
+      owing nothing does not compact; a compaction failing once (a test subclass of
+      each adapter) leaves the migrations recorded and the compaction owed, and the
+      next run performs it; and the SQLAlchemy driver connection's isolation level is
+      unchanged after, for the default and for an `AUTOCOMMIT` engine; passed. Unit,
+      `tests/unit/test_sqlalchemy_compaction.py`: on a non-SQLite dialect the adapter
+      issues nothing to its connection — a `MagicMock` standing in for a database
+      this suite does not have; passed. `test-before` against the round's base: every
+      test of `test_compaction.py` failed there on `Migration` refusing
+      `frees_space` — the declaration is absent, which shows less than a behaviour
+      failing.
+- [x] 5.2 Keep the check mode read-only: `--check` lists the pending space-freeing
       migration and neither drops nor compacts (deployment-state "An operator previews
       the upgrade"). Verify by a library integration test.
-- [ ] 5.3 Verify the section: `kit/schema-migrations` unit and integration suites.
+      The check is unchanged: it runs no migration, so it neither drops nor compacts.
+      Library integration, `test_compaction.py`: `check_sqlite_file` over a database
+      whose space-freeing migration is pending reports it behind with that migration
+      pending, the file byte-for-byte unchanged and the table still present; passed.
+      This is the engine's check, which every service's `--check` reports; a service's
+      own command entry is proven by its chain tests in sections 7 and 10.
+- [x] 5.3 Verify the section: `kit/schema-migrations` unit and integration suites.
       End-to-end: none — no chain declares such a migration until sections 7 and 10.
+      `make -C kit/schema-migrations test`: 79 passed (unit and library integration).
+      End-to-end confirmed: none.
+
+Notes (section 5):
+
+- `arkhai-kit-schema-migrations` is bumped 0.1.0 to 0.2.0 (new public API); every
+  dependent declares a lower bound `>=0.1.0`, so none moves here, and the
+  after-functional-change hook relocked every lock installing it.
+- For sections 7 and 10: a space-freeing migration is declared
+  `Migration("<id>", <drop>, frees_space=True)` in the service's chain after the kit's
+  replay-table migration, and the service raises its lower bound on
+  `arkhai-kit-schema-migrations` to `>=0.2.0`. The engine logs the compaction; the
+  commands log only `report.applied` today, so a command reports `compacted` only if
+  its section adds it. The VACUUM needs free space of about the database's remaining
+  size while it rewrites the file.
+- For section 6, a premise to settle: D9 says the registry's PostgreSQL returns the
+  space on `DROP TABLE`, but the registry runs SQLite today
+  (`helm/charts/registry/values.yaml`, `databaseUrl: sqlite:///…`) and migrates
+  through Alembic, not this engine, so 6.3's Alembic revision dropping
+  `publisher_replay_reservations` compacts nothing as planned. Section 6 decides
+  whether `registry-migrate` compacts after Alembic, or returns the question to the
+  owner.
+- The SQLite adapter takes the database header's `user_version` as its record of an
+  owed compaction; no service's database uses it otherwise.
 
 ## 6. The registry on the admission core
 

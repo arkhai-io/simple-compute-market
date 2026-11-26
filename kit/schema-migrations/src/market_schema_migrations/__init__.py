@@ -11,6 +11,7 @@ installed with the ``sqlalchemy`` extra, adapts a SQLAlchemy one.
 from market_schema_migrations.engine import (
     LEDGER_TABLE,
     Chain,
+    CompactionFailed,
     MigrateReport,
     Migration,
     MigrationConnection,
@@ -38,6 +39,7 @@ __all__ = [
     "Chain",
     "CheckResult",
     "CheckState",
+    "CompactionFailed",
     "MigrateReport",
     "Migration",
     "MigrationConnection",

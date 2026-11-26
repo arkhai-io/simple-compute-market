@@ -49,11 +49,15 @@ class Migration(Generic[C]):
 
     The body takes only the connection: no migration reads a service's
     configuration, so one database migrates to one schema and one set of rows
-    under any configuration.
+    under any configuration. A migration that drops what a database held, such
+    as a table, declares ``frees_space``: SQLite keeps a dropped table's pages in
+    its file, so applying one records the database as owed a compaction, which
+    the run performs after the chain, or a later run if it fails.
     """
 
     id: str
     apply: Callable[[C], None]
+    frees_space: bool = False
 
 
 class MigrationConnection(Protocol[C_co]):
@@ -82,6 +86,24 @@ class MigrationConnection(Protocol[C_co]):
     def record(self, ids: Iterable[str]) -> None: ...
 
     def forget(self, ids: Iterable[str]) -> None: ...
+
+    def owe_compaction(self) -> None:
+        """Record, in the transaction applying a migration that frees space, that
+        the database is owed a compaction."""
+        ...
+
+    def compaction_owed(self) -> bool:
+        """Whether a compaction recorded as owed has not yet run."""
+        ...
+
+    def compact(self) -> None:
+        """Return the space dropped data held to the file system, and clear the
+        compaction owed.
+
+        Runs outside any transaction, after the chain. A database that returns
+        the space when the data is dropped owes no compaction.
+        """
+        ...
 
 
 @dataclass(frozen=True)
@@ -139,10 +161,12 @@ class Chain(Generic[C]):
 
 @dataclass(frozen=True)
 class MigrateReport:
-    """What one run did: whether it adopted the database, and what it applied."""
+    """What one run did: whether it adopted the database, what it applied, and
+    whether it compacted the database after a migration that frees space."""
 
     adopted: bool
     applied: tuple[str, ...]
+    compacted: bool = False
 
 
 class MigrationRefused(RuntimeError):
@@ -151,6 +175,18 @@ class MigrationRefused(RuntimeError):
     def __init__(self, result: CheckResult, *, service: str, command: str) -> None:
         super().__init__(refusal_message(result, service=service, command=command))
         self.result = result
+
+
+class CompactionFailed(RuntimeError):
+    """The run's migrations are recorded, but compacting the database after them
+    failed; the compaction stays owed, and the next run performs it."""
+
+    def __init__(self, *, service: str, command: str, cause: BaseException) -> None:
+        super().__init__(
+            f"{service}'s migrations are applied, but compacting its database failed: "
+            f"{cause}. Run `{command}` again to compact it, with free space of about "
+            "the database's size."
+        )
 
 
 class MigrationFailed(RuntimeError):
@@ -247,7 +283,7 @@ def migrate(chain: Chain[C], connection: MigrationConnection[C]) -> MigrateRepor
             connection.forget(chain.floor_ids)
             connection.record(chain.baseline_ids)
     if result.state is CheckState.COMPATIBLE:
-        return MigrateReport(adopted=False, applied=())
+        return MigrateReport(adopted=False, applied=(), compacted=_compact_if_owed(chain, connection))
 
     if result.adoption_pending:
         logger.info(
@@ -265,10 +301,31 @@ def migrate(chain: Chain[C], connection: MigrationConnection[C]) -> MigrateRepor
             with connection.transaction():
                 migration.apply(connection.native)
                 connection.record((migration.id,))
+                if migration.frees_space:
+                    connection.owe_compaction()
         except Exception as exc:
             raise MigrationFailed(
                 service=chain.service, migration_id=migration.id, cause=exc
             ) from exc
         applied.append(migration.id)
         logger.info("%s: applied migration %s", chain.service, migration.id)
-    return MigrateReport(adopted=result.adoption_pending, applied=tuple(applied))
+    return MigrateReport(
+        adopted=result.adoption_pending,
+        applied=tuple(applied),
+        compacted=_compact_if_owed(chain, connection),
+    )
+
+
+def _compact_if_owed(chain: Chain[C], connection: MigrationConnection[C]) -> bool:
+    """Compact the database once, after every migration of the run, if a
+    migration that frees space is owed it -- this run's, or one an earlier run
+    applied whose compaction failed."""
+
+    if not connection.compaction_owed():
+        return False
+    try:
+        connection.compact()
+    except Exception as exc:
+        raise CompactionFailed(service=chain.service, command=chain.command, cause=exc) from exc
+    logger.info("%s: compacted the database", chain.service)
+    return True
