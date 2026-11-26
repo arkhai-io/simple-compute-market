@@ -187,8 +187,10 @@ Engineering guidance, shared across repositories, gains a messaging file and a
 - D3 one authenticated-request layer: `docs/development/ARCHITECTURE.md`, "Marketplace
   identity" and "Authenticated service boundaries"; `marketplace-identity`
   `architecture.md`.
-- D4 placement: `docs/development/ARCHITECTURE.md`, "Kit areas", and
-  `docs/development/ARCHITECTURE.toml`; the standalone component's README under `tools/`.
+- D4 placement: `docs/development/ARCHITECTURE.md`, "Kit areas", with
+  `docs/development/diagrams/kit-areas.drawio` and its SVG export, and
+  `docs/development/ARCHITECTURE.toml`; `tools/README.md`, "Standalone infrastructure
+  components", and the component's own README.
 - D5 per-route exact-retry declaration: `marketplace-identity` spec; its proof in
   `openspec/specs/marketplace-identity/testing.md`; the declaration as part of the route
   contract in `docs/guidance/engineering/implementation.md`, "Route contracts and their
@@ -197,13 +199,14 @@ Engineering guidance, shared across repositories, gains a messaging file and a
   `architecture.md`; `introduction-delivery` and `api-credits` specs; the rule that a
   message carrying a secret is never stored or logged as it stands, and is stripped
   before any persistence, to the new engineering `messaging.md`.
-- D7 bounds, the lease floor, the `RECORDED` lease renewal, expired rows treated as absent, the periodic sweep,
-  database stores and the retention and sweep-interval keys:
-  `marketplace-identity` `architecture.md` and `configuration.md`;
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- D7 bounds, the lease floor, the `RECORDED` lease renewal, expired rows treated as
+  absent, the periodic sweep, database stores and the retention and sweep-interval keys:
+  `marketplace-identity` `architecture.md` and its settings table in `configuration.md`;
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Stateful service persistence".
 - D8 request origin, retention and the 410: `marketplace-identity` spec.
-- D9 cutover, table drops and `VACUUM`: `deployment-state` spec;
-  `docs/development/DEPLOYMENT_AND_CONFIG.md`, its migrations section.
+- D9 cutover, table drops and `VACUUM`: `deployment-state` spec, and its
+  `architecture.md`, "One engine, one contract";
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup".
 - D10 audience, and D10a signed deliveries: `marketplace-identity` spec;
   `introduction-delivery` spec; the principle of binding the audience to the new
   engineering `messaging.md`.
