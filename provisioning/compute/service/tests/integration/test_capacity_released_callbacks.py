@@ -10,6 +10,7 @@ never for a public network.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 import injected_time
@@ -21,15 +22,25 @@ from market_fulfillment import SettlementRecord, SettlementRecordState
 
 from bare_metal_provisioning_adapter.services.mock_output import bare_metal_mock_output
 from compute_provisioning_contracts import LeaseForceRelease, LeaseState, LeaseTermination
+from market_site import LedgerSiteAuthority
+
 from compute_provisioning_service import container as _container_module
 from compute_provisioning_service.services.deal_event_sink import (
     CAPACITY_RELEASED_CONSUMER,
+    StorefrontPeer,
     capacity_release_request_id,
+)
+from compute_provisioning_service.services.operator_events import (
+    EventsSettings,
+    event_catalogue,
+    event_pruner,
 )
 
 from .bare_metal_deal import begun_bare_metal_deal, create_job_id
 from .conftest import SERVICE_SIGNER
 from .storefront_peer_double import CAPACITY_RELEASED, LEASE_ENDED, LOST
+from .test_capacity_api import capacity  # noqa: F401  (a fixture)
+from .test_lease_end_reports import IDENTITY, _Principals
 from .test_leases_api import _committed
 
 
@@ -113,6 +124,98 @@ async def test_a_callback_is_retried_with_backoff_until_acknowledged(
     attempts = storefront_peer_double.taken(CAPACITY_RELEASED)
     assert len(attempts) == 3
     assert len({(attempt.request_id, attempt.content) for attempt in attempts}) == 1
+    assert _status(await clients.family.get_event_deliveries()).delivered == 1
+
+
+@pytest.mark.parametrize("refusal", [400, 404, 409])
+async def test_a_refused_callback_is_abandoned_and_the_next_is_delivered(
+    clients, storefront_peer_double, refusal, caplog
+):
+    """A storefront refusing one callback outright — a reservation it does not
+    hold, say — costs that callback alone: it goes to the finally sink, and
+    the callbacks behind it are delivered."""
+    storefront_peer_double.answer(CAPACITY_RELEASED, refusal)
+    refused, accepted = _committed("fixture-refused"), _committed("fixture-accepted")
+
+    with caplog.at_level(logging.WARNING, logger="eventing.finally"):
+        await clients.family.force_release_lease(refused, LeaseForceRelease(reason="fixture"))
+        await clients.family.force_release_lease(accepted, LeaseForceRelease(reason="fixture"))
+
+    assert [callback.resource for callback in storefront_peer_double.taken(CAPACITY_RELEASED)] == [
+        refused, accepted,
+    ]
+    status = _status(await clients.family.get_event_deliveries())
+    assert (status.state, status.abandoned, status.delivered, status.pending) == (
+        "active", 1, 1, 0,
+    )
+    assert any(
+        "delivery abandoned" in record.getMessage() and refused in record.getMessage()
+        for record in caplog.records
+    )
+
+
+async def test_a_release_through_the_site_s_own_route_draws_no_callback(
+    clients, capacity, storefront_peer_double  # noqa: F811
+):
+    """Only the lease lifecycle's releases are called back; a release a caller
+    of the site's release route asks for is recorded for operators and sent to
+    no storefront."""
+    reservation = _committed("fixture-site-route-release")
+
+    assert await capacity.release(capacity_reservation_id=reservation) is not None
+    await clients.family.run_event_delivery_cycle()
+
+    assert storefront_peer_double.taken(CAPACITY_RELEASED) == []
+    (event,) = (await clients.family.list_events(
+        kind="site.capacity_released", reference=f"lease:{reservation}")).events
+    assert event.attributes["lease_lifecycle"] is False
+    assert _status(await clients.family.get_event_deliveries()).pending == 0
+
+
+def _worker_at(url: str, double):
+    """The service's delivery worker as a restart configured with `url` composes it."""
+    sessions = _container_module.resolved_session_factory
+    return _container_module._make_event_delivery_worker(
+        _container_module._make_storefront_consumers(
+            sessions,
+            tuple(StorefrontPeer(url, IDENTITY, _Principals(), transport=double.transport)
+                  for _ in range(2)),
+            IDENTITY,
+        ),
+        event_pruner(sessions, event_catalogue(SERVICE_SIGNER), EventsSettings()),
+        EventsSettings(),
+    )
+
+
+async def test_a_callback_recorded_while_no_storefront_is_configured_waits_for_one(
+    clients, storefront_peer_double, monkeypatch
+):
+    """With no storefront URL configured the callback stays pending, neither
+    read past nor retired, and is delivered once a URL is configured."""
+    monkeypatch.setattr(
+        _container_module, "resolved_event_delivery_worker", _worker_at("", storefront_peer_double)
+    )
+    reservation = _committed("fixture-no-storefront")
+    # Released through the site authority port, as the lifecycle releases,
+    # without the lifecycle's own delivery request to the composed worker.
+    authority = LedgerSiteAuthority(_container_module.resolved_capacity_ledger_service)
+    assert authority.record_release_success(reservation, forced=True) is not None
+
+    await clients.family.run_event_delivery_cycle()
+    status = _status(await clients.family.get_event_deliveries())
+    assert (status.state, status.pending) == ("active", 1)
+    assert "no storefront is configured" in status.head.last_error
+    assert storefront_peer_double.taken(CAPACITY_RELEASED) == []
+
+    monkeypatch.setattr(
+        _container_module, "resolved_event_delivery_worker",
+        _worker_at("http://127.0.0.1:0", storefront_peer_double),
+    )
+    injected_time.installed().set(injected_time.now() + 11)
+    await clients.family.run_event_delivery_cycle()
+
+    (callback,) = storefront_peer_double.taken(CAPACITY_RELEASED)
+    assert callback.resource == reservation
     assert _status(await clients.family.get_event_deliveries()).delivered == 1
 
 

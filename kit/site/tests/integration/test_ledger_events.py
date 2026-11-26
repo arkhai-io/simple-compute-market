@@ -20,7 +20,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from market_site import CapacityLedgerService
+from market_site import CapacityLedgerService, LedgerSiteAuthority
 from market_site import migrations as site_migrations
 from market_site.db import CapacityReservation
 from market_site.events import SITE_KINDS, lease_reference
@@ -128,7 +128,8 @@ def test_a_force_release_of_a_failed_release_records_capacity_released(store):
 
     assert released is not None
     (event,) = _events(sessions, "site.capacity_released")
-    assert event.attributes == {"forced": True, "after_release_failure": True}
+    assert event.attributes == {
+        "forced": True, "after_release_failure": True, "lease_lifecycle": False}
     assert event.details["state"] == "force_released"
     assert event.details["failure_reason"] == "admin_force_release"
 
@@ -140,8 +141,19 @@ def test_a_guarded_release_records_capacity_released_unforced(store):
     assert ledger.release(capacity_reservation_id=LEASE) is not None
 
     (event,) = _events(sessions, "site.capacity_released")
-    assert event.attributes == {"forced": False, "after_release_failure": False}
+    assert event.attributes == {
+        "forced": False, "after_release_failure": False, "lease_lifecycle": False}
     assert event.details["state"] == "released"
+
+
+def test_a_release_through_the_site_authority_port_is_marked_the_lease_lifecycles(store):
+    sessions, recorder = store
+    authority = LedgerSiteAuthority(_ledger(sessions, recorder))
+
+    assert authority.record_release_success(LEASE) is not None
+
+    (event,) = _events(sessions, "site.capacity_released")
+    assert event.attributes["lease_lifecycle"] is True
 
 
 def test_a_release_the_guard_refuses_records_no_capacity_released(store):

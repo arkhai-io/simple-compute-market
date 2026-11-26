@@ -93,15 +93,19 @@ class Routes:
             if execute(query, schema=self._schema, tables=tables).rows
         )
 
-    def select(self, envelope: Envelope) -> frozenset[str]:
-        """Every destination a route selecting `envelope` names."""
+    def select(
+        self, envelope: Envelope, candidates: Collection[str] | None = None
+    ) -> frozenset[str]:
+        """Every destination a route selecting `envelope` names, among `candidates`
+        when given — a consumer's `Selection`."""
         chosen = set(self.matching(envelope))
-        return frozenset(
+        named = frozenset(
             destination
             for route, _ in self._compiled
             if route.name in chosen
             for destination in route.destinations
         )
+        return named if candidates is None else named & frozenset(candidates)
 
     def _tables(self, envelope: Envelope) -> dict[str, list[dict[str, Any]]]:
         row: dict[str, Any] = dict.fromkeys(self._columns)

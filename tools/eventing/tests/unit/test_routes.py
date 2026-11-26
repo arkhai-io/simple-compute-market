@@ -144,3 +144,11 @@ def test_a_route_naming_a_destination_not_enabled_is_refused() -> None:
                catalogue(), ENABLED)
 
     assert refused.value.route == "held"
+
+
+def test_a_route_names_only_candidates_when_a_consumer_gives_them() -> None:
+    routes = Routes([Route("all", "TRUE", ("mail", "chat"))], catalogue(),
+                    enabled={"mail", "chat"})
+
+    assert routes.select(event("jobs.finished"), frozenset({"chat"})) == {"chat"}
+    assert routes.select(event("jobs.finished")) == {"mail", "chat"}

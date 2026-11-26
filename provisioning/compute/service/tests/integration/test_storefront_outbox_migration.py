@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import injected_time
 import pytest
+from injected_time import InjectedTime
 from market_identity import TrustedIdentitySet, canonical_json
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
@@ -110,6 +112,16 @@ def _callback(db: sqlite3.Connection, reservation: str, *, created_at: str,
     )
 
 
+@pytest.fixture
+def source() -> Iterator[InjectedTime]:
+    """The process time source, held at the wall instant it is installed."""
+    before = injected_time.installed()
+    installed = InjectedTime()
+    injected_time.install(installed)
+    yield installed
+    injected_time.install(before)
+
+
 def _floor(tmp_path: Path) -> tuple[Path, sqlite3.Connection]:
     path = create_floor_database(tmp_path / "provisioning.db")
     return path, sqlite3.connect(path)
@@ -150,10 +162,13 @@ def test_a_report_is_pending_at_upgrade(tmp_path):
     ]
     with engine.connect() as connection:
         kept = connection.execute(text(
-            "SELECT event_id FROM lease_end_reports ORDER BY event_id"
-        )).scalars().all()
+            "SELECT event_id, envelope_id FROM lease_end_reports ORDER BY event_id"
+        )).all()
         positions = dict(connection.execute(text("SELECT name, position FROM eventing_consumers")).all())
-    assert kept == ["end-delivered", "end-later", "end-pending"]
+    # A moved report names the event it is kept for; a delivered one has none.
+    assert [tuple(row) for row in kept] == [
+        ("end-delivered", None), ("end-later", "end-later"), ("end-pending", "end-pending"),
+    ]
     assert positions == {LEASE_END_REPORT_CONSUMER: 2, CAPACITY_RELEASED_CONSUMER: 2}
     tables = set(inspect(engine).get_table_names())
     assert not {"lease_end_report_outbox", "capacity_release_callback_outbox"} & tables
@@ -210,7 +225,7 @@ def test_a_former_peer_s_pending_report_is_retired_not_redirected(tmp_path):
     assert double.requests == []
 
 
-def test_a_callback_is_pending_at_upgrade(tmp_path):
+def test_a_callback_is_pending_at_upgrade(tmp_path, source):
     """The callback of a released reservation is delivered after the upgrade
     under the same reservation and the request identity its release gives; a
     delivered one and one whose reservation never released are not."""
@@ -239,11 +254,19 @@ def test_a_callback_is_pending_at_upgrade(tmp_path):
         envelope = json.loads(connection.execute(text(
             "SELECT envelope FROM eventing_events WHERE kind = 'site.capacity_released'"
         )).scalar_one())
-    assert envelope["attributes"] == {"forced": True, "after_release_failure": True}
+    assert envelope["attributes"] == {
+        "forced": True, "after_release_failure": True, "lease_lifecycle": True}
     assert envelope["source"] == {"service": "compute-provisioning", "instance": SITE}
 
     double = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    # The upgraded service first starts with no storefront URL: the moved
+    # callback stays pending rather than being retired.
+    unconfigured = StorefrontPeer("", IDENTITY, _Principals(), transport=double.transport)
+    gap = capacity_released_consumer(sessions, unconfigured, runner="upgraded").run_cycle()
+    assert (gap.retired, gap.abandoned, gap.failed) == ([], 0, 1)
+    assert _deliveries(engine, CAPACITY_RELEASED_CONSUMER)[0][2] == "pending"
     peer = StorefrontPeer(PEER, IDENTITY, _Principals(), transport=double.transport)
+    source.set(injected_time.now() + 3600)  # past the attempt's backoff
     assert capacity_released_consumer(sessions, peer, runner="upgraded").run_cycle().delivered == 1
     peer.close()
     (callback,) = double.taken(CAPACITY_RELEASED)

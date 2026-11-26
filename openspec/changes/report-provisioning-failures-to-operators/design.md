@@ -339,7 +339,11 @@ delivery attempt, so only a runner stuck past it inside a destination's call can
 superseded, and then the event is delivered again under its `id`, as at-least-once
 delivery allows. A runner identity names one process, and one stable across its
 restarts takes its own hold back at once; a consumer instance runs one cycle at a
-time, so a timer's cycle and a manual one on the same instance are kept apart too.
+time, so a timer's cycle and a manual one on the same instance are kept apart too. That
+identity must belong to one live process: a service running replicas gives each its
+own. The provisioning service names its runner for its site, since one process serves
+a site's database; implementation review 37 F3 challenged the stable name and the
+owner reaffirmed it, the assumption to be stated in the eventing companion.
 One mechanism covers registering and reading as well as delivering, at a
 throughput of one runner per consumer, ample at these volumes. *Rejected:* a claim
 per destination, which lets several runners serve one consumer's destinations at
@@ -358,13 +362,35 @@ a resumed peer misses stays readable through the authenticated lease read, from
 `lease_end_reports` (D15). A destination is retired when its consumer no longer has
 it configured — a storefront peer replaced by another: its undelivered events go to
 the finally sink, and it holds nothing back, so a removed peer's pending deliveries
-do not keep events forever. *Rejected:* a parked destination holding every event it
+do not keep events forever. Pruning leaves no reference dangling (implementation
+review 37 F4, and the owner's rule that retention never does): an event's references
+and deliveries go with it, and a row a record-time hook wrote names its event and is
+kept, whatever its own retention, while that event is, so a retained event's delivery
+always finds it. *Rejected:* a parked destination holding every event it
 would receive until resumed or abandoned, which keeps the resume guarantee whole but
-lets a long park grow the events table without bound.
+lets a long park grow the events table without bound. Expiring a delivery with its
+hook row, which narrows the recovery promise.
+
+**A change of destinations** (implementation review 37 F1). The destinations a
+consumer is first registered with start at its position. After that, a change to its
+destinations takes effect at the latest committed event: a cycle first reads every
+committed event with the destinations as stored, the selection given the candidate
+destinations so it can choose for one no longer configured, then adds each new
+destination there and retires each departing one, whose undelivered events — read
+just now or earlier — go to the finally sink. An event committed before a restart with
+another peer therefore never reaches the new peer. *Rejected:* binding each report to
+its peer when recorded, which puts domain state in the report table and still leaves
+the departing peer's unread work.
 
 **Failed delivery.** Each consumer has a retry policy. The peer consumers (D15)
 retry with backoff without limit and park a destination on "unsupported" until it is
-resumed. The event-sink consumer retries each destination with backoff up to a
+resumed. A destination may also refuse one delivery outright: that delivery is
+abandoned to the finally sink at once and the destination's next follows, so a
+receiver's permanent refusal of one event costs that event alone (implementation
+review 37 F5 / validation 38 V1, the owner's choice A). *Rejected:* parking on a
+permanent refusal, whose resume sends the same head again and stalls on every foreign
+reservation; a maximum age for the peers, which blocks every later delivery until it
+passes. The event-sink consumer retries each destination with backoff up to a
 maximum age, then marks that delivery abandoned and hands the event to the finally
 sink, which defaults to the log. Each destination's state shows on a status read.
 
@@ -403,8 +429,16 @@ travel in the Secret overlay. Delivery runs on its own worker,
 outbox drains the lease watchdog runs today. Administrator routes: `GET
 /api/v1/events` (filtered by kind, severity, subject or reference), `GET
 /api/v1/events/deliveries`, and `POST /api/v1/events/destinations/{name}/resume`,
-replacing the uncalled `resume_peer`. The provisioning chart carries `events` in its
-public `config`, its schema and drift test updated.
+replacing the uncalled `resume_peer`. The provisioning chart passes `Events` through
+its public `config` unchanged, as it passes every section: the service validates its
+own configuration, and the chart neither types it nor takes a release when it changes;
+secret sink settings travel in the Secret overlay (owner's notes 39 O1, which reverted
+a generated values-schema definition section 3 had added). The same disposition removes
+`deployment-state`'s requirement that a pass-through chart carry a schema generated
+from its service's models, and rewrites the Helm guidance (`helm.md`,
+`chart-render-tests.md`) to say so; the
+storefront charts' generated definitions, and the storefront loader refusals that
+replace them, are deferred to a change of their own.
 
 ### D10 — `additional_non_retryable_errors` is matched against the failure record
 
@@ -421,7 +455,8 @@ class mapping.
 
 New: `eventing`, the standalone component's specification and companion. Modified:
 `physical-provisioning`, `site-capacity`, `compute-provisioning-contract`,
-`introduction-delivery`. `fulfillment` is not modified (Context 7).
+`introduction-delivery`, and `deployment-state`, whose generated-fragment requirement
+for pass-through charts is removed (D9, owner's notes 39 O1). `fulfillment` is not modified (Context 7).
 
 ### D12 — Implementation cadence
 
@@ -446,7 +481,7 @@ rounds, an extra review for two foundations that do not touch.
 | `provisioning.teardown_attempt_held` | the job engine's retry transition, for a repairable class | `action_required` | job, retry count | `failure_class`, `retry_at`, `retries_left`, `offering_mode` |
 | `provisioning.job_finished` | the job engine's terminal transition | `info` succeeded; `warning` failed or cancelled | job | `status`, `action`, `offering_mode`, `duration_seconds`, `failure_class`, `operator_job` |
 | `site.lease_ended` | the site's ending transition | `info` | reservation, `transition_key` | `cause`, `source_state` |
-| `site.capacity_released` | the site's release | `info` | reservation | `forced`, `after_release_failure` |
+| `site.capacity_released` | the site's release | `info` | reservation | `forced`, `after_release_failure`, `lease_lifecycle` |
 
 The lease lifecycle does not hold the transaction that records `release_failed`: the
 site ledger commits it. So the site's failing-transition method takes an optional
@@ -490,11 +525,18 @@ authenticated lease read serves, retained under its own setting (unlimited by
 default). Delivery to the storefront is a consumer of `site.lease_ended` with one
 destination per configured peer: a peer answering "unsupported" parks its
 destination until it is resumed, and a newly configured peer is a new destination
-starting at the current position, so an old event never reaches a later peer, and
-the replaced peer's destination is retired (D8).
+starting at the latest committed event, so an old event never reaches a later peer,
+and the replaced peer's destination is retired (D8).
 `capacity_release_callback_outbox` is retired for a consumer of
 `site.capacity_released`, now recorded in the release's own transaction rather than
-reserved in a session before it. The lease watchdog no longer drains anything.
+reserved in a session before it. The callback goes only for the releases the lease
+lifecycle makes, through the site authority port, which the event marks
+(`lease_lifecycle`), as 0.4.0 called back only for those: a release a caller asks of
+the site's own route draws none. The storefront refusing one callback — 400, 404 or
+409 — abandons it to the finally sink (D8); its destination is registered whether or
+not a storefront URL is configured, so a callback recorded or migrated meanwhile waits
+for one (implementation review 37 F5 / validation 38 V1, the owner's choice S2; review
+37 F2). The lease watchdog no longer drains anything.
 
 One provisioning-service migration carries 0.4.0's state: each undelivered
 `lease_end_report_outbox` row becomes a `site.lease_ended` event under its original

@@ -280,6 +280,7 @@ _LEASE_END_REPORTS_DDL = (
         capacity_reservation_id VARCHAR NOT NULL,
         report TEXT NOT NULL,
         created_at DATETIME NOT NULL,
+        envelope_id VARCHAR,
         PRIMARY KEY (event_id)
     )
     """,
@@ -413,10 +414,14 @@ def _pending_delivery(
 
 def _move_lease_end_reports(connection: Connection, catalogue: Catalogue) -> None:
     """Keep every signed report; make each undelivered one a pending, or
-    parked, delivery of a ``site.lease_ended`` event under its own identity."""
+    parked, delivery of a ``site.lease_ended`` event under its own identity,
+    which the report names as the event it is kept for. A delivered report has
+    no event and is kept by its own retention alone."""
     connection.exec_driver_sql(
-        "INSERT INTO lease_end_reports (event_id, capacity_reservation_id, report, created_at) "
-        "SELECT event_id, capacity_reservation_id, report, created_at FROM lease_end_report_outbox"
+        "INSERT INTO lease_end_reports "
+        "(event_id, capacity_reservation_id, report, created_at, envelope_id) "
+        "SELECT event_id, capacity_reservation_id, report, created_at, "
+        "CASE WHEN delivered_at IS NULL THEN event_id END FROM lease_end_report_outbox"
     )
     parked_peers = {
         row[0]
@@ -493,7 +498,8 @@ def _move_capacity_release_callbacks(connection: Connection, catalogue: Catalogu
     reservation was force-released, and follows a release failure when the
     reservation recorded one at any time before — an earlier release failure
     the release need not have followed directly, since the outbox kept no
-    reservation's state before its release.
+    reservation's state before its release. The outbox held only the lease
+    lifecycle's releases, so each event is marked the lease lifecycle's.
     """
     rows = connection.execute(text(
         "SELECT o.capacity_reservation_id, o.attempt_count, o.last_error, o.created_at, "
@@ -538,6 +544,7 @@ def _move_capacity_release_callbacks(connection: Connection, catalogue: Catalogu
                 details,
                 forced=row["state"] == "force_released",
                 after_release_failure=bool(row["failed_before"]),
+                lease_lifecycle=True,
             ),
             event_id=f"capacity_released:{details.capacity_reservation_id}:{details.released_at}",
             site_id=site_id,

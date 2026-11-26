@@ -54,14 +54,16 @@ class ProvisioningReplayReservation(Base):
 class LeaseEndReport(Base):
     """One lease end's signed statement, as the site signed it when the end was
     recorded: the authenticated lease read serves it, and the storefront peer's
-    consumer delivers it. Kept under its own retention, independent of the
-    event it was recorded with."""
+    consumer delivers it. Kept under its own retention, and never before the
+    event it was recorded with, ``envelope_id``, is pruned: a retained event's
+    delivery always finds its report."""
 
     __tablename__ = "lease_end_reports"
 
     event_id = Column(String, primary_key=True)
     capacity_reservation_id = Column(String, nullable=False, index=True)
     report = Column(Text, nullable=False)
+    envelope_id = Column(String, nullable=True)
     # Reports are read in creation order and retained by age, so creation is
     # stamped from the process's time source rather than the database's clock.
     created_at = Column(

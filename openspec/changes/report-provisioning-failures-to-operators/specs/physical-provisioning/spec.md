@@ -144,18 +144,33 @@ The provisioning service MUST serve, to its administrator, the events it recorde
 
 ### Requirement: The capacity-released callback is a consumer of the release event
 
-The capacity-released callback MUST be delivered to the owning storefront by a consumer of `site.capacity_released`, retrying with backoff until acknowledged. A callback pending when the service is upgraded MUST be delivered after it.
+The capacity-released callback MUST be delivered to the owning storefront, for each release the lease lifecycle makes, by a consumer of `site.capacity_released`, retrying with backoff until acknowledged. A release a caller of the site's own release route asks for MUST draw no callback. A callback the storefront refuses outright — answering 400, 404 or 409 — MUST be abandoned to the finally sink and MUST NOT hold back the callbacks after it. A callback recorded while no storefront is configured MUST stay pending until one is. A callback pending when the service is upgraded MUST be delivered after it.
 
 #### Scenario: A callback is pending at upgrade
 
 - **WHEN** a deployment holding an undelivered capacity-released callback is upgraded
-- **THEN** the callback is delivered after the upgrade under the same reservation
+- **THEN** the callback is delivered after the upgrade under the same reservation, even when the upgraded service first starts with no storefront configured
+
+#### Scenario: The storefront refuses a callback
+
+- **WHEN** the storefront answers 404 to a capacity-released callback, for a reservation it does not hold, and later releases follow
+- **THEN** that callback is abandoned to the finally sink and the later callbacks are delivered
+
+#### Scenario: A release is asked of the site directly
+
+- **WHEN** a caller of the site's release route releases a reservation
+- **THEN** the release is recorded and no capacity-released callback is sent
+
+#### Scenario: No storefront is configured
+
+- **WHEN** the lease lifecycle releases a reservation while no storefront URL is configured, and one is configured later
+- **THEN** the callback stays pending meanwhile and is delivered once the storefront is configured
 
 ## MODIFIED Requirements
 
 ### Requirement: Intended lease ends are reported separately from capacity release
 
-Compute provisioning MUST deliver each `site.lease_ended` event's signed report to the owning storefront through a consumer of the eventing system, keyed by event identity, the report signed with the site's service identity in the transaction that records the event and kept in a table of its own, retained under its own setting, unlimited by default. The consumer MUST hold one destination per configured storefront peer: a destination is parked when its peer answers unsupported, until an administrator resumes it, and on resume receives the reports it missed whose events are still retained; a newly configured peer is a new destination that receives no event recorded before it, and a peer no longer configured has its destination retired, its undelivered reports going to the finally sink. Compute provisioning MUST keep acknowledgements separate from the capacity-released callback and expose the same signed report through the authenticated lease read for recovery. A report pending or parked when the service is upgraded MUST be delivered, or stay parked, after it under its original identity. The report MUST state intended end, not prove teardown or free capacity.
+Compute provisioning MUST deliver each `site.lease_ended` event's signed report to the owning storefront through a consumer of the eventing system, keyed by event identity, the report signed with the site's service identity in the transaction that records the event and kept in a table of its own, retained under its own setting, unlimited by default, and never pruned while its event is retained. The consumer MUST hold one destination per configured storefront peer: a destination is parked when its peer answers unsupported, until an administrator resumes it, and on resume receives the reports it missed whose events are still retained; a newly configured peer is a new destination that receives no event recorded before it, and a peer no longer configured has its destination retired, its undelivered reports, those its consumer had not yet read included, going to the finally sink. A report no longer kept is abandoned to the finally sink rather than retried. Compute provisioning MUST keep acknowledgements separate from the capacity-released callback and expose the same signed report through the authenticated lease read for recovery. A report pending or parked when the service is upgraded MUST be delivered, or stay parked, after it under its original identity. The report MUST state intended end, not prove teardown or free capacity.
 
 #### Scenario: The site crashes after recording an end
 
@@ -174,8 +189,13 @@ Compute provisioning MUST deliver each `site.lease_ended` event's signed report 
 
 #### Scenario: The owning storefront's peer is reconfigured
 
-- **WHEN** an operator configures another storefront peer while reports for the previous peer are pending
+- **WHEN** an operator configures another storefront peer while reports for the previous peer are pending, or recorded and not yet read by the consumer
 - **THEN** none of those reports is sent to the new peer, and the previous peer's destination is retired, its pending reports written to the finally sink and still readable through the authenticated lease read
+
+#### Scenario: A pending report outlives its retention
+
+- **WHEN** an operator sets a finite report retention and a report's delivery is still pending past it, its peer down
+- **THEN** the report is kept while its event is, and delivered when the peer returns
 
 #### Scenario: A report is pending at upgrade
 

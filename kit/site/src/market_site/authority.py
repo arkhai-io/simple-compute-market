@@ -88,6 +88,7 @@ class SiteAuthorityLedger(Protocol):
         end_context: dict[str, Any] | None = None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
+        lease_lifecycle: bool = False,
     ) -> dict[str, Any] | None: ...
 
     def record_unmanaged(
@@ -161,6 +162,7 @@ class LedgerSiteAuthority:
             forced=forced, end_context=end_context,
             failure_reason=reason,
             failure_message=message,
+            lease_lifecycle=True,
         )
 
     def record_unmanaged(

@@ -1,38 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": [
-    "server",
-    "sshKey",
-    "sshDecryptionKey",
-    "identity",
-    "storefrontIdentity",
-    "adminIdentity"
-  ],
+  "required": ["server", "sshKey", "sshDecryptionKey", "identity", "storefrontIdentity", "adminIdentity"],
   "properties": {
-    "mockMode": {
-      "type": "boolean"
-    },
+    "mockMode": {"type": "boolean"},
     "server": {
       "type": "object",
       "properties": {
-        "image": {
-          "$ref": "#/definitions/image"
-        }
+        "image": {"$ref": "#/definitions/image"}
       }
     },
-    "identity": {
-      "$ref": "#/definitions/identity"
-    },
-    "storefrontIdentity": {
-      "$ref": "#/definitions/trustedIdentitySet"
-    },
-    "adminIdentity": {
-      "$ref": "#/definitions/trustedIdentitySet"
-    },
-    "sshKey": {
-      "$ref": "#/definitions/optionalSecretReference"
-    },
+    "identity": {"$ref": "#/definitions/identity"},
+    "storefrontIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
+    "adminIdentity": {"$ref": "#/definitions/trustedIdentitySet"},
+    "sshKey": {"$ref": "#/definitions/optionalSecretReference"},
     "config": {
       "type": "object",
       "properties": {
@@ -47,62 +28,36 @@
         "host_definitions_path": false,
         "capacity_definitions_path": false,
         "playbook_path": false
-      },
-      "patternProperties": {
-        "^[Ee][Vv][Ee][Nn][Tt][Ss]$": {
-          "$ref": "#/definitions/provisioningEvents"
-        }
       }
     },
     "definitions": {
       "type": "object",
       "properties": {
-        "relays": {
-          "type": "object"
-        },
-        "pools": {
-          "type": "object"
-        },
-        "hosts": {
-          "type": "object"
-        },
-        "capacity": {
-          "type": "object"
-        }
+        "relays": {"type": "object"},
+        "pools": {"type": "object"},
+        "hosts": {"type": "object"},
+        "capacity": {"type": "object"}
       }
     },
     "configFiles": {
       "type": "object",
-      "additionalProperties": {
-        "type": "string"
-      },
+      "additionalProperties": {"type": "string"},
       "propertyNames": {
         "pattern": "^[-._a-zA-Z0-9]+$",
         "maxLength": 253,
         "not": {
           "anyOf": [
-            {
-              "enum": [
-                ".",
-                "relay-definitions.yaml",
-                "pool-definitions.yaml",
-                "host-definitions.yaml",
-                "capacity-definitions.yaml"
-              ]
-            },
-            {
-              "pattern": "^\\.\\."
-            },
-            {
-              "pattern": "^config(-.*)?\\.ya?ml$"
-            }
+            {"enum": [
+              ".", "relay-definitions.yaml", "pool-definitions.yaml", "host-definitions.yaml",
+              "capacity-definitions.yaml"
+            ]},
+            {"pattern": "^\\.\\."},
+            {"pattern": "^config(-.*)?\\.ya?ml$"}
           ]
         }
       }
     },
-    "sshDecryptionKey": {
-      "$ref": "#/definitions/secretReference"
-    },
+    "sshDecryptionKey": {"$ref": "#/definitions/secretReference"},
     "inventory": false,
     "storefront": {
       "type": "object",
@@ -111,35 +66,16 @@
       }
     }
   },
-  "if": {
-    "required": [
-      "mockMode"
-    ],
-    "properties": {
-      "mockMode": {
-        "const": true
-      }
-    }
-  },
-  "else": {
-    "properties": {
-      "sshKey": {
-        "$ref": "#/definitions/secretReference"
-      }
-    }
-  },
+  "if": {"required": ["mockMode"], "properties": {"mockMode": {"const": true}}},
+  "else": {"properties": {"sshKey": {"$ref": "#/definitions/secretReference"}}},
   "definitions": {
     "image": {
       "type": "object",
       "properties": {
         "digest": {
           "anyOf": [
-            {
-              "const": ""
-            },
-            {
-              "pattern": "^sha256:[0-9a-f]{64}$"
-            }
+            {"const": ""},
+            {"pattern": "^sha256:[0-9a-f]{64}$"}
           ]
         }
       }
@@ -147,123 +83,61 @@
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "principal",
-        "credentialSecret"
-      ],
+      "required": ["principal", "credentialSecret"],
       "properties": {
-        "principal": {
-          "$ref": "#/definitions/publicIdentity"
-        },
-        "credentialSecret": {
-          "$ref": "#/definitions/credentialSecret"
-        }
+        "principal": {"$ref": "#/definitions/publicIdentity"},
+        "credentialSecret": {"$ref": "#/definitions/credentialSecret"}
       }
     },
     "publicIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "scheme",
-        "identifier"
-      ],
+      "required": ["scheme", "identifier"],
       "properties": {
-        "scheme": {
-          "enum": [
-            "ed25519",
-            "eip191"
-          ]
-        },
-        "identifier": {
-          "type": "string"
-        }
+        "scheme": {"enum": ["ed25519", "eip191"]},
+        "identifier": {"type": "string"}
       },
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "scheme": {
-                "const": "eip191"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "identifier": {
-                "pattern": "^0x[0-9a-f]{40}$"
-              }
-            }
-          }
+          "if": {"properties": {"scheme": {"const": "eip191"}}},
+          "then": {"properties": {"identifier": {"pattern": "^0x[0-9a-f]{40}$"}}}
         },
         {
-          "if": {
-            "properties": {
-              "scheme": {
-                "const": "ed25519"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "identifier": {
-                "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
-              }
-            }
-          }
+          "if": {"properties": {"scheme": {"const": "ed25519"}}},
+          "then": {"properties": {"identifier": {"pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"}}}
         }
       ]
     },
     "trustedIdentitySet": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "principals"
-      ],
+      "required": ["principals"],
       "properties": {
         "principals": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
           "uniqueItems": true,
-          "items": {
-            "$ref": "#/definitions/publicIdentity"
-          }
+          "items": {"$ref": "#/definitions/publicIdentity"}
         }
       }
     },
     "credentialSecret": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "name",
-        "key"
-      ],
+      "required": ["name", "key"],
       "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "key": {
-          "type": "string",
-          "minLength": 1
-        }
+        "name": {"type": "string", "minLength": 1},
+        "key": {"type": "string", "minLength": 1}
       }
     },
     "secretReference": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "createSecret",
-        "secretName"
-      ],
+      "required": ["createSecret", "secretName"],
       "properties": {
-        "createSecret": {
-          "const": false
-        },
-        "secretName": {
-          "type": "string",
-          "minLength": 1
-        },
+        "createSecret": {"const": false},
+        "secretName": {"type": "string", "minLength": 1},
         "sshPrivateKey": false,
         "privateKey": false,
         "key": false
@@ -272,449 +146,13 @@
     "optionalSecretReference": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "createSecret"
-      ],
+      "required": ["createSecret"],
       "properties": {
-        "createSecret": {
-          "const": false
-        },
-        "secretName": {
-          "type": "string"
-        },
+        "createSecret": {"const": false},
+        "secretName": {"type": "string"},
         "sshPrivateKey": false,
         "privateKey": false,
         "key": false
-      }
-    },
-    "provisioningEvents": {
-      "additionalProperties": false,
-      "type": "object",
-      "patternProperties": {
-        "^[rR][eE][tT][eE][nN][tT][iI][oO][nN]_[dD][aA][yY][sS]$": {
-          "additionalProperties": false,
-          "type": "object",
-          "patternProperties": {
-            "^[eE][vV][eE][nN][tT][sS]$": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "^[dD][eE][lL][iI][vV][eE][rR][iI][eE][sS]$": {
-              "minimum": 0,
-              "type": "integer"
-            },
-            "^[lL][eE][aA][sS][eE]_[eE][nN][dD]_[rR][eE][pP][oO][rR][tT][sS]$": {
-              "minimum": 0,
-              "type": "integer"
-            }
-          }
-        },
-        "^[dD][eE][lL][iI][vV][eE][rR][yY]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
-          "exclusiveMinimum": 0,
-          "type": "number"
-        },
-        "^[sS][iI][nN][kK]_[mM][aA][xX]_[aA][gG][eE]_[sS][eE][cC][oO][nN][dD][sS]$": {
-          "exclusiveMinimum": 0,
-          "type": "number"
-        },
-        "^[fF][iI][nN][aA][lL][lL][yY]$": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "^[sS][iI][nN][kK][sS]$": {
-          "type": "object",
-          "patternProperties": {
-            "^[eE][nN][aA][bB][lL][eE][dD]$": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-              "type": "number",
-              "exclusiveMinimum": 0
-            },
-            "^[aA][pP][pP][rR][iI][sS][eE]$": {
-              "additionalProperties": false,
-              "type": "object",
-              "patternProperties": {
-                "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "anyOf": [
-                    {
-                      "exclusiveMinimum": 0,
-                      "type": "number"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[uU][rR][lL][sS]$": false,
-                "^[tT][iI][tT][lL][eE]$": {
-                  "type": "string"
-                },
-                "^sink$": {
-                  "const": "apprise"
-                },
-                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-              }
-            },
-            "^[cC][oO][mM][mM][aA][nN][dD]$": {
-              "additionalProperties": false,
-              "type": "object",
-              "patternProperties": {
-                "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "anyOf": [
-                    {
-                      "exclusiveMinimum": 0,
-                      "type": "number"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[aA][rR][gG][vV]$": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "^[sS][eE][nN][dD]$": {
-                  "type": "string"
-                },
-                "^sink$": {
-                  "const": "command"
-                },
-                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-              }
-            },
-            "^[fF][iI][lL][eE]$": {
-              "additionalProperties": false,
-              "type": "object",
-              "patternProperties": {
-                "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "anyOf": [
-                    {
-                      "exclusiveMinimum": 0,
-                      "type": "number"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[pP][aA][tT][hH]$": {
-                  "type": "string"
-                },
-                "^sink$": {
-                  "const": "file"
-                },
-                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-              }
-            },
-            "^[sS][mM][tT][pP]$": {
-              "additionalProperties": false,
-              "type": "object",
-              "patternProperties": {
-                "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "anyOf": [
-                    {
-                      "exclusiveMinimum": 0,
-                      "type": "number"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[hH][oO][sS][tT]$": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "^[pP][oO][rR][tT]$": {
-                  "maximum": 65535,
-                  "minimum": 1,
-                  "type": "integer"
-                },
-                "^[sS][eE][nN][dD][eE][rR]$": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "^[rR][eE][cC][iI][pP][iI][eE][nN][tT][sS]$": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "^[sS][tT][aA][rR][tT]_[tT][lL][sS]$": {
-                  "type": "boolean"
-                },
-                "^[uU][sS][eE][rR][nN][aA][mM][eE]$": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[pP][aA][sS][sS][wW][oO][rR][dD]$": false,
-                "^[sS][uU][bB][jJ][eE][cC][tT]_[pP][rR][eE][fF][iI][xX]$": {
-                  "type": "string"
-                },
-                "^sink$": {
-                  "const": "smtp"
-                },
-                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-              }
-            },
-            "^[wW][eE][bB][hH][oO][oO][kK]$": {
-              "additionalProperties": false,
-              "type": "object",
-              "patternProperties": {
-                "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                  "anyOf": [
-                    {
-                      "exclusiveMinimum": 0,
-                      "type": "number"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "^[uU][rR][lL]$": false,
-                "^[hH][eE][aA][dD][eE][rR][sS]$": false,
-                "^[sS][eE][nN][dD]$": {
-                  "type": "string"
-                },
-                "^[sS][iI][gG][nN]$": {
-                  "type": "boolean"
-                },
-                "^sink$": {
-                  "const": "webhook"
-                },
-                "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-              }
-            }
-          },
-          "additionalProperties": {
-            "type": "object",
-            "patternProperties": {
-              "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-            },
-            "dependencies": {
-              "sink": {
-                "anyOf": [
-                  {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                        "anyOf": [
-                          {
-                            "exclusiveMinimum": 0,
-                            "type": "number"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "^[uU][rR][lL][sS]$": false,
-                      "^[tT][iI][tT][lL][eE]$": {
-                        "type": "string"
-                      },
-                      "^sink$": {
-                        "const": "apprise"
-                      },
-                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-                    }
-                  },
-                  {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                        "anyOf": [
-                          {
-                            "exclusiveMinimum": 0,
-                            "type": "number"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "^[aA][rR][gG][vV]$": {
-                        "items": {
-                          "type": "string"
-                        },
-                        "type": "array"
-                      },
-                      "^[sS][eE][nN][dD]$": {
-                        "type": "string"
-                      },
-                      "^sink$": {
-                        "const": "command"
-                      },
-                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-                    }
-                  },
-                  {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                        "anyOf": [
-                          {
-                            "exclusiveMinimum": 0,
-                            "type": "number"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "^[pP][aA][tT][hH]$": {
-                        "type": "string"
-                      },
-                      "^sink$": {
-                        "const": "file"
-                      },
-                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-                    }
-                  },
-                  {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                        "anyOf": [
-                          {
-                            "exclusiveMinimum": 0,
-                            "type": "number"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "^[hH][oO][sS][tT]$": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "^[pP][oO][rR][tT]$": {
-                        "maximum": 65535,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "^[sS][eE][nN][dD][eE][rR]$": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "^[rR][eE][cC][iI][pP][iI][eE][nN][tT][sS]$": {
-                        "items": {
-                          "type": "string"
-                        },
-                        "minItems": 1,
-                        "type": "array"
-                      },
-                      "^[sS][tT][aA][rR][tT]_[tT][lL][sS]$": {
-                        "type": "boolean"
-                      },
-                      "^[uU][sS][eE][rR][nN][aA][mM][eE]$": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "^[pP][aA][sS][sS][wW][oO][rR][dD]$": false,
-                      "^[sS][uU][bB][jJ][eE][cC][tT]_[pP][rR][eE][fF][iI][xX]$": {
-                        "type": "string"
-                      },
-                      "^sink$": {
-                        "const": "smtp"
-                      },
-                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-                    }
-                  },
-                  {
-                    "additionalProperties": false,
-                    "type": "object",
-                    "patternProperties": {
-                      "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-                        "anyOf": [
-                          {
-                            "exclusiveMinimum": 0,
-                            "type": "number"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "^[uU][rR][lL]$": false,
-                      "^[hH][eE][aA][dD][eE][rR][sS]$": false,
-                      "^[sS][eE][nN][dD]$": {
-                        "type": "string"
-                      },
-                      "^[sS][iI][gG][nN]$": {
-                        "type": "boolean"
-                      },
-                      "^sink$": {
-                        "const": "webhook"
-                      },
-                      "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
-                    }
-                  },
-                  {
-                    "patternProperties": {
-                      "^sink$": {
-                        "not": {
-                          "enum": [
-                            "apprise",
-                            "command",
-                            "file",
-                            "smtp",
-                            "webhook"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "^[rR][oO][uU][tT][eE][sS]$": {
-          "additionalProperties": {
-            "additionalProperties": false,
-            "type": "object",
-            "patternProperties": {
-              "^[wW][hH][eE][rR][eE]$": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "^[sS][iI][nN][kK][sS]$": {
-                "items": {
-                  "type": "string"
-                },
-                "minItems": 1,
-                "type": "array"
-              }
-            }
-          },
-          "type": "object"
-        }
       }
     }
   }

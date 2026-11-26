@@ -46,10 +46,17 @@ class KindRefused(ValueError):
 
 @dataclass(frozen=True)
 class PrunedTable:
-    """A table a record-time hook writes, pruned by time on `timestamp_column`."""
+    """A table a record-time hook writes, pruned by time on `timestamp_column`.
+
+    `event_column`, when given, holds the `id` of the event whose hook wrote the
+    row: the row is then pruned only once its event is gone too, so every row a
+    retained event or delivery refers to is present. A row whose column is empty is
+    pruned by time alone.
+    """
 
     name: str
     timestamp_column: str
+    event_column: str | None = None
 
 
 @dataclass(frozen=True)

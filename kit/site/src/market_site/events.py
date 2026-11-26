@@ -89,14 +89,17 @@ SITE_LEASE_ENDED: Kind[LeaseEndedDetails] = Kind(
     dedup_key=("subject", "attributes.transition_key"),
 )
 
-#: One per reservation whose capacity a release freed.
+#: One per reservation whose capacity a release freed. ``lease_lifecycle`` says
+#: the lease lifecycle made the release through the site authority port — the
+#: releases the owning storefront is called back for — rather than a caller of
+#: the site's own release route.
 SITE_CAPACITY_RELEASED: Kind[CapacityReleasedDetails] = Kind(
     name="site.capacity_released",
     version=1,
     severity=Severity.INFO,
     details=CapacityReleasedDetails,
     summary=_capacity_released_summary,
-    attributes={"forced": bool, "after_release_failure": bool},
+    attributes={"forced": bool, "after_release_failure": bool, "lease_lifecycle": bool},
     dedup_key=("subject",),
 )
 
@@ -125,14 +128,22 @@ def lease_ended_draft(payload: dict[str, Any], *, transition_key: str) -> EventD
 
 
 def capacity_released_draft(
-    details: CapacityReleasedDetails, *, forced: bool, after_release_failure: bool
+    details: CapacityReleasedDetails,
+    *,
+    forced: bool,
+    after_release_failure: bool,
+    lease_lifecycle: bool,
 ) -> EventDraft:
     """``site.capacity_released`` for a release that freed a reservation's capacity."""
     lease = lease_reference(details.capacity_reservation_id)
     return SITE_CAPACITY_RELEASED.draft(
         subject=lease,
         details=details,
-        attributes={"forced": forced, "after_release_failure": after_release_failure},
+        attributes={
+            "forced": forced,
+            "after_release_failure": after_release_failure,
+            "lease_lifecycle": lease_lifecycle,
+        },
         related=(lease,),
         correlation_id=lease.id,
     )

@@ -1753,6 +1753,7 @@ class CapacityLedgerService:
         failure_reason: str | None = None,
         failure_message: str | None = None,
         end_context: Mapping[str, Any] | None = None,
+        lease_lifecycle: bool = False,
     ) -> dict[str, Any] | None:
         """Return a held reservation's capacity to the pool, if the guard permits.
 
@@ -1761,7 +1762,8 @@ class CapacityLedgerService:
         an ``unmanaged`` reservation, one an operator has taken over from the
         lease lifecycle. Returns ``None`` when no reservation matches, when it
         is not held, and when the release guard refuses; a refusal changes
-        nothing.
+        nothing. ``lease_lifecycle`` marks the release's ``site.capacity_released``
+        as the lease lifecycle's, made through the site authority port.
         """
         state = (
             ReservationState.force_released.value
@@ -1821,6 +1823,7 @@ class CapacityLedgerService:
                 ),
                 forced=forced,
                 after_release_failure=after_release_failure,
+                lease_lifecycle=lease_lifecycle,
             ))
             db.add(
                 CapacityEvent(

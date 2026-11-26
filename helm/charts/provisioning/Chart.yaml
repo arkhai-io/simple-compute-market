@@ -2,4 +2,4 @@ apiVersion: v2
 name: provisioning
 description: Async provisioning service for the Arkhai stack
 type: application
-version: 0.2.0
+version: 0.1.4

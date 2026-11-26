@@ -79,6 +79,9 @@ carries: classifying failures and delivering them to an operator is one design.
 - `compute-provisioning-contract`: the job view's `failure`.
 - `introduction-delivery`: sinks deliver any deliverable, a signing webhook signs as
   its composition says, and configured sinks receive the events their routes select.
+- `deployment-state`: a chart passing a service's configuration through is no longer
+  required to carry a values-schema fragment generated from the service's models
+  (design D9, owner's notes 39 O1).
 
 ## Non-Goals
 
@@ -107,7 +110,10 @@ carries: classifying failures and delivering them to an operator is one design.
 - The provisioning service (`[Events]` configuration, `EventDeliveryWorker`, the
   administrator routes, the signed-report table, the peer and capacity-release
   consumers, the retirement of both outboxes and a data migration of their 0.4.0
-  rows) and the provisioning chart's values and schema.
+  rows); the provisioning chart is unchanged, passing `Events` through its `config`.
+- `docs/guidance/engineering/helm.md`, `helm-render-tests.md` and
+  `docs/guidance/repository/chart-render-tests.md`: a chart's values schema types the
+  chart's own values, never a pass-through service configuration.
 - `docs/operator-handbook.md`, `VALIDATION_RUNBOOK.md`'s observation 5,
   `docs/development/ARCHITECTURE.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
   and the roadmap's Goal 1.
@@ -170,7 +176,8 @@ carries: classifying failures and delivering them to an operator is one design.
   `configuration.md` (routes and sinks).
 - D9: `physical-provisioning`'s `configuration.md` (`[Events]`);
   `docs/development/ARCHITECTURE.md`, "Recovery workers" (`EventDeliveryWorker`);
-  `docs/development/DEPLOYMENT_AND_CONFIG.md` (the chart's `events`); the operator
+  `docs/development/DEPLOYMENT_AND_CONFIG.md` (`Events` passed through the chart's
+  `config`, its secret sink settings in the Secret overlay); the operator
   handbook (routes, sinks, the event reads, resuming a destination).
 - D10: `physical-provisioning`'s `configuration.md`
   (`additional_non_retryable_errors` matched against the failure record) and the

@@ -6,15 +6,18 @@ delivery row per event selected for it: `pending`, `delivered` or `abandoned`, w
 its attempt count and last error. A cycle does three things, each in its own
 transactions:
 
-1. **Registers** the consumer and its configured destinations. A new consumer, and a
-   destination added to an existing one, start at the current position: neither
-   receives an event recorded before it. A stored destination absent from the
-   configuration is retired: each delivery still pending to it is abandoned to the finally sink, and
-   nothing more is selected for it.
+1. **Registers** the consumer and its configured destinations. A new consumer starts
+   at the latest event, and the destinations it is first registered with at its
+   position. Once a consumer has had destinations, a change to them takes effect at
+   the latest committed event: the cycle first reads every committed event with the
+   destinations as stored, then adds each new destination there — so it receives no
+   event recorded before it — and retires each stored destination absent from the
+   configuration: each delivery still pending to it, those just read included, is
+   abandoned to the finally sink, and nothing more is selected for it.
 2. **Reads** every event past the position, in sequence order, writes a pending
-   delivery for each destination its selection names that is not retired, and
-   advances the position. The recorder's sequence allocation means no event can later
-   commit below the position.
+   delivery for each destination its selection names among those not retired and
+   added before the event, and advances the position. The recorder's sequence
+   allocation means no event can later commit below the position.
 3. **Delivers**, destination by destination, each pending delivery in sequence order,
    outside any transaction, then records the outcome. A delivery that fails is retried
    after a backoff, and the destination's later events wait behind it; another
@@ -38,9 +41,12 @@ the event again under the same `id`.
 
 A destination parks itself by raising `ParkDestination`, or is parked explicitly;
 nothing is delivered to it until it is resumed, and resuming delivers, in order, the
-pending events still retained. A consumer's retry policy may bound a delivery's
-retries by a maximum age: a delivery that fails once older than that is abandoned,
-keeping its last error, and the event is handed to the finally sink.
+pending events still retained. A destination that can never take one delivery — a
+receiver refusing that event outright, say — raises `AbandonDelivery`: that delivery
+is abandoned to the finally sink and the destination's next one follows. A
+consumer's retry policy may bound a delivery's retries by a maximum age: a delivery
+that fails once older than that is abandoned, keeping its last error, and the event
+is handed to the finally sink.
 
 Retries are scheduled, a delivery's age measured, and the hold's expiry kept in the
 time of the world the consumer's clock reads, not on the monotonic clock: the
@@ -93,9 +99,17 @@ class ParkDestination(Exception):
     the reason, kept as the delivery's last error and the destination's state reason."""
 
 
+class AbandonDelivery(Exception):
+    """Raised by a destination that can never take this one delivery — a receiver
+    refusing the event itself rather than failing for the moment. The delivery is
+    abandoned, the message kept as its last error, and the event handed to the
+    finally sink; the destination's next delivery follows."""
+
+
 class Destination(Protocol):
     """Where a consumer delivers. `deliver` returns once the event is delivered, and
-    raises to fail the attempt, or `ParkDestination` to park the destination."""
+    raises to fail the attempt, `AbandonDelivery` to abandon this delivery, or
+    `ParkDestination` to park the destination."""
 
     def deliver(self, envelope: Envelope) -> None: ...
 
@@ -156,16 +170,23 @@ class CycleReport:
     the cycle, which then stopped without applying its pending outcome."""
 
 
-def _all(destinations: Collection[str]) -> Callable[[Envelope], Collection[str]]:
-    return lambda envelope: destinations
+Selection = Callable[[Envelope, frozenset[str]], Collection[str]]
+"""Names the destinations an event goes to, among the candidates given: those not
+retired and added before the event, which may include a stored destination the
+configuration no longer names while a change to the destinations takes effect."""
+
+
+def _all(envelope: Envelope, candidates: frozenset[str]) -> Collection[str]:
+    return candidates
 
 
 class Consumer:
     """One named consumer over one store.
 
-    `select` names the destinations an event goes to; by default, every configured
-    destination. `clock` reads the time of the world as an aware datetime, against
-    which retries are scheduled, a delivery's age is measured and the hold kept.
+    `select` names the destinations an event goes to among the candidates it is
+    given; by default, every candidate. `clock` reads the time of the world as an
+    aware datetime, against which retries are scheduled, a delivery's age is
+    measured and the hold kept.
     `runner` names this runner as the hold's holder, unique to the instance by
     default; a name given is one process's, stable across its restarts. `hold` is how
     long it holds the consumer past each transaction, longer than any delivery
@@ -180,7 +201,7 @@ class Consumer:
         destinations: Mapping[str, Destination],
         clock: Callable[[], datetime],
         retry: RetryPolicy | None = None,
-        select: Callable[[Envelope], Collection[str]] | None = None,
+        select: Selection | None = None,
         finally_sink: FinallySink | None = None,
         batch_size: int = 100,
         runner: str | None = None,
@@ -191,7 +212,7 @@ class Consumer:
         self._destinations = dict(destinations)
         self._clock = clock
         self._retry = retry or RetryPolicy()
-        self._select = select or _all(tuple(self._destinations))
+        self._select = select or _all
         self._finally = finally_sink or LogFinallySink()
         self._batch_size = batch_size
         self.runner = runner or uuid4().hex
@@ -205,7 +226,10 @@ class Consumer:
 
     def register(self, report: CycleReport | None = None) -> CycleReport:
         """Record the consumer and its configured destinations, retiring each stored
-        destination absent from the configuration, under the consumer's hold."""
+        destination absent from the configuration, under the consumer's hold. A
+        change to destinations a consumer already has first reads every committed
+        event past the position, as a cycle's read does, so the change takes effect
+        at the latest committed event."""
         return self._held(self._register, report=report)
 
     def read(self, report: CycleReport | None = None) -> CycleReport:
@@ -314,40 +338,70 @@ class Consumer:
             )
 
     def _register(self, report: CycleReport) -> None:
-        clock_now = self._clock()
-        now = schema.to_stored(clock_now)
-        with self._sessions.begin() as session:
-            self._renew(session, clock_now)
-            position = self._position(session)
-            stored: dict[str, str] = {
-                row.name: row.state
-                for row in session.execute(
-                    select(schema.destinations.c.name, schema.destinations.c.state).where(
-                        schema.destinations.c.consumer == self.name
-                    )
-                )
-            }
-            for name in sorted(self._destinations):
-                if name not in stored:
-                    session.execute(
-                        insert(schema.destinations).values(
-                            consumer=self.name, name=name, state=ACTIVE,
-                            added_at_position=position, added_at=now, state_changed_at=now,
+        while True:
+            clock_now = self._clock()
+            now = schema.to_stored(clock_now)
+            with self._sessions.begin() as session:
+                self._renew(session, clock_now)
+                position = self._position(session)
+                stored: dict[str, str] = {
+                    row.name: row.state
+                    for row in session.execute(
+                        select(schema.destinations.c.name, schema.destinations.c.state).where(
+                            schema.destinations.c.consumer == self.name
                         )
                     )
-                elif stored[name] == RETIRED:
-                    # Configured again after retirement: a new destination, starting
-                    # at the current position.
-                    session.execute(
-                        update(schema.destinations)
-                        .where(self._destination(name))
-                        .values(state=ACTIVE, added_at_position=position,
-                                added_at=now, state_changed_at=now, state_reason=None)
+                }
+                receiving = {name for name, state in stored.items() if state != RETIRED}
+                if stored and receiving != set(self._destinations):
+                    latest = int(session.execute(
+                        select(func.coalesce(func.max(schema.events.c.sequence), 0))
+                    ).scalar_one())
+                    if latest > position:
+                        # The change takes effect at the latest committed event: the
+                        # events before it go to the destinations as stored.
+                        unread = True
+                    else:
+                        unread = False
+                        self._apply_destinations(session, stored, position, now, report)
+                else:
+                    unread = False
+                    self._apply_destinations(session, stored, position, now, report)
+            if not unread:
+                return
+            self._read(report)
+
+    def _apply_destinations(
+        self,
+        session: Session,
+        stored: Mapping[str, str],
+        position: int,
+        now: datetime,
+        report: CycleReport,
+    ) -> None:
+        """Add each configured destination not stored, or retired, at `position`, and
+        retire each stored destination the configuration does not name."""
+        for name in sorted(self._destinations):
+            if name not in stored:
+                session.execute(
+                    insert(schema.destinations).values(
+                        consumer=self.name, name=name, state=ACTIVE,
+                        added_at_position=position, added_at=now, state_changed_at=now,
                     )
-            for name in sorted(set(stored) - set(self._destinations)):
-                if stored[name] != RETIRED:
-                    report.abandoned += self._retire(session, name, now)
-                    report.retired.append(name)
+                )
+            elif stored[name] == RETIRED:
+                # Configured again after retirement: a new destination, starting
+                # at the current position.
+                session.execute(
+                    update(schema.destinations)
+                    .where(self._destination(name))
+                    .values(state=ACTIVE, added_at_position=position,
+                            added_at=now, state_changed_at=now, state_reason=None)
+                )
+        for name in sorted(set(stored) - set(self._destinations)):
+            if stored[name] != RETIRED:
+                report.abandoned += self._retire(session, name, now)
+                report.retired.append(name)
 
     def _read(self, report: CycleReport) -> None:
         while True:
@@ -356,14 +410,16 @@ class Consumer:
                 self._renew(session, clock_now)
                 now = schema.to_stored(clock_now)
                 position = self._position(session)
-                receiving: set[str] = set(
-                    session.execute(
-                        select(schema.destinations.c.name).where(
+                receiving: dict[str, int] = {
+                    row.name: int(row.added_at_position)
+                    for row in session.execute(
+                        select(schema.destinations.c.name,
+                               schema.destinations.c.added_at_position).where(
                             schema.destinations.c.consumer == self.name,
                             schema.destinations.c.state != RETIRED,
                         )
-                    ).scalars()
-                )
+                    )
+                }
                 rows = session.execute(
                     select(schema.events.c.sequence, schema.events.c.envelope)
                     .where(schema.events.c.sequence > position)
@@ -372,8 +428,13 @@ class Consumer:
                 ).all()
                 if not rows:
                     return
-                for sequence, raw in rows:
-                    chosen = receiving & set(self._select(Envelope.from_json(str(raw))))
+                for row in rows:
+                    sequence: int = row.sequence
+                    raw = row.envelope
+                    candidates = frozenset(
+                        name for name, added in receiving.items() if added < sequence)
+                    chosen = candidates & set(
+                        self._select(Envelope.from_json(str(raw)), candidates))
                     for destination in sorted(chosen):
                         session.execute(
                             insert(schema.deliveries).values(
@@ -445,6 +506,15 @@ class Consumer:
                     park_destination(session, self.name, name, str(parked), now)
                 report.parked.append(name)
                 return
+            except AbandonDelivery as refused:
+                with self._sessions.begin() as session:
+                    self._renew(session, self._clock())
+                    self._attempted(session, name, due.event_sequence, attempts, now,
+                                    last_error=str(refused), state=ABANDONED)
+                    self._finally.abandoned(consumer=self.name, destination=name,
+                                            envelope=envelope, last_error=str(refused))
+                report.abandoned += 1
+                continue
             except Exception as error:  # a destination's failure is any exception
                 last_error = f"{type(error).__name__}: {error}"
                 age = now - schema.from_stored(due.created_at)

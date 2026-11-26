@@ -169,17 +169,43 @@ def test_a_retired_destination_with_no_deliveries_left_is_pruned_with_the_delive
         recorder.record(session, job("j-1"))
     Consumer("notify", session_factory=store.sessions, destinations={"old": Failing()},
              clock=clock).run_cycle()
-    Consumer("notify", session_factory=store.sessions, destinations={}, clock=clock).run_cycle()
+    Consumer("notify", session_factory=store.sessions, destinations={"new": Failing()},
+             clock=clock).run_cycle()
     clock.advance(timedelta(days=8))
 
     report = pruner(store, clock, Retention(deliveries=timedelta(days=7))).prune()
 
     assert report.removed == {"deliveries": 1, "retired_destinations": 1}
     with store.engine.connect() as connection:
-        assert connection.execute(select(schema.destinations)).all() == []
+        assert connection.execute(
+            select(schema.destinations.c.name)).scalars().all() == ["new"]
 
 
-def notices_catalogue() -> Catalogue:
+def test_a_consumer_keeps_its_latest_retired_destination_so_a_later_one_starts_after_it(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    """With every destination retired and pruned, a destination configured later is
+    still a change to the consumer's destinations, not its first registration: an
+    event committed before it was added never reaches it."""
+    def notify(**destinations: Failing) -> Consumer:
+        return Consumer("notify", session_factory=store.sessions, destinations=destinations,
+                        clock=clock)
+
+    notify(old=Failing()).run_cycle()
+    notify().run_cycle()
+    clock.advance(timedelta(days=8))
+    report = pruner(store, clock, Retention(deliveries=timedelta(days=7))).prune()
+    with store.sessions.begin() as session:
+        recorder.record(session, job("j-1"))
+    new = Failing()
+    new.failing = False
+
+    notify(new=new).run_cycle()
+
+    assert report.removed == {"deliveries": 0, "retired_destinations": 0}
+    assert new.received == []
+
+
+def notices_catalogue(event_column: str | None = None) -> Catalogue:
     def write_notice(session: Session, envelope: Envelope) -> None:
         session.execute(text("INSERT INTO notices (event_id, written_at) VALUES (:id, :at)"),
                         {"id": envelope.id,
@@ -188,8 +214,15 @@ def notices_catalogue() -> Catalogue:
     return Catalogue([Kind(
         name="jobs.noticed", version=1, severity=Severity.INFO, details=JobDetails,
         summary=lambda draft, details: "noticed",
-        hook=RecordHook(write_notice, tables=(PrunedTable("notices", "written_at"),)),
+        hook=RecordHook(write_notice, tables=(
+            PrunedTable("notices", "written_at", event_column=event_column),)),
     )])
+
+
+def notices(store: Store) -> list[str | None]:
+    with store.engine.connect() as connection:
+        return list(connection.execute(
+            text("SELECT event_id FROM notices ORDER BY written_at")).scalars())
 
 
 @pytest.mark.parametrize(("retention", "kept"), [(timedelta(days=7), 0), (None, 1)])
@@ -209,6 +242,37 @@ def test_a_hooks_table_is_pruned_by_its_own_retention(
     with store.engine.connect() as connection:
         assert connection.execute(text("SELECT COUNT(*) FROM notices")).scalar_one() == kept
     assert sequences(store) == [1]
+
+
+def test_a_hooks_row_linked_to_its_event_is_kept_until_the_event_is_pruned(
+        store: Store, clock: Clock) -> None:
+    with store.engine.begin() as connection:
+        connection.execute(text("CREATE TABLE notices (event_id VARCHAR, written_at TIMESTAMP)"))
+    kinds = notices_catalogue(event_column="event_id")
+    recorder = Recorder(kinds, source=Source(service="s", instance="i"), clock=clock)
+    peer = Failing()
+    notify = Consumer("notify", session_factory=store.sessions, clock=clock,
+                      destinations={"peer": peer})
+    notify.register()
+    with store.sessions.begin() as session:
+        recorder.record(session, kinds.require("jobs.noticed").draft(
+            subject=Reference(type="job", id="j-1"), details={"queue": "q"}))
+    with store.engine.begin() as connection:
+        connection.execute(text("INSERT INTO notices (event_id, written_at) VALUES (NULL, :at)"),
+                           {"at": schema.to_stored(clock()).isoformat(" ")})
+    notify.run_cycle()
+    clock.advance(timedelta(days=40))
+    retention = Retention(events=MONTH, tables={"notices": timedelta(days=7)})
+
+    pending = pruner(store, clock, retention, kinds).prune()
+    peer.failing = False
+    notify.run_cycle()
+    delivered = pruner(store, clock, retention, kinds).prune()
+
+    assert pending.removed == {"events": 0, "notices": 1}
+    assert peer.received == ["j-1"]
+    assert delivered.removed == {"events": 1, "notices": 1}
+    assert notices(store) == []
 
 
 def test_a_retention_naming_a_table_no_hook_writes_is_refused(store: Store, clock: Clock) -> None:

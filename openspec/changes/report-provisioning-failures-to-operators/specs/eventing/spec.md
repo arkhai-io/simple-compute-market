@@ -75,9 +75,9 @@ A named consumer MUST hold a durable position and, for each destination, a deliv
 - **WHEN** a delivery succeeds and the process stops before recording the outcome
 - **THEN** the event is delivered again under the same `id`
 
-### Requirement: A destination is parked and resumed explicitly, and a new destination starts at the current position
+### Requirement: A destination is parked and resumed explicitly, and a new destination receives no earlier event
 
-A consumer MUST be able to park a destination, after which nothing is delivered to it until it is resumed, and resuming MUST deliver, in order, the events it missed that are still retained. A destination added to a consumer MUST start at the consumer's current position and MUST NOT receive events recorded before it was added. A destination its consumer no longer has configured MUST be retired: each event still undelivered to it MUST be marked abandoned and handed to the consumer's finally sink, and nothing more is delivered to it.
+A consumer MUST be able to park a destination, after which nothing is delivered to it until it is resumed, and resuming MUST deliver, in order, the events it missed that are still retained. The destinations a consumer is first registered with MUST start at its position. Once a consumer has had destinations, a change to them MUST take effect at the latest committed event: each event committed before it MUST go to the destinations as they were, whether or not the consumer had read it, and a destination added MUST NOT receive any event committed before it was added. A destination its consumer no longer has configured MUST be retired: each event still undelivered to it, read or not, MUST be marked abandoned and handed to the consumer's finally sink, and nothing more is delivered to it.
 
 #### Scenario: A destination is parked and resumed
 
@@ -98,6 +98,11 @@ A consumer MUST be able to park a destination, after which nothing is delivered 
 
 - **WHEN** a destination is added to a consumer that has events recorded before it
 - **THEN** none of those events is delivered to it
+
+#### Scenario: A destination is replaced before the consumer reads an event
+
+- **WHEN** an event commits, and before the consumer reads it the consumer starts with one destination replaced by another
+- **THEN** the event is not delivered to the new destination, and is abandoned to the finally sink for the replaced one
 
 ### Requirement: A route selects events with an SQL condition validated against the catalogue
 
@@ -125,21 +130,31 @@ A route MUST select events with an SQL condition over the event's envelope scala
 
 ### Requirement: An abandoned delivery goes to the finally sink
 
-A consumer MUST be able to bound a destination's retries by a maximum age, after which that event's delivery to that destination is marked abandoned, keeping its last error, and the event is handed to the consumer's finally sink. The finally sink MUST default to the log.
+A consumer MUST be able to bound a destination's retries by a maximum age, after which that event's delivery to that destination is marked abandoned, keeping its last error, and the event is handed to the consumer's finally sink. A destination MUST be able to refuse one delivery outright, which is then abandoned the same way at once, keeping the refusal as its last error, while the destination's later deliveries follow it in order. The finally sink MUST default to the log.
 
 #### Scenario: A destination keeps failing
 
 - **WHEN** a destination fails every delivery of an event past its consumer's maximum age
 - **THEN** that delivery is abandoned with its last error and the event is written to the finally sink
 
+#### Scenario: A destination refuses one delivery
+
+- **WHEN** a destination refuses the delivery at the head of its queue outright
+- **THEN** that delivery is abandoned with the refusal as its last error, the event is written to the finally sink, and the destination's next delivery is attempted
+
 ### Requirement: Stored events are pruned by time per table, never ahead of a pending destination
 
-Each table the component writes, and each table a record-time hook writes, MUST be retained for a time configured per table, where no limit keeps every row. An event MUST be pruned only once it is past its table's retention and, for each consumer's destination, it is delivered or abandoned, or the destination is parked or retired. A parked destination MUST NOT hold back the pruning of an event past its retention.
+Each table the component writes, and each table a record-time hook writes, MUST be retained for a time configured per table, where no limit keeps every row. An event MUST be pruned only once it is past its table's retention and, for each consumer's destination, it is delivered or abandoned, or the destination is parked or retired. A parked destination MUST NOT hold back the pruning of an event past its retention. Pruning MUST leave no retained row referring to a pruned one: an event's references and deliveries go with it, and a row a record-time hook wrote that names its event MUST be kept, whatever its own retention, while that event is.
 
 #### Scenario: An old event is still pending
 
 - **WHEN** an event is past its table's retention and one consumer's destination is still pending it
 - **THEN** the event is kept until that destination's state is no longer pending
+
+#### Scenario: A hook's row is past its retention while its event is pending
+
+- **WHEN** a row a record-time hook wrote is past its table's retention and the event it names is still kept for a pending destination
+- **THEN** the row is kept, and is pruned once its event is
 
 ### Requirement: The component depends on no internal package and names no market concept
 

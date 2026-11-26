@@ -238,21 +238,6 @@ config:
   lease_watchdog_enabled: true
   lease_watchdog_poll_interval_seconds: 60
   lease_watchdog_grace_period_seconds: 3600
-
-  # Operator events: the service's [Events] section, rendered as given. Routes
-  # select events by an SQL condition and name the sinks they go to; a sink's
-  # public settings are stated here, and its secret ones (a webhook's url, an
-  # Apprise sink's urls, a mail password) in the runtime Secret's
-  # provisioning-secrets profile, which the values schema enforces. Omitted, the
-  # service records its events and delivers them nowhere. For example:
-  #   Events:
-  #     sinks:
-  #       enabled: [ops-push]
-  #       ops-push: {sink: apprise, title: "Provisioning"}
-  #     routes:
-  #       held-work:
-  #         where: "severity = 'action_required'"
-  #         sinks: [ops-push]
   storefront_site_id: "default"
   storefront_url: ""
 

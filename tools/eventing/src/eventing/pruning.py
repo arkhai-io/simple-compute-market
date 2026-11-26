@@ -3,14 +3,18 @@
 Each table has its own retention, and a table with none keeps every row. The
 component's tables are named for retention by `schema.TABLES`: `events` (the
 events and their references) and `deliveries` (finished deliveries, and retired
-destinations with none left); a table a record-time hook writes is named as its
-kind declares it.
+destinations with none left, though a consumer keeps its latest destination row);
+a table a record-time hook writes is named as its kind declares it.
 
 An event is pruned only once it is past its retention, every consumer has read past
 it, and each delivery of it is delivered or abandoned, or its destination is parked
 or retired. A parked destination therefore does not hold an event back: one parked
 longer than the events' retention receives, when resumed, only what is still
-retained. A delivery of a pruned event goes with it.
+retained. A delivery of a pruned event goes with it, and so do its references.
+
+A row a record-time hook wrote is pruned once past its table's retention and, when
+the table names the column linking it to its event, once that event is gone: no
+retained event refers to a pruned row.
 """
 
 from __future__ import annotations
@@ -19,12 +23,24 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnClause, CursorResult, Delete, column, delete, exists, func, select, table
+from sqlalchemy import (
+    ColumnClause,
+    CursorResult,
+    Delete,
+    and_,
+    column,
+    delete,
+    exists,
+    func,
+    or_,
+    select,
+    table,
+)
 from sqlalchemy.orm import Session, sessionmaker
 
 from eventing import schema
 from eventing.consumers import ABANDONED, ACTIVE, DELIVERED, PENDING, RETIRED
-from eventing.kinds import Catalogue
+from eventing.kinds import Catalogue, PrunedTable
 
 
 @dataclass(frozen=True)
@@ -93,18 +109,41 @@ class Pruner:
             for name, retention in sorted(self._retention.tables.items()):
                 if retention is None:
                     continue
-                pruned = self._hooked[name]
-                stamp: ColumnClause[datetime] = column(pruned.timestamp_column)
-                report.removed[name] = _deleted(session, delete(table(name, stamp)).where(
-                    stamp < schema.to_stored(now - retention)))
+                report.removed[name] = self._prune_hooked(
+                    session, self._hooked[name], schema.to_stored(now - retention))
         return report
+
+    def _prune_hooked(self, session: Session, pruned: PrunedTable, cutoff: datetime) -> int:
+        stamp: ColumnClause[datetime] = column(pruned.timestamp_column)
+        if pruned.event_column is None:
+            return _deleted(session, delete(table(pruned.name, stamp)).where(stamp < cutoff))
+        event: ColumnClause[str] = column(pruned.event_column)
+        hooked = table(pruned.name, stamp, event)
+        return _deleted(session, delete(hooked).where(
+            stamp < cutoff,
+            or_(event.is_(None),
+                ~exists().where(schema.events.c.id == hooked.c[pruned.event_column])),
+        ))
 
     def _prune_retired(self, session: Session, cutoff: datetime) -> int:
         d, ds = schema.deliveries, schema.destinations
+        other = ds.alias("other")
+        # A consumer keeps at least one destination row, its latest retired one when
+        # none is active or parked, so it is never taken for one first registering
+        # its destinations.
+        kept_elsewhere = exists().where(
+            other.c.consumer == ds.c.consumer,
+            other.c.name != ds.c.name,
+            or_(other.c.state != RETIRED,
+                other.c.state_changed_at > ds.c.state_changed_at,
+                and_(other.c.state_changed_at == ds.c.state_changed_at,
+                     other.c.name > ds.c.name)),
+        )
         return _deleted(session, delete(ds).where(
             ds.c.state == RETIRED,
             ds.c.state_changed_at < cutoff,
             ~exists().where(d.c.consumer == ds.c.consumer, d.c.destination == ds.c.name),
+            kept_elsewhere,
         ))
 
     def _prune_events(self, session: Session, cutoff: datetime) -> int:

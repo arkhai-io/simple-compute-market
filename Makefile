@@ -703,14 +703,10 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 # it writes -- VM's storefront chart and the umbrella's storefront definition, and
 # the bare-metal chart's -- and its generator runs in that storefront's own
 # environment (make init-storefront; make -C domains/bare_metal/storefront init),
-# whose test suite fails when a committed definition is stale. The provisioning
-# chart's values schema carries one too, its [Events] section, generated from
-# the provisioning service's typed models and the sinks it installs, in that
-# service's environment, whose suite holds it the same way.
-helm-values-schema: ## Regenerate each storefront's config definition, and provisioning's [Events], in their Helm values schemas
+# whose test suite fails when a committed definition is stale.
+helm-values-schema: ## Regenerate each storefront's config definition in its Helm values schemas
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
-	cd provisioning/compute/service && uv run --frozen --no-sync python -m compute_provisioning_service.values_schema write --root ../../..
 
 # An older uv writes locks at an older revision; uv_project.py refuses it too, but
 # this prerequisite refuses before the wheelhouse is built, even under -j.

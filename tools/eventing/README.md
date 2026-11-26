@@ -82,8 +82,10 @@ catalogue = Catalogue([SHIPMENT_DELAYED], schema_prefix="urn:event")
   key makes every event its own occurrence.
 - `summary` renders the line a person reads, from the draft and its validated details.
 - `hook`, a `RecordHook`, is optional work done in the recording transaction with the
-  event as recorded; `RecordHook.tables` names each table it writes and the column
-  its rows are pruned by (`PrunedTable`).
+  event as recorded; `RecordHook.tables` names each table it writes, the column its
+  rows are pruned by, and optionally the column holding the `id` of the event that
+  wrote each row (`PrunedTable(name, timestamp_column, event_column=...)`), which
+  keeps a row while its event is.
 
 `Catalogue.kinds()` lists every declared kind. The catalogue refuses a second kind
 of one name, and a declaration whose attributes or key cannot be routed or resolved
@@ -132,7 +134,7 @@ consumer = Consumer(
     "notifications",
     session_factory=sessions,
     destinations={"ops-mail": mail, "ops-chat": chat},
-    select=routes.select,            # by default every destination
+    select=routes.select,            # (envelope, candidates); by default every candidate
     retry=RetryPolicy(max_age=timedelta(days=1)),
     finally_sink=LogFinallySink(),   # the default
     clock=now,
@@ -143,8 +145,10 @@ consumer.run_cycle()
 ```
 
 A `Destination` has one method, `deliver(envelope)`: it returns once the event is
-delivered, raises to fail the attempt, and raises `ParkDestination(reason)` to park
-itself. A consumer holds a durable position and, for each destination, a state —
+delivered, raises to fail the attempt, raises `AbandonDelivery(reason)` to refuse
+this one delivery outright, and raises `ParkDestination(reason)` to park itself. A
+selection (`Selection`) is called with the event and the candidate destinations —
+those not retired and added before the event — and names the ones it goes to. A consumer holds a durable position and, for each destination, a state —
 `active`, `parked` or `retired` — and a delivery per event selected for it,
 `pending`, `delivered` or `abandoned`, with its attempts and last error.
 
@@ -156,14 +160,21 @@ the position into pending deliveries, then delivers what is due:
   delivering — is delivered again. A failed delivery is retried after the policy's
   backoff, doubling from `initial` to `maximum`, and the destination's later events
   wait behind it; another destination is not held up.
-- A new consumer, and a destination added to a consumer, start at the current
-  position: neither receives an event recorded before it.
+- A new consumer starts at the latest event, and the destinations it is first
+  registered with at its position. Once a consumer has had destinations, a change to
+  them takes effect at the latest committed event: the cycle first reads every
+  committed event with the destinations as stored, then adds each new destination,
+  which receives no event committed before it, and retires each departing one.
 - A parked destination receives nothing until it is resumed (`Consumer.resume`, or
   `EventService.resume`); resuming delivers, in order, its pending events still
   retained. `Consumer.park` parks one explicitly.
 - A stored destination absent from the consumer's configuration is retired: each event
-  still pending to it is marked abandoned and handed to the finally sink, and nothing
-  more is selected for it. A name configured again starts afresh at the position.
+  still pending to it, those just read for it included, is marked abandoned and
+  handed to the finally sink, and nothing more is selected for it. A name configured
+  again starts afresh at the position.
+- A delivery its destination refuses with `AbandonDelivery` is abandoned at once,
+  keeping the refusal as its last error, and the event goes to the finally sink; the
+  destination's next delivery follows.
 - With `RetryPolicy.max_age`, a delivery that fails once older than that is
   abandoned, keeping its last error, and the event goes to the finally sink. With
   none, a delivery is retried without limit.
@@ -233,8 +244,10 @@ pruner.prune()
 
 Each table is retained for its own time, and none keeps every row: `events` (the
 events and their references), `deliveries` (finished deliveries, and retired
-destinations with none left), and each table a record-time hook writes, by its
-name. An event is pruned only once it is past its retention, every consumer has
+destinations with none left, though a consumer keeps its latest destination row),
+and each table a record-time hook writes, by its name. A hook's row whose table names
+an event column is kept, whatever its own retention, while its event is, so no
+retained event refers to a pruned row; one whose column is empty goes by time alone. An event is pruned only once it is past its retention, every consumer has
 read past it, and each of its deliveries is delivered or abandoned, or its
 destination is parked or retired. A parked destination does not hold an event back,
 so one parked longer than the events' retention receives, on resume, only what is

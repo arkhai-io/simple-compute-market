@@ -1735,6 +1735,8 @@ class Stage11c_LeaseEventsRecorded:
         assert {"create", "teardown"} <= actions, finished
         assert all(event.attributes.get("status") == "succeeded" for event in finished), finished
         released = next(e for e in listed.events if e.kind == "site.capacity_released")
-        assert released.attributes == {"forced": False, "after_release_failure": False}, released
+        assert released.attributes == {
+            "forced": False, "after_release_failure": False, "lease_lifecycle": True,
+        }, released
         log.info("[11c] Lease %s recorded %s", deal_state.lease_id, ", ".join(kinds))
 

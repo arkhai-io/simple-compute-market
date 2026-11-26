@@ -22,6 +22,7 @@ from eventing import (
     PARKED,
     PENDING,
     RETIRED,
+    AbandonDelivery,
     Consumer,
     Envelope,
     ParkDestination,
@@ -319,6 +320,49 @@ def test_a_destination_added_receives_no_event_recorded_before_it(
     assert chat.subjects == ["j-2"]
 
 
+def test_a_destination_added_while_an_event_is_unread_receives_no_event_before_it(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    mail, chat = Collect(), Collect()
+    consumer(store, clock, mail=mail).run_cycle()
+    record(store, recorder, "j-1")
+
+    consumer(store, clock, mail=mail, chat=chat).run_cycle()
+    record(store, recorder, "j-2")
+    consumer(store, clock, mail=mail, chat=chat).run_cycle()
+
+    assert mail.subjects == ["j-1", "j-2"]
+    assert chat.subjects == ["j-2"]
+
+
+def test_a_destination_replaced_while_an_event_is_unread_hands_it_to_the_finally_sink(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    old, new = Collect(), Collect()
+    finally_sink = Finally()
+    consumer(store, clock, finally_sink, old=old).run_cycle()
+    (unread,) = record(store, recorder, "j-1")
+
+    report = consumer(store, clock, finally_sink, new=new).run_cycle()
+    record(store, recorder, "j-2")
+    consumer(store, clock, finally_sink, new=new).run_cycle()
+
+    assert report.retired == ["old"]
+    assert finally_sink.calls == [("old", "j-1", "destination retired: not configured")]
+    assert delivery(store, "notify", "old", unread.sequence)["state"] == ABANDONED
+    assert old.received == []
+    assert new.subjects == ["j-2"]
+
+
+def test_the_destinations_a_consumer_is_first_registered_with_start_at_its_position(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    peer = Collect()
+    consumer(store, clock).run_cycle()
+    record(store, recorder, "j-1")
+
+    consumer(store, clock, peer=peer).run_cycle()
+
+    assert peer.subjects == ["j-1"]
+
+
 def test_a_new_consumer_starts_after_the_events_already_recorded(
         store: Store, recorder: Recorder, clock: Clock) -> None:
     record(store, recorder, "j-1")
@@ -335,7 +379,8 @@ def test_a_selection_sends_each_event_only_where_it_names(
         store: Store, recorder: Recorder, clock: Clock) -> None:
     mail, chat = Collect(), Collect()
 
-    def by_subject(envelope: Envelope) -> set[str]:
+    def by_subject(envelope: Envelope, candidates: frozenset[str]) -> set[str]:
+        assert candidates == {"mail", "chat"}
         return {"mail"} if envelope.subject.id == "j-1" else {"chat", "unknown"}
 
     def notify() -> Consumer:
@@ -395,6 +440,29 @@ def test_a_destination_failing_past_the_maximum_age_is_abandoned_with_its_last_e
     assert (abandoned["state"], abandoned["attempts"]) == (ABANDONED, 3)
     assert abandoned["last_error"] == "ConnectionError: 503 from sink"
     assert delivery(store, "notify", "ops", second.sequence)["state"] == ABANDONED
+
+
+def test_a_delivery_its_destination_refuses_is_abandoned_and_the_next_follows(
+        store: Store, recorder: Recorder, clock: Clock) -> None:
+    class Refusing(Collect):
+        def deliver(self, envelope: Envelope) -> None:
+            if envelope.subject.id == "j-1":
+                raise AbandonDelivery("refused: HTTP 404")
+            super().deliver(envelope)
+
+    peer = Refusing()
+    finally_sink = Finally()
+    consumer(store, clock, finally_sink, peer=peer).register()
+    refused, _ = record(store, recorder, "j-1", "j-2")
+
+    report = consumer(store, clock, finally_sink, peer=peer).run_cycle()
+
+    assert (report.abandoned, report.delivered, report.parked) == (1, 1, [])
+    assert peer.subjects == ["j-2"]
+    assert finally_sink.calls == [("peer", "j-1", "refused: HTTP 404")]
+    row = delivery(store, "notify", "peer", refused.sequence)
+    assert (row["state"], row["attempts"], row["last_error"]) == (ABANDONED, 1, "refused: HTTP 404")
+    assert destination_state(store, "notify", "peer") == ACTIVE
 
 
 def test_with_no_maximum_age_a_failing_delivery_is_retried_without_limit(

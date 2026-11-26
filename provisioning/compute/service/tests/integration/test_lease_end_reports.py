@@ -166,7 +166,8 @@ def test_a_repeated_release_keeps_one_report(session_factory):
     assert len(LeaseEndReports(session_factory).read(reservation)) == 1
 
 
-def test_signed_reports_are_kept_without_limit_unless_retention_is_set(session_factory, source):
+def test_a_signed_report_is_kept_by_its_own_retention_and_while_its_event_is(
+        session_factory, source):
     ledger = _ledger(session_factory)
     reservation = _leased(ledger, "escrow-retained")
     ledger.release(capacity_reservation_id=reservation)
@@ -176,9 +177,102 @@ def test_signed_reports_are_kept_without_limit_unless_retention_is_set(session_f
     event_pruner(session_factory, catalogue, EventsSettings()).prune()
     assert len(LeaseEndReports(session_factory).read(reservation)) == 1
 
-    retained_a_day = EventsSettings.model_validate({"retention_days": {"lease_end_reports": 1}})
-    event_pruner(session_factory, catalogue, retained_a_day).prune()
+    report_a_day = EventsSettings.model_validate({"retention_days": {"lease_end_reports": 1}})
+    event_pruner(session_factory, catalogue, report_a_day).prune()
+    assert len(LeaseEndReports(session_factory).read(reservation)) == 1
+
+    # Once both storefront consumers have read and delivered the end's events,
+    # its event is prunable, and the report with it.
+    double = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    peers = tuple(StorefrontPeer(PEER, IDENTITY, _Principals(), transport=double.transport)
+                  for _ in range(2))
+    for consumer in _container_module._make_storefront_consumers(
+            session_factory, peers, IDENTITY):
+        consumer.run_cycle()
+    for peer in peers:
+        peer.close()
+    both_a_day = EventsSettings.model_validate(
+        {"retention_days": {"events": 1, "lease_end_reports": 1}})
+    event_pruner(session_factory, catalogue, both_a_day).prune()
     assert LeaseEndReports(session_factory).read(reservation) == []
+
+
+def test_a_pending_report_past_its_retention_is_still_delivered(session_factory, source):
+    """A report outlives its retention while its event waits for a peer that
+    is down, so the delivery finds it when the peer returns."""
+    ledger = _ledger(session_factory)
+    double = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    double.answer(LEASE_ENDED, 503)
+    consumer, peer = _consumer(session_factory, double)
+    consumer.register()
+    reservation = _leased(ledger, "escrow-outage")
+    ledger.release(capacity_reservation_id=reservation)
+    stored = _stored(session_factory, reservation)
+    assert consumer.run_cycle().failed == 1
+    source.set(injected_time.now() + 3 * 86400)
+
+    a_day = EventsSettings.model_validate(
+        {"retention_days": {"events": 1, "lease_end_reports": 1}})
+    event_pruner(session_factory, event_catalogue(SERVICE_SIGNER), a_day).prune()
+    report = consumer.run_cycle()
+    peer.close()
+
+    assert report.delivered == 1
+    assert [sent.content for sent in double.taken(LEASE_ENDED)] == [stored, stored]
+
+
+def test_a_report_no_longer_kept_is_abandoned_and_the_next_follows(
+        session_factory, source, caplog):
+    ledger = _ledger(session_factory)
+    double = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    consumer, peer = _consumer(session_factory, double)
+    consumer.register()
+    lost, kept = _leased(ledger, "escrow-lost"), _leased(ledger, "escrow-kept")
+    ledger.release(capacity_reservation_id=lost)
+    ledger.release(capacity_reservation_id=kept)
+    with session_factory() as db, db.begin():
+        db.query(LeaseEndReport).filter_by(capacity_reservation_id=lost).delete()
+
+    with caplog.at_level(logging.WARNING, logger="eventing.finally"):
+        report = consumer.run_cycle()
+    peer.close()
+
+    assert (report.abandoned, report.delivered) == (1, 1)
+    assert [sent.resource for sent in double.taken(LEASE_ENDED)] == [kept]
+    assert any("is not retained" in record.getMessage() for record in caplog.records)
+
+
+def test_a_peer_replaced_before_its_report_is_read_never_sends_it_to_the_new_peer(
+        session_factory, caplog):
+    """The service stops after a lease end commits and before its consumer
+    reads it, and restarts configured with another storefront: the report goes
+    to the previous peer's finally sink, not to the new peer, which receives
+    what is recorded after it."""
+    ledger = _ledger(session_factory)
+    previous = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    consumer, peer = _consumer(session_factory, previous)
+    consumer.run_cycle()
+    peer.close()
+    unread = _leased(ledger, "escrow-unread")
+    ledger.release(capacity_reservation_id=unread)
+
+    moved = StorefrontPeerDouble(STOREFRONT_SIGNER)
+    restarted, peer = _consumer(session_factory, moved, url="https://new-owner.example")
+    with caplog.at_level(logging.WARNING, logger="eventing.finally"):
+        report = restarted.run_cycle()
+    later = _leased(ledger, "escrow-later")
+    ledger.release(capacity_reservation_id=later)
+    restarted.run_cycle()
+    peer.close()
+
+    assert report.retired == [peer_destination(PEER)]
+    assert previous.requests == []
+    assert [sent.resource for sent in moved.taken(LEASE_ENDED)] == [later]
+    assert any(
+        "delivery abandoned" in record.getMessage() and unread in record.getMessage()
+        for record in caplog.records
+    )
+    assert len(LeaseEndReports(session_factory).read(unread)) == 1
 
 
 # ---------------------------------------------------------------------------
