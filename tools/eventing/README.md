@@ -244,10 +244,11 @@ pruner = Pruner(catalogue, session_factory=sessions, clock=now, retention=Retent
 pruner.prune()
 ```
 
-Each table is retained for its own time, and none keeps every row: `events` (the
-events and their references), `deliveries` (finished deliveries, and retired
-destinations with none left, though a consumer keeps its latest destination row),
-and each table a record-time hook writes, by its name. A hook's row whose table names
+Each table is retained for its own time: `events` (the events and their
+references), `deliveries` (finished deliveries, and retired destinations with none
+left, though a consumer keeps its latest destination row), and each table a
+record-time hook writes, by its name. A table whose retention is `None` keeps every
+row. A hook's row whose table names
 an event column is kept, whatever its own retention, while its event is, so no
 retained event refers to a pruned row; one whose column is empty goes by time alone. An event is pruned only once it is past its retention, every consumer has
 read past it, and each of its deliveries is delivered or abandoned, or its

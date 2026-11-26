@@ -28,8 +28,10 @@ Production composition supplies the site's configured identity and logical site
 ID, signs the report in the ending transaction, and runs the lease-end report
 consumer, with one destination per configured storefront peer, on the event
 delivery worker, beside the capacity-released consumer and its own
-acknowledgements. A newly configured peer is a new destination that receives no
-earlier report; the previous peer's destination is retired. An administrator
+acknowledgements. A first peer receives the reports recorded since the consumer
+last read; a peer configured beside or in place of another is a new destination
+that receives no earlier report, and the previous peer's destination is
+retired. An administrator
 resumes a parked destination through `POST /api/v1/events/destinations/{name}/resume`.
 The callback contract is `LEASE_ENDED_CALLBACK` in the compute contracts;
 storefront compositions bind it to their verified delivery ingress. This
