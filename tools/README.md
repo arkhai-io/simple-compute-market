@@ -182,6 +182,28 @@ package reading the time of the world depends on it.
   is part of `make test` and the Tests workflow's matrix; `make
   dist-injected-time`, part of `make dist`, builds its wheel into `.dist/`.
 
+### `eventing/`
+
+One eventing system per service (distribution `arkhai-eventing`, import
+`eventing`): declared kinds of event under a versioned envelope, recorded in the
+producer's own database transaction, and delivered at least once, in order, to each
+destination of each named consumer, with per-destination state, park and resume, a
+finally sink, routes as SQL conditions evaluated by sqlglot, retention by time per
+table, and a framework-free read and status service each service binds behind its
+own administrator authentication. It depends on the standard library, SQLAlchemy,
+pydantic and sqlglot, and supplies its tables and one schema step per version for
+each service's own migration chain to apply. Its [README](eventing/README.md) is its
+interface, and its specification is
+[`eventing`](../openspec/specs/eventing/spec.md).
+
+- `make test` (in its directory) type-checks the package and runs its unit tests,
+  the structure test holding its boundary among them, and its library-integration
+  tests over real SQLite files.
+- `make build` builds its wheel into its own `dist/`, or into `DIST_DIR`.
+- From the repository root, `make test-eventing` runs its `make test` and is part of
+  `make test` and the Tests workflow's matrix; `make dist-eventing`, part of `make
+  dist`, builds its wheel into `.dist/`.
+
 ## Lane collaborators
 
 A lane collaborator is a stand-in for a service outside this repository, run by

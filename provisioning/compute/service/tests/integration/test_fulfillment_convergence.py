@@ -748,11 +748,17 @@ async def test_advance_cycle_reaches_a_row_this_worker_still_holds(
     provider = _StubProvider(
         status=ProviderStatus(state=ProviderOperationState.pending)
     )
+    # The pending poll's claim lasts the backoff's first delay of wall time; an
+    # hour keeps it live however slowly the test runs, so the plain cycle below
+    # meets the claim rather than a lapsed one.
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
         provider_registry=ProviderRegistry({"vm.ansible": provider}),
-        settings=_settings(),
+        settings=_settings(
+            fulfillment_convergence_backoff_initial_seconds=3600.0,
+            fulfillment_convergence_backoff_max_seconds=3600.0,
+        ),
     )
     watchdog.pause()
     await watchdog.converge_teardowns()
