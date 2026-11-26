@@ -262,6 +262,19 @@ def _servicing_page_position(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE bare_metal_lifecycle_cursor")
 
 
+def _drop_hosted_lifecycle(connection: sqlite3.Connection) -> None:
+    """Drop the hosted physical lifecycle earlier releases kept, where present.
+
+    The table held each hosted-card deal's accepted binding and its physical,
+    financial, recovery and teardown states. Nothing reads it, and no release
+    from v0.3.0 on has, so its rows are discarded; dropping it drops its
+    indexes and immutability trigger. A database holds it only if a release
+    before v0.3.0 created it and v0.3.0 then ran on it; on any other database
+    this changes nothing.
+    """
+    connection.execute("DROP TABLE IF EXISTS bare_metal_hosted_lifecycle")
+
+
 FLOOR_IDS: tuple[str, ...] = (
     "20260604_000_listing_resource_timestamps",
     "20260604_004_negotiation_amount_text_columns",
@@ -324,6 +337,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         # Deal servicing's record of each successful payment observation's instant.
         Migration("bare-metal-storefront-0019-payment-observations", create_payment_observations),
         Migration("bare-metal-storefront-0020-servicing-page-position", _servicing_page_position),
+        Migration("bare-metal-storefront-0021-drop-hosted-lifecycle", _drop_hosted_lifecycle),
     ),
     floor=Floor("marketplace 0.3.0", FLOOR_IDS),
 )

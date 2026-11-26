@@ -21,6 +21,7 @@ from market_schema_migrations import (
     MigrationFailed,
     MigrationRefused,
     SqliteMigrationConnection,
+    UnsupportedCause,
     check,
     check_sqlite_file,
     migrate,
@@ -31,6 +32,9 @@ from market_storefront.utils.migrations import CHAIN, FLOOR_IDS, migrate_storefr
 from tests.floor_database import create_floor_database, floor_ids, floor_snapshot
 
 _LATER = tuple(migration.id for migration in CHAIN.migrations)
+#: A record no release of the chain lists, as a release before the floor left it.
+_EARLIER_RECORD = "20250101_001_recorded_by_an_earlier_release"
+_REPOSITORY = Path(__file__).resolve().parents[5]
 #: The seller a planted listing names; a development key, never used on a
 #: public network.
 _SELLER = Ed25519Signer(b"\x5d" * 32).identity
@@ -99,6 +103,111 @@ def test_a_floor_database_is_adopted_and_only_the_later_migrations_run(tmp_path)
         assert connection.execute("SELECT stage FROM stage_events").fetchall() == [("kept",)]
     finally:
         connection.close()
+
+
+def test_a_floor_database_carrying_an_earlier_releases_record_and_table_is_adopted(
+    tmp_path,
+) -> None:
+    path = create_floor_database(tmp_path / "upgraded.db", earlier_records=(_EARLIER_RECORD,))
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute("CREATE TABLE earlier_release_extension (id TEXT PRIMARY KEY)")
+        connection.execute("INSERT INTO earlier_release_extension VALUES ('kept')")
+        connection.execute(
+            "INSERT INTO stage_events (ts, stage, event, data) "
+            "VALUES ('t', 'kept', 'kept', '{}')"
+        )
+    connection.close()
+
+    result = check_sqlite_file(CHAIN, path)
+    assert result.state is CheckState.BEHIND
+    assert result.floor == "marketplace 0.3.0"
+    assert result.adopting == CHAIN.baseline_ids
+    assert result.set_aside == (_EARLIER_RECORD,)
+    assert result.pending == _LATER
+
+    report = migrate_storefront_database(path)
+
+    assert report.adopted is True
+    assert report.set_aside == (_EARLIER_RECORD,)
+    assert report.applied == _LATER
+    assert check_sqlite_file(CHAIN, path).state is CheckState.COMPATIBLE
+    assert _recorded(path) == sorted(CHAIN.ids)
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("SELECT stage FROM stage_events").fetchall() == [("kept",)]
+        assert connection.execute("SELECT id FROM earlier_release_extension").fetchall() == [
+            ("kept",)
+        ]
+    finally:
+        connection.close()
+
+
+def _ledger_database(path: Path, ids: list[str]) -> Path:
+    """A database holding a table and a ledger recording ``ids``."""
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "CREATE TABLE schema_migrations (id VARCHAR(255) PRIMARY KEY, "
+            "applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+        connection.execute("CREATE TABLE stage_events (ts TEXT, stage TEXT)")
+        connection.executemany(
+            "INSERT INTO schema_migrations (id) VALUES (?)", [(i,) for i in ids]
+        )
+    connection.close()
+    return path
+
+
+def test_the_bare_metal_storefronts_database_is_refused_as_older_or_shared(tmp_path) -> None:
+    """The storefronts share core storefront's migrations, so a bare-metal
+    storefront's v0.3.0 ledger records most of the VM floor: it reads as an
+    older VM storefront database, and is refused with the conditional upgrade."""
+    bare_metal_floor = json.loads(
+        (
+            _REPOSITORY
+            / "domains/bare_metal/storefront/tests/fixtures/v0_3_0_floor/floor_ids.json"
+        ).read_text(encoding="utf-8")
+    )
+    path = _ledger_database(tmp_path / "bare-metal.db", bare_metal_floor)
+    before = path.read_bytes()
+
+    with pytest.raises(MigrationRefused) as refused:
+        migrate_storefront_database(path)
+
+    result = refused.value.result
+    assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.OLDER_OR_SHARED
+    assert result.adopting == ()
+    assert result.missing == tuple(i for i in FLOOR_IDS if i not in bare_metal_floor)
+    assert result.missing
+    message = str(refused.value)
+    assert all(migration_id in message for migration_id in result.missing)
+    assert "If it is the VM storefront's database" in message
+    assert "upgrade it through marketplace 0.3.0 first" in message
+    assert "cannot tell another service's database from an older one of its own" in message
+    assert path.read_bytes() == before
+
+
+def test_compute_provisionings_database_is_refused_as_not_the_storefronts(tmp_path) -> None:
+    provisioning_floor = json.loads(
+        (
+            _REPOSITORY
+            / "provisioning/compute/service/tests/fixtures/v0_3_0_floor/floor_ids.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert not set(provisioning_floor) & set(FLOOR_IDS)
+    path = _ledger_database(tmp_path / "provisioning.db", provisioning_floor)
+    before = path.read_bytes()
+
+    with pytest.raises(MigrationRefused) as refused:
+        migrate_storefront_database(path)
+
+    assert refused.value.result.cause is UnsupportedCause.NOT_THIS_CHAIN
+    assert "was not built by `market-storefront-migrate`" in str(refused.value)
+    assert "upgrade" not in str(refused.value)
+    assert "fresh" not in str(refused.value)
+    assert path.read_bytes() == before
 
 
 def test_a_rerun_changes_nothing(tmp_path) -> None:
@@ -198,8 +307,10 @@ def test_a_database_missing_a_floor_id_is_refused_and_unchanged(tmp_path) -> Non
         migrate_storefront_database(path)
 
     assert refused.value.result.state is CheckState.UNSUPPORTED
+    assert refused.value.result.cause is UnsupportedCause.OLDER_OR_SHARED
     assert refused.value.result.missing == (missing,)
     assert missing in str(refused.value)
+    assert "marketplace 0.3.0" in str(refused.value)
     assert "market-storefront-migrate" in str(refused.value)
     assert path.read_bytes() == before
 

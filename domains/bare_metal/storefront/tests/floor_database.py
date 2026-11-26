@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,12 @@ def floor_ids() -> list[str]:
     return json.loads((FLOOR / "floor_ids.json").read_text(encoding="utf-8"))
 
 
-def create_floor_database(path: str | Path) -> Path:
-    """Write a v0.3.0 database at ``path``, holding no rows but its ledger's."""
+def create_floor_database(path: str | Path, *, earlier_records: Sequence[str] = ()) -> Path:
+    """Write a v0.3.0 database at ``path``, holding no rows but its ledger's.
+
+    ``earlier_records`` are IDs recorded beside the floor's, as a release
+    before v0.3.0 left them on a database v0.3.0 then ran on.
+    """
     ddl = (FLOOR / "ddl.sql").read_text(encoding="utf-8").replace(_SEQUENCE_TABLE, "")
     connection = sqlite3.connect(path)
     try:
@@ -38,7 +43,7 @@ def create_floor_database(path: str | Path) -> Path:
         with connection:
             connection.executemany(
                 "INSERT INTO schema_migrations (id) VALUES (?)",
-                [(migration_id,) for migration_id in floor_ids()],
+                [(migration_id,) for migration_id in (*floor_ids(), *earlier_records)],
             )
     finally:
         connection.close()
