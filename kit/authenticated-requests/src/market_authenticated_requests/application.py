@@ -1,0 +1,207 @@
+"""The application the core wraps, in either form.
+
+The wrapper reads every request's whole body, which the signature's digest
+covers, and hands the application the same bytes. In the middleware form it binds
+the request through the authority's route table and admits it before the
+application runs. In the dependency form a route admits it through its
+:class:`~market_authenticated_requests.dependency.RouteAdmission`, and the wrapper
+finishes what the route admitted. In
+both, a request carrying a request identity that no route of the application
+serves is answered with a signed refusal, since in the dependency form no route's
+admission ever runs for it; and the wrapper holds a handler's response until it is
+recorded and signed.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from market_identity import VerifiedRequest, stated_request_binding
+from request_replay.asgi import (
+    CapturedResponse,
+    Receive,
+    Scope,
+    Send,
+    capture,
+    read_body,
+    replayed_receive,
+    send_response,
+)
+from starlette.datastructures import Headers
+from starlette.routing import BaseRoute, Match
+
+from market_authenticated_requests.core import Admitted, AdmissionCore, Answer
+from market_authenticated_requests.routes import ResourceUnbound, RouteNotServed, RouteTable, Unauthenticated
+
+logger = logging.getLogger(__name__)
+
+#: Where the wrapper leaves its work for the dependency form, in the request's
+#: state: the body it read, the request a route admitted, and the answer a route
+#: refused it with.
+BODY_KEY = "authenticated_request_body"
+ADMITTED_KEY = "authenticated_request"
+ANSWER_KEY = "authenticated_request_answer"
+
+
+class AuthenticatedApplication:
+    """An application whose authenticated requests the core admits and answers.
+
+    Built by :func:`~market_authenticated_requests.inventory.install`, which
+    checks the route inventory first.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        core: AdmissionCore,
+        *,
+        routes: RouteTable | None,
+        unauthenticated: Unauthenticated,
+    ) -> None:
+        self._app = app
+        self._core = core
+        self._routes = routes
+        self._unauthenticated = unauthenticated
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        try:
+            body = await read_body(receive)
+        except ConnectionError:
+            # The caller left before its request was whole: no one is waiting for
+            # an answer, and nothing was admitted.
+            return
+        scope.setdefault("state", {})[BODY_KEY] = body
+        downstream = replayed_receive(body, receive)
+        method = str(scope["method"])
+        headers = Headers(scope=scope)
+
+        not_served = _unserved(self._app_routes(), scope)
+        if not_served is not None:
+            if stated_request_binding(method=method, headers=headers) is None:
+                await self._app(scope, downstream, send)
+                return
+            await self._send(send, self._refuse_unserved(method, headers, body, not_served))
+            return
+
+        marked = self._unauthenticated.marks(_route_path(self._app_routes(), scope))
+        if self._routes is not None and not marked:
+            await self._send(send, await self._middleware_form(scope, downstream, method, headers, body))
+            return
+        await self._send(send, await self._dependency_form(scope, downstream, method, headers, marked=marked))
+
+    async def _middleware_form(
+        self, scope: Scope, receive: Receive, method: str, headers: Headers, body: bytes
+    ) -> Answer:
+        assert self._routes is not None
+        try:
+            binding = self._routes.resolve(method, str(scope["path"]), body)
+        except RouteNotServed as not_served:
+            return self._refuse_unserved(method, headers, body, not_served)
+        except ResourceUnbound as unbound:
+            verified = self._core.verify(method, headers, body)
+            return verified if isinstance(verified, Answer) else self._core.refuse_unbound(verified, unbound)
+        except Exception as error:
+            return self._core.fail_unadmitted(method, headers, error)
+        verified = self._core.verify(method, headers, body, route=binding)
+        if isinstance(verified, Answer):
+            return verified
+        admitted = self._core.admit(verified, binding)
+        if isinstance(admitted, Answer):
+            return admitted
+        scope["state"][ADMITTED_KEY] = admitted
+        return await self._run(admitted, scope, receive)
+
+    async def _dependency_form(
+        self, scope: Scope, receive: Receive, method: str, headers: Headers, *, marked: bool
+    ) -> Answer:
+        """Run the application; finish what a route admitted, or pass its answer on."""
+
+        state = scope["state"]
+        try:
+            captured = await capture(self._app, scope, receive)
+        except Exception as error:
+            admitted = state.get(ADMITTED_KEY)
+            if isinstance(admitted, Admitted):
+                return await self._core.fail(admitted, error)
+            if marked:
+                raise
+            return self._core.fail_unadmitted(method, headers, error)
+        except BaseException:
+            _abandon(state.get(ADMITTED_KEY))
+            raise
+        answer = state.get(ANSWER_KEY)
+        if isinstance(answer, Answer):
+            return answer
+        admitted = state.get(ADMITTED_KEY)
+        if isinstance(admitted, Admitted):
+            return await self._core.finish(admitted, captured.status, captured.headers, captured.body)
+        if marked:
+            return Answer(captured.status, captured.headers, captured.body)
+        # A declared route answered before its admission ran -- another of its
+        # dependencies refused first -- so its answer names the request the
+        # caller stated and is signed over it.
+        return self._core.sign_stated(method, headers, captured.status, captured.headers, captured.body)
+
+    async def _run(self, admitted: Admitted, scope: Scope, receive: Receive) -> Answer:
+        try:
+            captured: CapturedResponse = await capture(self._app, scope, receive)
+        except Exception as error:
+            return await self._core.fail(admitted, error)
+        except BaseException:
+            _abandon(admitted)
+            raise
+        return await self._core.finish(admitted, captured.status, captured.headers, captured.body)
+
+    def _refuse_unserved(self, method: str, headers: Headers, body: bytes, not_served: RouteNotServed) -> Answer:
+        verified = self._core.verify(method, headers, body)
+        if isinstance(verified, VerifiedRequest):
+            return self._core.refuse_unserved(verified, not_served)
+        return verified
+
+    def _app_routes(self) -> list[BaseRoute]:
+        return list(getattr(self._app, "routes", ()))
+
+    @staticmethod
+    async def _send(send: Send, answer: Answer) -> None:
+        await send_response(send, answer.status, answer.headers, answer.body)
+
+
+def _unserved(routes: list[BaseRoute], scope: Scope) -> RouteNotServed | None:
+    """Whether no route serves the request, by the application's own matching.
+
+    A path some route serves under other methods is answered 405 naming them.
+    """
+
+    allowed: set[str] = set()
+    for route in routes:
+        match, _ = route.matches(scope)
+        if match is Match.FULL:
+            return None
+        if match is Match.PARTIAL:
+            allowed.update(getattr(route, "methods", None) or ())
+    return RouteNotServed(allowed_methods=allowed)
+
+
+def _route_path(routes: list[BaseRoute], scope: Scope) -> str:
+    """The path template of the route serving the request."""
+
+    for route in routes:
+        match, _ = route.matches(scope)
+        if match is Match.FULL:
+            return str(getattr(route, "path", scope["path"]))
+    return str(scope["path"])
+
+
+def _abandon(admitted: object) -> None:
+    """Stop renewing an attempt whose handler was cancelled.
+
+    Its lease then ends, and an exact retry of a recorded route is told the
+    outcome is unknown rather than in progress for as long as the process runs.
+    """
+
+    if isinstance(admitted, Admitted) and admitted.renewal is not None:
+        admitted.renewal.cancel()

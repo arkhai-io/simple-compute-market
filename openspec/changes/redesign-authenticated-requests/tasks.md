@@ -361,14 +361,28 @@ settings, and its migrations. A new foundation kit, `kit/authenticated-requests`
 (distribution `arkhai-kit-authenticated-requests`), with a package allowlist;
 `docs/development/ARCHITECTURE.toml`'s `[kit_areas] foundation` gains it.
 
-- [ ] 4.1 Gate (D3): confirm the framework's route table can tell a route admitted
+- [x] 4.1 Gate (D3): confirm the framework's route table can tell a route admitted
       through the dependency form from one that is not, and that the dependency form can
       hold a renewal task for the handler's whole run. Record the result in this task's
       note. Where the route table cannot tell, the dependency form registers each
       declaration in an explicit table at import and the inventory reads that (D3's
       stated fallback); where the dependency form cannot hold the task, stop: that is a
       design question (35 F3's trigger), and the change returns to design.
-- [ ] 4.2 Implement admission (D3, D10, D11): verify signature, freshness on `created`,
+      **Passed; no fallback.** FastAPI's route table tells an admitted route from one
+      that is not: each `APIRoute`'s `dependant` tree holds the declaration's callable
+      (a `RouteAdmission` instance), which the inventory walks. The dependency form
+      holds the renewal for the handler's whole run without relying on how a
+      dependency with `yield` exits: the dependency starts a `Renewal` when it admits,
+      and the core's application wrapper, which runs around the whole application in
+      both forms, stops it once the handler's response is complete. Shown on FastAPI
+      0.162.0 (`kit/deal-servicing`'s lock) and 0.115.14 (the VM storefront's) by a
+      scratch script: a task started in a dependency is still running when the
+      wrapper regains control after the response, and `scope["state"]` written by the
+      wrapper is the route's `request.state`. The kit declares `fastapi>=0.115`; the
+      0.115.14 observation is that scratch run, and the committed suite runs only the
+      kit's locked FastAPI, where the dependency-form renewal and cancellation tests
+      reproduce the gate.
+- [x] 4.2 Implement admission (D3, D10, D11): verify signature, freshness on `created`,
       the origin's future bound, audience containing the authority's own signing
       principal, role and principal against an injected trust provider, stated operation
       and resource against the route's; reserve; resolve to `dispatch`, `rerun` (with
@@ -381,19 +395,74 @@ settings, and its migrations. A new foundation kit, `kit/authenticated-requests`
       profile carrying the version 3 fields refused signed; a rotated authority accepted
       by an audience holding both principals; a reused request ID with a changed body,
       operation, role, principal or origin refused as changed reuse before dispatch.
-- [ ] 4.3 Implement answers (D3, D7, D8): a signed 500 with a fixed detail for a handler
+      `market_authenticated_requests`: `AdmissionCore` (`verify`, `admit`,
+      `refuse_unserved`, `refuse_unbound`, `finish`, `fail`, `answer`), the
+      middleware form through `install(app, core, routes=<RouteTable>)` and the
+      dependency form through `Depends(RouteAdmission(core, operation=, roles=,
+      exact_retry=, resource=))`, both wrapped by `AuthenticatedApplication`. Checks in
+      order: route, signature, stated operation and resource, audience, freshness,
+      role, trust, then the reservation; a proof failing on a route is refused signed
+      over the route's operation and resource and the stated request ID. Library
+      integration, `tests/integration/test_admission.py`, under both caller schemes and,
+      but where a case names one form, in both forms (70 passed): a signed first use; 404 and 405 with `Allow`
+      `operation_not_served` over the stated fields; 400 `operation_mismatch` for a
+      stated operation and for a stated resource, bound over the route; 421
+      `audience_mismatch`; a signed 400 `unsupported_protocol` for a request whose tag
+      names another profile; an unsigned `unsupported_protocol` for a real version 2
+      request; unsigned answers for requests carrying no identity; a rotated authority
+      accepted by an audience holding both principals; changed reuse of body, role,
+      origin and operation refused 409 before dispatch, and a principal swapped into
+      the proof refused 401; wrong role and untrusted principal 403; `created` and
+      origin outside the skew 401; the time-setting operation 900 s ahead accepted and
+      answered signed at the new instant while another operation as far ahead is
+      refused; a body holding no resource a signed 400; a broken proof on a route a
+      signed 401 bound over the route; and, in the dependency form, a declared route
+      whose earlier dependency refuses first answering signed over the stated fields;
+      and a request failing before its admission (a body the route cannot parse)
+      answered a 500 signed over its stated fields, in both forms. The "changed
+      principal"
+      reuse is a proof whose `keyid` was altered: a different principal re-signing is a
+      different reservation key, not a reuse.
+- [x] 4.3 Implement answers (D3, D7, D8): a signed 500 with a fixed detail for a handler
       that raises, logged, recorded on a `RECORDED` route and not on `RERUN`; a signed
       409 `exact_retry_outcome_unknown` for an ended attempt with no outcome; a signed
       410 `exact_retry_expired`; the signed-outcome hook handing the signed response's
       raw body and headers to the caller. Verify by library integration tests for each
       answer, and for the hook receiving the exact bytes and headers sent.
-- [ ] 4.4 Implement renewal around `RECORDED` handlers in both forms (D7), through 3.2's
+      Library integration, `tests/integration/test_answers.py` in both forms and
+      schemes: a recorded route's exact retry answered with the same status and body
+      under a fresh signature after a later write; a re-run route's retry run again,
+      told it is a retry; a recorded route raising after its write answered a signed
+      500 with the fixed detail, the error logged, its retry the same 500 with one
+      dispatch; a re-run route raising answered a signed 500 and its retry dispatched
+      again; a recorded retry past the retention a signed 410 `exact_retry_expired`;
+      the hook receiving the status, the headers in order and the body sent; and a
+      reservation
+      the store fails answered a signed 500 with nothing dispatched; passed. The
+      hook, `on_signed_outcome`, receives every signed answer to a request that
+      verified, refusals after verification included; a consumer filters by the
+      request's operation. The outcome-unknown 409 is 4.4's.
+- [x] 4.4 Implement renewal around `RECORDED` handlers in both forms (D7), through 3.2's
       wrapper. Verify by library integration tests in each form: a crash after a domain
       write and before the outcome is recorded answered `exact_retry_outcome_unknown`,
       never dispatched again; a handler running past its lease renewed, its retry in
       progress then answered with the outcome; a write that commits and then raises
       answered with a recorded 500 whose retry dispatches nothing.
-- [ ] 4.5 Implement the unmatched-request fallback and the route inventory (D3): an
+      Library integration in both forms, `tests/integration/test_answers.py`: an
+      attempt whose outcome never lands after its write (a store wrapper whose
+      `record` raises; the handler's answer is still sent signed) answered
+      `exact_retry_outcome_unknown` once its lease ends, never dispatched again, a
+      read then showing the write; a handler held past its lease, renewed every third
+      of it (the waits stepped by the test and their durations asserted), its retry
+      refused in progress, then answered with the outcome once it returns; a handler
+      cancelled mid-run leaving no task behind, its renewal stopped with it; and a
+      write that commits and then raises answered with a recorded
+      500 whose retry dispatches nothing (the `/fail` case of 4.3); passed. The
+      process stopping between commit and record is modelled by the failing record,
+      not by stopping a process. The core starts renewal for every
+      `RECORDED` admission and stops it in `finish`; a `RERUN` attempt holds a fixed
+      lease that its retry may reclaim.
+- [x] 4.5 Implement the unmatched-request fallback and the route inventory (D3): an
       application-level fallback the core installs, answering a request carrying request
       identity that no route admitted with D11's signed refusal; the inventory, checked
       when the core is constructed, refusing to start naming any route with neither a
@@ -402,7 +471,28 @@ settings, and its migrations. A new foundation kit, `kit/authenticated-requests`
       in the dependency form answered signed 404; a route with no declaration refusing
       startup by name; a signed time-setting route declared `RERUN` passing
       (marketplace-identity "A signed time-setting route in the inventory").
-- [ ] 4.6 Implement the sweep's lifespan task and the settings (D7):
+      The fallback is part of `AuthenticatedApplication`: before the application runs,
+      it matches the request against the application's own routes, and a request
+      carrying a request identity that none serves is verified and answered 404 or 405
+      signed, in either form; a request carrying none goes on to the application
+      unchanged. `install` checks the inventory (`undeclared_routes`) and raises
+      `RouteInventoryError` naming each route that neither takes a `RouteAdmission`,
+      nor is bound by the middleware form's table (`RouteTable.declares`), nor is
+      marked by `Unauthenticated` (health and the OpenAPI document by default). Library
+      integration: the unmatched path signed 404 in the dependency form (and the
+      middleware form) in `test_admission.py`; the toy authority installing in both
+      forms with its signed time route declared `RERUN`. Unit,
+      `tests/unit/test_inventory.py` over applications whose routes never reach a
+      store: a dependency-form route with no declaration refusing startup by name, a
+      middleware table missing a route refusing it, a route admitting through a
+      dependency in the middleware form refused, an unsigned time route passing once
+      marked and a signed one declared `RERUN` passing, a declaration with no
+      resolution failing where it is declared, a route served without the wrapper
+      refusing to run, and a caller leaving before its body is whole answered nothing;
+      passed. A mounted application is one route by its mount's path, declared or
+      marked whole, in the inventory and at request time alike; no test mounts one,
+      and no authority mounts an application today.
+- [x] 4.6 Implement the sweep's lifespan task and the settings (D7):
       `authenticated_requests.recorded_outcome_retention_seconds` and
       `authenticated_requests.replay_prune_interval_seconds`, positive integers defaulting
       to 86400 when absent, as a settings model each authority composes into its own; the
@@ -410,14 +500,92 @@ settings, and its migrations. A new foundation kit, `kit/authenticated-requests`
       composes. Verify by unit tests of the settings model's bounds and defaults
       (marketplace-identity "The retention is not configured", "The sweep's interval is
       not configured") and a library integration test of the startup sweep.
-- [ ] 4.7 Wrap the component's DDL into `kit/schema-migrations` migrations for the
+      `AuthenticatedRequestsSettings` (strict positive integers, 86400 when absent,
+      unknown keys refused) and `AdmissionCore.sweeping()`, an async context manager
+      for the authority's lifespan sweeping at startup and every interval, each sweep
+      in a worker thread. Unit: `tests/unit/test_settings.py`; passed. Library
+      integration: `tests/integration/test_sweep.py`, the startup sweep deleting
+      expired rows and a second sweep, after the test steps the wait, deleting a later
+      one, each wait asked for `replay_prune_interval_seconds`; and a sweep the store
+      fails logged and the next one sweeping; passed. That the
+      default is a day rests on the settings unit test.
+- [x] 4.7 Wrap the component's DDL into `kit/schema-migrations` migrations for the
       `sqlite3` and SQLAlchemy adapters, exported for each service's chain to compose,
       and the DDL the registry's Alembic revision mirrors (deployment-state "The
       authenticated-request replay table belongs to its kit"). Verify by a library
       integration test applying the migration to an empty database of each adapter.
-- [ ] 4.8 Verify the section: the kit's unit and library integration suites;
+      `SQLITE_REPLAY_TABLE_MIGRATION` (in `migrations`) and
+      `SQLALCHEMY_REPLAY_TABLE_MIGRATION` (in `sqlalchemy_support`, the `sqlalchemy`
+      extra), both id `authenticated_requests_0001_replay_table`, creating
+      `authenticated_request_replay` and its expiry index from the component's
+      statements; `replay_table_statements(dialect)` for the registry's Alembic
+      revision; `sqlite_replay_store` and `sqlalchemy_replay_store` over that table.
+      Library integration: `tests/integration/test_migrations.py`, each migration
+      applied by the engine to an empty SQLite database, the table and index present,
+      a store admitting over it, and using the store leaving the schema snapshot
+      unchanged, for both adapters; passed. Unit: the kit's statements are the
+      component's for its table; passed. The toy authority every
+      other integration test uses is migrated by a chain composing the sqlite3
+      migration.
+- [x] 4.8 Verify the section: the kit's unit and library integration suites;
       `make check-architecture`; `make check-packaging`.
       End-to-end: none — no authority composes the core yet.
+      `make -C kit/authenticated-requests test`: 26 unit and 116 library-integration
+      tests passed. `make -C tools/request-replay test`: 67 unit and 71
+      library-integration tests passed, `Renewal.start`, `stop` and `cancel` among
+      them. `make check-architecture`: passed. `make check-packaging`: passed
+      in the pre-commit functional checks. End-to-end confirmed: none.
+
+Notes (section 4):
+
+- Outside the plan: the kit is `kit/authenticated-requests` (distribution
+  `arkhai-kit-authenticated-requests`, import `market_authenticated_requests`),
+  declared in `manifests/release-components.json` and `published-packages.md`'s table
+  after `arkhai-kit-identity`, in `ARCHITECTURE.toml`'s foundation area, and in
+  `kit/Makefile`'s `test`, `dist` and `dist-ci`. Its package allowlist names the
+  identity, migration and time components, the replay component, FastAPI, Starlette,
+  pydantic and SQLAlchemy.
+- Correction to section 3's handoff: the generic part of the wrappers that landed in
+  `request_replay` is `Renewal` (start where a request is admitted, stop where its
+  response completes) beside `asgi.capture` and `replayed_receive`. Admission,
+  dispatch, recording and answering stay in the kit's `AuthenticatedApplication`,
+  since each step is interleaved with verification or signing.
+- For sections 6–15, composing the core: build `AdmissionCore(signer=, trust=,
+  store=, settings=, time_setting_operation=)` — `signer` and `trust` are callables,
+  so a rotation or a reloaded trust set is read per request — and wrap the
+  application last with `install(app, core, routes=..., unauthenticated=...)`, after
+  every route is added; the inventory reads the routes then. The middleware form's
+  route table implements `resolve(method, path, body)` raising `RouteNotServed` or
+  `ResourceUnbound`, and `declares(method, path_template)`. A middleware-form handler
+  reads the admission from `request.state.authenticated_request`; a dependency-form
+  route receives it from its `RouteAdmission`. `Admitted.exact_retry` is the retry
+  flag. Compose `core.sweeping()` into the lifespan, and the kit's migration into the
+  chain.
+- A refusal in the dependency form raises Starlette's `HTTPException` with the
+  answer's status so no handler runs; the wrapper sends the signed answer in place of
+  what the framework rendered. A request-validation 422 after admission is the
+  route's answer, recorded on a `RECORDED` route.
+- Every response the wrapper sends is held whole before it is sent, unauthenticated
+  routes' included; no authenticated route streams today.
+- The verification failures other than D11's rows keep the `{"detail": ...}` bodies
+  the authorities answer today (`Invalid request proof`, `Request timestamp is outside
+  the allowed skew`, `Request principal is not trusted`, `Marketplace role is not
+  authorized`), so a typed client's error handling reads them as before.
+- An application in the middleware form admits every unmarked request through its
+  table, so `install` refuses one whose routes also take a `RouteAdmission`: a route
+  admitted twice would find its own lease held.
+- A route's HEAD is not implied by its GET: a route table or a mark names it.
+- A replay-store failure after authentication is answered signed: a failed
+  reservation is a signed 500 with nothing dispatched; a failed record still sends the
+  handler's answer signed, and the request's exact retry is outcome-unknown once its
+  lease ends.
+- For closeout: D4 places "ASGI and dependency wrappers" in the standalone component;
+  admission, dispatch, recording and answering live in the kit's
+  `AuthenticatedApplication` and `RouteAdmission`, and the component holds `Renewal`
+  and the framework-free ASGI plumbing. The promotion in 17.9 describes them where
+  they are.
+- No test-before run: every test imports what only this kit adds.
+
 
 ## 5. Space-freeing migrations in `kit/schema-migrations`
 

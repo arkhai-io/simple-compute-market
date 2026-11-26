@@ -24,7 +24,7 @@ from request_replay.guard import (
     RequestReplay,
 )
 from request_replay.policy import Policy, Resolution
-from request_replay.renewal import renewing
+from request_replay.renewal import Renewal, renewing
 from request_replay.sqlite_store import SqliteReplayStore
 from request_replay.store import Entry, Outcome, ReplayStore, Row
 
@@ -43,6 +43,7 @@ __all__ = [
     "Outcome",
     "OutcomeUnknown",
     "Policy",
+    "Renewal",
     "ReplayStore",
     "RequestReplay",
     "Resolution",

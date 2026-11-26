@@ -21,6 +21,11 @@
       "dist": "arkhai-kit-identity"
     },
     {
+      "key": "kit-authenticated-requests",
+      "path": "kit/authenticated-requests",
+      "dist": "arkhai-kit-authenticated-requests"
+    },
+    {
       "key": "kit-deal-lifecycle-contracts",
       "path": "kit/deal-lifecycle-contracts",
       "dist": "arkhai-kit-deal-lifecycle-contracts"

@@ -54,9 +54,12 @@ lease, recording nothing.
 
 `renewing(replay, attempt)` is an async context manager renewing the attempt's lease
 every third of its period while its body runs, and stopping when the body returns or
-raises; an attempt shorter than a third of the lease writes nothing. Hold a
-`RECORDED` attempt's handler inside it, so a lease ends only when its process is
-gone and `OutcomeUnknown` means the attempt has ended.
+raises; an attempt shorter than a third of the lease writes nothing. A renewal the
+store fails is tried again at the next interval. `Renewal.start(replay, attempt)`
+does the same for a holder that starts renewal in one place and stops it, with
+`await renewal.stop()`, in another. Hold a `RECORDED` attempt's handler inside one,
+so a lease ends only when its process is gone and `OutcomeUnknown` means the attempt
+has ended.
 
 ## Bounds
 

@@ -10,7 +10,7 @@ import asyncio
 import sqlite3
 from collections.abc import Callable
 
-from request_replay import Answered, Dispatch, InProgress, Resolution, renewing
+from request_replay import Answered, Dispatch, InProgress, Renewal, Resolution, renewing
 
 from tests.support import OUTCOME, POLICY, START, ManualClock, entry, guard
 
@@ -186,3 +186,45 @@ def test_a_renewal_that_fails_once_is_tried_again_before_the_lease_ends(store) -
         await asyncio.wait_for(running, STEP_BOUND)
 
     asyncio.run(scenario())
+
+
+def test_a_started_renewal_renews_until_it_is_stopped(store) -> None:
+    clock = ManualClock()
+    replay = guard(store, clock)
+    request = entry(Resolution.RECORDED)
+
+    async def scenario() -> None:
+        sleep = SteppedSleep()
+        first = replay.admit(request)
+        assert isinstance(first, Dispatch)
+        renewal = Renewal.start(replay, first.attempt, sleep=sleep)
+        clock.advance(10)
+        await sleep.step()
+        clock.advance(25)
+        assert replay.admit(request) == InProgress()
+        await renewal.stop()
+        assert all(task is asyncio.current_task() for task in asyncio.all_tasks())
+
+    asyncio.run(scenario())
+
+
+def test_a_cancelled_renewal_writes_nothing_more(store) -> None:
+    clock = ManualClock()
+    replay = guard(store, clock)
+    request = entry(Resolution.RECORDED)
+
+    async def scenario() -> None:
+        sleep = SteppedSleep()
+        first = replay.admit(request)
+        assert isinstance(first, Dispatch)
+        renewal = Renewal.start(replay, first.attempt, sleep=sleep)
+        clock.advance(10)
+        await sleep.step()
+        renewal.cancel()
+        await asyncio.sleep(0)
+        assert all(task is asyncio.current_task() for task in asyncio.all_tasks())
+
+    asyncio.run(scenario())
+
+    row = store.get("scheme:caller-1", "request-1", now=clock())
+    assert row.lease_until == START + 10 + POLICY.lease_seconds

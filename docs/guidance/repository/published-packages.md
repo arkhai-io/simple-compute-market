@@ -79,6 +79,7 @@ uninstallable. Each package's version is the one its `pyproject.toml` declares.
 | `arkhai-kit-alkahest` | `kit/alkahest/` | `arkhai-core`, `arkhai-injected-time`, `arkhai-kit-config`, `arkhai-kit-deal-lifecycle`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-config` | `kit/config/` | `arkhai-kit-settlement-runtime` |
 | `arkhai-kit-identity` | `kit/identity/` | `arkhai-injected-time` |
+| `arkhai-kit-authenticated-requests` | `kit/authenticated-requests/` | `arkhai-injected-time`, `arkhai-kit-identity`, `arkhai-kit-schema-migrations`, `arkhai-request-replay` |
 | `arkhai-kit-deal-lifecycle-contracts` | `kit/deal-lifecycle-contracts/` | `arkhai-kit-identity` |
 | `arkhai-kit-deal-lifecycle` | `kit/deal-lifecycle/` | `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
 | `arkhai-kit-deal-lifecycle-client` | `kit/deal-lifecycle-client/` | `arkhai-injected-time`, `arkhai-kit-deal-lifecycle-contracts`, `arkhai-kit-identity` |
