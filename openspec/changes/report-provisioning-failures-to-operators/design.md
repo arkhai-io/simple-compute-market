@@ -114,6 +114,17 @@ owner-only file the runner names per run and removes when the run ends: host, pl
 role, task name, task tags, module, `rc`, `msg`, `stdout`/`stderr`, and whether the
 failure was ignored or rescued. Results under `no_log` arrive censored.
 
+The runner hands the records to the executor on the run's outcome, never through the
+file (design review 14 F3). `wait_for_playbook` reads and parses the file once the
+process has ended and attaches the records, as typed failure records, to the
+`AnsibleResult` it returns or the `AnsibleError` it raises; the runner removes the
+file in its own `finally`, on success, failure, timeout and cancellation alike, so
+the executor reads no file and the task output it holds lives on disk only for the
+run. On a timeout or cancellation the records already written are attached, though
+`timed_out` and `cancelled` take precedence. The mock runner, which writes no file,
+attaches its rule's record to the `AnsibleError` it raises, so a mocked failure
+reaches `classify` through the same field.
+
 The executor classifies a failed run in order: the runner's own outcomes
 (`timed_out`, `cancelled`); then the generic classes from the last unignored,
 unrescued record (`unreachable`, `authentication_refused` for an unreachable record
@@ -295,9 +306,32 @@ column, and refused a `DROP` by node type.
 recorder writes an occurrence at most once per key and returns the existing event on
 a repeat.
 
+**Order.** The recorder allocates `sequence` from a single counter row it updates in
+the producer's transaction (`UPDATE … SET value = value + 1 RETURNING value`), whose
+row lock is held until that transaction ends, so no event commits with a lower
+sequence than one already visible, and a consumer may always advance its position
+past every event it has read (design review 14 F2). On SQLite, which serializes
+writers, this costs nothing; on PostgreSQL, transactions that record events queue on
+the row from their record call to their commit, negligible at the volumes of this
+repository's services. *Rejected:* a free-running sequence whose consumers stop at a
+gap until it is proven unused, which needs PostgreSQL's transaction snapshots in a
+component meant to be portable, or, by a time horizon, still loses an event whose
+transaction outlives it.
+
 **Retention.** By time, configured per table — the events, the delivery state, and
-any table a record-time hook writes — and never ahead of a consumer: an event is
-pruned only once past its table's retention and passed by every consumer.
+any table a record-time hook writes — and never ahead of a pending destination: an
+event is pruned only once past its table's retention and, for each consumer's
+destination, delivered, abandoned, or held by a destination that is parked or
+retired. A parked destination does not hold an event back, so a destination parked
+longer than the events' retention loses, on resume, the events pruned meanwhile; the
+owner accepted that risk (design review 14 F1). For the signed lease-end report, what
+a resumed peer misses stays readable through the authenticated lease read, from
+`lease_end_reports` (D15). A destination is retired when its consumer no longer has
+it configured — a storefront peer replaced by another: its undelivered events go to
+the finally sink, and it holds nothing back, so a removed peer's pending deliveries
+do not keep events forever. *Rejected:* a parked destination holding every event it
+would receive until resumed or abandoned, which keeps the resume guarantee whole but
+lets a long park grow the events table without bound.
 
 **Failed delivery.** Each consumer has a retry policy. The peer consumers (D15)
 retry with backoff without limit and park a destination on "unsupported" until it is
@@ -427,7 +461,8 @@ authenticated lease read serves, retained under its own setting (unlimited by
 default). Delivery to the storefront is a consumer of `site.lease_ended` with one
 destination per configured peer: a peer answering "unsupported" parks its
 destination until it is resumed, and a newly configured peer is a new destination
-starting at the current position, so an old event never reaches a later peer.
+starting at the current position, so an old event never reaches a later peer, and
+the replaced peer's destination is retired (D8).
 `capacity_release_callback_outbox` is retired for a consumer of
 `site.capacity_released`, now recorded in the release's own transaction rather than
 reserved in a session before it. The lease watchdog no longer drains anything.
@@ -486,6 +521,13 @@ Round 2, two sessions in sequence — producers and delivery; the move. Then clo
   `reference`, reported as a sink failure.
 - **The callback plugin depends on Ansible's callback API**, stable across
   `ansible-core` releases; the runner enables it whatever an operator configures.
+- **A destination parked past the events' retention** loses the events pruned while
+  it was parked; resuming delivers only what is retained. Accepted by the owner (D8);
+  the signed lease-end reports a resumed peer misses stay readable through the
+  authenticated lease read.
+- **Event recording serializes on the sequence counter** on PostgreSQL (D8). A
+  service recording events at rates where that queue is measurable revisits the
+  allocation.
 - **`cleanup_refused`'s retry window** is about seven minutes at the defaults, short
   for a person; the push narrows it (Open Questions).
 

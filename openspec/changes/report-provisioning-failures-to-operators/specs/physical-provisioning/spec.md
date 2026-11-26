@@ -2,7 +2,12 @@
 
 ### Requirement: A real playbook failure is classified from Ansible's own result records
 
-The Ansible executor MUST enable, for every playbook it runs, a callback that records each failed or unreachable task — its host, play, role, task, task tags, module, return code, message and output, and whether the failure was ignored or rescued — to an owner-only file removed when the run ends, whatever Ansible configuration an operator names. It MUST classify a failed run, in order, as the runner's `timed_out` or `cancelled`; else from the last failure neither ignored nor rescued as `unreachable`, `authentication_refused` (an unreachable host refusing SSH authentication) or `task_failed`, a `task_failed` refined by its domain's codec; else, with no record, as `playbook_error`. The executor MUST report the class as the failure's `code`, a message naming the host, the task and the failure, and redacted `details`.
+The Ansible executor MUST enable, for every playbook it runs, a callback that records each failed or unreachable task — its host, play, role, task, task tags, module, return code, message and output, and whether the failure was ignored or rescued — to an owner-only file, whatever Ansible configuration an operator names. The runner MUST read the records once the process ends, hand them to the executor with the run's result or failure, and remove the file itself when the run ends, whether it succeeds, fails, times out or is cancelled; the executor MUST classify from the records it is handed, never from the file. It MUST classify a failed run, in order, as the runner's `timed_out` or `cancelled`; else from the last failure neither ignored nor rescued as `unreachable`, `authentication_refused` (an unreachable host refusing SSH authentication) or `task_failed`, a `task_failed` refined by its domain's codec; else, with no record, as `playbook_error`. The executor MUST report the class as the failure's `code`, a message naming the host, the task and the failure, and redacted `details`.
+
+#### Scenario: A real task fails
+
+- **WHEN** a real playbook run fails on a task that neither ignores nor rescues the failure
+- **THEN** the job's failure is classified from that task's record, naming its host and task, and the run's record file no longer exists
 
 #### Scenario: A host stops answering mid-run
 
@@ -135,7 +140,7 @@ The provisioning service MUST serve, to its administrator, the events it recorde
 #### Scenario: An administrator resumes a parked peer
 
 - **WHEN** an administrator resumes the parked destination of the storefront peer
-- **THEN** the lease-end reports it missed are delivered to it in order
+- **THEN** the lease-end reports it missed whose events are still retained are delivered to it in order, and any older report stays readable through the authenticated lease read
 
 ### Requirement: The capacity-released callback is a consumer of the release event
 
@@ -150,7 +155,7 @@ The capacity-released callback MUST be delivered to the owning storefront by a c
 
 ### Requirement: Intended lease ends are reported separately from capacity release
 
-Compute provisioning MUST deliver each `site.lease_ended` event's signed report to the owning storefront through a consumer of the eventing system, keyed by event identity, the report signed with the site's service identity in the transaction that records the event and kept in a table of its own, retained under its own setting, unlimited by default. The consumer MUST hold one destination per configured storefront peer: a destination is parked when its peer answers unsupported, until an administrator resumes it, and a newly configured peer is a new destination that receives no event recorded before it. Compute provisioning MUST keep acknowledgements separate from the capacity-released callback and expose the same signed report through the authenticated lease read for recovery. A report pending or parked when the service is upgraded MUST be delivered, or stay parked, after it under its original identity. The report MUST state intended end, not prove teardown or free capacity.
+Compute provisioning MUST deliver each `site.lease_ended` event's signed report to the owning storefront through a consumer of the eventing system, keyed by event identity, the report signed with the site's service identity in the transaction that records the event and kept in a table of its own, retained under its own setting, unlimited by default. The consumer MUST hold one destination per configured storefront peer: a destination is parked when its peer answers unsupported, until an administrator resumes it, and on resume receives the reports it missed whose events are still retained; a newly configured peer is a new destination that receives no event recorded before it, and a peer no longer configured has its destination retired, its undelivered reports going to the finally sink. Compute provisioning MUST keep acknowledgements separate from the capacity-released callback and expose the same signed report through the authenticated lease read for recovery. A report pending or parked when the service is upgraded MUST be delivered, or stay parked, after it under its original identity. The report MUST state intended end, not prove teardown or free capacity.
 
 #### Scenario: The site crashes after recording an end
 
@@ -170,7 +175,7 @@ Compute provisioning MUST deliver each `site.lease_ended` event's signed report 
 #### Scenario: The owning storefront's peer is reconfigured
 
 - **WHEN** an operator configures another storefront peer while reports for the previous peer are pending
-- **THEN** none of those reports is sent to the new peer
+- **THEN** none of those reports is sent to the new peer, and the previous peer's destination is retired, its pending reports written to the finally sink and still readable through the authenticated lease read
 
 #### Scenario: A report is pending at upgrade
 

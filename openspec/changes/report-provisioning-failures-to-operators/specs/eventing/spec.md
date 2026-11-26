@@ -53,7 +53,12 @@ The recorder MUST write at most one event per kind and dedup-key value, and MUST
 
 ### Requirement: A consumer receives each event at least once per destination, in order
 
-A named consumer MUST hold a durable position and, for each destination, a delivery state of pending, delivered, parked or abandoned, with its attempt count and last error. It MUST deliver events to each destination in `sequence` order and at least once, under the event's stable `id`, and a failing destination MUST NOT hold up another.
+A named consumer MUST hold a durable position and, for each destination, a delivery state of pending, delivered, parked or abandoned, with its attempt count and last error. It MUST deliver events to each destination in `sequence` order and at least once, under the event's stable `id`, and a failing destination MUST NOT hold up another. The recorder MUST allocate `sequence` so that no event commits with a lower sequence than an event already visible to a consumer — from a single counter updated in the producer's transaction, whose lock is held until that transaction ends — so that a consumer advancing its position past every event it has read skips none.
+
+#### Scenario: Two producers record events concurrently
+
+- **WHEN** two transactions each record an event, the one that recorded first commits after the other, and a consumer reads between the two commits
+- **THEN** the first event's sequence is the higher of the two, and the consumer delivers both
 
 #### Scenario: A destination fails
 
@@ -67,12 +72,22 @@ A named consumer MUST hold a durable position and, for each destination, a deliv
 
 ### Requirement: A destination is parked and resumed explicitly, and a new destination starts at the current position
 
-A consumer MUST be able to park a destination, after which nothing is delivered to it until it is resumed, and resuming MUST deliver what it missed in order. A destination added to a consumer MUST start at the consumer's current position and MUST NOT receive events recorded before it was added.
+A consumer MUST be able to park a destination, after which nothing is delivered to it until it is resumed, and resuming MUST deliver, in order, the events it missed that are still retained. A destination added to a consumer MUST start at the consumer's current position and MUST NOT receive events recorded before it was added. A destination its consumer no longer has configured MUST be retired: each event still undelivered to it MUST be marked abandoned and handed to the consumer's finally sink, and nothing more is delivered to it.
 
 #### Scenario: A destination is parked and resumed
 
-- **WHEN** a destination is parked, events are recorded, and the destination is resumed
+- **WHEN** a destination is parked, events are recorded, and the destination is resumed while those events are retained
 - **THEN** the events recorded while it was parked are delivered to it in order
+
+#### Scenario: A destination is parked past the events' retention
+
+- **WHEN** a destination stays parked until events recorded meanwhile are past their table's retention and pruned, and is then resumed
+- **THEN** it receives, in order, only the events still retained
+
+#### Scenario: A destination is removed from its consumer's configuration
+
+- **WHEN** a destination has undelivered events and its consumer starts without it configured
+- **THEN** each of those deliveries is abandoned and the event written to the finally sink, and none is delivered to it
 
 #### Scenario: A destination is added
 
@@ -112,9 +127,9 @@ A consumer MUST be able to bound a destination's retries by a maximum age, after
 - **WHEN** a destination fails every delivery of an event past its consumer's maximum age
 - **THEN** that delivery is abandoned with its last error and the event is written to the finally sink
 
-### Requirement: Stored events are pruned by time per table, never ahead of a consumer
+### Requirement: Stored events are pruned by time per table, never ahead of a pending destination
 
-Each table the component writes, and each table a record-time hook writes, MUST be retained for a time configured per table, where no limit keeps every row. An event MUST be pruned only once it is past its table's retention and every consumer has delivered, parked past or abandoned it for each destination.
+Each table the component writes, and each table a record-time hook writes, MUST be retained for a time configured per table, where no limit keeps every row. An event MUST be pruned only once it is past its table's retention and, for each consumer's destination, it is delivered or abandoned, or the destination is parked or retired. A parked destination MUST NOT hold back the pruning of an event past its retention.
 
 #### Scenario: An old event is still pending
 
