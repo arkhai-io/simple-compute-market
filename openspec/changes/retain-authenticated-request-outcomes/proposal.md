@@ -1,13 +1,13 @@
 ## Status
 
-Blocked on [`redesign-authenticated-requests`](../redesign-authenticated-requests/).
-That change found that every authority's replay store grows without bound, that the
-storefront and registry already retain response bodies indefinitely, and that most
-routes are idempotent in their own domain, so re-running them answers an exact retry
-better than a stored body. Retaining outcomes in the site stores on the present design
-would add a third store with the same problems. Its decision 1.7 settles whether this
-change is superseded, narrowed to the routes that genuinely cannot be re-run, or folded
-in; do not begin implementation until then.
+Superseded by [`redesign-authenticated-requests`](../redesign-authenticated-requests/)
+(its design's decision D18, settled 2026-11-26), and archived as superseded at that
+change's closeout. Every route declares how an exact retry is resolved — run again,
+recorded outcome, or refuse — replacing `exact_retry_safe`; a `RECORDED` route's outcome
+is kept in a durable store in each service's own database, the API-credits service's
+included, for a configurable retention; an exact retry after it receives a signed 410
+rather than a re-run. `credits_key_adjust` is `RECORDED`, so its idempotency key is not
+needed. Do not design or implement this change.
 
 ## Why
 

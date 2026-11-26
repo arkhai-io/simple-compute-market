@@ -1,3 +1,5 @@
+# Redesign authenticated requests
+
 ## Why
 
 Every authority that accepts version 2 authenticated requests keeps replay state,
@@ -8,7 +10,8 @@ and none of them ever removes any of it:
   (`provisioning_replay_reservations`) keep a reservation per request *and* the full
   response body, durably and indefinitely;
 - the site middleware's default store keeps reservations in memory for the life of
-  the process.
+  the process, so a replay across a restart is accepted;
+- the deal-lifecycle routes keep no reservation at all.
 
 Two consequences follow, and neither is local to one route.
 
@@ -22,136 +25,189 @@ table's index 107 MB. On its 1 GiB volume this left too little free space for a
 consistent snapshot beside the database, so the pre-upgrade backup refused until the
 snapshot was written elsewhere.
 
-**Indefinite retention of whatever a response carried.** The storefront records the
+**Indefinite retention of whatever a response carried.** The storefronts record the
 body of every authenticated response, reads included. An introduction reveal or read
 therefore leaves a copy of a counterparty's contact in the replay store each time it
 is answered, outside anything a retention policy can reach. `contact-payload-retention`
 bounds the introduction record and scopes its disclosure to that record for exactly
 this reason.
 
-Meanwhile much of what the stored bodies exist to provide is already provided
-elsewhere, and provided better. The response body is only needed to answer an exact
-retry of a mutation that cannot safely be run again. Most mutations in this system are
-idempotent in their own domain — an introduction start, a settlement submission, a
-contact redaction, a credits consume keyed by an idempotency key — and for those,
-running the handler again on an exact retry gives the right answer, including the
-*current* answer after something has changed. A stored body can only give the answer
-from the moment it was recorded.
+Much of what the stored bodies exist to provide is already provided better in the
+domain. The response body is only needed to answer an exact retry of a mutation that
+cannot safely be run again. Most mutations here converge in their own domain, and for
+those, running the handler again on an exact retry gives the right answer, including
+the *current* answer after something has changed.
 
-`retain-authenticated-request-outcomes` would extend outcome retention to the site
-authorities' stores. Built on the present design, it would add a third body-retaining
-store with the same two problems. It is blocked on this change so the two are not
-designed in the wrong order.
+The authorities also authenticate requests by seven separate arrangements, each
+deciding for itself what an exact retry receives, so no bound or per-route rule can
+be applied in one place.
 
-*Expanded 2026-10-27, by `resolve-compute-family-findings`' design (its decision D3), to
-the shared `kit/identity` request contract, and renamed from
-`redesign-authenticated-replay-state` to match.* The direction is independently operated
-sites and storefronts, and one storefront serving several sites, and the version 2
-request envelope does not carry what that needs:
+*Expanded 2026-10-27, by `resolve-compute-family-findings`' design (its decision D3),
+to the shared `kit/identity` request contract, and renamed from
+`redesign-authenticated-replay-state` to match.* The direction is independently
+operated sites and storefronts, and the version 2 request envelope binds no audience:
+a request one storefront principal signed for site A verifies at site B, whose replay
+store has never seen it. It does not state its operation either, so an authority that
+cannot route a request cannot sign its answer, and a caller whose route table differs
+cannot tell version skew from tampering. Before 1.0 a versioned contract's introducing
+release may stop accepting the version before
+(`docs/guidance/engineering/versioning.md`).
 
-- **It binds no audience.** `RequestEnvelope` (`kit/identity/src/market_identity/models.py`)
-  signs role, principal, method, operation, resource, request identity, timestamp, and
-  body hash, and nothing naming the authority the request is addressed to. Replay is
-  reserved per authority. Once one storefront principal is trusted by several sites, a
-  request it signed for site A verifies at site B, whose store has never seen it, and
-  for an operation whose resource is not site-specific — a reservation against a pool
-  both sites name, a projection read — the replay acts. That makes audience binding a
-  replay question as much as an envelope one.
-- **A request does not state its operation.** The signature binds the operation, but the
-  request does not name it, so an authority that cannot route a request cannot sign its
-  answer (`resolve-compute-family-findings` keeps those answers unsigned, by status), and
-  cannot tell a caller whose route table differs from its own that it signed operation X
-  where this service binds Y; it answers 403. A stated operation lets an authority sign
-  "operation not served" over the caller's own claim, report version skew as skew, give
-  a newer storefront evidence to degrade against an older site, and match and authorize
-  on the operation rather than on how a proxy spelled the path. It also lets every replay
-  row record its operation, which today's rows cannot.
+## What Changes
 
-Before 1.0 the envelope may change incompatibly (`docs/guidance/engineering/versioning.md`,
-"A versioned contract is never changed in place"): a version 3 protocol identifier is defined beside version 2, and
-the release that introduces it may stop accepting version 2.
+- **One authenticated-request layer for every authority.** A standalone replay
+  component under `tools/` (reserve, lease, resolve, record, expire, prune, with
+  `sqlite3` and SQLAlchemy stores) and a thin foundation kit,
+  `kit/authenticated-requests`, over it: version 3 verification, audience, trust,
+  signed refusals and a signed-outcome hook. The storefronts, the registry, the
+  provisioning service, the site kit (the API-credits service) and the deal-lifecycle
+  routes all move onto it (design D3, D4).
+- **Every route declares how an exact retry is resolved**: `RERUN`, `RECORDED` or
+  `REFUSE`, required, with no default, each `RERUN` mutation proven by a
+  double-dispatch test (D5). Reads and convergent mutations re-run and record no body;
+  a short list of non-convergent mutations keeps its outcome (D6). A response carrying
+  a secret is never recorded.
+- **Every row is bounded.** Each request carries a signed origin; a row expires at a
+  time computed from the request, and is pruned on write. Recorded outcomes are kept
+  for an operator-configurable retention, 24 h by default; an exact retry after it gets
+  a signed 410 (D7, D8).
+- **A version 3 envelope, an RFC 9421 profile.** It binds the caller's
+  expected-authority set as its audience, states its operation and resource, and
+  carries the request origin; every answer that names a request is signed, including
+  "operation not served", operation mismatch, misdirected requests and unsupported
+  protocols. Signed webhook deliveries bind their endpoint (D2, D10, D11).
+- **One cutover.** Version 3 replaces version 2 in the release that introduces it; the
+  three 0.4.0 replay tables are dropped and the SQLite space reclaimed by the migrate
+  command (D9). Version 2 stays readable as an evidence format (D12).
+- **Two small domain fixes:** `idempotency_key` is required on credits consume, and an
+  exact replay of an introduction start whose completion failed completes it (D6).
+- **Corrections that fall out of the move:** the deal-lifecycle routes reserve request
+  IDs and stop signing refusals over an invented identity; the VM callback middleware's
+  refusals are signed (D3, D15).
 
-`service-identity-signing` was found delivered by `add-nonchain-marketplace-identities`
-and later changes, its requirements already in the permanent specifications. What its
-tasks left undone moves here:
+The identity-lifecycle remainder of `service-identity-signing` — the API-credits
+`X-Admin-Key` fallback's removal, durable rotation of the API-credits service's trust,
+one site-registry interface, provisioning-side retirement and disablement, and an
+operator route to the storefront's disablement — moves to
+`complete-service-identity-lifecycle` (D1, D19).
 
-- the API-credits service's shared-secret fallback (`storefront_admin_key`,
-  `AdminKeyAuthMiddleware`) and the `X-Admin-Key` the Python credits client still sends,
-  removed only after `sign-multi-language-credits-middleware` signs the TypeScript and
-  Rust middlewares, whose interim position relies on the fallback;
-- the API-credits service's trusted principals, read from the environment with no
-  durable rotation;
-- one site-registry interface returning `(site_id, url, principal)`, where principals
-  come through `ServicePeerTrust` and URLs straight from configuration;
-- provisioning-side explicit principal retirement and disablement, which
-  `physical-provisioning` requires and the service lacks, and an operator route to the
-  storefront's existing disablement;
-- the VM storefront's callback middleware's unsigned authentication refusals, contrary
-  to `marketplace-identity`;
-- a runtime protocol-capability check, and exact `arkhai-kit-identity` pins in
-  `kit/site` and `kit/arkhai-payments`.
+## Capabilities
 
-## What changes
+### New Capabilities
 
-This change is in design. Its direction, to be settled by the decisions in
-`design.md`:
+None.
 
-- **One replay contract, with each concern bounded separately.** Reservation (refusing
-  a replayed or changed request), exactly-once resolution of a lost acknowledgement,
-  and in-flight leasing are three jobs with three different lifetimes. Each is kept
-  only as long as its job needs.
-- **Every row has a bound.** Reservations can be pruned once a captured request would
-  fail its timestamp check anyway. Nothing is kept indefinitely by default.
-- **Routes declare how an exact retry is resolved.** A route idempotent in its own
-  domain re-runs on an exact retry and records no body. A read records no body. Only a
-  route that genuinely cannot be re-run retains an outcome, for a stated period.
-- **One implementation.** The storefront, registry, provisioning service, and site
-  middleware converge on one shared store and contract, so the bound and the
-  declarations are the same everywhere.
-- **The requirement is restated.** `marketplace-identity`'s "an exact reuse MUST
-  resolve to the recorded operation outcome" is revised to say how each kind of route
-  resolves one, and for how long.
-- **A version 3 request envelope** states its operation and binds its audience, and
-  every authority's middleware and typed client moves to it; an authority signs its
-  answer to a request it cannot route, over the operation the request states.
-- **What `service-identity-signing` left undone**, listed under Why.
+### Modified Capabilities
 
-## Design questions this owes
+- `marketplace-identity`: the version 3 profile; the three replay jobs and their
+  lifetimes; per-route exact-retry resolution; the retention and the 410; secrets never
+  recorded; signed refusals; version 2 as an evidence format.
+- `physical-provisioning`: exact retry per declaration; a failure after authentication
+  recorded only on a recorded route.
+- `registry-discovery`: durable replay reservation per declaration.
+- `storefront-publication`: version 3 authorization and exact retry per declaration.
+- `introduction-delivery`: an exact replay of a failed start completes it; signed
+  deliveries bind their endpoint.
+- `compute-provisioning-contract`: a resent capacity-released notification is re-run.
+- `api-credits`: `idempotency_key` required on consume.
+- `deployment-state`: the migrate command reclaims space; the replay table belongs to
+  `kit/authenticated-requests`.
 
-See `design.md`. In short: where the shared contract lives; how a route declares its
-retry resolution and who checks the declaration is true; the reservation horizon and
-how it relates to clock skew and leases; how long a retained outcome lives and what an
-exact retry after it receives; how existing rows are migrated or dropped; and what
-becomes of `retain-authenticated-request-outcomes`.
-
-## What this change does not cover
+## Non-Goals
 
 - Skew enforcement on first use, which conforms and is unchanged.
 - The introduction record's retention, which `contact-payload-retention` owns.
 - A signed answer to a route that raises after authentication, which
   `unbacked-bare-metal-listings` owns.
+- The storefront role middleware set, its administrator route contracts and how the
+  shell applies them, which `kit-owned-storefront-auth-and-persistence` keeps.
+- The identity-lifecycle remainder, which `complete-service-identity-lifecycle` owns.
+- Making the non-convergent mutations idempotent in their domains.
 
-If design finds that bounded replay state and the version 3 envelope can land
-separately, it may split them again; what argues for one change is that both rewrite
-every authority's middleware.
+## Dependencies and Acceptance Boundary
+
+No change gates it; `unify-compute-delivery-path`, whose credential-capable
+declaration this generalizes, is archived. `retain-authenticated-request-outcomes` is
+superseded by it (D18), and `sign-multi-language-credits-middleware` waits on it (D19).
+
+Acceptance: every authority authenticates through the one admission core under version
+3; every authenticated route declares its exact-retry resolution and every `RERUN`
+mutation passes its double-dispatch case; no replay row outlives its computed expiry;
+no recorded outcome holds a contact or a secret; the 0.4.0 tables are gone and the
+SQLite files compacted after the upgrade; every refusal that names a request is signed;
+version 2 requests are refused and version 2 evidence still verifies.
+
+## Impact
+
+Code: `kit/identity` (version 3 profile, wire names, declaration vocabulary, version 2
+evidence reader); a new standalone component under `tools/`; a new
+`kit/authenticated-requests`; `kit/schema-migrations` (space-freeing migrations); every
+authority's authentication code listed in the design's findings; every typed client;
+`kit/delivery`'s webhook sink; each service's migration chain and the registry's
+Alembic revisions; the API-credits consume models. Configuration: one retention key on
+every authority, in its settings and Helm values schema. Packages: `arkhai-kit-identity`
+takes an incompatible minor bump and every dependent's bound moves (D17).
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the identity paragraph's replay
-      reservation, and the authenticated service-to-service call description
-- [x] Existing subsystem specification — `marketplace-identity`
+- [x] `docs/development/ARCHITECTURE.md` — "Marketplace identity", "Authenticated
+      service boundaries" (whose generic substance moves to engineering guidance), and
+      the new foundation kit in "Kit areas"
+- [x] Existing subsystem specifications — `marketplace-identity`,
+      `physical-provisioning`, `registry-discovery`, `storefront-publication`,
+      `introduction-delivery`, `compute-provisioning-contract`, `api-credits`,
+      `deployment-state`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
+Engineering guidance, shared across repositories, gains a messaging file and a
+`messaging` topic tag, and the route contract in
+`docs/guidance/engineering/implementation.md` gains the exact-retry declaration.
+
 ### Knowledge to promote
 
-- The three replay jobs, each one's lifetime, and the reservation horizon →
-  `openspec/specs/marketplace-identity/spec.md`
-- Route declaration of exact-retry resolution → `marketplace-identity`, and the
-  storefront and site route contracts that carry it
-- Where the shared replay store lives in the package layers →
-  `docs/development/ARCHITECTURE.md`
-- Any operator-configurable horizon → `docs/development/DEPLOYMENT_AND_CONFIG.md`
-- The version 3 envelope, its audience binding, and signed answers to unroutable
-  requests → `openspec/specs/marketplace-identity/spec.md` and `architecture.md`;
-  `docs/development/ARCHITECTURE.md`, "Authenticated service boundaries"
+- D1: no permanent destination — scope is the change's own, and the split-off change
+  records its scope in its proposal.
+- D2 version 3 as an RFC 9421 profile: `openspec/specs/marketplace-identity/spec.md` and
+  `architecture.md`; the principle of a standard signature format to a new `messaging.md`
+  in `docs/guidance/engineering/`.
+- D3 one authenticated-request layer: `docs/development/ARCHITECTURE.md`, "Marketplace
+  identity" and "Authenticated service boundaries"; `marketplace-identity`
+  `architecture.md`.
+- D4 placement: `docs/development/ARCHITECTURE.md`, "Kit areas", and
+  `docs/development/ARCHITECTURE.toml`; the standalone component's README under `tools/`.
+- D5 per-route exact-retry declaration: `marketplace-identity` spec; its proof in
+  `openspec/specs/marketplace-identity/testing.md`; the declaration as part of the route
+  contract in `docs/guidance/engineering/implementation.md`, "Route contracts and their
+  HTTP binding".
+- D6 which routes record, and secrets never recorded: `marketplace-identity` spec and
+  `architecture.md`; `introduction-delivery` and `api-credits` specs; the rule that a
+  message carrying a secret is never stored or logged as it stands, and is stripped
+  before any persistence, to the new engineering `messaging.md`.
+- D7 bounds, on-write pruning, database stores and the retention key:
+  `marketplace-identity` `architecture.md` and `configuration.md`;
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- D8 request origin, retention and the 410: `marketplace-identity` spec.
+- D9 cutover, table drops and `VACUUM`: `deployment-state` spec;
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, its migrations section.
+- D10 audience, and D10a signed deliveries: `marketplace-identity` spec;
+  `introduction-delivery` spec; the principle of binding the audience to the new
+  engineering `messaging.md`.
+- D11 stated operation and signed refusals: `marketplace-identity` spec; the principle
+  of signing every refusal bound to a request to the new engineering `messaging.md`,
+  together with the generic substance of `ARCHITECTURE.md`'s "Authenticated service
+  boundaries" (both directions signed, trust from configured public principals, a
+  timestamp as a claim checked within a tolerance), which `ARCHITECTURE.md` then cites.
+- D12 version 2 as an evidence format: `marketplace-identity` spec and `architecture.md`.
+- D13 wire names owned by `kit/identity`: `marketplace-identity` `architecture.md`.
+- D14: no permanent destination — the deltas themselves are merged
+  by the archive.
+- D15: no permanent destination — the existing requirement
+  already demands it.
+- D16 capability check: `marketplace-identity` spec, through D11's refusal.
+- D17: no permanent destination — the version numbers are the record.
+- D18: no permanent destination —
+  index rows and the archive record it.
+- D19: no permanent destination — index rows
+  are planning state.
+- D20: no permanent destination — the cadence is the plan's, not current behaviour.

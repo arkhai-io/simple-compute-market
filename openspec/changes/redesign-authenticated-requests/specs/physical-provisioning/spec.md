@@ -1,0 +1,117 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: Service calls use the shared version 2 identity contract`
+- TO: `### Requirement: Service calls use the shared version 3 identity contract`
+
+## MODIFIED Requirements
+
+### Requirement: Service calls use the shared version 3 identity contract
+
+A provisioning authority MUST authenticate each inbound service request with
+the shared `arkhai.market-request.v3` profile and MUST sign each response with
+the shared response profile. Verification MUST use the complete counterparty
+principal selected by route and authority state, bind the request or response
+body digest, require the authority's own principal in the request's audience,
+enforce bounded freshness, classify replay durably, and run locally without a
+chain or external identity call. Only the version 3 request and response
+profiles authenticate the service boundary; shared credentials, caller-selected
+expected identities, and unsigned mutation responses MUST NOT do so.
+
+The authority MUST durably reserve `(principal, request_id)` with the request's
+hash before dispatch, and resolve an exact retry as the route's declared
+exact-retry resolution says: a `RERUN` route runs again, and a `RECORDED` route
+returns the recorded status and body under a freshly signed response without
+repeating the operation. One caller MAY reclaim an exact unfinished request
+after its dispatch lease expires; an in-progress exact retry or reuse with
+changed signed content MUST NOT dispatch a second operation.
+
+#### Scenario: An inbound request is authenticated
+
+- **WHEN** a storefront calls a provisioning authority with a correctly signed
+  version 3 request
+- **THEN** the authority verifies its role, exact registered principal, method,
+  semantic operation and resource, audience, request identity, origin,
+  `created`, and body digest before dispatch
+
+#### Scenario: Request content is changed
+
+- **WHEN** any bound request field or body content is changed after signing
+- **THEN** verification fails before the authority performs the operation
+
+#### Scenario: A mutation response is returned
+
+- **WHEN** the authority acknowledges a state-changing request
+- **THEN** it signs the status, the request binding, authority principal,
+  `created`, and body digest, and the caller verifies that exact authority
+  before accepting the acknowledgement
+
+#### Scenario: An exact completed request to a convergent route is retried
+
+- **WHEN** a caller repeats an exact `terminate` request for a lease after losing
+  the acknowledgement
+- **THEN** the route runs again, finds the lease already releasing or released,
+  and answers its current state under a fresh signed response
+
+#### Scenario: An exact completed request is retried
+
+- **WHEN** a caller repeats an exact `POST relays` request that named no relay
+  ID, within the retention, after losing the acknowledgement
+- **THEN** the authority returns the recorded outcome under a fresh signed
+  response and creates no second relay
+
+#### Scenario: An unfinished request is retried
+
+- **WHEN** an exact retry arrives while the original dispatch lease remains
+  active
+- **THEN** the authority rejects it as still in progress without dispatching a
+  second operation
+
+#### Scenario: A request identity is replayed
+
+- **WHEN** a previously reserved request identity is reused with changed
+  content, operation, role, principal, or origin
+- **THEN** the authority rejects it as a replay conflict rather than dispatching
+  the operation
+
+#### Scenario: Verification runs without external dependencies
+
+- **WHEN** an Ed25519 or EIP-191 signature is verified
+- **THEN** verification completes locally without a chain node, RPC endpoint,
+  or external identity service
+
+### Requirement: A failure after authentication is answered signed
+
+A provisioning authority, and every service authenticating through the shared
+admission core, MUST answer a request that fails after it was authenticated — a
+route raising an unexpected error — with a signed 500 response carrying a fixed
+detail that reveals nothing of the error, and MUST log the error itself. On a
+route declared `RECORDED`, that response MUST be recorded as the request's
+outcome, so an exact retry receives the same signed answer rather than an
+unsigned one or an in-progress refusal; on a route declared `RERUN`, nothing is
+recorded and an exact retry runs the route again.
+
+#### Scenario: A route raises after authentication
+
+- **WHEN** an authenticated request reaches a provisioning route that raises an
+  unexpected error
+- **THEN** the caller receives a signed 500 its typed client verifies, and the error is
+  logged by the service
+
+#### Scenario: The failed request is retried exactly
+
+- **WHEN** the caller retries a failed request to a `RECORDED` provisioning route with
+  the same request identity and body, within the retention
+- **THEN** it receives the recorded signed 500 without the route running again
+
+#### Scenario: The failed request to a re-run route is retried exactly
+
+- **WHEN** the caller retries a failed request to a `RERUN` provisioning route with the
+  same request identity and body
+- **THEN** the route runs again and its answer is signed
+
+#### Scenario: A route behind the site kit's middleware raises
+
+- **WHEN** an authenticated request to the API-credits service reaches a route that
+  raises an unexpected error
+- **THEN** the caller receives a signed 500 its typed client verifies, and the error is
+  logged by the service
