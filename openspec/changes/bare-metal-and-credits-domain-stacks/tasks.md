@@ -71,6 +71,15 @@ Composing bare metal onto the kit negotiation runtime moved to
 multi-round negotiation and force-accept for parity with VM's. What remains here is
 moving the bare-metal routes onto the shell.
 
+Noted 2026-11-27, for 4a.3 and 4a.5 and for Section 2: the bare-metal and API-credits
+storefronts still resolve their domain contract through a module getter,
+`get_market_domain_contract()` in each one's `domain_runtime.py`. Bare metal's
+`build_runtime_from_configuration` (`runtime.py`) and `SQLiteClient` (`sqlite_client.py`)
+fall back to it when given no contract, and API credits' `ListingService.publish_from_quota`
+(`services/listing_service.py`) calls it on each request. The VM storefront has no such
+getter and builds its contract in one place, which
+`test_vm_storefront_constructs_contract_only_in_domain_contribution` holds.
+
 - [x] 4a.1 **Migrated** to `bare-metal-mock-provisioned-deal`. Re-verify that `negotiation_service.py`, `negotiation.py`, the
       `/api/v1/negotiate/*` and listing routes in `api.py`, and their thread
       persistence in `sqlite_client.py` are still domain-local copies, and that no

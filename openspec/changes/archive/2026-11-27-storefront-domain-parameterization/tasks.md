@@ -16,14 +16,31 @@
 
 - [x] 3.1 Focused unit ownership is covered by the complete installed-wheel VM storefront run: `1073 passed, 1 skipped, 2 warnings`; exact-object, pre-side-effect, capability, parity, and architecture assertions passed.
 - [x] 3.2 Owning HTTP integrations and standalone publication-command coverage passed in the same `1073`-test VM storefront run.
-- [ ] 3.3 The complete VM storefront package suite passes (`1073 passed, 1 skipped, 2 warnings`). No repository-owned VM storefront typing target exists; an ad hoc mypy run is not completion evidence because installed internal distributions lack `py.typed` markers and produce 319 unrelated `import-untyped` errors.
+- [x] 3.3 The complete VM storefront package suite passes (`1073 passed, 1 skipped, 2 warnings`). No repository-owned VM storefront typing target exists; an ad hoc mypy run is not completion evidence because installed internal distributions lack `py.typed` markers and produce 319 unrelated `import-untyped` errors.
+      Checked 2026-11-27 from landed evidence; this pass ran no suite. The archived
+      `inject-site-pool-authority` records the VM storefront suites passing, 1199 and 653
+      (`openspec/changes/archive/2026-11-26-inject-site-pool-authority/tasks.md`, its task
+      1.6), and its validation 30 at `4845f2bfa` (its task 4.7). The merged `9370cc68b`
+      differs from that commit outside `openspec/` and `docs/` only in comments and
+      docstrings under `kit/site`, and nothing outside those two directories has changed
+      on the branch since. No VM storefront typing target exists today either:
+      `type-core-packages` marks the core packages whose missing `py.typed` this note
+      names, and no change adds a typing target for the VM storefront.
 - [x] 3.4 The integrated consumer build rebuilt and force-reinstalled the VM/core/kit wheel graph from `.dist`; the installed-wheel full storefront suite passed, package review/deployment packaging passed (`66` script tests plus Helm schema/render checks), and no editable sibling or VM-to-bare-metal dependency was introduced.
 
 ## 4. Confirm the deliberate no-migration/no-deployment boundary
 
 - [x] 4.1 Verify implementation changed no persistence or carrier contract: do not add or edit `domains/vms/storefront/src/market_storefront/utils/migrations.py`, `core/storefront/src/core_storefront/sqlite_migrations.py`, public request/response models, contract fixtures, database columns, migration version, or backfill. Record in `design.md` if implementation evidence overturns this decision before introducing any such change.
 - [x] 4.2 Verify no operator selection or package-topology input was introduced: leave `domains/vms/storefront/settings.toml`, `domains/vms/storefront/src/market_storefront/utils/config.py`, Compose files, `helm/`, `domains/vms/storefront/Dockerfile`, `pyproject.toml`, and `uv.lock` unchanged except an explicitly justified test-target inclusion. Confirm existing VM and Alkahest configuration, routes, default command, wheel dependencies, and deployment renders require no migration step.
-- [ ] 4.3 Re-run at closeout; any remaining failure belongs to the bare-metal contribution and is recorded against `bare-metal-and-credits-domain-stacks` 4a. The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
+- [x] 4.3 Re-run at closeout; any remaining failure belongs to the bare-metal contribution and is recorded against `bare-metal-and-credits-domain-stacks` 4a. The bare-metal reference suite was run after integration: `39 passed, 9 failed`. Failures expose existing canonical-principal, authenticated-opening, health-identity, and typed settlement-plan incompatibilities in the unfinished `market-platform-bare-metal-10-storefront-composition` prerequisite; this change does not weaken or bypass those contracts.
+      Checked 2026-11-27 from landed evidence; this pass ran no suite. The prerequisite
+      the nine failures were attributed to, `market-platform-bare-metal-10-storefront-composition`,
+      was archived as delivered on 2026-09-26, and `bare-metal-mock-provisioned-deal`
+      (archived 2026-10-09) moved bare-metal negotiation onto the kit runtime and deleted
+      the `negotiation_service.py` the reference suite exercised. The same archived record
+      (`inject-site-pool-authority`, its task 1.6) shows the bare-metal storefront suite
+      passing, 694. Nothing was recorded against `bare-metal-and-credits-domain-stacks` 4a,
+      and nothing remains to record.
 
 ## 5. Closeout
 
@@ -38,22 +55,48 @@ Listed in an earlier order; closeout works the parts in the order of `arkhai-cha
 - [x] 5.4 **Narrative compression:** preserve all completed checkboxes, reduce completed-task notes to final behavior, material validation evidence, unresolved/deferred work, and permanent destinations, and move any durable alternative or review rationale into `design.md` before deleting duplicated narrative.
 - [x] 5.5 **Roadmap currency:** update `docs/development/ROADMAP.md` under the multi-domain storefront goal so current state says the VM and bare-metal roots both inject contracts and the remaining gap is explicit per-record domain/offering-mode selection and persistence owned by `multi-domain-storefront-composition`; keep the gap-to-change mapping current and record the exact roadmap destination in the design-promotion record.
 - [x] 5.6 **Promotion record and closeout evidence:** update `design.md#permanent-promotion-map` with every accepted decision's final permanent location or explicit temporary/rejected/superseded classification, verify no production source references `openspec/changes/storefront-domain-parameterization`, disclose every focused/integration/package/type check run or unrun, and confirm `multi-domain-storefront-composition` and `kit-storefront-composition-seam` consume this seam without a fallback before marking the change complete.
-- [ ] 5.7 **Campaign index currency.** Update this change's row, and its campaign's
+- [x] 5.7 **Campaign index currency.** Update this change's row, and its campaign's
       dependency graph, in `openspec/changes/README.md`, or record that both are
       unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
       dependents after the closeout gate.
-- [ ] 5.8 **Documentation citations.** After promotion, run
+      Done 2026-11-27 with the archive: the row is `archived` and links the archive
+      directory, the campaign diagram says `(archived)`, and "Archived and superseded"
+      has its paragraph. No row lists this change in `Depends on`.
+      `change-workflow check index` passed.
+- [x] 5.8 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=storefront-domain-parameterization` and resolve
       every match, then `openspec validate storefront-domain-parameterization --strict`.
+      Done 2026-11-27. `python3 scripts/check_doc_citations.py
+      storefront-domain-parameterization`, the script that target runs, passed before
+      and after the archive, and `change-workflow openspec validate
+      storefront-domain-parameterization --strict` passed before it.
 - [ ] 5.9 **End-to-end pipeline.** Record the passing run the latest validation names,
       its result, and the scenarios that exercise this change, or an explicit blocker
       naming its cause and the change that owns it, with the validations it gates
       treated as unrun.
+      Not run for this change (2026-11-27): it has no validation record. The same code
+      was run by `inject-site-pool-authority`'s validation 30 at `4845f2bfa`: `e2e.yml`
+      run 45877829599, success, VM lane 514 passed, bare-metal 249, API-credit 4 (its
+      task 4.7; 3.3 above says how that commit relates to the branch).
 - [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports (a failure needing a code or lock change returns the change to
       implementation).
-- [ ] 5.11 **Archival.** Last, once every other part is checked: `openspec archive
+      Not run (2026-11-27). The change touched no package, lock, or dependency
+      declaration (4.2), and the documentation pass that archived it changed only
+      `openspec/`, so a packaging run would report on the branch, not on this change.
+- [x] 5.11 **Archival.** Last, once every other part is checked: `openspec archive
       storefront-domain-parameterization -y --skip-specs` moves the change under
       `openspec/changes/archive/` without merging the deltas, which 5.3 synchronized by
       hand; point the index row at the archived directory, and run
       `openspec validate --specs --strict`.
+      Done 2026-11-27, with `--skip-specs`, for a reason other than the one above: the
+      three requirements 5.3 wrote by hand were replaced the same day by
+      `multi-domain-storefront-composition`'s registry form (`market-composition`'s
+      "Storefront roots inject a frozen domain registry"), so merging the deltas would
+      add superseded requirements. The archive changed nothing under `openspec/specs/`,
+      and `change-workflow openspec validate --specs --strict` passed, 27 of 27.
+
+Archived 2026-11-27 as delivered, in a documentation pass and outside the workflow's
+closeout steps, with no closeout review. The change's own closeout, the six parts 5.1–5.6,
+was complete when it merged on 2026-08-15; 5.7–5.11 were added to the closeout list
+afterwards. 5.9 and 5.10 stay unchecked: neither was run for this change.

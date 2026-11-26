@@ -43,7 +43,6 @@ The VM storefront resolves its `MarketDomainContract` from module scope at the p
 - Changing VM, bare-metal, or Alkahest listing, negotiation, settlement, fulfillment, pricing, capacity, identity, or recovery semantics.
 - Making the storefront executable core-owned, changing entry-point discovery, extracting a kit-owned storefront runtime, or modifying `MarketDomainContract` vocabulary.
 - Adding a configuration key, environment variable, wire field, schema migration, data backfill, compatibility shim, deprecated accessor, or fallback contract.
-- Editing production code or permanent specifications as part of this planning change.
 
 ## Permanent documentation impact
 
