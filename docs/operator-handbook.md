@@ -375,6 +375,93 @@ original: configure the key the host's key was protected under, which recovers
 every host it protected, or configure a new one and submit each affected host's
 private key again.
 
+#### Rotating the key that protects stored secrets
+
+`ssh_decryption_key` protects three kinds of secret the provisioning service
+stores: a private key registered with a host, each relay's admission token, and
+each relay's grant-signing keys, active and staged. A stored value carries no key
+id, the service reads every one under the single configured key, and nothing
+re-encrypts a stored value. After the key changes, each secret stays unreadable
+until it is submitted again. Changing the key ends no session, since it touches
+no host and no relay, but every job that needs an unreadable secret fails.
+
+What stops under another key:
+
+- **A host registered with its own key** is refused as the section above says.
+  A host reached with the deployment's shared key file is unaffected.
+- **A relay's token** is read by every job of a delivery leased on that relay
+  before the job runs, its teardown and reclaim included. Each such job fails
+  unretried before any playbook starts, with the error `Internal error:` and
+  no text after it; with no key configured the error is `Internal error: No
+  at-rest encryption key is configured.` and the rest of that message. A
+  teardown that fails this way counts as never started: it runs again up to
+  `teardown_rerun_limit` times, failing each time, and its lease then reaches
+  `release_failed`. A new delivery on a pool whose relay is enabled fails at
+  fulfillment, where the pool's configuration is read for execution.
+- **A relay's grant keys** cannot sign, so a job adding a proxy fails the same
+  way. Grants signed earlier are unaffected: they are on the hosts, and the
+  relay's plugin checks them against public keys.
+- **No read reports a relay's secrets unreadable.** A relay's read answers
+  `token_configured: true` and lists each key's `kid` and public half under any
+  `ssh_decryption_key`, and system status reads no relay secret.
+
+How each is submitted again:
+
+- **A host's key**: as the section above says, at any time.
+- **A relay's grant key**: stage and activate a new key, at any time
+  ([`VALIDATION_RUNBOOK.md`, "Rotate keys and change admission policy"](development/VALIDATION_RUNBOOK.md#rotate-keys-and-change-admission-policy)).
+  A relay refuses to stage a key it holds or has held, so the key it cannot
+  read is replaced, not staged again. Once the new key is active the
+  unreadable one is listed as retired; keep its public key in the plugin until
+  its `grants_valid_until` has passed or reads null.
+- **A relay's token**: `POST /api/v1/relays/{relay_id}/token` with
+  `{"token": "<value>"}`. The route compares nothing with the stored value, so
+  the token frps already holds may be submitted again. It is refused while the
+  relay holds an unreleased lease, whatever the value.
+
+That refusal sets the order. A relay's lease is released by its delivery's
+teardown, and the teardown reads the token. A relay that holds a lease when the
+key changes therefore recovers in only two ways: the earlier key is restored, or
+each of its leases is force-released by hand. A deliberate rotation drains every
+relay first.
+
+To rotate the key:
+
+1. Gather what must be submitted again: the private key of every host
+   registered with its own key, and each relay's token.
+2. Under the current key, drain every relay: disable it with
+   `POST /api/v1/relays/{relay_id}/disable`, then let the deals holding its
+   leases end, or end them, until its read reports `drained: true`
+   ([`VALIDATION_RUNBOOK.md`, "Respond to a compromised relay credential"](development/VALIDATION_RUNBOOK.md#respond-to-a-compromised-relay-credential)
+   gives the routes and what ending a deal costs). Every delivery leased on a
+   relay ends before the key changes; a delivery reached without a relay keeps
+   running.
+3. Configure the new `ssh_decryption_key` and restart the provisioning service.
+4. Submit every such host's private key again, and read system status until the
+   `ansible` component names none of them. A job against one of these hosts
+   fails unretried until its key is submitted.
+5. For each relay, submit its token, stage a new grant key, add the staged
+   public key to the relay's issuer in the plugin's TOML and reload the plugin,
+   then activate the key. A drained relay's retired key reads
+   `grants_valid_until: null`, so remove its public key from the plugin.
+6. Run the admission check under the runbook's "Prove admission before enabling
+   a pool", then enable each relay.
+
+When the key has changed while a relay holds leases, restore the earlier key if
+it exists: every stored secret is readable again, and the rotation starts over
+from step 1. Otherwise end each deal that holds a lease, as the runbook section
+says. Its teardown cannot run, so once its lease reaches `release_failed`,
+remove from the host what the teardown would have removed and force-release the
+lease
+(["Teardowns that never started are run again"](#what-the-upgrade-from-v030-changes)
+gives the steps). Once the relay holds no unreleased lease, continue from step
+5.
+
+A key rotated because it leaked protects nothing it encrypted from whoever also
+holds the database. Submit new host keys, a new token and new grant keys in
+place of the earlier values; a new token is also set on frps and on every
+client baseline, as the runbook section says.
+
 #### Capturing and rotating a host key
 
 The Ansible executor reaches a host only when the key it presents matches the

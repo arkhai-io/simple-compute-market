@@ -1,15 +1,19 @@
-# Harden a relay against hosts its operator does not trust
+# Harden relay and host credentials on the provisioning boundary
 
 The change keeps its directory name, `harden-shared-relays`, from when it aimed at
 a relay shared between operators.
 
 ## Why
 
-The rule is one buyer relay per operator (`docs/development/VALIDATION_RUNBOOK.md`
-section 28; `docs/seller-frp-setup.md`). Under it a relay is safe while every party
-holding root on a host attached to it is one its operator trusts. Three gaps are
-acceptable today only because of that, and each names the condition under which it
-stops being acceptable:
+The provisioning service holds and hands out the credentials its operator's
+hardware is reached with: each relay's client token and grant-signing keys, and the
+private key of a host registered with its own. They are safe today because every
+party that touches them is the operator or one it trusts. The rule is one buyer
+relay per operator (`docs/development/VALIDATION_RUNBOOK.md` section 28;
+`docs/seller-frp-setup.md`), so every party holding root on a host attached to a
+relay is one its operator trusts, and only the operator's administrator submits a
+host's key. Four gaps are acceptable only because of that, and each names the
+condition under which it stops being acceptable:
 
 - **A relay admits every holder of its one client token at login.** frps admits a
   client by one token, which sits in the root-only client configuration of every
@@ -48,10 +52,38 @@ stops being acceptable:
   wheel is released separately from this repository's roles with a recorded
   digest: the plugin moves to a repository of its own, or its wheel joins the
   release's distributions.
+- **A host's key is plaintext on its way in, and one key with no id protects
+  every stored secret.** A private key registered with a host travels as
+  plaintext inside a signed request (`POST` and `PUT /api/v1/hosts` with
+  `secrets`), protected on that hop by the authenticated transport alone; the INI
+  import's `embedded` mode reads key files from the service's own filesystem. At
+  rest, `fernet-v1` is bare Fernet under the one `ssh_decryption_key`, which also
+  protects every relay's token and grant-signing keys; a stored value carries no
+  key id and is bound to no host or relay. The transit gap is small today, since
+  the host routes admit the administrator alone, who is the operator of the
+  service it calls. The practical gap is rotation. Nothing re-encrypts a stored
+  value, so a changed key leaves every stored secret unreadable until it is
+  submitted again, and a relay's token is accepted again only while the relay
+  holds no lease, although the teardown that releases a lease reads that token.
+  A deliberate rotation therefore drains every relay first
+  (`docs/operator-handbook.md`, "Rotating the key that protects stored
+  secrets"). And a relay's unreadable secret is not named as a host's is: under
+  another `ssh_decryption_key` a job of a relayed delivery fails with
+  `Internal error:` and no text after it, where a host's unreadable key is named
+  with how to recover, and no read reports it, since a relay's read answers
+  `token_configured: true` under any key and system status reads no relay
+  secret. That defect is small and fits this change, which is why it is recorded
+  here and not as an unowned row. *Trigger:* a party other than the deployment's
+  operator registers hosts with their own keys, the shared key must be rotated
+  where draining every relay is not acceptable, or the first credential
+  compromise.
 
-They're grouped because they are one theme, a relay whose attached hosts are not
-all trusted by its operator, and each is small beside a change of its own. Each
-activates at its own trigger.
+They're grouped because they are one theme: the credentials on the provisioning
+boundary, and the parties its operator has to trust with them. They also share
+their ground. The rotation work touches the relay secrets stored under the key
+the fourth gap replaces, and both activate at the first credential compromise or
+when a party the operator does not trust is involved. Each activates at its own
+trigger.
 
 ## What Changes
 
@@ -67,11 +99,21 @@ activates at its own trigger.
 - **The relay role checks the plugin wheel against a pinned release.** The role
   holds the plugin release's version and digest and refuses a wheel whose digest
   differs.
+- **A host's key is protected from submission to use, and the key protecting
+  stored secrets is rotated without losing them.** A host's key reaches the
+  service, and rests there, under a scheme that does not leave it to the
+  transport alone, names the key that protects each stored value, and binds the
+  value to its host. The protecting key is then rotated with every stored secret
+  still readable and no relay drained. Which scheme is for design.
+- **A relay's unreadable secret is named wherever a host's is.** A token or
+  grant key that cannot be decrypted under the configured key is named, with how
+  to recover, at the job that needs it and in a read an operator can check
+  before a delivery fails.
 
 ### Decided by the owner
 
 - **D1: one change for the three relay gaps.** The gaps are grouped by theme
-  rather than each given a change (2026-11-17).
+  rather than each given a change (2026-11-17). D7 adds a fourth.
 - **D2: deferred until a trigger.** No work starts on a piece until its trigger
   above holds. The digest pin may be done on its own at its trigger (2026-11-17).
 - **D3: the change is not Goal 1's.** Goal 1's value is that the storefront holds
@@ -107,6 +149,19 @@ activates at its own trigger.
   required expected-digest input on the role, whose reference value would come
   from the same operator who supplies the wheel; and making the wheel a release
   distribution for this alone, which is larger than the gap (2026-11-26).
+- **D7: host credential protection is folded in as a fourth deferred gap, and
+  leaves Goal 1 with the rest.** `harden-provisioning-trust-boundaries` deferred
+  it to an unowned gap, with two questions it carried: whether relay tokens and
+  grant keys under `ssh_decryption_key` move too, and how stored `fernet-v1`
+  values migrate. It fits here because the two share the boundary, the key and a
+  trigger: this change's rotation work must touch the relay secrets stored under
+  the same key, and both activate at the first credential compromise or when a
+  party the operator does not trust is involved. It leaves Goal 1 because it is
+  hardening, and the storefront's physical authority does not rest on it. What an
+  operator does to rotate the key with today's routes is in
+  `docs/operator-handbook.md`. Since that procedure makes a rotation possible
+  today at the cost of draining every relay, the gap's second trigger is a
+  rotation where that cost is not acceptable (2026-11-26).
 
 ### Open for design, not decided here
 
@@ -130,7 +185,21 @@ Design settles these when the change activates.
   plugin for `NewProxy` only. Adding an operation to a deployed frps is a
   configuration change that needs a restart of a drained server, so how hosts
   move from the one token to their own credentials without a drain is owed an
-  answer.
+  answer. The release also carried the host API's `secrets` submission and
+  `fernet-v1` values stored for hosts and relays, so both are owed a path.
+- **The scheme protecting a host's key.** `harden-provisioning-trust-boundaries`
+  weighed four and chose none: sealed submission to a keyring of HPKE keys with
+  key ids and binding to the host, which its design recommended; a reference to
+  a secret authority, close to `key_path` at a mounted Secret; envelope
+  encryption under a cloud KMS; and authenticated encryption with key ids. Each
+  is a new protected-value scheme and its codec, with a submission field that
+  needs no further connection version.
+- **Whether relay tokens and grant keys move with host keys.** They rest under
+  the same key, outside the host connection's protected values, and the rotation
+  work above reads and writes them.
+- **How stored `fernet-v1` values migrate, and what readiness reports
+  meanwhile.** A release that reads a new scheme meets databases holding only
+  `fernet-v1` values, for hosts and for relays.
 - **The pin's representation.** It follows the `frp-binary` role: version, source
   and SHA-256 in the role's defaults, an unpinned version refused, the install at
   a path naming the version. Which version it names, the plugin's own or the
@@ -143,7 +212,10 @@ Design settles these when the change activates.
   execution"; "Each relay holds its own grant-signing key"; "Relays are
   administered resources"; "The buyer-facing tunnel client is hardened on every
   host"; "A relay prepared by the family role runs admission and discloses no
-  secret", which requires a wheel the role is given.
+  secret", which requires a wheel the role is given; and, for the fourth gap,
+  "Connection secrets stay protected", "A protected key that cannot be decrypted
+  is named, not hidden" and "Relay admission tokens are confidential at rest and
+  on read paths".
 - **Where the triggers are written.** In the index row's Notes; the roadmap
   states none.
 
@@ -155,7 +227,8 @@ Provisional; settled in design.
 
 - `frp-grant-admission`: admission at login, and the plugin's release.
 - `physical-provisioning`: grant reissue, per-host login credentials and their
-  rotation, and the relay role's pin.
+  rotation, the relay role's pin, and the protection of host keys and relay
+  secrets in transit and at rest.
 - `compute-provisioning-contract`: only if a relay route or wire model changes.
 
 ### New Capabilities
@@ -167,10 +240,6 @@ None.
 - A relay shared between operators who do not trust each other. The rule is one
   relay per operator (D4).
 - Host-key checking, which `harden-provisioning-trust-boundaries` delivered.
-- Host credential protection, and whether relay tokens and grant keys leave
-  `ssh_decryption_key`. `harden-provisioning-trust-boundaries` deferred both to an
-  unowned gap in the change index, where they stay: the storage scheme is one
-  question for host keys and relay secrets alike.
 - Moving an existing delivery between relays.
 
 ## Impact
@@ -183,20 +252,27 @@ None.
   and the administrator's client in `provisioning/compute/client/`.
 - The `relay-server`, `relay-client` and `relay-proxy` roles under
   `provisioning/compute/iac/ansible/roles/`.
-- `docs/development/VALIDATION_RUNBOOK.md` section 28 and
-  `docs/seller-frp-setup.md`.
+- The `ssh` connection codec and its `fernet-v1` scheme in
+  `provisioning/compute/ansible/src/compute_provisioning_ansible/connection.py`,
+  the at-rest encryption in `kit/config/src/market_config/secret_at_rest.py`,
+  the host routes' `secrets` submission, and readiness.
+- `docs/development/VALIDATION_RUNBOOK.md` section 28,
+  `docs/seller-frp-setup.md` and `docs/operator-handbook.md`.
 
 ## Dependencies and Related Changes
 
 - None.
 - `harden-provisioning-trust-boundaries` (archived 2026-11-24) hardened the host
   half of the same boundary: a job that sends the relay's client token reaches
-  only a host checked against its pinned key.
+  only a host checked against its pinned key. It deferred host credential
+  protection (its D11 to D13), which this change holds as its fourth gap (D7).
 - `VALIDATION_RUNBOOK.md` section 28 states what D4, D5 and D6 decided for
   today's system: the rule, the procedure at a credential compromise, and the
   image digest a containerised relay pins. `docs/seller-frp-setup.md` states the
-  rule too. They were written with this proposal on 2026-11-26 and describe
-  existing behaviour; this change's work revises them when it activates.
+  rule too, and `docs/operator-handbook.md` states how `ssh_decryption_key` is
+  rotated with today's routes (D7). They were written with this proposal on
+  2026-11-26 and describe existing behaviour; this change's work revises them
+  when it activates.
 
 ## Permanent documentation impact
 
@@ -212,5 +288,6 @@ To be determined at design completion. Expected destinations: the
 `frp-grant-admission` and `physical-provisioning` specifications and architecture
 companions, the plugin's README (`tools/frp-grant-admission/README.md`),
 `docs/development/VALIDATION_RUNBOOK.md` section 28, `docs/seller-frp-setup.md`,
+`docs/operator-handbook.md`'s host key and key rotation sections,
 `docs/development/ROADMAP.md`'s Goal 1 current state, which states the relay's
 limits, and this change's row in the change index.

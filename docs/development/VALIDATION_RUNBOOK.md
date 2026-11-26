@@ -1655,6 +1655,10 @@ the attacker does not hold; the compromised key is then listed under
   relay's unreleased leases allocated at or before the key's `retired_at`;
   ending those deals as above brings it forward.
 
+The service stores the token and the grant keys under its `ssh_decryption_key`.
+Rotating that key, and recovering a relay after it changes, is the operator
+handbook's ["Rotating the key that protects stored secrets"](../operator-handbook.md#rotating-the-key-that-protects-stored-secrets).
+
 ### Retire a relay
 
 Nothing in the provisioning service deletes a relay; disabling one drains it.
