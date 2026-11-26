@@ -665,8 +665,11 @@ The provisioning service records, as events, the state changes an operator may
 want to know of: a lease whose release failed, a teardown attempt held for your
 repair, a job that finished, a lease that ended, capacity that was released. It
 delivers the ones your routes select to the sinks you configure, and serves every
-event and each destination's delivery state to its administrator. Nothing is pushed
-anywhere until you configure a route. The settings are
+event and each destination's delivery state to its administrator. Nothing reaches your
+sinks until you configure a route; the signed lease-end reports and
+capacity-released callbacks to your storefront are delivered whatever your routes say
+([Lease-end report delivery](../openspec/specs/physical-provisioning/architecture.md#lease-end-report-delivery)).
+The settings are
 [`physical-provisioning`'s "Operator events"](../openspec/specs/physical-provisioning/configuration.md#operator-events),
 and the kinds, with what each carries, are
 [`operator-events.md`](guidance/repository/operator-events.md#the-provisioning-services-operator-events).

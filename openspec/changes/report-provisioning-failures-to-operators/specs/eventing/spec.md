@@ -94,9 +94,9 @@ A consumer MUST be able to park a destination, after which nothing is delivered 
 - **WHEN** a destination has undelivered events and its consumer starts without it configured
 - **THEN** each of those deliveries is abandoned and the event written to the finally sink, and none is delivered to it
 
-#### Scenario: A destination is added
+#### Scenario: A destination is added to a consumer that has had destinations
 
-- **WHEN** a destination is added to a consumer that has events recorded before it
+- **WHEN** a destination is added to a consumer that has had destinations, and events were recorded before it was added
 - **THEN** none of those events is delivered to it
 
 #### Scenario: A destination is replaced before the consumer reads an event

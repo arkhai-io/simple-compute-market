@@ -12,10 +12,9 @@ peer, named for the peer's URL (``event_names.peer_destination``). A peer
 answering 404, 405, 501 or an explicit ``unsupported`` parks its destination
 until an administrator resumes it, and resuming delivers the reports it missed whose events are still retained; any
 other failure is retried with backoff; a report the table does not hold is
-abandoned to the finally sink, since no retry can send it. A first peer — the
-consumer's first destination, as after an install, or an upgrade that moved no
-undelivered report, whose consumer the migration registers with none — starts at the consumer's position, so it
-receives the reports recorded since the consumer last read. A peer configured
+abandoned to the finally sink, since no retry can send it. A first peer, the
+consumer's first destination, starts at the consumer's position, so it receives
+the reports recorded since the consumer last read. A peer configured
 beside or in place of another is a new destination starting at the latest
 committed event, so no report recorded before it reaches it; the destination of
 a peer the configuration does not name is retired, its undelivered reports —
