@@ -107,7 +107,8 @@ is the registered relay id, public keys from that relay's grant-key read, and a
 port range containing the registered allocation window. A token alone must not
 admit a proxy.
 
-Use one buyer-only relay per operator. Put management tunnels on a different
+Each operator runs its own buyer-only relay; a buyer relay is not shared between
+operators. Put management tunnels on a different
 relay, with their client admin API disabled or authenticated. A shared buyer
 relay uses one token across all operators' hosts; token rotation touches them
 all, and an frps restart to end one operator's sessions interrupts everyone.
