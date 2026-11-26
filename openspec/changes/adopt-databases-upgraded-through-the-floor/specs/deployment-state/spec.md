@@ -68,7 +68,7 @@ Each in-house chain MUST begin with baseline migrations, one for each package wh
 #### Scenario: A database that reached v0.3.0 by upgrading is adopted
 
 - **WHEN** the VM storefront's migration command runs against a database an earlier release built and v0.3.0 then ran on, which records every migration of the v0.3.0 chain and migrations v0.3.0 no longer lists
-- **THEN** it adopts the database, removing the v0.3.0 records and every other record the chain does not list, records the baselines without running them, applies the migrations after the baseline, keeps the database's rows, and leaves the same schema and recorded migrations as a fresh database
+- **THEN** it adopts the database, removing the v0.3.0 records and every other record the chain does not list, records the baselines without running them, applies the migrations after the baseline, keeps the database's rows, and leaves the same recorded migrations as a fresh database and the same schema, apart from the position of columns the floor release appended to a table an earlier release created
 
 #### Scenario: A v0.3.0 storefront database never opened a store's tables
 

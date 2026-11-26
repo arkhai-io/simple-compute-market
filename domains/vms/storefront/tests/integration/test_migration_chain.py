@@ -29,12 +29,37 @@ from market_schema_migrations import (
 )
 
 from market_storefront.utils.migrations import CHAIN, FLOOR_IDS, migrate_storefront_database
-from tests.floor_database import create_floor_database, floor_ids, floor_snapshot
+from tests.floor_database import (
+    create_floor_database,
+    create_upgraded_database,
+    floor_ids,
+    floor_snapshot,
+    upgraded_recorded_ids,
+)
 
 _LATER = tuple(migration.id for migration in CHAIN.migrations)
 #: A record no release of the chain lists, as a release before the floor left it.
 _EARLIER_RECORD = "20250101_001_recorded_by_an_earlier_release"
 _REPOSITORY = Path(__file__).resolve().parents[5]
+#: The VM storefront migrations every v0.2.x release applied and v0.3.0 retired,
+#: which the upgraded fixture's database recorded beside the v0.3.0 floor.
+_RETIRED_BY_V0_3_0 = (
+    "20260604_001_compute_allocation_callback_metadata",
+    "20260604_002_compute_inventory_pools",
+    "20260611_006_pool_member_sites",
+    "20260611_007_allocation_hold_expiry",
+    "20260716_008_rename_compute_capacity_pools",
+    "20260813_010_resource_settlement_clauses",
+    "20260815_005_hosted_settlement_funding_profile",
+)
+#: Columns v0.3.0 appended with ALTER TABLE to the ``negotiation_threads`` an
+#: earlier release created, so an upgraded database holds them last, where a
+#: fresh one holds them mid-table. Every read and write of the table addresses
+#: its columns by name, so their position is harmless. Reordering them means
+#: rebuilding a table three others reference, which a migration cannot do
+#: safely: inside the engine's transaction SQLite ignores ``PRAGMA
+#: foreign_keys``, so enforcement cannot be switched off around the rebuild.
+_COLUMNS_ADDED_LAST = ("agreement_bytes", "settlement_data")
 #: The seller a planted listing names; a development key, never used on a
 #: public network.
 _SELLER = Ed25519Signer(b"\x5d" * 32).identity
@@ -143,6 +168,104 @@ def test_a_floor_database_carrying_an_earlier_releases_record_and_table_is_adopt
         connection.close()
 
 
+def test_the_upgraded_fixture_records_the_floor_and_the_retired_migrations() -> None:
+    recorded = upgraded_recorded_ids()
+    assert set(recorded) == set(FLOOR_IDS) | set(_RETIRED_BY_V0_3_0)
+    assert len(recorded) == len(FLOOR_IDS) + len(_RETIRED_BY_V0_3_0)
+
+
+def _without_column_order(snapshot: dict, table: str) -> dict:
+    """``snapshot`` with ``table``'s columns compared by name, not position."""
+    columns = snapshot["tables"][table]["columns"]
+    tables = {
+        **snapshot["tables"],
+        table: {
+            **snapshot["tables"][table],
+            "columns": sorted(columns, key=lambda column: column["name"]),
+        },
+    }
+    return {**snapshot, "tables": tables}
+
+
+def test_a_database_an_earlier_release_built_and_v0_3_0_ran_on_ends_as_a_fresh_one(
+    tmp_path,
+) -> None:
+    """The real upgrade path: v0.2.29's storefront built the database and
+    v0.3.0's then ran on it (``tests/fixtures/v0_3_0_floor/upgraded``)."""
+    path = create_upgraded_database(tmp_path / "upgraded.db")
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "INSERT INTO stage_events (ts, stage, event, data) "
+            "VALUES ('t', 'kept', 'kept', '{}')"
+        )
+    connection.close()
+
+    result = check_sqlite_file(CHAIN, path)
+    assert result.state is CheckState.BEHIND
+    assert result.adopting == CHAIN.baseline_ids
+    assert result.set_aside == tuple(sorted(_RETIRED_BY_V0_3_0))
+
+    report = migrate_storefront_database(path)
+
+    assert report.adopted is True
+    assert report.set_aside == tuple(sorted(_RETIRED_BY_V0_3_0))
+    assert report.applied == _LATER
+    connection = sqlite3.connect(path)
+    try:
+        assert connection.execute("SELECT stage FROM stage_events").fetchall() == [("kept",)]
+    finally:
+        connection.close()
+    fresh = tmp_path / "fresh.db"
+    migrate_storefront_database(fresh)
+    assert _recorded(path) == _recorded(fresh) == sorted(CHAIN.ids)
+    upgraded, built = _snapshot(path), _snapshot(fresh)
+    columns = [c["name"] for c in upgraded["tables"]["negotiation_threads"]["columns"]]
+    assert tuple(columns[-len(_COLUMNS_ADDED_LAST) :]) == _COLUMNS_ADDED_LAST
+    assert upgraded != built
+    assert _without_column_order(upgraded, "negotiation_threads") == _without_column_order(
+        built, "negotiation_threads"
+    )
+
+
+def test_the_derived_listing_mapping_an_earlier_release_created_is_dropped(tmp_path) -> None:
+    path = create_upgraded_database(tmp_path / "upgraded.db")
+    assert "derived_compute_listings" in _snapshot(path)["tables"]
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "INSERT INTO derived_compute_listings (listing_id, resource_id, gpu_count, "
+            "status, derivation_key) VALUES ('listing', 'pool', 1, 'open', 'key')"
+        )
+    connection.close()
+
+    report = migrate_storefront_database(path)
+
+    assert "20261126_001_vm_derived_listings_dropped" in report.applied
+    assert "derived_compute_listings" not in _snapshot(path)["tables"]
+
+
+def test_the_derived_listing_drop_changes_nothing_on_a_fresh_database(tmp_path) -> None:
+    drop = "20261126_001_vm_derived_listings_dropped"
+    without_drop = tuple(m for m in CHAIN.migrations if m.id != drop)
+    assert len(without_drop) == len(CHAIN.migrations) - 1
+    path = tmp_path / "fresh.db"
+    connection = sqlite3.connect(path)
+    try:
+        migrate(
+            dataclasses.replace(CHAIN, migrations=without_drop),
+            SqliteMigrationConnection(connection),
+        )
+        before = schema_snapshot(connection)
+
+        report = migrate(CHAIN, SqliteMigrationConnection(connection))
+
+        assert report.applied == (drop,)
+        assert schema_snapshot(connection) == before
+    finally:
+        connection.close()
+
+
 def _ledger_database(path: Path, ids: list[str]) -> Path:
     """A database holding a table and a ledger recording ``ids``."""
     connection = sqlite3.connect(path)
@@ -240,7 +363,7 @@ def test_an_upgraded_database_gains_the_kits_empty_page_position(tmp_path) -> No
 
     report = migrate_storefront_database(path)
 
-    assert report.applied[-1] == "20261116_001_vm_servicing_page_position"
+    assert "20261116_001_vm_servicing_page_position" in report.applied
     assert "servicing_page_position" in _snapshot(path)["tables"]
     connection = sqlite3.connect(path)
     try:
