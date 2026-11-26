@@ -87,7 +87,8 @@ None.
   or anything declared in production (D1).
 - Naming or preparing a hosted target. The deployment prepares a topology from the
   stated requirements (D2).
-- A real bare-metal host. Real-host qualification is Goal 1's (D3).
+- A real bare-metal host. Real-host qualification is
+  `complete-real-provisioning-qualification`'s (D3).
 - Live verification of a payout hold's shape, which
   `offer-a-seller-chosen-payout-hold` makes itself (D4).
 - Live observations a hosted authority cannot be made to produce: a storefront stopped,
@@ -110,6 +111,11 @@ None.
   `renewable-compute-lease-deadlines`, `end-delivery-when-funding-runs-out` and
   `offer-a-seller-chosen-payout-hold` as closeouts the roadmap's "Done when" names, not
   through this change.
+- `complete-real-provisioning-qualification` states the same rule for when a real-host
+  run is owed (its design, D1) and rewrites the validation runbook's candidate rule to
+  it. Whichever of the two lands first writes the rule to
+  `docs/guidance/repository/qualification-evidence.md`; the other confirms the text and
+  adds nothing.
 - **External needs, at live verification, not at design** (D2, D6): a topology with
   Arkhai payments in test mode, a hosted mediation authority serving the vendored
   contract, this repository's services on mock provisioning, and a ruling policy for

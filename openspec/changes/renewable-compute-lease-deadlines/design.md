@@ -501,7 +501,8 @@ observations the validation runbook owes cover teardown of delivered machines on
   touches the provisioning roles or how an adapter runs them.
 - (b) One real-host observation of a reclaim during a create, made with this change,
   because this change is what makes the case routine.
-- (c) Table it with Goal 1's qualification work, as an observation the runbook lacks.
+- (c) Table it with `complete-real-provisioning-qualification`, as an observation the
+  runbook lacks. That change's design holds it as its Q4.
 
 Recommended: (c). The gap is in the provisioning roles' evidence and exists without
 this change; (b) would make this change wait on a host for behaviour it does not alter.

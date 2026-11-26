@@ -147,7 +147,9 @@ Rejected:
 
 The bare-metal live scenarios run on mock provisioning, as VM's do. No observation of
 this change needs a real bare-metal host, and Goal 8's completion needs none.
-Real-host qualification stays Goal 1's.
+Real-host qualification is `complete-real-provisioning-qualification`'s, which states
+the rule below too (its design, D1); whichever of the two changes lands first writes it
+to `docs/guidance/repository/qualification-evidence.md`.
 
 A real-host run verifies the Ansible layer and how each provisioning adapter executes
 it. It is owed again when a change touches either, and not otherwise. Real hosts were
