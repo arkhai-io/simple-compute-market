@@ -188,7 +188,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.29.0"
+version = "0.30.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -231,7 +231,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.29.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.30.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -715,10 +715,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-schema-migrations"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_schema_migrations-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -896,7 +896,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.29.0"
+version = "0.30.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -988,7 +988,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.29.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.30.0" },
     { name = "arkhai-compute", specifier = ">=0.3.0" },
     { name = "arkhai-compute-delivery", specifier = ">=0.2.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
@@ -1018,7 +1018,7 @@ requires-dist = [
     { name = "arkhai-kit-pool-overrides", specifier = "==0.3.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-schema-migrations", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-schema-migrations", specifier = ">=0.2.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.8.0" },
     { name = "arkhai-kit-site", specifier = ">=0.10.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },

@@ -59,7 +59,7 @@ def test_the_fixture_is_the_snapshot_of_its_own_ddl(tmp_path):
 
 def test_the_chain_adopts_exactly_the_ids_the_release_recorded():
     assert list(FLOOR_IDS) == floor_ids()
-    assert CHAIN.floor_ids == FLOOR_IDS
+    assert CHAIN.floor.recorded == FLOOR_IDS
 
 
 def test_the_baselines_alone_reproduce_the_v0_3_0_schema(tmp_path):

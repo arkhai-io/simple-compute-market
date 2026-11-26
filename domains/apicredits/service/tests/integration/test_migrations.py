@@ -29,6 +29,7 @@ from market_schema_migrations import (
     Chain,
     CheckState,
     MigrationRefused,
+    UnsupportedCause,
     migrate,
     schema_snapshot,
 )
@@ -95,7 +96,12 @@ def _behind(path: Path) -> Path:
     try:
         with engine.connect() as connection:
             migrate(
-                Chain(service=CHAIN.service, command=CHAIN.command, baselines=CHAIN.baselines),
+                Chain(
+                    service=CHAIN.service,
+                    command=CHAIN.command,
+                    baselines=CHAIN.baselines,
+                    floor=CHAIN.floor,
+                ),
                 SqlAlchemyMigrationConnection(connection),
             )
     finally:
@@ -185,7 +191,9 @@ class TestAnExistingDatabase:
 
         engine = _engine(path)
         try:
-            assert check_database(engine).state is CheckState.UNSUPPORTED
+            result = check_database(engine)
+            assert result.state is CheckState.UNSUPPORTED
+            assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
             with pytest.raises(MigrationRefused) as refused:
                 migrate_database(engine)
             with pytest.raises(IncompatibleDatabase) as startup:
@@ -194,7 +202,8 @@ class TestAnExistingDatabase:
             engine.dispose()
 
         assert f"`{COMMAND}`" in str(refused.value)
-        assert "fresh database" in str(refused.value)
+        assert f"was not built by `{COMMAND}`" in str(refused.value)
+        assert "fresh database" not in str(refused.value)
         assert f"`{COMMAND}`" in str(startup.value)
         assert path.read_bytes() == before
 

@@ -174,7 +174,7 @@ signed = [
 
 [[package]]
 name = "arkhai-apicredits-service"
-version = "0.8.0"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -206,7 +206,7 @@ requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.10.0" },
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.1.0" },
+    { name = "arkhai-kit-schema-migrations", extras = ["sqlalchemy"], specifier = ">=0.2.0" },
     { name = "arkhai-kit-site", specifier = ">=0.14.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
@@ -404,10 +404,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-schema-migrations"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 wheels = [
-    { path = "arkhai_kit_schema_migrations-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_schema_migrations-0.2.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]

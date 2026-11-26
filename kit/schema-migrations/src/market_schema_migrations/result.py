@@ -3,6 +3,13 @@
 This module knows nothing of the engine: a result is plain data, so a service
 whose migrations run on another engine can report through the same result and
 refuse with the same message.
+
+Every chain is supported from a floor release. A database that release ran on
+is adopted whatever earlier releases recorded in it; a database older than the
+floor upgrades through the floor release first, since the image cannot reach it
+itself, and a database the chain did not build is not the service's to
+migrate. No refusal sends an operator to a fresh database: that discards a
+deployment's state, and is never the remedy for a database that can upgrade.
 See openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history.
 """
 
@@ -23,13 +30,29 @@ class CheckState(enum.Enum):
     baseline is still to be adopted."""
 
     AHEAD = "ahead"
-    """The database records a migration this image does not know."""
+    """The database records the chain's baselines and a migration this image
+    does not know, which only a newer image leaves."""
 
     UNSUPPORTED = "unsupported"
-    """The database holds state from before the supported baseline."""
+    """No step of the chain reaches the database: it is older than the floor, or
+    the chain did not build it."""
 
     COMPATIBLE = "compatible"
     """The recorded migrations are exactly the image's."""
+
+
+class UnsupportedCause(enum.Enum):
+    """Why a database is unsupported, as far as its ledger can tell."""
+
+    OLDER_OR_SHARED = "older than the floor, or another service's"
+    """The ledger records some of the floor's migrations but not all, and none
+    of the chain's baselines. Services sharing part of their history record the
+    same IDs, so the ledger cannot tell an older database of the service's own
+    from another service's."""
+
+    NOT_THIS_CHAIN = "not built by this chain"
+    """The database holds tables but records no migration, or records none of
+    the floor's migrations or the chain's baselines."""
 
 
 @dataclass(frozen=True)
@@ -37,15 +60,18 @@ class CheckResult:
     """One database's state, with the migration IDs that make it so.
 
     ``pending`` lists, in the order they would apply, the migrations a run would
-    apply; ``unknown`` the recorded migrations the image does not know, which
-    take precedence over pending ones, since this image cannot vouch for such a
-    database. ``missing`` lists the baseline-floor migrations an unsupported
-    database never recorded. ``adopting`` lists the baseline migrations a run
-    would record, without running them, in place of a supported database's
-    floor records, so a preview names every ID the run records even when no
-    migration follows the baseline. ``current`` is the newest migration the
+    apply; ``unknown`` the recorded migrations the image does not know on a
+    database recording its baselines, which take precedence over pending ones,
+    since this image cannot vouch for such a database. ``missing`` lists the
+    floor's migrations an older database never recorded. ``adopting`` lists the
+    baseline migrations a run would record, without running them, in place of
+    the floor release's records, so a preview names every ID the run records
+    even when no migration follows the baseline; ``set_aside``, sorted, every
+    other recorded ID the adoption would forget, which earlier releases wrote
+    and the chain does not list. ``current`` is the newest migration the
     database records that the image knows, or the revision it is at, where a
-    service has one.
+    service has one. ``floor`` names the release the chain is supported from,
+    and ``cause`` says why an unsupported database is.
     """
 
     state: CheckState
@@ -53,7 +79,10 @@ class CheckResult:
     unknown: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
     adopting: tuple[str, ...] = ()
+    set_aside: tuple[str, ...] = ()
     current: str | None = None
+    floor: str | None = None
+    cause: UnsupportedCause | None = None
 
     @property
     def compatible(self) -> bool:
@@ -70,14 +99,31 @@ def _ids(ids: tuple[str, ...]) -> str:
     return ", ".join(ids)
 
 
+def _floor(result: CheckResult) -> str:
+    return result.floor if result.floor is not None else "the release it is supported from"
+
+
+def _released(release: str, service: str) -> str:
+    """The service as a release shipped it: "example 1.0.0's billing service"
+    for the service "the billing service"."""
+
+    bare = service[4:] if service.startswith("the ") else service
+    return f"{release}'s {bare}"
+
+
 def describe(result: CheckResult) -> str:
     """One line naming the state and every differing migration ID."""
 
     parts = [result.state.value]
+    if result.cause is not None:
+        parts[0] = f"{result.state.value} ({result.cause.value})"
     if result.current is not None:
         parts.append(f"at {result.current}")
     if result.adopting:
         parts.append(f"supported baseline to be adopted: {_ids(result.adopting)}")
+        parts.append(f"replacing the records of {_floor(result)}")
+    if result.set_aside:
+        parts.append(f"records set aside: {_ids(result.set_aside)}")
     if result.unknown:
         parts.append(f"unknown: {_ids(result.unknown)}")
     if result.pending:
@@ -91,9 +137,11 @@ def refusal_message(result: CheckResult, *, service: str, command: str) -> str:
     """Why ``service`` will not start on this database, and what to do.
 
     Every message names the migration command; each state names the remedy it
-    calls for, since they differ: a behind or absent database is migrated, an
-    ahead one is restored from its backup or served by the image that wrote it,
-    and an unsupported one is replaced by a fresh database.
+    calls for, since they differ: a behind or absent database is migrated; an
+    ahead one is restored from its backup or served by the image that wrote it;
+    an older one, once the operator confirms it is the service's, upgrades
+    through the floor release first; and one the chain did not build is not the
+    service's to migrate, so no remedy is named for it.
     """
 
     state = result.state
@@ -107,10 +155,17 @@ def refusal_message(result: CheckResult, *, service: str, command: str) -> str:
     if state is CheckState.BEHIND:
         steps = []
         if result.adopting:
-            steps.append(
+            adoption = (
                 "its supported baseline is to be adopted "
-                f"(recording {_ids(result.adopting)})"
+                f"(recording {_ids(result.adopting)}), replacing the records of "
+                f"{_floor(result)}"
             )
+            if result.set_aside:
+                adoption += (
+                    " and setting aside records earlier releases wrote: "
+                    f"{_ids(result.set_aside)}"
+                )
+            steps.append(adoption)
         if result.pending:
             steps.append(f"migrations {_ids(result.pending)} are pending")
         at = f" at {result.current}" if result.current is not None else ""
@@ -133,12 +188,24 @@ def refusal_message(result: CheckResult, *, service: str, command: str) -> str:
             f"{pending} `{command}` will not change it. Restore the backup taken "
             "before the upgrade that wrote them, or run the image that wrote them."
         )
-    missing = (
-        f" It lacks migrations {_ids(result.missing)} of the supported baseline."
-        if result.missing
-        else ""
-    )
+    if result.cause is UnsupportedCause.OLDER_OR_SHARED:
+        floor = _floor(result)
+        released = _released(floor, service)
+        lacks = (
+            f"lacks migrations {_ids(result.missing)} that {released} recorded"
+            if result.missing
+            else f"lacks migrations that {released} recorded"
+        )
+        return (
+            f"{service}'s database {lacks}. If it is {service}'s database, it "
+            f"predates {floor}, the release it is supported from: upgrade it "
+            f"through {floor} first — run {released} on it — then run "
+            f"`{command}`. Confirm it is first: `{command}` cannot tell another "
+            "service's database from an older one of its own."
+        )
     return (
-        f"{service}'s database predates its supported baseline and cannot be "
-        f"migrated by `{command}`.{missing} Start {service} on a fresh database."
+        f"{service}'s database was not built by `{command}`: it holds tables, but "
+        f"its ledger shows no state {service}'s migrations or the release it is "
+        f"supported from leave, so `{command}` cannot migrate it. Check that "
+        f"{service} is configured with its own database."
     )

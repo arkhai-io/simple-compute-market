@@ -41,7 +41,12 @@ def _behind(path: Path) -> Path:
     connection = sqlite3.connect(path)
     try:
         migrate(
-            Chain(service=CHAIN.service, command=CHAIN.command, baselines=CHAIN.baselines),
+            Chain(
+                service=CHAIN.service,
+                command=CHAIN.command,
+                baselines=CHAIN.baselines,
+                floor=CHAIN.floor,
+            ),
             SqliteMigrationConnection(connection),
         )
     finally:

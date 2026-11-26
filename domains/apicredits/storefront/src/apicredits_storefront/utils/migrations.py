@@ -1,11 +1,11 @@
 """The API-credit storefront's migration chain.
 
 The chain composes core storefront's baseline, the settlement runtime's, and
-the API-credit domain's own, in that order. The chain names no floor: no
-API-credit database from before its baseline is supported, so the migration
-command refuses every non-empty database it did not build. A later change to
-any of these tables is a migration appended to :data:`CHAIN`, never an edit to
-a baseline.
+the API-credit domain's own, in that order. Its floor is ``0.0.0``, recording
+no migration: no API-credit database from before its baseline is supported, so
+the migration command adopts none and refuses every non-empty database it did
+not build. A later change to any of these tables is a migration appended to
+:data:`CHAIN`, never an edit to a baseline.
 See openspec/specs/deployment-state/spec.md.
 """
 
@@ -18,6 +18,7 @@ from core_storefront import migrations as core_migrations
 from market_schema_migrations import (
     Chain,
     CheckResult,
+    Floor,
     MigrateReport,
     Migration,
     SqliteMigrationConnection,
@@ -129,6 +130,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         BASELINE,
     ),
     migrations=core_migrations.MIGRATIONS,
+    floor=Floor("0.0.0"),
 )
 
 

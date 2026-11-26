@@ -4,10 +4,14 @@ The chain composes core storefront's baseline, the baselines of the kits whose
 tables the storefront holds (the settlement runtime, contact exchange, and the
 pool-override store), and the VM domain's own, in that order, then every
 migration after the baseline. The baselines reproduce the database the
-marketplace v0.3.0 release's storefront built at construction; a database
-recording every ID that release's chain recorded (:data:`FLOOR_IDS`) is adopted
-at the baseline without running it. A later change to any of these tables is a
-migration appended to :data:`CHAIN`, never an edit to a baseline.
+marketplace v0.3.0 release's storefront built at construction, the chain's
+floor. A database recording every ID that release's chain recorded
+(:data:`FLOOR_IDS`) is one the release ran on, and is adopted at the baseline
+without running it, whatever earlier releases recorded beside those IDs; a
+database recording only some of them is older than the floor, or another
+storefront's, which shares core storefront's history. A later change to any
+of these tables is a migration appended to :data:`CHAIN`, never an edit to a
+baseline.
 See openspec/specs/deployment-state/spec.md.
 """
 
@@ -25,6 +29,7 @@ from market_pool_overrides import migrations as pool_override_migrations
 from market_schema_migrations import (
     Chain,
     CheckResult,
+    Floor,
     MigrateReport,
     Migration,
     SqliteMigrationConnection,
@@ -246,7 +251,7 @@ CHAIN: Chain[sqlite3.Connection] = Chain(
         # Each deal servicing loop's page position, kept across restarts.
         Migration("20261116_001_vm_servicing_page_position", create_page_position),
     ),
-    floor_ids=FLOOR_IDS,
+    floor=Floor("marketplace 0.3.0", FLOOR_IDS),
 )
 
 

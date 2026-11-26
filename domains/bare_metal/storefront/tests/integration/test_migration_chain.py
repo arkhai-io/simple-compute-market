@@ -62,7 +62,7 @@ def test_the_baselines_reproduce_the_floor() -> None:
 
 
 def test_the_chain_floor_is_the_fixture_floor() -> None:
-    assert list(FLOOR_IDS) == floor_ids()
+    assert list(CHAIN.floor.recorded) == floor_ids()
 
 
 def test_a_fresh_database_gets_the_floor_and_every_later_migration(tmp_path) -> None:
