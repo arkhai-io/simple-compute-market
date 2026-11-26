@@ -122,8 +122,9 @@ class PoolFactsReader(Protocol):
 `kit/resource-pools` implements them in `market_resource_pools/pool_facts.py` with its
 own frozen dataclass, `StoredPoolFacts`, and `ResourcePoolFacts`, which takes the
 composition's `HostRequirement` and resolves the pool's provider into `needs_host`. It
-imports nothing from `market_site`; the composition root, which imports both, is where
-the type checker confirms the implementation satisfies the port. A port's returned
+imports nothing from `market_site`; the provisioning service, a composition root
+importing both, holds the test that confirms the implementation satisfies the port. A
+port's returned
 values are structural for the same reason its methods are: a concrete class owned by
 `kit/site` would make the implementation import `market_site`, recreating the edge in
 reverse.
@@ -151,10 +152,18 @@ The ledger loses its `host_requirement` argument and takes a required `pool_fact
 argument. `kit/site` drops both `arkhai-kit-resource-pools` and
 `arkhai-kit-resource-pools-contracts`.
 
-A later fact adds a member to `PoolFacts` and a field to `StoredPoolFacts` in the change
-that introduces it; an implementation lacking it fails type-checking at the composition
-root. `renewable-compute-lease-deadlines` adds `delivery_deadline_seconds` this way, with its
-switch and provider defaults configured on `ResourcePoolFacts`.
+The conformance is a runtime test in the provisioning service's unit tests, settled in
+the triage of the design review (10 F2), since no type checker runs over these packages
+and that root builds the ledger through dependency-injection providers no checker relates
+to the constructor. The test asserts that every member `typing.get_protocol_members`
+returns for `PoolFacts` is a field of `StoredPoolFacts`, and that `ResourcePoolFacts`
+has `pool_facts` with `PoolFactsReader`'s parameters. A later fact adds a member to
+`PoolFacts` and a field to `StoredPoolFacts` in the change that introduces it; an
+implementation lacking it fails that test. `renewable-compute-lease-deadlines` adds
+`delivery_deadline_seconds` this way, with its switch and provider defaults configured on
+`ResourcePoolFacts`. *Rejected (10 F2):* a static conformance witness checked by mypy in
+a required suite gives the guarantee as a type error, but brings a type checker into
+packages that run none, a decision larger than this change.
 
 *Rejected.* One method per fact keeps each caller's intent at its call site but moves
 the site's admission rules — enabled and declared, fail-closed — into the implementation,
@@ -257,12 +266,24 @@ One round of two sessions, reviewed together, then closeout:
 
 1. **The contracts split (D6):** move the two modules and their unit tests, switch the
    four readers' imports, move test-only dependencies to `dev`, bump versions, relock.
+   `arkhai-kit-resource-pools-contracts` takes a minor bump (to 0.5.0) and
+   `arkhai-kit-resource-pools` one (to 0.11.0) that also covers what session 2 adds to
+   it. The VM and bare-metal storefronts and `arkhai_vms_listings` raise
+   `arkhai-kit-resource-pools-contracts` to that version, and the API-credit storefront
+   adds the dependency at it.
 2. **The port (D3, D4, D5, D9, D10):** the two `kit/site` modules, `ResourcePoolFacts`
    and its tests, the ledger rewired, fulfillment's and the relay report's imports, both
-   composition roots, every test constructing the ledger, both boundary tests, and
-   `kit/site/pyproject.toml` dropping both pool distributions.
+   composition roots, every test constructing the ledger, both boundary tests, the
+   conformance test (D4), and `kit/site/pyproject.toml` dropping both pool
+   distributions. `arkhai-kit-site` takes a minor bump (to 0.15.0); `kit/fulfillment`
+   and `provisioning/compute` raise their `arkhai-kit-site` floor to it, and the
+   provisioning service and the API-credit service raise both `arkhai-kit-site` and
+   `arkhai-kit-resource-pools`, for `ResourcePoolFacts`.
 
-The sessions touch disjoint code, and the split is mechanical, so one review reads both.
+Each consumer raises its lower bound to the first version exporting what it now imports,
+as `versioning.md`, "Before 1.0.0", asks (10 F3); the versions named are those the
+pre-1.0 rule gives, confirmed against `make check-version-bumps`. The sessions touch
+disjoint code, and the split is mechanical, so one review reads both.
 
 ## Open questions
 

@@ -90,7 +90,8 @@ None.
   that construct `CapacityLedgerService`.
 - Affected packaging: `kit/site` loses two internal dependencies and four reader
   packages lose one, so every lock installing them is rechecked with
-  `make check-packaging`.
+  `make check-packaging`. Each consumer of a moved import raises its lower bound to the
+  first version exporting it (design D11).
 - Wire, persistence and deployed compatibility: none. Deployment record read:
   `marketplace-v0.4.0`.
 

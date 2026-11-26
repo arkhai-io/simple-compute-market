@@ -31,8 +31,8 @@ composition supplies a host requirement.
 - **GIVEN** a composition supplying a host requirement
 - **WHEN** the offered read reaches a declaration whose pool the reader reports as not
   existing
-- **THEN** the declaration is offered enabled only when it names a host taking new
-  delivery, as for a pool that delivers and whose provider needs a host
+- **THEN** the declaration is judged as one in a backed pool whose provider needs a
+  host: it is offered enabled only when it has a usable host, as admission judges it
 
 #### Scenario: The site authority is installed without the pool capability
 
