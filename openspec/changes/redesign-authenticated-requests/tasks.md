@@ -15,6 +15,15 @@ core. Sections 6, 9, 10, 11, 12, 15, 16 and 17 were replanned against the review
 design, and so were the route-declaration tasks of 7, 8 and 13. Sections 2–4 stay as
 done, with correction notes.
 
+*Amended again 2026-11-27* against the design as design review 85's triage left it
+(D24–D29, with D2, D3, D11, D14, D20 and D21 amended). Section 6 stopped a second time,
+before its first task: the registry's descriptor bootstrap could not name an audience,
+and the profile signed no query values. Sections 5d and 5e amend the foundations again
+(`kit/identity`, then the admission core). Section 6 was replanned against the reviewed
+design. Tasks in 7–13 and 15 that move a client or declare routes now also carry the
+query rule below; 9 and 10 move the storefronts' replay-table migration so that section
+9 can be committed alone. Sections 2, 4, 5a and 5c stay as done, with correction notes.
+
 Every section that declares routes declares, for each operation, whether it acts on a
 target object. `Market-Resource` is sent only for one that does (D2, D21). Every
 classification task's note names the declaration. Each authority here runs SQLite, so
@@ -22,6 +31,15 @@ every classification also names any `RECORDED` route that holds a write transact
 near its lease period or writes in more than one transaction (D7, design review 61 F1).
 Such a route is a defect the section fixes, or, where the fix is a design question, the
 change returns to design.
+
+Every request's query is covered by `@query` (D25). So every section that moves an
+authority or a client removes the query values that version 2 folded into a signed
+body or a resource: the registry's `canonical_query_body`, the site kit's and
+provisioning's canonical query forms, and the storefronts' negotiation-list and
+stage-event resources. Such a query travels as the query, and the resource names only
+the object the operation acts on, or is absent (D2, D28). Each typed client builds the
+query it signs and sends from `kit/identity`'s one query encoding (5d.3). Each
+authority's section proves a read whose query was altered after signing is refused.
 
 Every section bumps each package it changes once against `dev`
 (`docs/guidance/engineering/versioning.md`, "One bump per unit of work"; held by
@@ -173,6 +191,10 @@ dependent.
 
 Notes (section 2):
 
+- Correction (plan amended again 2026-11-27; D24, D25): section 5d changes what 2.2
+  delivered. Every request covers `@query` second in both coverage lists, and
+  verification takes the raw query string; the request hash covers the query.
+  `kit/identity` gains one query encoding and a public request builder.
 - Correction (plan amended 2026-11-27; D2, D13, D21, D22): section 5a changes what
   2.2, 2.3 and 2.5 delivered. The tags become `arkhai.market-request-signature.v3` and
   `arkhai.market-response-signature.v3`. The profile accepts one spelling of what it
@@ -561,6 +583,12 @@ settings, and its migrations. A new foundation kit, `kit/authenticated-requests`
 
 Notes (section 4):
 
+- Correction (plan amended again 2026-11-27; D3, D11, D24, D25; design review 85 F1):
+  section 5e changes what 4.2 and 4.5 delivered. Admission verifies against the raw
+  query string in both forms. The route inventory admits a third mark, a public
+  operation, answered signed with nothing reserved. The fallback answers an unmatched
+  request that states a request identity and carries no signature field with the signed
+  404 or 405 over its stated identity, without verifying it.
 - Correction (plan amended 2026-11-27; D3, D7, D11, D23): section 5c changes what
   4.2–4.4 delivered.
   - A replay-store failure while admitting, resolving or concluding a request is a
@@ -914,6 +942,9 @@ bumped against `dev` by 2.6, so this section bumps nothing.
 
 Notes (section 5a):
 
+- Correction (plan amended again 2026-11-27; D21, D25): section 5d adds `query` to the
+  request record 5a.4 defined, `?` where the request had no query, and regenerates
+  5a.7's fixture with a request carrying a query.
 - Outside the plan: the new API reaches `kit/authenticated-requests`, which this
   commit adapts only so its suite passes: it reads `.headers` from
   `sign_market_response`, and treats a route resource `""` as none (`or None` in
@@ -1233,6 +1264,8 @@ change, so nothing is bumped.
 
 Notes (section 5c):
 
+- Correction (plan amended again 2026-11-27): section 5e builds on 5c.2's targetless
+  declaration for the public operation, which has no target (D24, D28).
 - For sections 6–15: a route whose operation has a target passes `resource=`
   (`path_resource`, a body-derived `ResourceOf`, or `fixed_resource(value)`); one
   with none passes nothing, and a middleware-form table returns `resource=None`.
@@ -1267,43 +1300,191 @@ Notes (section 5c):
   renewal stopped, an unneeded yield, and a misnumbered D7 case; all fixed. The
   section's "Touches" line omits `__init__.py`, which it also changed.
 
+## 5d. Query coverage and the public request in `kit/identity`
+
+Covers `@query` in the profile, the request record and the request hash, and adds the
+one query encoding and the public request builder (D2, D21, D24, D25, D28;
+marketplace-identity "Body-bound authenticated request and response version", its
+`@query` sentences and "A read's query is changed in transit"; "A signed message
+retained as evidence verifies offline as a record"; "A public operation is answered
+signed without request authentication"). Touches `kit/identity/src/market_identity/`
+(`http_profile.py`, `records.py`, `wire.py`, `evidence.py`, `fixtures/`,
+`__init__.py`) and its unit tests. `arkhai-kit-identity` is already at 0.6.0 against
+`dev` (2.6), so nothing is bumped. `kit/authenticated-requests`' suite must still pass
+against this build: a verification given no query reads `?` until 5e passes the raw
+one.
+
+- [ ] 5d.1 Cover `@query` (D2, D25). `sign_market_request` takes the request's encoded
+      query string and signs it as `@query`, the string with its leading `?`, or `?`
+      alone where there is none. It sits second in both request coverage lists, after
+      `@method`, and the delivery shape (D10a) covers it too. `verify_market_request`
+      takes the raw query string the authority received and verifies against it,
+      never a re-encoding. `VerifiedRequest.request_hash` frames the query. The response
+      coverage is unchanged. Verify by unit tests, `test_http_profile.py`:
+      - a request signed for `?limit=50&offset=0&status=open` verifies against that
+        raw string;
+      - the same request verified against `?limit=50&offset=0&status=closed` fails as
+        an invalid proof (the delta's "A read's query is changed in transit");
+      - a request with no query covers `?`, and verifies with no query or an empty one;
+      - a query signed with `%20` fails against the same query spelled with `+`;
+      - two requests differing only in their query have different request hashes;
+      - 2.1's interoperability oracle, `http-message-signatures`, agrees on a base
+        covering `@query`;
+      - a delivery covering `@target-uri` covers its query too.
+- [ ] 5d.2 Carry `query` in the request record (D21, D25). `RequestRecord.query` is
+      required, `?` where the request had no query. Its wire name is `RecordField`'s,
+      and the evidence verifier rebuilds the signature base with it. A version 2 record
+      is unaffected. Regenerate 5a.7's producer fixture with a request carrying a query.
+      Verify by unit tests, `test_records.py`, `test_evidence.py`, `test_wire.py`,
+      `test_fixtures.py`:
+      - a record round trip under both schemes, with a non-empty query and with `?`;
+      - a record whose query is altered refused by the request evidence verifier;
+      - a publish record with `query` `?` verifying;
+      - the version 2 evidence vectors still verifying;
+      - the record's fields held to `RecordField`.
+- [ ] 5d.3 Add the one query encoding (D25). One `kit/identity` function encodes an
+      ordered sequence of query items into the exact string a typed client signs and
+      sends: RFC 3986 percent-encoding with spaces as `%20`, repeated keys kept in their
+      given order, with the leading `?` added only for a non-empty query. Typed clients
+      build both the signed value and the request URL from it, never through `httpx`'s
+      `params=`. Verify by unit tests:
+      - the encoding is deterministic for a given item sequence;
+      - repeated keys and reserved characters encode as stated;
+      - a URL built from the encoded string and sent through `httpx`'s mock transport
+        arrives with a byte-identical query, so the authority verifies what was signed.
+- [ ] 5d.4 Add the public request builder and the public-shape check (D24, D28). The
+      builder takes the method and operation, a targetless operation stating no resource,
+      and returns the headers — `Market-Operation` and a fresh 128-bit
+      `Market-Request-ID`, nothing else the profile adds — with the `RequestBinding`
+      its answer is verified against through `verify_market_response`. The check tells an
+      authority whether a request is public-shaped: it states a request identity and
+      carries no `Signature` or `Signature-Input` field. Verify by unit tests:
+      - the builder's headers carry no `Signature`, `Signature-Input`, `Market-Audience`,
+        `Market-Request-Origin` or `Content-Digest`, and two builds differ in their
+        request ID;
+      - a response signed over the binding verifies, and one signed over another
+        request ID fails (registry-discovery "A replayed descriptor is offered to a
+        bootstrap", at its unit);
+      - the check holds for the builder's request and fails for a signed one, or for one
+        missing `Market-Operation` or `Market-Request-ID`.
+- [ ] 5d.5 Verify the section: `make -C kit/identity test` (unit); `make -C
+      kit/authenticated-requests test` against this build, still passing; `make
+      check-architecture`.
+      End-to-end: none — no authority composes the core until section 6.
+
+## 5e. The admission core: raw query, public operations and unmatched public requests
+
+Hands the raw query to verification, adds the public route mark and answers unmatched
+public requests signed (D3, D11, D24, D25; design review 85 F1; marketplace-identity "A
+public operation is answered signed without request authentication" and its four
+scenarios, "Each route declares how an exact retry is resolved", its inventory sentence,
+and "Body-bound authenticated request and response version", the authority verifying
+the raw query). Touches `kit/authenticated-requests/src/market_authenticated_requests/`
+(`core.py`, `application.py`, `dependency.py`, `routes.py`, `inventory.py`,
+`__init__.py`) and its tests. The kit is new in this change, so nothing is bumped.
+
+- [ ] 5e.1 Hand the raw query to verification in both forms (D25). Each form reads the
+      ASGI scope's `query_string` and passes it, decoded as received, to
+      `verify_market_request`; the reservation keys on 5d.1's request hash. Verify by
+      library integration tests in both forms and schemes:
+      - a read whose query was altered after signing refused as an invalid proof, signed
+        over its stated identity, nothing dispatched;
+      - an exact retry with the same query resolved as its route declares;
+      - a request ID reused with a changed query refused as changed reuse.
+- [ ] 5e.2 Add the public route mark (D3, D24). A route admission declares a public
+      operation: its operation, and no target. The core answers its request with the
+      version 3 response signed over the stated binding, through the route's handler, and
+      reserves nothing. A request to it carrying signature fields is refused as
+      malformed, signed over its stated identity. One stating another operation, or a
+      resource, is answered `operation_mismatch`. The route inventory accepts the public
+      mark beside a declaration and the unauthenticated mark. Verify by library
+      integration tests in both forms (marketplace-identity "A client reads a public
+      operation knowing no principal", "A public operation's request is signed"):
+      - a public read answered 200 signed, verifying through 5d.4's binding, with no
+        replay row written;
+      - a signed request to it refused as malformed;
+      - another operation, or a stated resource, answered `operation_mismatch`.
+
+      Add a unit test, `test_inventory.py`: a public-marked route passes the inventory,
+      and a route with no mark still fails it naming the route.
+- [ ] 5e.3 Answer unmatched public requests (D3, D11, design review 85 F1). The fallback
+      answers an unmatched request that states a request identity and carries no
+      signature field with the signed 404, or 405 with `Allow`, `operation_not_served`,
+      over its stated identity and unverified. One carrying signature fields is verified
+      first, as now. Verify by library integration tests in both forms
+      (marketplace-identity "A public request names a path no route serves", "A public
+      request uses a method its path does not serve"):
+      - a public-shaped request on a mistyped path answered a signed 404;
+      - a public-shaped POST to a GET-only public path answered a signed 405 with
+        `Allow: GET`;
+      - a signed request under an unknown profile tag on an unmatched path still
+        answered `unsupported_protocol` (D16);
+      - a forged signature on an unmatched path still refused as an invalid proof.
+- [ ] 5e.4 Verify the section: `make -C kit/authenticated-requests test` (unit and
+      library integration) against 5d's build; `make check-architecture`.
+      End-to-end: none — no authority composes the core until section 6.
+
 ## 6. The registry on the admission core
 
 *Replanned 2026-11-27 against the reviewed design:* 6.1–6.6 were superseded before any
-was started; the section stopped at 6.1, as its notes record.
+was started; the section stopped at 6.1, as its notes record. *Replanned again
+2026-11-27* (D24–D28, design review 85): the section stopped a second time before 6.1,
+and its tasks were replaced; none had started.
 
-Moves the registry onto the core in the dependency form, with its typed client, and
-keeps its publication evidence as records (D3, D5, D6, D7, D9, D21, D23;
-registry-discovery "Durable replay reservation", "Seller publication evidence is
-independently verifiable"). Touches `core/registry/src/core_registry/api/`
-(`publisher_auth.py` and every route calling it, `listing_routes.py`, `utils.py`,
-`validate_routes.py`, `main.py`'s unsigned-error path), `db/models.py`, a new Alembic
-revision under `alembic/versions/`, the registry's migrate command, `config.py`, the
-registry chart's values and schema, and `core/registry-client/src/registry_client/`
-(`auth.py`, `client.py`, `models.py`).
+Moves the registry onto the core in the dependency form, with its typed client. Keeps
+its publication evidence as records, serves its descriptor as a public read, signs its
+query values, and answers late rotation retries (D3, D5, D6, D7, D9, D21, D23, D24, D25,
+D26, D27, D28). Requirements: registry-discovery "Durable replay reservation", "Seller
+publication evidence is independently verifiable", "Body-bound registry
+authentication", "Filter-spec consistency", "Resource query compilation preserves
+filter-spec authority", "Publisher principal rotation", "Registry self-description is
+authority-authenticated"; marketplace-identity "A public operation is answered signed
+without request authentication". Touches:
+- `core/registry/src/core_registry/api/`: `publisher_auth.py` and every route calling
+  it, `listing_routes.py`, `publisher_routes.py`, `descriptor_routes.py`,
+  `filter_spec.py`, `system_routes.py`, `utils.py`, `validate_routes.py`, and
+  `main.py`'s unsigned-error path;
+- `core/registry/src/core_registry/`: `db/models.py`, a new Alembic revision under
+  `alembic/versions/`, the migrate command, `config.py`;
+- the registry chart's values and schema;
+- `core/registry-client/src/registry_client/`: `auth.py`, `client.py`, `models.py`,
+  `query.py`;
+- `core/buyer/src/core_buyer/orchestrator.py`, where it passes the ETag;
+- the VM storefront's `tests/unit/test_registry_client_contract.py`, which doubles
+  the registry's wire against the installed client;
+- `kit/authenticated-requests`, where its `trust` becomes a protocol (the notes'
+  choices).
 
 - [ ] 6.1 Classify every authenticated registry route against D6's criterion and declare
       it, naming whether each operation has a target. Record the table in this task's
       note.
       - Listing publish, update and delete are `RECORDED`.
-      - Publish, the listing and publisher collection reads, and validate have no target.
-      - Reads, validate, and identity rotation and retirement follow the criterion.
+      - Publish, the listing and publisher collection reads, validate, the filter spec,
+        health and stats have no target (D28).
+      - The descriptor read is public (D24).
+      - Identity rotation and retirement are `RERUN`, keyed by the rotation's nonce
+        (D6, D27). Every other read follows the criterion.
 
       A route whose classification differs from the design's table, or a `RECORDED` route
       whose caller could not learn by reading whether its write applied, stops the
       section: it is a design question, and the change returns to design (D6, D7). The
       table names any `RECORDED` route holding a write transaction near the lease period
       or writing in more than one transaction (the plan's preamble).
-- [ ] 6.2 Authenticate every route through the core's dependency form, its store bound to
-      the registry's database through the SQLAlchemy store. Remove `publisher_auth.py`'s
-      own reservation, caching and completion. Verify by application integration tests
-      through the typed client (registry-discovery scenarios):
+- [ ] 6.2 Authenticate every route through the core's dependency form. Its store is bound
+      to the registry's database through the SQLAlchemy store, on an engine of its own
+      (the notes' choices). Its trust admits any verified principal, the routes checking
+      ownership, so the kit's `trust` parameter becomes a protocol. Remove
+      `publisher_auth.py`'s own reservation, caching and completion. Verify by
+      application integration tests through the typed client (registry-discovery
+      scenarios):
       - a delayed retry of a publish after a later update answered with the recorded
         outcome, the update kept;
       - a delete retried after the listing was republished answered with the recorded
         outcome, the republished listing kept;
       - an unmatched path answered signed;
       - a request stating a resource on publish refused `operation_mismatch`.
+
+      Re-run `kit/authenticated-requests`' suite for the trust protocol.
 - [ ] 6.3 Keep publication evidence as records (D21, D23). Publish and update store the
       seller's request record and body from the admission as `publication`, and in
       `updates` per changed field. The listing read returns both. A row retained under
@@ -1314,8 +1495,8 @@ registry chart's values and schema, and `core/registry-client/src/registry_clien
       term", "A seller publishes a term named like the evidence", "A listing published
       before the cutover is read", "A seller changes status or oracle after
       publication"):
-      - a publication's record verifying through `kit/identity`'s request evidence
-        verifier with the listing's publisher principals;
+      - a publication's record, its `query` `?`, verifying through `kit/identity`'s
+        request evidence verifier with the listing's publisher principals;
       - a seller term named `publication` refused by name;
       - a listing migrated from a 0.4.0 database read with its version 2 evidence intact;
       - an update adding its entry under `updates`, the publication unchanged.
@@ -1329,16 +1510,74 @@ registry chart's values and schema, and `core/registry-client/src/registry_clien
       - from a database holding the 0.4.0 table with rows and version 2 evidence: the
         file compacted, the evidence carried under the new names;
       - a rerun not compacting.
-- [ ] 6.5 Move `core/registry-client` to version 3 signing and response verification,
+- [ ] 6.5 Serve the descriptor as a public read, and rebuild the bootstrap on it (D24,
+      design review 85 F2). The route carries 5e.2's public mark.
+      `bootstrap_registry_descriptor`, async and sync:
+      - drops `signer` and `caller_role` and gains `allow_insecure_http`;
+      - refuses a URL whose scheme is not `https`, before sending, unless opted in;
+      - sends 5d.4's public request;
+      - verifies the signed answer's binding and its signer against the descriptor's
+        principals;
+      - refuses a descriptor whose base URL is not the URL it bootstrapped from.
+
+      `get_registry_descriptor` sends the same public request and verifies against the
+      configured registries. Verify by application integration tests through the typed
+      client:
+      - registry-discovery "Client inspects a public registry", "Registry reads require a
+        key", "Descriptor is used as a trust bootstrap" and "A descriptor claims another
+        base URL";
+      - "A replayed descriptor is offered to a bootstrap", by a transport that returns
+        another request's signed answer;
+      - marketplace-identity's public-operation scenarios through the registry's
+        application: a key-less read, a signed request refused as malformed, a mistyped
+        descriptor path answered a signed 404, a POST answered a signed 405 with
+        `Allow: GET`.
+
+      Add unit tests: "A bootstrap is given a plain-HTTP URL" refused naming the scheme,
+      no request sent (a transport that fails if called); the async and sync signatures
+      equal.
+- [ ] 6.6 Sign the registry's query values and move the filter-spec ETag (D25, D26, D28).
+      - Remove `canonical_query_body` and the client's `_query_body`. Every read's query
+        travels as its query, built through 5d.3's encoding.
+      - `listing.list` reads the `filter_spec_etag` parameter, 412 on a stale value, and
+        refuses an `If-Match` header as malformed, naming it.
+      - `list_listings(etag=…)` sends the parameter, and the query compiler and
+        `core_buyer`'s orchestrator keep passing the ETag.
+      - The filter-spec route's documentation names the parameter.
+
+      Verify by application integration tests through the typed client:
+      - registry-discovery "Cached filter spec is stale", "A listing query sends the
+        ETag as `If-Match`" and "Filter specification changes during query
+        construction";
+      - a listing read whose query an intermediary changed, by a transport rewriting
+        the URL, refused as an invalid proof.
+- [ ] 6.7 Answer an applied rotation or retirement first (D27). Rotation answers an
+      applied intent with the same nonce and intent hash, to the principal it names,
+      before its proof-expiry, primary and overlap checks. Retirement answers an already
+      retired rotation, to its replacement, before its primary check. Verify by
+      application integration tests through the typed client (registry-discovery "A
+      rotation is retried after its intent expired", "A retirement is retried after a
+      later rotation", "Rotation is retried"). Each route's double-dispatch case sends
+      its retry after the intent's expiry and after a later write, and the completeness
+      test covers both.
+- [ ] 6.8 Move `core/registry-client` to version 3 signing and response verification,
       sending its expected-authority set as the audience, and reading `publication` and
-      `updates` in `ListingSummary`. Verify by the client's unit suite, its messages from
-      5a.7's fixture, and 6.2–6.3's application integration tests.
-- [ ] 6.6 Add the retention and sweep-interval settings to the registry's settings and
+      `updates` in `ListingSummary`. Move the VM storefront's
+      `tests/unit/test_registry_client_contract.py` to the version 3 wire. Bump
+      `core/registry-client` and `core/registry` once against `dev`. Verify by:
+      - the client's unit suite, with its messages from 5a.7's fixture;
+      - the contract test;
+      - 6.2–6.7's application integration tests.
+- [ ] 6.9 Add the retention and sweep-interval settings to the registry's settings and
       chart values schema. Verify by the registry's configuration tests and its chart
       render test.
-- [ ] 6.7 Verify the section: `make test-registry`, `make test-registry-client`.
+- [ ] 6.10 Verify the section: `make test-registry`, `make test-registry-client`, `make
+      -C kit/authenticated-requests test`, the VM storefront's unit suite (via `make
+      test-domains`) for its contract test, and `core/buyer`'s suite for the ETag's
+      caller.
       End-to-end: `registry`, `multi_registry`, `roles_layer_registry` — evidence once
-      section 16 lands.
+      section 16 lands. No end-to-end scenario runs the URL bootstrap; none is owed,
+      since no deployed role calls it (D24).
 
 Notes (section 6):
 
@@ -1519,8 +1758,13 @@ signed"; compute-provisioning-contract "Deal-scoped lifecycle events"). Touches
       outbox (a column added by 7.3's migration), so every resend carries the same
       identity and origin. The callbacks themselves are sent through
       `core/storefront-client`, which moves to version 3 in section 10; the resent
-      notification's end-to-end behaviour is proven in 11.3. Verify by the client's unit
-      suite and the outbox's unit tests.
+      notification's end-to-end behaviour is proven in 11.3. Remove the family's
+      canonical query form (`compute_provisioning_contracts/routes.py`): the
+      client builds every query through 5d.3's encoding, and `@query` covers it (D25,
+      the plan's preamble). Verify by:
+      - the client's unit suite and the outbox's unit tests;
+      - an application integration test: a job-list read whose query an intermediary
+        changed refused as an invalid proof.
 - [ ] 7.5 Add the retention and sweep-interval settings to provisioning's settings and
       chart values schema. Verify by its configuration tests and chart render test.
 - [ ] 7.6 Verify the section: `make test-compute-provisioning`,
@@ -1572,8 +1816,13 @@ raises after its domain write commits", "An issuance answer is lost"). Touches
       typed client, with a double-dispatch case per `RERUN` mutation and the completeness
       test.
 - [ ] 8.5 Move `kit/site-client`, the settlement credits client and the Python middleware
-      client to version 3 signing and response verification. Verify by their unit suites
-      and 8.3–8.4's integration tests.
+      client to version 3 signing and response verification. Remove the site kit's
+      canonical query form (`kit/site/src/market_site/auth.py`, the signed body of the
+      reservation and projection reads). The site client builds those queries through
+      5d.3's encoding, and `@query` covers them (D25, the plan's preamble). Verify by:
+      - their unit suites and 8.3–8.4's integration tests;
+      - an application integration test: a projection read whose `after` an
+        intermediary changed refused as an invalid proof.
 - [ ] 8.6 Add the kit's replay-table migration to the API-credits service's chain, and the
       retention and sweep-interval settings to its settings and chart values schema.
       Verify by its migration-chain test, configuration tests and chart render test.
@@ -1601,11 +1850,29 @@ is signed by the Agreement's seller"). Touches:
 - `kit/deal-lifecycle-client/src/market_deal_lifecycle_client/client.py`.
 
 - [ ] 9.1 Declare each lifecycle route against D6's criterion and record it in this task's
-      note: submit and peer keyed by `operation_key`, reads `RERUN`, each naming its
-      negotiation as its target. A difference stops the section as in 6.1.
+      note: submit and peer keyed by `operation_key`, reads `RERUN`. Each names its
+      negotiation as its target, but `lifecycle_list`, a collection read with no
+      target, whose filters `dispatch` folds into its resource today: they travel as
+      the query, covered by `@query` (D25, D28). A difference stops the section as in
+      6.1.
 - [ ] 9.2 Authenticate through the core's dependency form, the router taking the admission
-      core its storefront composes. The storefronts compose it in sections 10–12, over the
-      replay table 10.2 adds. Evidence is kept as records (D23):
+      core its storefront composes. So that this section passes a functional commit's
+      checks alone, it composes that core wherever `create_lifecycle_router` is built
+      today:
+      - the bare-metal and VM storefronts' `server.py`;
+      - the VM storefront's integration tests (`tests/recurring_world.py`,
+        `test_spot_notice.py`, `test_vm_delivery_path.py`, `test_payment_settlement.py`);
+      - `domains/vms/storefront/examples/payment_smoke.py`;
+      - `kit/deal-servicing`'s examples and integration tests;
+      - `docs/attachments/lifecycle-routes/end_first_use.py`.
+
+      Each core is over the storefront's database, through the `sqlite3` store, with
+      the replay table this section adds to core storefront's chain (the kit's
+      replay-table migration, moved here from 10.2). Until 11 and 12 declare every
+      storefront route, the storefronts admit only the lifecycle routes through it. The
+      core's application-level fallback and route inventory are installed over a
+      storefront once 11 and 12 extend that core to every route. Evidence is kept as
+      records (D23):
       - `lifecycle_response` from the signed outcome;
       - the buyer's end request (`buyer-end-envelope:`) from the admission, in the
         ingress's transaction;
@@ -1615,6 +1882,8 @@ is signed by the Agreement's seller"). Touches:
       `kit/deal-servicing`'s integration suite, binding a core over a test database
       migrated with 4.7's migration:
       - a replayed lifecycle request inside the skew refused by its reservation;
+      - a `lifecycle_list` read stating no resource admitted, and one whose query an
+        intermediary changed refused as an invalid proof;
       - each evidence item's record verifying through the evidence verifiers with the
         Agreement's parties;
       - a double-dispatch case per `RERUN` mutation.
@@ -1636,7 +1905,9 @@ is signed by the Agreement's seller"). Touches:
 - [ ] 9.5 Verify the section: `kit/deal-servicing`, `kit/deal-lifecycle-contracts`,
       `kit/deal-lifecycle`, `kit/deal-lifecycle-client` and `kit/deal-lifecycle-buyer`
       suites (via `make test-kits`). The buyer kit is run because its ending verifies the
-      receipt.
+      receipt. Also run the VM and bare-metal storefronts' suites (via `make
+      test-domains`) and `make test-core`, for the composition and the moved migration's
+      chain tests.
       End-to-end: `e2e_vm_payment_deal`, `e2e_vm_dispute_ruled_end` — evidence once
       section 16 lands.
 
@@ -1662,15 +1933,17 @@ core's replay table, and binds the kit route services (D3, D7, D9; storefront-pu
         authentication");
       - a captured negotiation message whose record verifies through the evidence
         verifiers.
-- [ ] 10.2 Add to core storefront's chain the kit's replay-table migration and a
-      space-freeing migration dropping `auth_replay_reservations` (D9). Verify by each
+- [ ] 10.2 Add to core storefront's chain a space-freeing migration dropping
+      `auth_replay_reservations` (D9); the kit's replay-table migration moved to 9.2,
+      which first composes a storefront's core. Verify by each
       storefront's migration-chain test from its floor fixture and from a database holding
       the 0.4.0 table with rows, the file compacted after (deployment-state "A storefront
       upgrades from marketplace 0.4.0").
 - [ ] 10.3 Move `core/storefront-client` to version 3, sending its expected-authority set
       as the audience; its captures pass records through the seam (5a.6); replace its
       "reuse `request_id`" guidance with the declared resolution, and tell a caller
-      answered `admission_unavailable` to retry the same request (D7). Verify by its unit
+      answered `admission_unavailable` to retry the same request (D7). It builds every
+      query through 5d.3's encoding, `@query` covering it (D25). Verify by its unit
       suite, its messages from 5a.7's fixture.
 - [ ] 10.4 Declare and bind the shared route services' operations (deal-control routes,
       pool overrides) against D6's criterion: trading and listing pause and resume,
@@ -1703,8 +1976,12 @@ callback refusals (D3, D5, D6, D15). Touches
       `RECORDED` set is negotiate new and continue, advance, force-accept, admin reserve
       and release, run-cycle, projection refresh, pause and resume, `refund_listing` and
       `arbitrate_listing`; credential-capable routes `RERUN` recording no body; each
-      operation names whether it has a target (the plan's preamble); record the table in
-      this task's note; a difference stops the section as in 6.1.
+      operation names whether it has a target (the plan's preamble). The negotiation
+      list names its listing alone. The stage-event read names none. Their filters,
+      folded into the resource today (`admin_identity.py`'s
+      `_negotiation_list_resource`, `StageEventRouteService.signed_resource`), travel
+      as the query (D25, D28). Record the table in this task's note; a difference stops
+      the section as in 6.1.
 - [ ] 11.2 Replace the four middlewares and every controller's `recorded_outcome`
       handling with the core; handlers needing to know a retry read `exact_retry`
       (`settle_controller`'s `refuse_after_end`); negotiation evidence
@@ -1714,8 +1991,9 @@ callback refusals (D3, D5, D6, D15). Touches
       verifying through the evidence verifiers (deal-lifecycle "A storefront keeps the
       buyer's signed opening"); a `negotiate_new` retry answered with the recorded outcome and no second
       negotiation; a credential-capable read retried after an end refused and no body
-      recorded (marketplace-identity scenarios); a double-dispatch case per `RERUN`
-      mutation and the completeness test.
+      recorded (marketplace-identity scenarios); a negotiation-list read whose buyer
+      filter an intermediary changed refused as an invalid proof (D25); a double-dispatch
+      case per `RERUN` mutation and the completeness test.
 - [ ] 11.3 Sign the service-peer callback's refusals (D15), and prove the resent
       capacity-released notification: provisioning's sender, through the version 3
       storefront client, resends a notification hours later under the same request
@@ -1737,15 +2015,19 @@ Moves the bare-metal storefront onto the core (D3, D5, D6). Touches
 
 - [ ] 12.1 Classify every bare-metal storefront route against D6's criterion and declare
       it, naming whether each operation has a target (the plan's preamble), replacing `CREDENTIAL_CAPABLE_ROUTES` and `without_access_material` with
-      `RERUN` declarations that record no body; record the table in this task's note; a
-      difference stops the section as in 6.1.
+      `RERUN` declarations that record no body. The negotiation list names its listing
+      alone and the stage-event read none, their filters (`api.py`'s
+      `_negotiation_list_resource` and stage-event resource) travelling as the query
+      (D25, D28). Record the table in this task's note; a difference stops the section
+      as in 6.1.
 - [ ] 12.2 Replace `response_auth.py` and `api.py`'s authentication with the core;
       seller-response evidence captured as a record through the signed-outcome hook, no
       headers kept (D23). Verify by application integration tests through the typed
       client: the fulfillment access route retried after an end refused with no body
       recorded; the `seller-response:` item's record verifying through the evidence
-      verifiers with the seller's principal; a double-dispatch case per `RERUN` mutation
-      and the completeness test.
+      verifiers with the seller's principal; a stage-event read whose query an
+      intermediary changed refused as an invalid proof (D25); a double-dispatch case per
+      `RERUN` mutation and the completeness test.
 - [ ] 12.3 Verify the section: the bare-metal storefront's suites (via
       `make test-domains`).
       End-to-end: `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`,
@@ -1758,13 +2040,17 @@ Moves the API-credits storefront onto the core (D3, D5, D6). Touches
 `seller_auth.py`, `buyer_auth.py`, `response_auth.py`), `controllers/` and its tests.
 
 - [ ] 13.1 Classify every API-credits storefront route against D6's criterion and declare
-      it, naming whether each operation has a target (the plan's preamble); `publish-from-quota` and the shared `RECORDED` routes are `RECORDED`; record the
-      table in this task's note; a difference stops the section as in 6.1.
+      it, naming whether each operation has a target (the plan's preamble); `publish-from-quota` and the shared `RECORDED` routes are `RECORDED`. The
+      negotiation list names its listing alone, its buyer filter
+      (`admin_auth.py`'s `negotiation_list_resource`) travelling as the query (D25,
+      D28). Record the table in this task's note; a difference stops the section as in
+      6.1.
 - [ ] 13.2 Replace the four middlewares and `negotiate_controller`'s `recorded_outcome`
       handling with the core. Verify by application integration tests through the typed
       client: a `publish-from-quota` retry answered with the recorded outcome and no
-      second listing; a double-dispatch case per `RERUN` mutation and the completeness
-      test.
+      second listing; a negotiation-list read whose buyer filter an intermediary changed
+      refused as an invalid proof (D25); a double-dispatch case per `RERUN` mutation and
+      the completeness test.
 - [ ] 13.3 Verify the section: the API-credits storefront's suites (via
       `make test-domains`).
       End-to-end: `e2e_credits_deal` — evidence once section 16 lands.
@@ -1807,8 +2093,9 @@ readable through the evidence verifiers (D2, D8, D9, D10a, D12, D21, D22, D23). 
 
 - [ ] 15.1 Move `core_buyer`'s negotiation client and every buyer plugin to version 3, the
       audience from `expected_response_principals`. Captures pass records through the seam
-      (5a.6). The run log records version 3 request identities for recovery. Verify by the
-      buyer suites, including run-log recovery.
+      (5a.6). The run log records version 3 request identities for recovery. Any query
+      is built through 5d.3's encoding (D25). Verify by the buyer suites, including
+      run-log recovery.
 - [ ] 15.2 Keep the buyer's evidence as records (D23). The buyer store captures a record,
       its body and the expected principals, and keeps no headers. Its acceptance lookup
       and case export read version 3 records and stored version 2 items alike. Verify by
@@ -1838,8 +2125,8 @@ readable through the evidence verifiers (D2, D8, D9, D10a, D12, D21, D22, D23). 
       while another operation 900 s skewed is refused (marketplace-identity "The harness
       advances past the skew", "Another operation arrives skewed"). Verify as an
       application integration test through the storefront client.
-- [ ] 15.6 Move the end-to-end harness's signing clients to version 3. Verify by
-      `make test-e2e-unit`.
+- [ ] 15.6 Move the end-to-end harness's signing clients to version 3, building any query
+      through 5d.3's encoding (D25). Verify by `make test-e2e-unit`.
 - [ ] 15.7 Remove version 2 request signing and acceptance from `kit/identity`, and the
       version 2 form of the capture seam. Keep version 2 verification inside the evidence
       verifiers (D9, D12). Confirm no package outside them imports version 2 request code.
@@ -1881,7 +2168,7 @@ its fix and test land here.
       implementation.
 - [ ] 17.2 Import placement: check the imports the change added (`git diff dev...` over
       `*.py`); a local import that should move returns the change to implementation.
-- [ ] 17.3 Documentation compliance: re-check D1–D23 against
+- [ ] 17.3 Documentation compliance: re-check D1–D29 against
       `openspec/README.md`, "Documentation placement", and confirm every permanent
       document this closeout writes describes the current state with no wording relative
       to the change.
@@ -1910,11 +2197,14 @@ its fix and test land here.
       - `openspec/specs/marketplace-identity/architecture.md`: "Canonical version 2
         proofs" rewritten as the version 3 RFC 9421 profile, with audience, stated
         operation, origin, wire names owned by `kit/identity` and version 2 as an evidence
-        format, the profile's tags, its one accepted spelling and `Market-Resource` only
-        where an operation has a target (D2, D10, D12, D13); a new section on the
-        admission core, its two forms, the fallback, the route inventory, the signed 503
+        format, the profile's tags, its one accepted spelling, `Market-Resource` only
+        where an operation has a target, and `@query` covered on every request with the
+        raw query verified (D2, D10, D12, D13, D25, D28); a new section on the
+        admission core, its two forms, the fallback (unmatched public requests answered
+        signed unverified), the route inventory and its three marks, the public
+        operation answered signed with nothing reserved, the signed 503
         `admission_unavailable`, and the records it hands to evidence capture (D3, D7,
-        D23); a new section, "Signed messages retained as evidence", on the record of a
+        D23, D24); a new section, "Signed messages retained as evidence", on the record of a
         message's signed values, its scope to authority-bound messages, and the two
         evidence verifiers reading either version (D21, D22); a new section on exact-retry
         resolution, which routes record, and secrets never recorded (D5, D6); a new
@@ -1930,6 +2220,10 @@ its fix and test land here.
       - `openspec/specs/registry-discovery/architecture.md`, "Seller publication
         evidence": `publication` and `updates` as the seller's request record beside the
         body, a version 2 row returned as stored, and the four reserved names (D21);
+        "Self-description boundary": the descriptor a public read whose signed answer,
+        bound to the client's fresh request ID, proves possession; the bootstrap's HTTPS
+        precondition and base-URL check; trust on first use kept for adding a registry
+        by URL, a directory's countersignature a separate layer (D24);
       - `openspec/specs/deal-lifecycle/architecture.md`, "Buyer surrender and cases": the
         end-delivery receipt as a request record and a response record with their bodies,
         verified through the evidence verifiers, a version 2 receipt still read (D21, D22,
@@ -1939,7 +2233,8 @@ its fix and test land here.
         command compacting after Alembic under the same rule, and the replay table a kit
         contributes to every authority's chain (D9);
       - `docs/development/ARCHITECTURE.md`: "Marketplace identity" for the version 3
-        profile and the admission core (D2, D3); "Kit areas" for
+        profile and the admission core (D2, D3); "Registry self-description" for the
+        descriptor's public read and the bootstrap's trust on first use (D24); "Kit areas" for
         `kit/authenticated-requests` in the foundation area, with
         `docs/development/diagrams/kit-areas.drawio` and its SVG export (D4);
         "Authenticated service boundaries" reduced to this repository's instance — the
@@ -1962,7 +2257,9 @@ its fix and test land here.
         response bound to its request; every refusal bound to a request signed; a
         timestamp a claim checked within a tolerance, citing `implementation.md`'s "One
         time source per process"; and a message carrying a secret never stored or logged
-        as it stands, stripped before any persistence (D2, D6, D10, D11); and the two
+        as it stands, stripped before any persistence; and a signature covering every
+        request input that changes behaviour, the query included (D2, D6, D10, D11,
+        D25); and the two
         principles the owner stated with D21 — each kind of message carries exactly the
         fields some message of that kind needs, presence fixed by the kind and never by
         one message's values; and a retained signed message is stored as its signed
@@ -1970,7 +2267,8 @@ its fix and test land here.
       - `docs/release-handbook.md`, "Compatibility to retire": no row — D9 builds no
         compatibility path, and D12's evidence reader is current behaviour;
       - the delta specifications' `spec.md` files are written by the archive and named
-        in the record (D14).
+        in the record (D14), carrying D26's filter-spec parameter and D27's rotation
+        retries; D28 and D29 have no destination beyond them and the plan.
       Run `make check-spec-index CHANGE=redesign-authenticated-requests`.
 - [ ] 17.10 Guidance placement: read the new `messaging.md`, the `implementation.md`
       section and the moved `ARCHITECTURE.md` text against the layer test — the
