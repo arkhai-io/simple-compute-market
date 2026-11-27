@@ -1,77 +1,63 @@
 ## Why
 
-A package that several domains of a family share goes under the family, whose
-directory `docs/development/ARCHITECTURE.toml` names
-(`docs/guidance/repository/package-layers.md`, "Scope"). The compute family
-follows this at `domains/compute`. The `api` family does not: its vocabulary
-and its twelve other distributions sit at `kit/api`, and to admit them
-`scripts/architecture.py`'s `read_path` reads a family directory under `kit/`
-as a family, so `kit/` holds specializations. `align-package-paths-with-layers`
-designs the opposite, and `ARCHITECTURE.md`'s path table and role words say the
-opposite.
+The `api` family's vocabulary and its distributions sit at `kit/api`. To admit
+them there, `scripts/architecture.py`'s `read_path` reads a family directory
+under `kit/` as a family, and
+`docs/guidance/repository/package-layers.md` says a family kit belongs under
+`kit/`. The compute family lives at `domains/compute`,
+`align-package-paths-with-layers` designs family kits under their family, and
+`kit/` otherwise means a package that knows no market. Two families follow two
+rules.
 
-A review of the branch carrying the family kit found that departure and seven
-smaller ones against rules the repository already states. None needs a new
-design decision about the market; each is a known rule the code does not yet
-meet:
+A review of the branch carrying the family kit found that departure and
+several smaller ones against rules the repository already states. Checked
+against the code, these stand:
 
-- The family's buying libraries hold mechanism code that knows no family.
-  `arkhai_api_buying_alkahest`'s `escrow_selection.py`, `escrow_client.py`, and
-  `chains.py` repeat the VM buyer's modules of the same names, and
-  `arkhai_api_buying_arkhai_payments`'s `payments.py` is payments client code.
-- `arkhai-api-selling` depends upward on `arkhai-core-storefront`. The exception
-  row names `kit-owned-storefront-auth-and-persistence` as its owner, which
-  covers authentication and persistence; the library also imports the stage
-  log, system models, domain registry, negotiation service, aggregation, and
-  the listing, negotiation, and settle models, which no change owns moving, so
-  the row cannot be retired.
-- The API-credits and inference storefronts each hold
-  `settlement_composition.py` and `services/fulfillment_service.py`, which
-  differ in about twenty lines of roughly a hundred and are composition code,
-  not controllers.
-- Issuance pins for the inference label sit in `domains/apicredits/tests`.
+- The selling library imports the stage-event emitter from the storefront role
+  in three modules and takes it as a parameter in two others.
+- The API-credits and inference storefronts each assemble the same settlement
+  composition, so the order of assembly and the rule that issuance evidence is
+  trusted only from the storefront's own signer are written twice.
+- The inference-label issuance pin is replayed by an API-credits test, though
+  the code under test is the family vocabulary's.
 - `domains/inference/buyer/tests/test_scope_refusal.py` replaces eleven names
-  in kit libraries, and `kit/api/buying/tests/unit/test_credentials.py` patches
-  `os` globally; `TESTING.md` admits replacing only factories on the module
-  under test.
-- The authority's `consume` debits whatever amount the caller sends and never
-  compares it with the `request_charge` pinned on the key's terms.
+  inside kit libraries, and `kit/api/buying/tests/unit/test_credentials.py`
+  patches the standard library and a collaborator's class, against
+  `docs/guidance/engineering/testing-python.md` and
+  `docs/guidance/engineering/testing.md`.
+- The authority's `consume` debits whatever amount it is sent and never
+  compares it with the request charge pinned on the key's first grant.
 - The roadmap's inference goal fixes the campaign's order of delivery, which
-  the roadmap does not hold: sequencing is the change index's.
+  the roadmap does not hold.
 
 `compose-api-family-kit`, which built the kit, is archived, and an archived
 change is not returned to design, planning, or implementation. This change
-owns the corrections instead.
+owns the corrections.
 
 ## What Changes
 
-- Move the family from `kit/api` to `domains/api`: the vocabulary package at
-  `domains/api` and each distribution as its sibling directory beneath it, with
-  the family's `directory` in `ARCHITECTURE.toml` naming `domains/api`.
-  Distribution and import names do not change. The gateway and the gate ports
-  move with the rest; removing the gateway stays `meter-inference-usage`'s.
-- Restore the placement rule: `read_path` reads a family only under `domains/`,
-  and `ARCHITECTURE.md` and `package-layers.md` say so again.
-- Follow the move everywhere a path is written: project sources and locks, the
-  Makefiles, the release components manifest, the workflows, the Compose stacks
-  and images, the published-packages table, and the permanent documents that
-  cite `kit/api`.
-- Move mechanism code that knows no family out of the family's buying
-  libraries into its mechanism kit, leaving only the family's stage glue, and
-  compose the VM buyer's copies from the same place where that is the same
-  code.
-- Point `arkhai-api-selling` at `kit/storefront` wherever it already serves
-  what the library imports from `core_storefront`, and record every remaining
-  import under an owner that moves it, so the exception row has an owner that
-  can retire it.
-- Move the shared body of `settlement_composition.py` and
-  `services/fulfillment_service.py` into `arkhai-api-selling`; each storefront
-  keeps only what differs.
-- Move the inference-label issuance pins into the family's tests.
-- Rewrite the two test modules to replace only what `TESTING.md` admits.
-- Make the authority's `consume` refuse an amount that differs from the pinned
-  `request_charge`.
-- Remove the delivery order from the roadmap's inference goal.
+- Move the family from `kit/api` to `domains/api`: the vocabulary project at
+  `domains/api` and each distribution directly beneath it. Distribution and
+  import names do not change.
+- Restore the placement rule: `read_path` reads a family only under
+  `domains/`, and `package-layers.md` and `ARCHITECTURE.md` say a family kit
+  lives under its family's directory.
+- Follow the move wherever the path is written: the Makefile recipes and
+  aggregates, the continuous-integration job, the release components manifest
+  and the published-packages table, tests that reach the family by path, and
+  the documents that cite `kit/api`.
+- The selling library's listing service, storefront loops, and negotiation
+  runtime builder take the stage-event emitter by injection, and each
+  storefront passes it.
+- One settlement composition builder in the selling library replaces the body
+  the two storefronts repeat; each storefront passes its own resources.
+- The family's pin test replays the inference-label case.
+- The two test modules take their doubles through seams: the Alkahest buyer
+  stage gains optional collaborators for the seller calls, and the file
+  credential store optional `replace` and `fsync` parameters.
+- The authority refuses a pinned key's consumption at an amount other than its
+  pinned charge, as `charge_mismatch`.
+- The roadmap's inference goal no longer fixes a delivery order.
 
 ## Capabilities
 
@@ -82,102 +68,104 @@ None.
 ### Modified Capabilities
 
 - `api-family`: the family's packages live under `domains/api`; the authority
-  refuses a consumption whose amount is not the key's pinned charge; the
-  family's selling library owns settlement and fulfillment composition.
-- `market-composition`: a family kit lives under its family's directory, never
-  under `kit/`.
+  refuses a pinned key's consumption at another amount.
+- `market-composition`: the family's vocabulary and kit are under
+  `domains/api`.
+- `api-credits`: the family distributions it composes are under `domains/api`.
 
 ## Non-Goals
 
-- No change to a wire shape, a route, a digest, a distribution name, or an
-  import name. The pinned API-credits digests hold byte-for-byte.
-- No change to buyer or seller behaviour beyond the authority's refusal of a
-  mismatched amount.
+- No change to a route, a digest, a persisted record, a distribution name, or
+  an import name. The pinned API-credits digests hold byte for byte.
+- No change to API-credits behaviour: its keys are unpinned and are charged
+  the amount sent, as before.
+- No move of the Alkahest buyer modules in the family's buying library; that
+  is `move-escrow-into-alkahest`'s.
+- No move of the Arkhai-payments buyer library or of the buyer role's
+  orchestration; the latter is `kit-owned-buyer-orchestration`'s.
+- No move of the storefront's authentication, persistence, or wire models;
+  that stays `kit-owned-storefront-auth-and-persistence`'s.
 - No removal of the gateway, and no change to what a failed upstream request
   costs; both are `meter-inference-usage`'s.
-- No move of the buyer role's orchestration; that is
-  `kit-owned-buyer-orchestration`'s, which keeps the three buying exception
-  rows.
-- No move of the storefront's authentication and persistence; that stays
-  `kit-owned-storefront-auth-and-persistence`'s.
-- No copied controller is merged: a domain's controllers stay copied until
-  controller and client derive from the contract and model packages.
-
-## Questions for design
-
-- Which package takes the Arkhai-payments buyer code: `kit/arkhai-payments`, or
-  a buyer-side distribution beside it, given that a buyer installs no selling
-  code.
-- Whether the Alkahest buyer modules move here or wait for
-  `move-escrow-into-alkahest`, which owns the escrow exception rows and edits
-  the same VM buyer modules.
-- Which change owns each `core_storefront` import `kit/storefront` does not yet
-  serve: a widened `kit-owned-storefront-auth-and-persistence`, or
-  `kit-owned-storefront-shell`.
-- Whether the mismatched-amount refusal is a new refusal code on the
-  authority's contract, and what `consume_batch` does with one bad item.
-- Whether the move is one section or several, since every later section edits
-  paths it changes.
+- No rewrite of the other tests that replace library names; they stay with the
+  roadmap's unowned gap on command-module test seams.
 
 ## Impact
 
-- Code: every file under `kit/api`, which moves; `scripts/architecture.py`;
-  `docs/development/ARCHITECTURE.toml`; each project that names a family
-  distribution by path, and its lock; `manifests/release-components.json`; the
-  workflows; the API-credits and inference storefronts and buyers; `kit/alkahest`
-  and `kit/arkhai-payments`; the VM buyer where it composes moved mechanism
-  code.
-- Tests: the family's suites move with their packages; the two rewritten test
-  modules; the issuance pins.
-- Evidence: the family has never been exercised end to end by the API-credit
-  lane on the branch its kit was built on. This change's validation runs the
-  pipeline's four lanes on the moved tree.
+- Code: every file under `kit/api`, which moves; `scripts/architecture.py`
+  and its test; `docs/development/ARCHITECTURE.toml`; `kit/Makefile` and
+  `domains/Makefile`; the tests workflow; `manifests/release-components.json`;
+  the selling library, the Alkahest buying library, the buying library's
+  credential store, and the authority's key service; the API-credits and
+  inference storefronts.
+- Tests: the family's suites move with their packages; tests in the
+  API-credits and inference domains that reach the family by path; the pin
+  tests; the two test modules.
+- Evidence: each implementation round is validated on the pipeline's four
+  lanes and the Helm lane.
 
 ## Permanent documentation impact
 
-- [x] `docs/development/ARCHITECTURE.md` — the family kits section, the path
-  table, and the domain-anatomy diagram.
+- [x] `docs/development/ARCHITECTURE.md` — the family kits section, the
+  vocabulary paragraph, and the domain-anatomy diagram.
 - [x] Existing subsystem specification — `openspec/specs/api-family/spec.md`
   and its companion; `openspec/specs/market-composition/spec.md`;
-  `openspec/specs/inference/architecture.md` where it cites the kit's paths.
+  `openspec/specs/api-credits/spec.md`;
+  `openspec/specs/inference/architecture.md`; the paths the evidence sections
+  of `deployment-state`, `resource-pool-management`, and
+  `storefront-publication` cite.
 - [ ] New subsystem specification
 - [x] `docs/guidance/repository/package-layers.md`,
   `docs/guidance/repository/published-packages.md`,
   `docs/guidance/repository/contract-conformance.md`, and
-  `docs/guidance/repository/migrations-at-startup.md` — the paths they cite.
-- [x] `docs/development/ROADMAP.md` — the inference goal.
+  `docs/guidance/repository/migrations-at-startup.md`.
+- [x] `docs/development/ROADMAP.md` — the inference goal, and the path the
+  kit goal names.
 
 ### Knowledge to promote
 
-- A family kit lives under its family's directory; `kit/` holds no
-  specialization — `docs/development/ARCHITECTURE.md`,
-  `docs/guidance/repository/package-layers.md`,
+- D1: a family kit lives under its family's directory and `kit/` holds no
+  specialization — `docs/guidance/repository/package-layers.md`,
+  `docs/development/ARCHITECTURE.md`, `openspec/specs/api-family/spec.md`,
   `openspec/specs/market-composition/spec.md`.
-- The authority refuses a consumption whose amount is not the pinned charge —
-  `openspec/specs/api-family/spec.md`.
-- The family's selling library owns settlement and fulfillment composition —
-  `openspec/specs/api-family/spec.md` and its companion.
+- D2: no permanent destination — the modules do not move;
+  `move-escrow-into-alkahest` records its own outcome.
+- D3: no permanent destination — nothing changes.
+- D4: the authority refuses a pinned key's consumption at another amount —
+  `openspec/specs/api-family/spec.md` and its companion's section on the
+  gate.
+- D5: the selling library takes the stage-event emitter by injection —
+  `openspec/specs/api-family/architecture.md`, "Current limits", and the
+  exception row's reason in `docs/development/ARCHITECTURE.toml`.
+- D6: no permanent destination — an ordering between changes.
+- D7: the selling library assembles the settlement composition from the
+  resources a storefront passes, and inference composes no dispute policy —
+  `openspec/specs/api-family/architecture.md` and
+  `openspec/specs/inference/architecture.md`.
+- D8: no permanent destination — the tests conform to rules already written.
+- D9: no permanent destination — a test moves.
+- D10: the inference goal fixes no order — `docs/development/ROADMAP.md`.
+- D11: no permanent destination — no compatibility is owed.
+- D12: no permanent destination — the notes live in the change index and in
+  the changes that receive them.
+- D13: no permanent destination — the change's own shape.
 
 ## Dependencies and Related Changes
 
 - Depends on `compose-api-family-kit`, which built the kit and whose archive
   cleanup has not run.
-- Takes from `compose-api-family-kit` the corrections its closeout left: the
-  family's directory, the mechanism code in its buying libraries, and the
-  selling exception's owner.
+- Hands to `move-escrow-into-alkahest` the Alkahest buyer modules in the
+  family's buying library, with the question of a buyer-side Alkahest kit.
+- Notes for `kit-owned-storefront-auth-and-persistence` an import its
+  carve-out places, and for `sign-multi-language-credits-middleware` what the
+  ported gates do not yet do.
 - Coordinates with `align-package-paths-with-layers`, whose design the
   placement rule returns to.
-- Coordinates with `kit-owned-storefront-auth-and-persistence`, whose scope
-  widens or whose exception row gains a second owner, as design settles.
-- Coordinates with `kit-owned-buyer-orchestration` and
-  `move-escrow-into-alkahest`, which own exception rows on packages this
-  change moves and edit the buyer modules it touches.
-- Coordinates with `keep-buyer-credentials-private` and
-  `derive-buyer-settlement-inputs`, which edit `kit/api/buying` files this
-  change moves.
+- Precedes the closeout of `keep-buyer-credentials-private` and
+  `derive-buyer-settlement-inputs`, whose documents cite the family's path.
 - Precedes `meter-inference-usage`, which removes the gateway from where this
   change leaves it.
 
 ## Status
 
-Ready for design.
+In design; the design is settled and awaits its review.
