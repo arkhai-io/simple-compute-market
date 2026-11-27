@@ -2199,6 +2199,62 @@ signed"; compute-provisioning-contract "Deal-scoped lifecycle events"). Touches
       End-to-end: `provisioning`, `provisioning_readonly`, `provisioning_security`,
       `e2e_compute_dynamic_listings` — evidence once section 16 lands.
 
+Notes (section 7):
+
+- **Stopped before 7.1 (2026-11-27); the change returns to planning.** Section 7
+  cannot be committed apart from section 8: one typed client, `kit/site-client`,
+  signs the requests of both sections' authorities, and the admission core accepts
+  version 3 alone. The evidence:
+  - The provisioning service hosts the site's capacity and capacity-definition
+    routes (`compute_provisioning_service/route_table.py`, `site_route_contracts`
+    over `market_site.auth`'s `CAPACITY_ROUTE_CONTRACTS` and
+    `CAPACITY_DEFINITION_ROUTE_CONTRACTS`). 7.2 puts every route of the service
+    behind the core, the hosted site's included, so they answer only version 3.
+  - Provisioning's own suite reaches those routes through `kit/site-client`'s typed
+    clients: the integration conftest's `provisioning_clients` builds
+    `SiteCapacityClient` and `SiteCapacityAdminClient`, and 11 integration modules
+    call them (68 calls; `test_capacity_api.py`, `test_capacity_definitions_api.py`,
+    `test_deliverable_hosts_api.py`, `test_relay_drain_api.py`,
+    `test_leases_api.py`, `test_fulfillment_api.py`, among others).
+    `kit/site-client` signs version 2 until 8.5, so 7.6's `make
+    test-compute-provisioning` cannot pass after 7.2 with the typed clients.
+  - Moving `kit/site-client` in section 7 breaks the other authority it calls: the
+    API-credits service behind `kit/site`'s `SiteAuthMiddleware`, version 2 until
+    8.2 (`kit/site`'s integration suite, the API-credits service's suite). A typed
+    client never sends version 2 (D9), so no order of 7 and 8 lets either commit
+    pass `pre-commit-functional`, which runs every suite.
+  - Reaching the hosted site in section 7 through a test-side version 3 signer in
+    place of the typed client would be a workaround the plan does not give, and
+    7.2 asks for the typed client.
+- Also for planning, found while checking (none started):
+  - Neither section names the suites outside its packages that double the
+    provisioning or site wire against the installed clients, the omission 6.5 had
+    for the VM storefront's registry contract test. 7.4 removes
+    `canonical_provisioning_request_body`, which
+    `domains/vms/storefront/tests/integration/test_site_trust.py`,
+    `domains/bare_metal/storefront/tests/signed_sites.py` (used by its
+    `test_site_clients.py`, `test_site_trust.py` and `test_app_composition.py`),
+    `domains/apicredits/service/tests/integration/test_signed_authority.py` and
+    `e2e-tests/src/e2e_harness/provisioning_test_client.py` import; each signs or
+    verifies the version 2 wire too, as do `domains/vms/storefront/tests/fake_site.py`
+    and `domains/bare_metal/storefront/tests/integration/test_site_reservation.py`
+    for the site. Section 15 owns the e2e harness, but `make test-e2e-unit` is in
+    `make test`.
+  - 7.1 classifies the hosted site's routes, but their declarations live in
+    `kit/site`'s `SiteRouteContract`, whose `exact_retry_safe` 8.1 replaces; the
+    plan should say which section adds the field the provisioning service reads.
+- Recommendation: one section moving together the
+  provisioning service and its hosted site, `kit/site`'s middleware and the
+  API-credits service, and their clients (`compute_provisioning_client`,
+  `kit/site-client`, the settlement credits client, the Python middleware client),
+  naming the suites above. That unit is large beside sections 6–7 as planned
+  (the provisioning service alone has 47 integration modules); the cadence's
+  session for it is planning's to size, since the workflow commits a section
+  whole and the owner's direction for this round was one fresh session per
+  section.
+- Nothing of section 7 was implemented, and no task is checked. This commit holds
+  only these notes. Sections 8 and 9 were not given to this session.
+
 ## 8. The site kit and the API-credits service on the admission core
 
 Moves `kit/site`'s middleware and the API-credits service onto the core, with the
