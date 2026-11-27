@@ -17,11 +17,14 @@ pending deletion and whose content is gone. The predicate for that lives in
 check that disagreed with the prune utility about what a tombstone is would
 pass on files the prune then deletes.
 
-A specification also names no change (docs/guidance/engineering/documentation.md,
-"Permanent documents name no change"): a path under `openspec/changes/`, or the name
-of an open or archived change in backticks, is refused in any file under
-`openspec/specs/` but the capabilities that govern the change process itself and the
-specifications' own README (`CHANGE_SUBJECT`).
+A specification, the architecture description and a handbook also name no change
+(docs/guidance/engineering/documentation.md, "A specification, the architecture
+description and a handbook name no change"): a path into a change or the change index
+under `openspec/changes/`, or the name of an open or archived change in backticks, is
+refused in any file under `openspec/specs/` but the capabilities that govern the change
+process itself and the specifications' own README (`CHANGE_SUBJECT`), and in
+`docs/development/ARCHITECTURE.md` and each handbook (`docs/*-handbook.md`). The
+changes' directory as a whole may still be named.
 
 Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
@@ -77,7 +80,7 @@ CITATION = re.compile(
 CHANGE_SUBJECT = frozenset({"market-change-workflow", "planning-governance"})
 
 #: A path under the changes' directory.
-CHANGE_PATH = re.compile(r"(?<![\w./-])openspec/changes/")
+CHANGE_PATH = re.compile(r"(?<![\w./-])openspec/changes/[\w.-]")
 
 #: A backticked run that may name a change.
 BACKTICKED = re.compile(r"`([a-z0-9][a-z0-9-]*)`")
@@ -93,17 +96,28 @@ def _change_names(root: Path) -> frozenset[str]:
     return frozenset(names)
 
 
-def specification_change_references(root: Path) -> list[tuple[str, str]]:
-    """Every reference to a change from a specification, as (reference, document)."""
-    names = _change_names(root)
+def _change_free_documents(root: Path) -> list[Path]:
+    """The documents that name no change: the specifications but those of the change
+    process, the architecture description, and the handbooks."""
     specs = root / "openspec" / "specs"
-    found: list[tuple[str, str]] = []
+    found = []
     for document in sorted(specs.glob("**/*.md")):
         relative = document.relative_to(specs)
-        if relative.parts[0] in CHANGE_SUBJECT or relative.as_posix() == "README.md":
-            continue
+        if relative.parts[0] not in CHANGE_SUBJECT and relative.as_posix() != "README.md":
+            found.append(document)
+    found.extend(path for path in (root / "docs" / "development" / "ARCHITECTURE.md",) if path.is_file())
+    found.extend(sorted((root / "docs").glob("*-handbook.md")))
+    return found
+
+
+def change_references(root: Path) -> list[tuple[str, str]]:
+    """Every reference to a change from a document that names none, as (reference,
+    document)."""
+    names = _change_names(root)
+    found: list[tuple[str, str]] = []
+    for document in _change_free_documents(root):
         text = document.read_text(encoding="utf-8", errors="ignore")
-        cited = {"openspec/changes/..." for _ in CHANGE_PATH.finditer(text)}
+        cited = {"a path under openspec/changes/" for _ in CHANGE_PATH.finditer(text)}
         cited |= {name for name in BACKTICKED.findall(text) if name in names}
         found.extend((reference, document.relative_to(root).as_posix()) for reference in sorted(cited))
     return found
@@ -196,7 +210,7 @@ def main() -> int:
     change = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
     scanned = documents(root, change)
     problems = unresolvable(root, change)
-    references = [] if change else specification_change_references(root)
+    references = [] if change else change_references(root)
     scope = (
         "change %s" % change
         if change
@@ -209,14 +223,14 @@ def main() -> int:
     for reference, document in references:
         print(
             "CHANGE:    %s\n  named by %s\n"
-            "  a specification names no change; state the fact without the pointer"
+            "  a specification, the architecture and a handbook name no change; state the fact without the pointer"
             % (reference, document)
         )
     if not problems:
         if references:
-            print("\n%d reference(s) to a change from a specification." % len(references))
+            print("\n%d reference(s) to a change." % len(references))
             return 1
-        print("OK: every cited path resolves and none is a tombstone, and no specification names a change.")
+        print("OK: every cited path resolves and none is a tombstone, and no specification, architecture or handbook names a change.")
         return 0
     for kind, cited, document in problems:
         if kind == "absent":

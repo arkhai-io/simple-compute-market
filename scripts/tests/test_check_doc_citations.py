@@ -167,12 +167,12 @@ def test_a_specification_naming_a_change_is_reported(tmp_path: Path) -> None:
     spec = tmp_path / "openspec/specs/kit/spec.md"
     spec.write_text("Gap in `open-one`, once `old-one`, see openspec/changes/README.md.\n", "utf-8")
 
-    found = checker.specification_change_references(tmp_path)
+    found = checker.change_references(tmp_path)
 
     assert sorted(found) == [
+        ("a path under openspec/changes/", "openspec/specs/kit/spec.md"),
         ("old-one", "openspec/specs/kit/spec.md"),
         ("open-one", "openspec/specs/kit/spec.md"),
-        ("openspec/changes/...", "openspec/specs/kit/spec.md"),
     ]
 
 
@@ -182,4 +182,16 @@ def test_a_capability_governing_changes_may_name_their_directory(tmp_path: Path)
         "The index is openspec/changes/README.md.\n", "utf-8")
     (tmp_path / "openspec/specs/kit/spec.md").write_text("A `plain-word` and an anchor.\n", "utf-8")
 
-    assert checker.specification_change_references(tmp_path) == []
+    assert checker.change_references(tmp_path) == []
+
+
+def test_the_architecture_and_a_handbook_name_no_change_but_may_name_the_directory(tmp_path: Path) -> None:
+    _specs(tmp_path)
+    docs = tmp_path / "docs"
+    (docs / "development").mkdir(parents=True)
+    (docs / "development/ARCHITECTURE.md").write_text(
+        "Transitions live in [`openspec/changes/`](../../openspec/changes/).\n", "utf-8")
+    (docs / "operator-handbook.md").write_text("Once `old-one` did this.\n", "utf-8")
+    (docs / "roadmap-like.md").write_text("`open-one` owns it.\n", "utf-8")
+
+    assert checker.change_references(tmp_path) == [("old-one", "docs/operator-handbook.md")]
