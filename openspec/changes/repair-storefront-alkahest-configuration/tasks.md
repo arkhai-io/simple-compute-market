@@ -2540,7 +2540,7 @@ failures.
       Two things this owes: a validation path (an e2e scenario per
       implementation, or a shared harness that drives each against the real
       service), and then signing itself. `README.md` under
-      `kit/api/gate-ports/` should say plainly that the TS and Rust
+      `domains/api/gate-ports/` should say plainly that the TS and Rust
       clients require a shared-secret service until then, so a third-party
       user discovers it from documentation rather than from a 401.
 

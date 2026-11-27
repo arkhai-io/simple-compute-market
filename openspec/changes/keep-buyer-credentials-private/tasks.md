@@ -9,9 +9,9 @@ implementing machine.
 
 ## 1. The private store, the scrubbed run log, and retrieval
 
-Touches `kit/api/buying/src/arkhai_api_buying/` (`credentials.py` new;
+Touches `domains/api/buying/src/arkhai_api_buying/` (`credentials.py` new;
 `stages.py`, `buy.py`, `common.py`, `commands.py`, `settle.py`,
-`settlement_composition.py`), `kit/api/buying-alkahest/src/arkhai_api_buying_alkahest/stage.py`,
+`settlement_composition.py`), `domains/api/buying-alkahest/src/arkhai_api_buying_alkahest/stage.py`,
 their tests, `domains/apicredits/buyer/tests/`, `e2e-tests/tests/e2e/roles/buyer_cli.py`,
 both API-credit scenarios, and `docs/cookbooks/vllm-apicredits-seller.md`.
 
@@ -26,7 +26,7 @@ both API-credit scenarios, and `docs/cookbooks/vllm-apicredits-seller.md`.
       `DeliveryRunLog`; the store directory is `buy-credentials` beside
       `buy-runs` (D1). Reads also refuse a symlinked directory and turn an
       unreadable record into a path-only `CredentialStoreError`.
-      `kit/api/buying/tests/unit/test_credentials.py`: modes, a
+      `domains/api/buying/tests/unit/test_credentials.py`: modes, a
       second save, a loose directory tightened, symlinked directory (write
       and read) and file refused, unsafe run IDs, missing record and foreign
       scheme, a failed `os.replace` keeping the old record and no temporary,

@@ -138,22 +138,40 @@ export, `docs/development/ROADMAP.md` (the kit goal's path),
 and `migrations-at-startup.md`, the specifications' evidence sections and
 companions that cite the path, and the active changes' documents that cite it.
 
-- [ ] 2.1 `docs/guidance/repository/package-layers.md`, "Scope": a package
+- [x] 2.1 `docs/guidance/repository/package-layers.md`, "Scope": a package
       several domains of a family share goes under the family's directory, and
       `kit/` holds no specialization; the sentences placing the api family
       under `kit/` go (D1). Verify: the paragraph names `domains/api` and
       `domains/compute` under one rule.
-- [ ] 2.2 `docs/development/ARCHITECTURE.md`, "Package and dependency layers"
+      *Note:* the paragraph places a package several domains of a family
+      share under the family's directory, naming `domains/api` and
+      `domains/compute`, and says `kit/` holds no specialization; the
+      sentences placing a family kit under `kit/` are gone.
+- [x] 2.2 `docs/development/ARCHITECTURE.md`, "Package and dependency layers"
       and "Family kits": the vocabulary paragraph and the distribution table
       name `domains/api`, and the count of distributions matches the tree; the
       domain-anatomy diagram's source and its export carry the new labels (D1).
       Verify: `git grep -n "kit/api" -- docs` finds nothing.
-- [ ] 2.3 `docs/guidance/repository/published-packages.md`, "Published
+      *Note:* twelve citations in `ARCHITECTURE.md`; the table's eleven
+      distributions match the tree. The diagram's label is replaced in
+      place in its source and in both places its export carries it, as the
+      move under `kit/` replaced it; the box held a longer label before.
+      Outside the plan: the box's subtitle named a Python port the
+      directory never held, corrected to Rust and TypeScript. The box still
+      sits inside the API-credits group, and the family is not drawn;
+      redrawing it is recorded as unowned work under the kit goal.
+      `git grep -n "kit/api" -- docs` finds nothing.
+- [x] 2.3 `docs/guidance/repository/published-packages.md`, "Published
       packages" and the npm path it names; `contract-conformance.md`;
       `migrations-at-startup.md`; `docs/development/ROADMAP.md`'s kit goal
       (D1). Verify: `make test-release-tooling
       TESTS=scripts/tests/test_publish_matrix.py` passes.
-- [ ] 2.4 The evidence sections of `openspec/specs/deployment-state/spec.md`,
+      *Note:* the published-packages rows already sat in the table's
+      domains group. Outside the plan: the roadmap's kit goal counted ten
+      kit distributions where the tree holds eleven, the gateway among
+      them; corrected beside the path. `test_publish_matrix.py`: 234
+      passed.
+- [x] 2.4 The evidence sections of `openspec/specs/deployment-state/spec.md`,
       `resource-pool-management/spec.md`, and `storefront-publication/spec.md`,
       and the companions `openspec/specs/api-family/architecture.md` and
       `openspec/specs/inference/architecture.md`: each cited path (D1). The
@@ -161,17 +179,35 @@ companions that cite the path, and the active changes' documents that cite it.
       is the archive's to write from this change's deltas. Verify: `git grep -n
       "kit/api" -- openspec/specs` finds only the three requirements the deltas
       modify.
-- [ ] 2.5 The `kit/api` citations in the documents of
+      *Note:* nineteen citations rewritten; the inference companion cites
+      no family path. The seven left are in "API credits composes the api
+      family kit", "The api family shares one vocabulary and one kit", and
+      "The api family shares one access vocabulary and kit", each a
+      requirement the deltas modify.
+- [x] 2.5 The `kit/api` citations in the documents of
       `keep-buyer-credentials-private`, `derive-buyer-settlement-inputs`,
       `kit-owned-storefront-auth-and-persistence`,
       `repair-storefront-alkahest-configuration`, and
       `sign-multi-language-credits-middleware`, and in the change index (D6).
       Verify: `git grep -n "kit/api" -- openspec/changes ':!openspec/changes/archive'`
       finds only this change's own account of the move.
-- [ ] 2.6 Verification. `make check-doc-citations` reports no failure it did
+      *Note:* fourteen citations across the five changes' documents. The
+      index's only one is `compose-api-family-kit`'s account of what it
+      built, so it reads "now at `domains/api`" rather than rewriting that
+      history. The search finds this change's own documents alone.
+- [x] 2.6 Verification. `make check-doc-citations` reports no failure it did
       not report before the section; `make check-guidance`;
       `change-workflow run pre-commit move-api-family-kit-into-domains`.
       End-to-end: none exercises a document.
+      *Note:* `make check-doc-citations` reports the two failures it
+      reported before the section, each a citation of the workflow's
+      closeout guidance by a repository path it no longer has, in the task
+      lists of `keep-buyer-credentials-private` and
+      `derive-buyer-settlement-inputs`, and nothing new. `make
+      check-guidance` passes. `change-workflow run pre-commit
+      move-api-family-kit-into-domains --base origin/dev` passes: the
+      section changes documents only, so only its closing checks ran.
+      Nothing is owed by validation.
 
 ## 3. The authority refuses a pinned key's consumption at another amount
 

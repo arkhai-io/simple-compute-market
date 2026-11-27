@@ -52,7 +52,7 @@ None.
 
 ## Impact
 
-- Code: `kit/api/buying-alkahest` (the stage's options, buy session, and
+- Code: `domains/api/buying-alkahest` (the stage's options, buy session, and
   resume), the wallet provider's home, and the API-credits buyer plugin's
   tests.
 - Docs and scenarios: the vLLM seller cookbook and

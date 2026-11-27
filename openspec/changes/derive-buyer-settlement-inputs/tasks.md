@@ -10,9 +10,9 @@ changes, and `keep-buyer-credentials-private`, on whose branch it is stacked.
 
 ## 1. Derived Alkahest inputs and no override flags
 
-Touches `kit/api/buying-alkahest/src/arkhai_api_buying_alkahest/` (`stage.py`,
-`chains.py`), `kit/api/buying/src/arkhai_api_buying/` (`buy.py`, `stages.py`),
-`kit/api/buying-arkhai-payments/src/arkhai_api_buying_arkhai_payments/stage.py`,
+Touches `domains/api/buying-alkahest/src/arkhai_api_buying_alkahest/` (`stage.py`,
+`chains.py`), `domains/api/buying/src/arkhai_api_buying/` (`buy.py`, `stages.py`),
+`domains/api/buying-arkhai-payments/src/arkhai_api_buying_arkhai_payments/stage.py`,
 their tests, `domains/apicredits/buyer/tests/`,
 `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_deal_buyer_cli.py`,
 and `docs/cookbooks/vllm-apicredits-seller.md`.

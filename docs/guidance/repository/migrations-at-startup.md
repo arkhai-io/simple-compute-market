@@ -47,9 +47,9 @@ states its own `uvicorn` command, since the image's command migrates first for
 Compose.
 
 The API-credit and inference services run one chain, the family authority
-library's (`kit/api/authority`), each on its own database and under its own
+library's (`domains/api/authority`), each on its own database and under its own
 command name. The API-credit and inference storefronts likewise run one chain,
-the family selling library's (`kit/api/selling`), which names the family's
+the family selling library's (`domains/api/selling`), which names the family's
 tables from each storefront's table prefix.
 
 ## The command's configuration

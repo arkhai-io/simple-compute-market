@@ -5,8 +5,8 @@ marketplace identity v2 envelope and signs every response. That was enabled on
 2026-09-14 by `repair-storefront-alkahest-configuration` task `3ax.8`, which
 also taught the Python middleware to sign as the `service` role.
 
-The TypeScript (`kit/api/gate-ports/typescript`) and Rust
-(`kit/api/gate-ports/rust`) middlewares still send only the legacy
+The TypeScript (`domains/api/gate-ports/typescript`) and Rust
+(`domains/api/gate-ports/rust`) middlewares still send only the legacy
 `X-Admin-Key` shared secret. A service with signed authentication enabled
 accepts signed requests **or** the shared secret and never both — `main.py`
 composes `SiteAuthMiddleware` or `AdminKeyAuthMiddleware`, not both — so both

@@ -182,8 +182,8 @@ place a cycle runs and records each cycle's outcome, which every storefront's
 system status reports; a loop registers as a timer loop or as a fan-out, such as
 the per-site capacity-event poller aggregate the capacity kit owns.
 
-The API-access machinery is the `api` family's: a vocabulary at `kit/api`
-and ten kit distributions beneath it, split only where a rule forces it, into
+The API-access machinery is the `api` family's: a vocabulary at `domains/api`
+and eleven kit distributions beneath it, split only where a rule forces it, into
 which API credits contributes one typed bundle per side and its service root
 passes a capacity profile. Its storefront composes the family's selling
 library, its service root the family's authority, its buyer plugin the buying

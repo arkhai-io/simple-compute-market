@@ -26,7 +26,7 @@ metal 1,723, API credits 252). Part of each is domain tables; part reimplements
 access to core-owned market state, and the boundary between the two is not stated.
 
 API credits' storefront authentication and its persistence client are the api
-family's: `StorefrontAuth` in `kit/api/selling/src/arkhai_api_selling/auth.py`
+family's: `StorefrontAuth` in `domains/api/selling/src/arkhai_api_selling/auth.py`
 and `StorefrontSQLiteClient` in `persistence.py`, which API credits composes.
 This change also owns the `layer` exception row for `arkhai-api-selling` on
 `arkhai-core-storefront` in `docs/development/ARCHITECTURE.toml`. The row's

@@ -52,7 +52,7 @@ None.
 
 ## Impact
 
-- Code: `kit/api/buying` (the buy and settle paths and their shared resume
+- Code: `domains/api/buying` (the buy and settle paths and their shared resume
   steps), the store's home, and the API-credits buyer plugin's tests.
 - Tests: the store's unit tests, the CLI's application-integration tests, and
   both API-credit end-to-end scenarios.

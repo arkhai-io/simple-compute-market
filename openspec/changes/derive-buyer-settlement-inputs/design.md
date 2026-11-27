@@ -2,7 +2,7 @@
 
 ### What exists
 
-`AlkahestBuyerStage.options` (`kit/api/buying-alkahest/src/arkhai_api_buying_alkahest/stage.py`)
+`AlkahestBuyerStage.options` (`domains/api/buying-alkahest/src/arkhai_api_buying_alkahest/stage.py`)
 adds these options to the API-credit buyer's normal commands through the buying
 library's `StageOption` mechanism:
 

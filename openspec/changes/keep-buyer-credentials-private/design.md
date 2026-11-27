@@ -2,7 +2,7 @@
 
 ### What exists
 
-The api family's buying library (`kit/api/buying`, `arkhai_api_buying`)
+The api family's buying library (`domains/api/buying`, `arkhai_api_buying`)
 runs every API-credit buyer flow. A seller returns an issued key's
 `tenant_credentials` — `key_id`, `secret`, `base_url`, `balance` — in its signed
 settlement status, and the library keeps it in three places in the buyer's
