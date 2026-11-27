@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from market_identity import VerifiedRequest, stated_request_binding
+from market_identity import stated_request_binding
 from request_replay.asgi import (
     CapturedResponse,
     Receive,
@@ -31,7 +31,7 @@ from request_replay.asgi import (
 from starlette.datastructures import Headers
 from starlette.routing import BaseRoute, Match
 
-from market_authenticated_requests.core import Admitted, AdmissionCore, Answer
+from market_authenticated_requests.core import Admitted, AdmissionCore, Answer, Verified
 from market_authenticated_requests.routes import ResourceUnbound, RouteNotServed, RouteTable, Unauthenticated
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,12 @@ class AuthenticatedApplication:
         verified = self._core.verify(method, headers, body, route=binding)
         if isinstance(verified, Answer):
             return verified
-        admitted = self._core.admit(verified, binding)
+        try:
+            admitted = self._core.admit(verified, binding)
+        except Exception as error:
+            # The authority's own trust or signer failing, as the dependency form's
+            # wrapper answers it: a signed 500, nothing dispatched.
+            return self._core.fail_unadmitted(method, headers, error)
         if isinstance(admitted, Answer):
             return admitted
         scope["state"][ADMITTED_KEY] = admitted
@@ -158,7 +163,7 @@ class AuthenticatedApplication:
 
     def _refuse_unserved(self, method: str, headers: Headers, body: bytes, not_served: RouteNotServed) -> Answer:
         verified = self._core.verify(method, headers, body)
-        if isinstance(verified, VerifiedRequest):
+        if isinstance(verified, Verified):
             return self._core.refuse_unserved(verified, not_served)
         return verified
 

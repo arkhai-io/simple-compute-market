@@ -18,8 +18,10 @@ from market_identity import (
     RequestEnvelope,
     TrustedIdentitySet,
     canonical_body_hash,
+    principal_text,
     sign_market_request,
     sign_request,
+    verify_request_evidence,
 )
 from fastapi import Depends, FastAPI
 from market_identity import Ed25519Signer, Signer
@@ -314,10 +316,21 @@ def test_the_time_setting_operation_is_exempt_from_freshness_alone(world: World)
 
 def test_a_route_whose_body_holds_no_resource_is_a_signed_400(world: World) -> None:
     async def scenario(caller: Caller) -> None:
-        response = await caller.send("POST", "/admin/time", operation="time_set", body={}, role="admin")
+        response = await caller.send("POST", "/claims", operation="item_claim", body={})
 
-        assert response.status_code == 400 and response.json() == {"detail": "now is required"}
-        assert caller.verified(response, method="POST", operation="time_set")
+        assert response.status_code == 400 and response.json() == {"detail": "item is required"}
+        assert caller.verified(response, method="POST", operation="item_claim")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {}
+
+
+def test_a_route_deriving_its_resource_from_the_body_admits_the_resource_stated(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        response = await caller.send("POST", "/claims", operation="item_claim", resource="a", body={"item": "a"})
+
+        assert response.status_code == 200 and response.json() == {"claimed": "a"}
+        assert caller.verified(response, method="POST", operation="item_claim", resource="a")
 
     world.run(scenario)
 
@@ -370,10 +383,83 @@ def test_a_declared_route_refused_by_an_earlier_dependency_answers_signed(
 
 def test_a_request_failing_before_its_admission_is_a_500_signed_over_its_stated_fields(world: World) -> None:
     async def scenario(caller: Caller) -> None:
-        response = await caller.send("POST", "/admin/time", operation="time_set", role="admin", raw_body=b"not json")
+        response = await caller.send("POST", "/claims", operation="item_claim", resource="a", raw_body=b"not json")
 
         assert response.status_code == 500 and response.json() == {"detail": ROUTE_FAILURE_DETAIL}
-        assert caller.verified(response, method="POST", operation="time_set")
+        assert caller.verified(response, method="POST", operation="item_claim", resource="a")
 
     world.run(scenario)
     assert world.toy.dispatches == {}
+
+
+# -- an operation with no target ----------------------------------------------------
+
+
+def test_a_resource_stated_for_an_operation_with_no_target_is_a_signed_400(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        response = await caller.send(
+            "POST", "/items", operation="item_publish", resource="items", body={"item": "a", "value": 1}
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "code": "operation_mismatch",
+            "stated": {"operation": "item_publish", "resource": "items"},
+            "bound": {"operation": "item_publish", "resource": None},
+        }
+        assert caller.verified(response, method="POST", operation="item_publish")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {}
+
+
+def test_no_resource_stated_for_an_operation_with_a_target_is_a_signed_400(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        response = await caller.send("POST", "/items/a/set", operation="item_set", body={"value": 1})
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "code": "operation_mismatch",
+            "stated": {"operation": "item_set", "resource": None},
+            "bound": {"operation": "item_set", "resource": "a"},
+        }
+        assert caller.verified(response, method="POST", operation="item_set", resource="a")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {}
+
+
+def test_a_request_for_an_operation_with_no_target_is_admitted_and_answered_signed(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        response = await caller.send("POST", "/items", operation="item_publish", body={"item": "b", "value": 3})
+
+        assert response.status_code == 200 and response.json() == {"item": "b", "value": 3}
+        assert caller.verified(response, method="POST", operation="item_publish")
+        assert "market-resource" not in response.headers["signature-input"]
+
+    world.run(scenario)
+    assert world.toy.items() == {"b": 3}
+
+
+# -- the admission's record ---------------------------------------------------------
+
+
+def test_a_handler_reads_the_admissions_record_and_body(world: World) -> None:
+    sent = json.dumps({"item": "c", "value": 4}).encode()
+
+    async def scenario(caller: Caller) -> None:
+        response = await caller.send("POST", "/items", operation="item_publish", raw_body=sent)
+        assert response.status_code == 200
+
+    world.run(scenario)
+
+    (admission,) = world.toy.kept
+    assert admission.body == sent
+    assert admission.record == admission.request.record
+    assert admission.record.audience == (principal_text(world.authority.identity),)
+    kept = verify_request_evidence(
+        json.loads(admission.record.model_dump_json()), body=admission.body,
+        trusted=TrustedIdentitySet(identities=(world.caller_signer.identity,)),
+        expected_role="seller", expected_operation="item_publish", expected_resource=None,
+    )
+    assert kept.verified

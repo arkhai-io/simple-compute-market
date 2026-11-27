@@ -1102,7 +1102,7 @@ request for an operation with no target states a resource"). Touches
 forms, the route table and `RouteAdmission`) and its tests. The kit is new in this
 change, so nothing is bumped.
 
-- [ ] 5c.1 Answer a replay-store failure to reserve, resolve or conclude a request with
+- [x] 5c.1 Answer a replay-store failure to reserve, resolve or conclude a request with
       a signed 503 whose body code is `admission_unavailable`, on either route kind, with
       nothing dispatched. Keep the signed 500 for a route raising after admission alone
       (D3, D7). Verify by library integration tests in both forms and schemes, over both
@@ -1114,12 +1114,58 @@ change, so nothing is bumped.
       - a `RECORDED` handler holding the database's write lock past its lease: its retry
         not answered `exact_retry_outcome_unknown` before the handler commits, then a
         read showing the write and a replacement write not overwritten.
-- [ ] 5c.2 Let a route declare that its operation has no target (D2, D11). In either form,
+
+      `AdmissionCore.admit` catches the component's `StoreUnavailable` and answers a
+      signed 503 `{"code": "admission_unavailable", "detail":
+      ADMISSION_UNAVAILABLE_DETAIL}`, logged at error, nothing dispatched; a
+      replay-store failure no longer reaches the 500. Library integration,
+      `tests/integration/test_answers.py`, in both forms and schemes: a refused
+      reservation answered the 503 on a `RECORDED` and a `RERUN` route, nothing
+      dispatched, the failure logged at error naming the request; a store refusing
+      every renewal, then every write while the test holds it closed — the retry
+      after the lease answered the 503, the loss logged once at error naming the
+      request, then, the store open again, the handler's outcome recorded and a
+      later retry receiving it, one dispatch; and, over the `sqlite3` and the
+      SQLAlchemy store each with no busy timeout and the renewal's waits never
+      stepped, a `POST /hold` handler holding `BEGIN IMMEDIATE` and a write on the
+      toy's database past its lease: its retry answered the 503, then after the
+      handler commits answered 409 `exact_retry_outcome_unknown`, a read showing
+      the write, a replacement set answered 200 and standing after the handler
+      returns, and a later retry receiving the recorded outcome; passed. The last
+      two each run with the retry within the skew, meeting the store at its claim,
+      and older than it: then the closed store refuses the concluding write, and on
+      the SQLAlchemy store the held lock meets the concluding write after a plain
+      read, the case design review 61 F1 named — which step meets it was confirmed
+      by hand from the logged tracebacks; the tests assert the answers, 503 then 409.
+      Under the `sqlite3` store the older retry's read already takes the lock. The
+      loss is asserted logged once over the whole attempt, its stop included. The
+      existing renewal-loss test, renewal refused but writes accepted, still answers
+      outcome-unknown: the case D7 names of a store unwritable for a whole lease,
+      after which the retry concludes the attempt. A trust that raises while
+      admitting is a signed 500 with nothing dispatched, in both forms (library
+      integration); passed.
+- [x] 5c.2 Let a route declare that its operation has no target (D2, D11). In either form,
       a request stating a resource for such a route, or stating none for a route with a
       target, is answered a signed 400 `operation_mismatch`. A targetless route's answers
       bind no resource. Verify by library integration tests in both forms: the delta's
       scenario, the reverse case, and a targetless request admitted and answered signed.
-- [ ] 5c.3 Hand records to evidence capture (D23):
+      `RouteBinding.resource` is `str | None`, `None` for an operation with no target
+      (an empty string refused where it is declared); a `RouteAdmission` given no
+      `resource=` declares no target; `fixed_resource` takes its value. `admit`
+      compares the stated operation and resource with the route's, so either
+      direction is an `operation_mismatch` whose body names `null` for the side with
+      none. 5a's `or None` stopgap is gone. Library integration,
+      `test_admission.py`, both forms and schemes: a resource stated for the
+      targetless `POST /items` answered 400 with `bound.resource` `null`, nothing
+      dispatched; none stated for `POST /items/{item}/set` answered 400 with
+      `stated.resource` `null`; a targetless publish admitted and answered signed
+      over a binding without the resource, its `Signature-Input` covering no
+      `market-resource`; passed. Unit, `tests/unit/test_routes.py`: a binding of
+      `""` and `fixed_resource("")` refused where they are declared, `None`
+      accepted; passed. The toy's time route is now targetless; the "body holds
+      no resource" and "fails before its admission" cases moved to `POST /claims`,
+      whose resource is the body's `item`.
+- [x] 5c.3 Hand records to evidence capture (D23):
       - the admission (`Admitted`) carries the verified request's record and body bytes,
         for a handler that keeps the request before it answers;
       - `SignedOutcome` carries the request's and the response's records with both
@@ -1129,9 +1175,58 @@ change, so nothing is bumped.
       middleware-form handler each reading the admission's record; the hook's records
       verifying through `kit/identity`'s evidence verifiers with the authority's and the
       caller's principals.
-- [ ] 5c.4 Verify the section: `make -C kit/authenticated-requests test` (unit and
+      `AdmissionCore.verify` answers `Verified(request, body)`, which `admit`,
+      `refuse_unserved` and `refuse_unbound` take; `Admitted` gains `record` and
+      `body`; `SignedOutcome` is now `request`, `request_body`, `response`,
+      `response_body` (the two records and bodies), its status in the response record.
+      Library integration, both forms and schemes: `test_admission.py`, the publish
+      handler keeping its `Admitted`, whose body is the bytes sent and whose record,
+      from JSON, verifies through `verify_request_evidence` with the caller's
+      principal, role, operation and no resource; `test_answers.py`, each hooked
+      outcome's request record verifying with the caller's principal and its response
+      record with the authority's, both bodies the bytes exchanged; passed.
+- [x] 5c.4 Verify the section: `make -C kit/authenticated-requests test` (unit and
       library integration) against 5a's and 5b's builds; `make check-architecture`.
       End-to-end: none — no authority composes the core until section 6.
+      `make -C kit/authenticated-requests test` against the rebuilt identity and
+      replay wheels: 27 unit and 172 library-integration tests passed. `make
+      check-architecture`: passed. End-to-end confirmed: none.
+
+Notes (section 5c):
+
+- For sections 6–15: a route whose operation has a target passes `resource=`
+  (`path_resource`, a body-derived `ResourceOf`, or `fixed_resource(value)`); one
+  with none passes nothing, and a middleware-form table returns `resource=None`.
+  A handler keeping the request reads `admitted.record` and `admitted.body`; a
+  signed-outcome hook reads `outcome.request`/`request_body` and
+  `outcome.response`/`response_body`, filtering by `outcome.request.operation`.
+  A caller answered 503 `admission_unavailable` retries the same request.
+- A body the route cannot bind (`ResourceUnbound`) applies only to a route with a
+  target; a targetless route refuses a bad body in its handler.
+- `change-workflow run test-before` at the round's base `f4af51435` shows nothing:
+  that kit code predates 5a and fails against the new identity wheel on every test.
+  At 5c's starting commit (`--at dc3dc1003`): `test_answers.py` fails at collection
+  (`ADMISSION_UNAVAILABLE_DETAIL`); `test_admission.py` 24 failed, 66 passed — the
+  new cases fail with 404, since the base's toy lacks `/items` and `/claims`,
+  which shows less than a behavioural failure; the reverse mismatch case passes
+  there, 5a having made an absent stated resource differ from a route's. 5b's
+  test-before shows the ordering defect at the component.
+- `AdmissionCore.admit` catches only `StoreUnavailable`, for the 503; any other
+  error while admitting — the authority's trust or signer raising — reaches the
+  wrapper, which answers it a signed 500 through `fail_unadmitted` in either form
+  (the middleware form now catches it around `admit`, as the dependency form's
+  wrapper already did).
+- Fixed from the fresh-context check: every 503 case met the store at its claim, so
+  none drove the concluding write through the core (now the older-than-skew
+  variants); the hold test renewed on real time, so a slow run could renew after
+  the commit (now a never-stepped sleep); the 503's log was unasserted;
+  `fixed_resource("")` passed declaration (now refused there); the test-before note
+  was wrong (now run, above); wrapping nits. A second check found the middleware
+  form answering a non-store error while admitting unsigned (now a signed 500, with
+  a test), the core's docstring saying a 500 means only a route raised, a test name
+  describing a wait the test never makes, the loss's single log asserted before the
+  renewal stopped, an unneeded yield, and a misnumbered D7 case; all fixed. The
+  section's "Touches" line omits `__init__.py`, which it also changed.
 
 ## 6. The registry on the admission core
 

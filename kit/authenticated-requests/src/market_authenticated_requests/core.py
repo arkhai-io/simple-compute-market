@@ -8,6 +8,12 @@ trust; reserves the request in the replay store; and answers every request that
 carries a request identity signed, refusals, recorded outcomes, and a handler's
 failure included. A request carrying no request identity -- a version 2 request
 among them -- is answered unsigned, since no identity may be invented to sign it.
+
+A replay store that fails while a request is reserved, resolved or concluded is
+answered with a signed 503 ``admission_unavailable``: nothing about the request was
+concluded, so its caller retries the same request. A signed 500 answers any other
+failure: a route raising after the request was admitted, or the request failing
+before its admission outside the replay store.
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ import injected_time
 from market_identity import (
     ExactRetry,
     RequestBinding,
+    RequestRecord,
+    ResponseRecord,
     Signer,
     TrustedIdentitySet,
     VerificationCode,
@@ -49,6 +57,7 @@ from request_replay import (
     ReplayStore,
     RequestReplay,
     Resolution,
+    StoreUnavailable,
 )
 
 from market_authenticated_requests.routes import ResourceUnbound, RouteBinding, RouteNotServed
@@ -63,6 +72,11 @@ DEFAULT_LEASE_SECONDS = 30
 #: authentication; it reveals nothing of the error, which is logged.
 ROUTE_FAILURE_DETAIL = "The request failed"
 
+#: The detail of the signed 503 answering a request whose replay store failed.
+ADMISSION_UNAVAILABLE_DETAIL = (
+    "The request could not be admitted and nothing about it was concluded; retry the same request"
+)
+
 Headers = list[tuple[bytes, bytes]]
 
 
@@ -76,28 +90,54 @@ class Answer:
 
 
 @dataclass(frozen=True)
-class SignedOutcome:
-    """A signed answer to a verified request, as sent: for evidence capture."""
+class Verified:
+    """A request whose version 3 signature verified, with the exact body it carried."""
 
     request: VerifiedRequest
-    status: int
-    headers: tuple[tuple[str, str], ...]
     body: bytes
+
+    @property
+    def record(self) -> RequestRecord:
+        """The request's evidence record; every request the core verifies is
+        addressed by its audience, so it has one."""
+
+        record = self.request.record
+        assert record is not None
+        return record
+
+
+@dataclass(frozen=True)
+class SignedOutcome:
+    """A signed answer to a verified request, for evidence capture: the request's
+    and the response's records, each with its exact body."""
+
+    request: RequestRecord
+    request_body: bytes
+    response: ResponseRecord
+    response_body: bytes
 
 
 @dataclass
 class Admitted:
     """A request admitted for dispatch to its handler.
 
-    ``exact_retry`` tells the handler it serves an exact retry of a request it
-    has seen, which only a re-run route dispatches.
+    ``record`` and ``body`` are the request's evidence record and exact body, for
+    a handler that keeps the request before it answers. ``exact_retry`` tells the
+    handler it serves an exact retry of a request it has seen, which only a re-run
+    route dispatches.
     """
 
     request: VerifiedRequest
+    record: RequestRecord
+    body: bytes
     binding: RouteBinding
     attempt: Attempt
     exact_retry: bool
     renewal: Renewal | None = field(default=None, repr=False)
+
+    @property
+    def verified(self) -> Verified:
+        return Verified(self.request, self.body)
 
 
 class AdmissionCore:
@@ -111,7 +151,7 @@ class AdmissionCore:
     exempt from both freshness bounds, every other check kept. ``clock`` is the
     process's time source in whole seconds; ``sleep`` waits durations of the
     core's own loops, on the monotonic clock. ``on_signed_outcome`` receives
-    every signed answer to a request that verified, exactly as sent.
+    every signed answer to a request that verified, as both records and bodies.
     """
 
     def __init__(
@@ -159,7 +199,7 @@ class AdmissionCore:
         body: bytes,
         *,
         route: RouteBinding | None = None,
-    ) -> VerifiedRequest | Answer:
+    ) -> Verified | Answer:
         """The verified request, or the answer refusing it.
 
         A refusal binds the caller's stated request ID, and the operation and
@@ -169,7 +209,7 @@ class AdmissionCore:
 
         verification = verify_market_request(method=method, headers=headers, body=body)
         if verification.verified and verification.request is not None:
-            return verification.request
+            return Verified(verification.request, body)
         stated = stated_request_binding(method=method, headers=headers)
         if verification.code == VerificationCode.UNSUPPORTED_VERSION:
             return self.answer(
@@ -190,37 +230,37 @@ class AdmissionCore:
             stated = RequestBinding.model_construct(
                 method=stated.method,
                 operation=route.operation,
-                resource=route.resource or None,
+                resource=route.resource,
                 request_id=stated.request_id,
             )
         return self.answer(stated, 401, {"detail": _VERIFICATION_DETAIL.get(verification.code, "Invalid request proof")})
 
-    def refuse_unserved(self, request: VerifiedRequest, not_served: RouteNotServed) -> Answer:
+    def refuse_unserved(self, verified: Verified, not_served: RouteNotServed) -> Answer:
         """A verified request no route serves: a signed 404, or 405 with ``Allow``."""
 
         headers: Headers = []
         if not_served.allowed_methods:
             headers.append((b"allow", ", ".join(not_served.allowed_methods).encode("latin-1")))
         return self.answer(
-            request.binding,
+            verified.request.binding,
             not_served.status_code,
-            {"code": RefusalCode.OPERATION_NOT_SERVED.value, "operation": request.operation},
+            {"code": RefusalCode.OPERATION_NOT_SERVED.value, "operation": verified.request.operation},
             headers=headers,
-            verified=request,
+            verified=verified,
         )
 
     def refuse_unbound(
-        self, request: VerifiedRequest, unbound: ResourceUnbound, *, operation: str | None = None
+        self, verified: Verified, unbound: ResourceUnbound, *, operation: str | None = None
     ) -> Answer:
         """A request whose route found no resource in its body: a signed 400, bound
         over the route's ``operation`` where it is known."""
 
-        binding = request.binding
+        binding = verified.request.binding
         if operation is not None:
             binding = RequestBinding.model_construct(
                 method=binding.method, operation=operation, resource=binding.resource, request_id=binding.request_id
             )
-        return self.answer(binding, 400, {"detail": unbound.detail}, verified=request)
+        return self.answer(binding, 400, {"detail": unbound.detail}, verified=verified)
 
     def fail_unadmitted(self, method: str, headers: Mapping[str, str], error: BaseException) -> Answer:
         """A request that failed before its admission: a 500 signed over the request
@@ -234,13 +274,19 @@ class AdmissionCore:
         status, headers_out, body = _json(500, {"detail": ROUTE_FAILURE_DETAIL})
         return self.sign_stated(method, headers, status, headers_out, body)
 
-    def admit(self, request: VerifiedRequest, binding: RouteBinding) -> Admitted | Answer:
-        """Check a verified request against its route and the authority, then reserve it."""
+    def admit(self, verified: Verified, binding: RouteBinding) -> Admitted | Answer:
+        """Check a verified request against its route and the authority, then reserve it.
 
+        A request must state the operation the route binds, and the route's
+        resource exactly when its operation has a target: a resource stated for
+        an operation with none, or none for one with a target, is a mismatch.
+        """
+
+        request = verified.request
         route = RequestBinding(
             method=request.method,
             operation=binding.operation,
-            resource=binding.resource or None,
+            resource=binding.resource,
             request_id=request.request_id,
         )
         if (request.operation, request.resource) != (route.operation, route.resource):
@@ -252,21 +298,21 @@ class AdmissionCore:
                     "stated": {"operation": request.operation, "resource": request.resource},
                     "bound": {"operation": route.operation, "resource": route.resource},
                 },
-                verified=request,
+                verified=verified,
             )
         if not request.addressed_to(self._signer().identity):
-            return self.answer(route, 421, {"code": RefusalCode.AUDIENCE_MISMATCH.value}, verified=request)
+            return self.answer(route, 421, {"code": RefusalCode.AUDIENCE_MISMATCH.value}, verified=verified)
         if not self._exempt_from_freshness(binding) and not request.fresh(
             now=self._clock(), max_skew=self._max_skew
         ):
             return self.answer(
-                route, 401, {"detail": _VERIFICATION_DETAIL[VerificationCode.TIMESTAMP_SKEW]}, verified=request
+                route, 401, {"detail": _VERIFICATION_DETAIL[VerificationCode.TIMESTAMP_SKEW]}, verified=verified
             )
         if request.role not in binding.roles:
-            return self.answer(route, 403, {"detail": "Marketplace role is not authorized"}, verified=request)
+            return self.answer(route, 403, {"detail": "Marketplace role is not authorized"}, verified=verified)
         if not self._trust(request.role).allows(request.principal):
             return self.answer(
-                route, 403, {"detail": _VERIFICATION_DETAIL[VerificationCode.WRONG_PRINCIPAL]}, verified=request
+                route, 403, {"detail": _VERIFICATION_DETAIL[VerificationCode.WRONG_PRINCIPAL]}, verified=verified
             )
         try:
             admission = self._replay.admit(
@@ -278,14 +324,24 @@ class AdmissionCore:
                     origin=request.origin,
                 )
             )
-        except Exception:
-            # The request is authenticated, so its caller is answered signed,
-            # and nothing was dispatched.
-            logger.exception("reserving request %s for %s failed", request.request_id, binding.operation)
-            return self.answer(route, 500, {"detail": ROUTE_FAILURE_DETAIL}, verified=request)
+        except StoreUnavailable:
+            # Reserving, resolving or concluding failed, so nothing was dispatched
+            # and nothing about the request is known: an earlier attempt may still
+            # run, and its caller retries this request rather than reading state.
+            logger.exception(
+                "admitting request %s for %s failed in the replay store", request.request_id, binding.operation
+            )
+            return self.answer(
+                route,
+                503,
+                {"code": RefusalCode.ADMISSION_UNAVAILABLE.value, "detail": ADMISSION_UNAVAILABLE_DETAIL},
+                verified=verified,
+            )
         if isinstance(admission, Dispatch):
             admitted = Admitted(
                 request=request,
+                record=verified.record,
+                body=verified.body,
                 binding=binding,
                 attempt=admission.attempt,
                 exact_retry=admission.exact_retry,
@@ -302,13 +358,13 @@ class AdmissionCore:
                 outcome.status,
                 [(name.encode("latin-1"), value.encode("latin-1")) for name, value in outcome.headers],
                 outcome.body,
-                verified=request,
+                verified=verified,
             )
         if isinstance(admission, InProgress):
-            return self.answer(route, 409, {"detail": "The authenticated request is still in progress"}, verified=request)
+            return self.answer(route, 409, {"detail": "The authenticated request is still in progress"}, verified=verified)
         if isinstance(admission, ChangedReuse):
             return self.answer(
-                route, 409, {"detail": "Request ID was reused with changed signed content"}, verified=request
+                route, 409, {"detail": "Request ID was reused with changed signed content"}, verified=verified
             )
         if isinstance(admission, OutcomeUnknown):
             return self.answer(
@@ -319,7 +375,7 @@ class AdmissionCore:
                     "detail": "The request's attempt ended without a recorded outcome; "
                     "read current state before sending a new request",
                 },
-                verified=request,
+                verified=verified,
             )
         assert isinstance(admission, Expired)
         return self.answer(
@@ -330,7 +386,7 @@ class AdmissionCore:
                 "detail": "The request's recorded outcome has expired; "
                 "read current state before sending a new request",
             },
-            verified=request,
+            verified=verified,
         )
 
     async def finish(self, admitted: Admitted, status: int, headers: Headers, body: bytes) -> Answer:
@@ -360,7 +416,7 @@ class AdmissionCore:
                 admitted.request.request_id,
                 admitted.binding.operation,
             )
-        return self._signed(admitted.request.binding, status, headers, body, verified=admitted.request)
+        return self._signed(admitted.request.binding, status, headers, body, verified=admitted.verified)
 
     def sign_stated(self, method: str, headers: Mapping[str, str], status: int, response_headers: Headers, body: bytes) -> Answer:
         """An answer the application gave a request no admission reached, signed over
@@ -396,7 +452,7 @@ class AdmissionCore:
         payload: dict[str, Any],
         *,
         headers: Iterable[tuple[bytes, bytes]] = (),
-        verified: VerifiedRequest | None = None,
+        verified: Verified | None = None,
     ) -> Answer:
         """A JSON answer, signed over ``binding``, or unsigned when there is none."""
 
@@ -413,19 +469,22 @@ class AdmissionCore:
         headers: Headers,
         body: bytes,
         *,
-        verified: VerifiedRequest | None,
+        verified: Verified | None,
     ) -> Answer:
         signature = sign_market_response(
             signer=self._signer(), status=status, body=body, request=binding, created=self._clock()
-        ).headers
-        signed = [*headers, *((name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in signature.items())]
+        )
+        signed = [
+            *headers,
+            *((name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in signature.headers.items()),
+        ]
         if verified is not None and self._on_signed_outcome is not None:
             self._on_signed_outcome(
                 SignedOutcome(
-                    request=verified,
-                    status=status,
-                    headers=tuple((name.decode("latin-1"), value.decode("latin-1")) for name, value in signed),
-                    body=body,
+                    request=verified.record,
+                    request_body=verified.body,
+                    response=signature.record,
+                    response_body=body,
                 )
             )
         return Answer(status, signed, body)

@@ -1,12 +1,13 @@
 """What a route declares to the admission core, in either form.
 
-Every authenticated route binds an operation and a resource, admits a set of caller
-roles, and declares how an exact retry is resolved, with no default
-(:class:`market_identity.ExactRetry`). A route that admits through a contract table
-the core consults before the application runs is in the middleware form; one that
-admits inside the application, through its
-:class:`~market_authenticated_requests.dependency.RouteAdmission`, is in the
-dependency form.
+Every authenticated route binds an operation and, where the operation acts on one
+object, that object's identifier as its resource; the route, not the request, says
+whether its operation has a target. It admits a set of caller roles, and declares
+how an exact retry is resolved, with no default (:class:`market_identity.ExactRetry`).
+A route that admits through a contract table the core consults before the
+application runs is in the middleware form; one that admits inside the application,
+through its :class:`~market_authenticated_requests.dependency.RouteAdmission`, is in
+the dependency form.
 """
 
 from __future__ import annotations
@@ -23,14 +24,22 @@ DOCUMENTATION_PATHS = ("/openapi.json", "/docs", "/docs/oauth2-redirect", "/redo
 
 @dataclass(frozen=True)
 class RouteBinding:
-    """What one admitted route binds and declares."""
+    """What one admitted route binds and declares.
+
+    ``resource`` is ``None`` for an operation with no target object, such as a
+    publication or a collection read: a request to it states no resource.
+    """
 
     operation: str
-    resource: str
+    resource: str | None
     roles: frozenset[str]
     exact_retry: ExactRetry
 
     def __post_init__(self) -> None:
+        if self.resource == "":
+            raise ValueError(
+                f"route {self.operation} binds an empty resource; an operation with no target binds None"
+            )
         if not isinstance(self.exact_retry, ExactRetry):
             raise TypeError(
                 f"route {self.operation} declares no exact-retry resolution: "
@@ -96,8 +105,8 @@ class Unauthenticated:
 
 
 ResourceOf = Callable[[dict[str, str], bytes], str]
-"""How a dependency-form route derives its resource: from its path parameters and
-the request body."""
+"""How a dependency-form route whose operation has a target derives that target's
+identifier: from its path parameters and the request body."""
 
 
 def path_resource(name: str) -> ResourceOf:
@@ -109,8 +118,11 @@ def path_resource(name: str) -> ResourceOf:
     return resource
 
 
-def fixed_resource(value: str = "") -> ResourceOf:
+def fixed_resource(value: str) -> ResourceOf:
     """A resource that is the same for every request to the route."""
+
+    if not value:
+        raise ValueError("a fixed resource names its object; an operation with no target takes none")
 
     def resource(path_params: dict[str, str], body: bytes) -> str:
         return value

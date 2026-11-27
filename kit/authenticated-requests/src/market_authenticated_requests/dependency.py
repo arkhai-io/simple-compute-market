@@ -2,9 +2,10 @@
 
 A route takes its declaration as a dependency,
 ``Depends(RouteAdmission(core, operation=..., roles=..., exact_retry=...))``, and
-receives the :class:`Admitted` request; a refusal never reaches its handler. The
-route inventory finds every route taking one through the framework's own
-dependency tree.
+receives the :class:`Admitted` request; a refusal never reaches its handler. A route
+whose operation acts on one object names how it derives that object's identifier as
+``resource=``; one given none declares that its operation has no target. The route
+inventory finds every route taking one through the framework's own dependency tree.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from starlette.requests import Request
 
 from market_authenticated_requests.application import ADMITTED_KEY, ANSWER_KEY, BODY_KEY
 from market_authenticated_requests.core import Admitted, AdmissionCore, Answer
-from market_authenticated_requests.routes import ResourceOf, ResourceUnbound, RouteBinding, fixed_resource
+from market_authenticated_requests.routes import ResourceOf, ResourceUnbound, RouteBinding
 
 
 class RouteAdmission:
@@ -35,12 +36,12 @@ class RouteAdmission:
     ) -> None:
         # Validated here, where the route is declared, so a route missing its
         # resolution fails as its module is imported.
-        RouteBinding(operation=operation, resource="", roles=frozenset(roles), exact_retry=exact_retry)
+        RouteBinding(operation=operation, resource=None, roles=frozenset(roles), exact_retry=exact_retry)
         self.core = core
         self.operation = operation
         self.roles = frozenset(roles)
         self.exact_retry = exact_retry
-        self._resource = resource if resource is not None else fixed_resource()
+        self._resource = resource
 
     async def __call__(self, request: Request) -> Admitted:
         state = request.scope.get("state", {})
@@ -51,7 +52,7 @@ class RouteAdmission:
             )
         body: bytes = state[BODY_KEY]
         try:
-            resource = self._resource(dict(request.path_params), body)
+            resource = None if self._resource is None else self._resource(dict(request.path_params), body)
         except ResourceUnbound as unbound:
             refused = self.core.verify(request.method, request.headers, body)
             self._refuse(

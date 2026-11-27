@@ -12,6 +12,7 @@ migration, and its lifespan :meth:`AdmissionCore.sweeping`. Its settings compose
 
 from market_authenticated_requests.application import AuthenticatedApplication
 from market_authenticated_requests.core import (
+    ADMISSION_UNAVAILABLE_DETAIL,
     DEFAULT_LEASE_SECONDS,
     DEFAULT_MAX_SKEW_SECONDS,
     ROUTE_FAILURE_DETAIL,
@@ -19,6 +20,7 @@ from market_authenticated_requests.core import (
     AdmissionCore,
     Answer,
     SignedOutcome,
+    Verified,
 )
 from market_authenticated_requests.dependency import RouteAdmission
 from market_authenticated_requests.inventory import RouteInventoryError, install, undeclared_routes
@@ -42,6 +44,7 @@ from market_authenticated_requests.routes import (
 from market_authenticated_requests.settings import AuthenticatedRequestsSettings
 
 __all__ = [
+    "ADMISSION_UNAVAILABLE_DETAIL",
     "DEFAULT_LEASE_SECONDS",
     "DEFAULT_MAX_SKEW_SECONDS",
     "DOCUMENTATION_PATHS",
@@ -62,6 +65,7 @@ __all__ = [
     "RouteTable",
     "SignedOutcome",
     "Unauthenticated",
+    "Verified",
     "fixed_resource",
     "install",
     "path_resource",

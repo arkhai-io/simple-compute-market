@@ -7,17 +7,18 @@ renewal is stepped by the test through the core's injected ``sleep``, never slep
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
 import httpx
 import injected_time
 import pytest
-from market_identity import Signer
+from market_identity import Signer, TrustedIdentitySet, verify_request_evidence, verify_response_evidence
 
-from market_authenticated_requests import ROUTE_FAILURE_DETAIL
+from market_authenticated_requests import ADMISSION_UNAVAILABLE_DETAIL, ROUTE_FAILURE_DETAIL
 from tests.integration.stepping import STEP_BOUND, SteppedSleep
-from tests.integration.support import LEASE, RETENTION, START, Caller, World, advance, make_world
+from tests.integration.support import LEASE, RETENTION, SKEW, START, Caller, World, advance, make_world
 
 
 def test_a_recorded_route_answers_its_exact_retry_with_the_recorded_outcome(world: World) -> None:
@@ -107,7 +108,7 @@ def test_a_recorded_retry_older_than_the_retention_is_a_signed_410(world: World)
     assert world.toy.dispatches == {"item_set": 1}
 
 
-def test_the_signed_outcome_hook_receives_the_exact_bytes_and_headers_sent(world: World) -> None:
+def test_the_signed_outcome_hook_receives_both_records_and_both_bodies(world: World) -> None:
     sent: list[httpx.Response] = []
 
     async def scenario(caller: Caller) -> None:
@@ -116,11 +117,22 @@ def test_the_signed_outcome_hook_receives_the_exact_bytes_and_headers_sent(world
 
     world.run(scenario)
 
+    caller = TrustedIdentitySet(identities=(world.caller_signer.identity,))
+    authority = TrustedIdentitySet(identities=(world.authority.identity,))
     assert len(world.outcomes) == 2
-    for outcome, response in zip(world.outcomes, sent):
-        assert (outcome.status, outcome.body) == (response.status_code, response.content)
-        assert list(outcome.headers) == [(name.decode(), value.decode()) for name, value in response.headers.raw]
-        assert outcome.request.operation == "item_set"
+    for outcome, response, value in zip(world.outcomes, sent, (5, 6)):
+        assert outcome.request_body == json.dumps({"value": value}).encode()
+        assert (outcome.response.status, outcome.response_body) == (response.status_code, response.content)
+        request = verify_request_evidence(
+            json.loads(outcome.request.model_dump_json()), body=outcome.request_body, trusted=caller,
+            expected_role="seller", expected_operation="item_set", expected_resource="a",
+        )
+        answer = verify_response_evidence(
+            json.loads(outcome.response.model_dump_json()), body=outcome.response_body, trusted=authority,
+            expected_operation="item_set", expected_resource="a",
+        )
+        assert request.verified and answer.verified
+        assert answer.evidence is not None and answer.evidence.request_id == outcome.request.request_id
 
 
 class LosesItsRecord:
@@ -258,19 +270,148 @@ class RefusesToReserve:
         raise ConnectionError("database is locked")
 
 
-def test_a_reservation_that_fails_is_a_signed_500_and_nothing_is_dispatched(
-    tmp_path: Path, form: str, caller_signer: Signer
+UNAVAILABLE = {"code": "admission_unavailable", "detail": ADMISSION_UNAVAILABLE_DETAIL}
+
+
+@pytest.mark.parametrize(
+    ("path", "operation", "resource"),
+    [("/items/a/set", "item_set", "a"), ("/items/a/raise", "item_raise", "a")],
+    ids=["recorded", "rerun"],
+)
+def test_a_reservation_the_store_refuses_is_a_signed_503_and_nothing_is_dispatched(
+    tmp_path: Path, form: str, caller_signer: Signer, path: str, operation: str, resource: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     world = make_world(tmp_path, form, caller_signer, wrap_store=RefusesToReserve)
 
     async def scenario(caller: Caller) -> None:
-        response = await caller.send("POST", "/items/a/set", operation="item_set", resource="a", body={"value": 5})
+        with caplog.at_level(logging.ERROR, logger="market_authenticated_requests"):
+            response = await caller.send("POST", path, operation=operation, resource=resource, body={"value": 5})
 
-        assert response.status_code == 500 and response.json() == {"detail": ROUTE_FAILURE_DETAIL}
-        assert caller.verified(response, method="POST", operation="item_set", resource="a")
+        assert response.status_code == 503 and response.json() == UNAVAILABLE
+        assert caller.verified(response, method="POST", operation=operation, resource=resource)
 
     world.run(scenario)
     assert world.toy.dispatches == {}
+    (logged,) = [record for record in caplog.records if "failed in the replay store" in record.getMessage()]
+    assert logged.levelno == logging.ERROR and "request-1" in logged.getMessage()
+
+
+class RefusesRenewalsThenWrites:
+    """A replay store that refuses every renewal, and every write while the test
+    holds it closed, as a database locked for longer than a lease."""
+
+    WRITES = ("claim", "conclude", "record", "renew", "reclaim", "release")
+
+    def __init__(self, store: object) -> None:
+        self._store = store
+        self.closed = False
+
+    def __getattr__(self, name: str) -> object:
+        target = getattr(self._store, name)
+        if name == "renew" or (self.closed and name in self.WRITES):
+
+            def refused(*args: object, **kwargs: object) -> object:
+                raise ConnectionError("database is locked")
+
+            return refused
+        return target
+
+
+# A retry within the skew meets the closed store at its claim; one older than the
+# skew reads the row and meets it at the concluding write.
+@pytest.mark.parametrize("later", [0, SKEW], ids=["within-the-skew", "older-than-the-skew"])
+def test_a_store_refusing_renewals_then_writes_answers_the_retry_503_then_the_outcome(
+    tmp_path: Path, form: str, caller_signer: Signer, caplog: pytest.LogCaptureFixture, later: int
+) -> None:
+    sleep = SteppedSleep()
+    stores: list[RefusesRenewalsThenWrites] = []
+
+    def wrap(store: object) -> RefusesRenewalsThenWrites:
+        stores.append(RefusesRenewalsThenWrites(store))
+        return stores[-1]
+
+    world = make_world(tmp_path, form, caller_signer, sleep=sleep, wrap_store=wrap)
+    lost = "lost its lease while its handler runs"
+
+    async def scenario(caller: Caller) -> None:
+        (store,) = stores
+        with caplog.at_level(logging.WARNING, logger="request_replay.renewal"):
+            first = asyncio.create_task(caller.send("POST", "/slow", operation="slow_recorded"))
+            await asyncio.wait_for(world.toy.slow_started.wait(), STEP_BOUND)
+            advance(LEASE // 3)
+            await sleep.step()
+            advance(LEASE // 3)
+            await sleep.step()
+            advance(LEASE - 2 * (LEASE // 3))
+            await sleep.last_step()
+            store.closed = True
+            advance(later)
+            unavailable = await caller.send("POST", "/slow", operation="slow_recorded", origin=START)
+
+            assert unavailable.status_code == 503 and unavailable.json() == UNAVAILABLE
+            assert caller.verified(unavailable, method="POST", operation="slow_recorded")
+            store.closed = False
+            world.toy.slow_finish.set()
+            answered = await asyncio.wait_for(first, STEP_BOUND)
+
+        (loss,) = [record for record in caplog.records if lost in record.getMessage()]
+        assert loss.levelno == logging.ERROR and "request-1" in loss.getMessage()
+        retry = await caller.send("POST", "/slow", operation="slow_recorded", origin=START)
+
+        assert answered.status_code == 200
+        assert (retry.status_code, retry.content) == (200, answered.content)
+        assert caller.verified(retry, method="POST", operation="slow_recorded")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {"slow_recorded": 1}
+
+
+@pytest.mark.parametrize("store_kind", ["sqlite3", "sqlalchemy"])
+@pytest.mark.parametrize("waited", [LEASE, SKEW + 1], ids=["within-the-skew", "older-than-the-skew"])
+def test_a_retry_while_the_handler_holds_the_database_is_concluded_only_after_its_commit(
+    tmp_path: Path, form: str, caller_signer: Signer, store_kind: str, waited: int
+) -> None:
+    # The replay store meets the handler's write lock with no busy timeout, so the
+    # retry is answered at once rather than after a wait; and the lease is never
+    # renewed, its renewal's waits never stepped. A retry within the skew meets the
+    # lock at its claim; one older than the skew reads the row, which on the
+    # SQLAlchemy store passes the lock, and meets it at the concluding write.
+    world = make_world(
+        tmp_path, form, caller_signer, store_kind=store_kind, busy_timeout=0, sleep=SteppedSleep()
+    )
+
+    async def scenario(caller: Caller) -> None:
+        first = asyncio.create_task(caller.send("POST", "/hold", operation="hold_recorded"))
+        await asyncio.wait_for(world.toy.hold_started.wait(), STEP_BOUND)
+        advance(waited)
+
+        held = await caller.send("POST", "/hold", operation="hold_recorded", origin=START)
+        assert held.status_code == 503 and held.json() == UNAVAILABLE
+        assert caller.verified(held, method="POST", operation="hold_recorded")
+
+        world.toy.hold_commit.set()
+        await asyncio.wait_for(world.toy.hold_committed.wait(), STEP_BOUND)
+        unknown = await caller.send("POST", "/hold", operation="hold_recorded", origin=START)
+        assert unknown.status_code == 409 and unknown.json()["code"] == "exact_retry_outcome_unknown"
+        assert caller.verified(unknown, method="POST", operation="hold_recorded")
+
+        read = await caller.send("GET", "/items/held", operation="item_read", resource="held", request_id="read-1")
+        assert read.json() == {"item": "held", "value": 1}
+        replaced = await caller.send(
+            "POST", "/items/held/set", operation="item_set", resource="held", body={"value": 2}, request_id="set-1"
+        )
+        assert replaced.status_code == 200
+
+        world.toy.hold_finish.set()
+        answered = await asyncio.wait_for(first, STEP_BOUND)
+        assert answered.status_code == 200
+        retry = await caller.send("POST", "/hold", operation="hold_recorded", origin=START)
+        assert (retry.status_code, retry.content) == (200, answered.content)
+
+    world.run(scenario)
+    assert world.toy.read("held") == 2
+    assert world.toy.dispatches == {"hold_recorded": 1, "item_set": 1}
 
 
 def test_a_cancelled_recorded_handler_stops_renewing_its_lease(
@@ -291,3 +432,21 @@ def test_a_cancelled_recorded_handler_stops_renewing_its_lease(
         assert all(task is asyncio.current_task() for task in asyncio.all_tasks())
 
     world.run(scenario)
+
+
+def test_a_trust_that_fails_while_admitting_is_a_signed_500_and_nothing_is_dispatched(
+    tmp_path: Path, form: str, caller_signer: Signer
+) -> None:
+    def failing_trust(role: str) -> TrustedIdentitySet:
+        raise LookupError("the trust store is unreachable")
+
+    world = make_world(tmp_path, form, caller_signer, trust=failing_trust)
+
+    async def scenario(caller: Caller) -> None:
+        response = await caller.send("POST", "/items/a/set", operation="item_set", resource="a", body={"value": 5})
+
+        assert response.status_code == 500 and response.json() == {"detail": ROUTE_FAILURE_DETAIL}
+        assert caller.verified(response, method="POST", operation="item_set", resource="a")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {}

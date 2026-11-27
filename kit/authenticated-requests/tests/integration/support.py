@@ -3,10 +3,14 @@
 The toy holds one integer per item. ``POST /items/{item}/set`` sets it outright
 and is recorded; ``POST /items/{item}/raise`` raises it to at least the value
 sent and re-runs, since an old retry of it changes nothing; ``GET /items/{item}``
-reads it. ``POST /fail`` and ``POST /fail-again`` raise after writing, recorded
-and re-run. ``POST /slow`` waits for the test before answering. ``POST
-/admin/time`` sets the injected time and re-runs. ``GET /health`` is
-unauthenticated. Every write counts its dispatches.
+reads it. ``POST /items`` publishes an item named in its body, an operation with
+no target, recorded, and keeps the request's record and body as evidence. ``POST
+/claims`` claims the item its body names, its resource taken from the body. ``POST
+/fail`` and ``POST /fail-again`` raise after writing, recorded and re-run. ``POST
+/slow`` waits for the test before answering, and ``POST /hold`` holds the
+database's write lock until the test lets it commit. ``POST /admin/time`` sets the
+injected time and re-runs. ``GET /health`` is unauthenticated. Every write counts
+its dispatches.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Awaitable, Callable
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +39,7 @@ from market_identity import (
     verify_market_response,
 )
 from market_schema_migrations import Chain, Migration, SqliteMigrationConnection, migrate
+from sqlalchemy import create_engine
 
 from market_authenticated_requests import (
     SQLITE_REPLAY_TABLE_MIGRATION,
@@ -50,6 +56,7 @@ from market_authenticated_requests import (
     path_resource,
     sqlite_replay_store,
 )
+from market_authenticated_requests.sqlalchemy_support import sqlalchemy_replay_store
 
 START = 1_800_000_000
 SKEW = 300
@@ -94,7 +101,13 @@ class Toy:
     dispatches: dict[str, int] = field(default_factory=dict)
     slow_started: asyncio.Event = field(default_factory=asyncio.Event)
     slow_finish: asyncio.Event = field(default_factory=asyncio.Event)
+    hold_started: asyncio.Event = field(default_factory=asyncio.Event)
+    hold_commit: asyncio.Event = field(default_factory=asyncio.Event)
+    hold_committed: asyncio.Event = field(default_factory=asyncio.Event)
+    hold_finish: asyncio.Event = field(default_factory=asyncio.Event)
     retries: list[bool] = field(default_factory=list)
+    kept: list[Admitted] = field(default_factory=list)
+    engines: list[Any] = field(default_factory=list)
 
     def count(self, operation: str) -> None:
         self.dispatches[operation] = self.dispatches.get(operation, 0) + 1
@@ -128,6 +141,7 @@ class Route:
     roles: frozenset[str]
     exact_retry: ExactRetry
     resource_param: str | None = None
+    resource_field: str | None = None
 
     @property
     def pattern(self) -> re.Pattern[str]:
@@ -142,6 +156,9 @@ ROUTES = (
     Route("POST", "/fail-again", "fail_rerun", SELLER, ExactRetry.RERUN),
     Route("POST", "/slow", "slow_recorded", SELLER, ExactRetry.RECORDED),
     Route("POST", "/admin/time", "time_set", ADMIN, ExactRetry.RERUN),
+    Route("POST", "/items", "item_publish", SELLER, ExactRetry.RECORDED),
+    Route("POST", "/claims", "item_claim", SELLER, ExactRetry.RERUN, resource_field="item"),
+    Route("POST", "/hold", "hold_recorded", SELLER, ExactRetry.RECORDED),
 )
 
 
@@ -160,9 +177,10 @@ class Table:
             if route.method != method:
                 allowed.add(route.method)
                 continue
-            if route.operation == "time_set" and "now" not in json.loads(body or b"{}"):
-                raise ResourceUnbound("now is required")
-            resource = match.group(route.resource_param) if route.resource_param else ""
+            if route.resource_field is not None:
+                resource = body_resource(route.resource_field)({}, body)
+            else:
+                resource = match.group(route.resource_param) if route.resource_param else None
             return RouteBinding(route.operation, resource, route.roles, route.exact_retry)
         raise RouteNotServed(allowed_methods=allowed)
 
@@ -170,12 +188,16 @@ class Table:
         return any(r.method == method and r.template == path_template for r in self._routes)
 
 
-def time_document_resource(path_params: dict[str, str], body: bytes) -> str:
-    """The time route binds no resource, but refuses a body that carries no instant."""
+def body_resource(name: str) -> Callable[[dict[str, str], bytes], str]:
+    """A resource that is the body's field ``name``, refused when the body has none."""
 
-    if "now" not in json.loads(body or b"{}"):
-        raise ResourceUnbound("now is required")
-    return ""
+    def resource(path_params: dict[str, str], body: bytes) -> str:
+        value = json.loads(body or b"{}").get(name)
+        if not isinstance(value, str) or not value:
+            raise ResourceUnbound(f"{name} is required")
+        return value
+
+    return resource
 
 
 def build_app(toy: Toy, core: AdmissionCore, *, form: str, extra: list[Route] | None = None) -> Any:
@@ -191,15 +213,16 @@ def build_app(toy: Toy, core: AdmissionCore, *, form: str, extra: list[Route] | 
 
             return Depends(from_state)
         resource = path_resource(route.resource_param) if route.resource_param else None
-        if route.operation == "time_set":
-            resource = time_document_resource
+        if route.resource_field is not None:
+            resource = body_resource(route.resource_field)
         return Depends(
             RouteAdmission(
                 core, operation=route.operation, roles=route.roles, exact_retry=route.exact_retry, resource=resource
             )
         )
 
-    set_route, raise_route, read_route, fail_route, fail_again_route, slow_route, time_route = ROUTES
+    set_route, raise_route, read_route, fail_route, fail_again_route, slow_route, time_route, *rest = ROUTES
+    publish_route, claim_route, hold_route = rest
 
     @app.post("/items/{item}/set")
     async def item_set(item: str, request: Request, admission: Admitted = admitted(set_route)) -> dict[str, Any]:
@@ -240,6 +263,31 @@ def build_app(toy: Toy, core: AdmissionCore, *, form: str, extra: list[Route] | 
     async def set_time(request: Request, admission: Admitted = admitted(time_route)) -> dict[str, Any]:
         toy.count("time_set")
         return injected_time.TimeRouteService(injected_time.installed()).set_time(await request.body())
+
+    @app.post("/items")
+    async def item_publish(request: Request, admission: Admitted = admitted(publish_route)) -> dict[str, Any]:
+        toy.count("item_publish")
+        toy.kept.append(admission)
+        document = json.loads(await request.body())
+        return {"item": document["item"], "value": toy.write(document["item"], document["value"], at_least=False)}
+
+    @app.post("/claims")
+    async def item_claim(admission: Admitted = admitted(claim_route)) -> dict[str, Any]:
+        toy.count("item_claim")
+        return {"claimed": admission.binding.resource}
+
+    @app.post("/hold")
+    async def hold(admission: Admitted = admitted(hold_route)) -> dict[str, Any]:
+        toy.count("hold_recorded")
+        with closing(sqlite3.connect(toy.database, isolation_level=None)) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("INSERT OR REPLACE INTO items (item, value) VALUES ('held', 1)")
+            toy.hold_started.set()
+            await toy.hold_commit.wait()
+            connection.execute("COMMIT")
+        toy.hold_committed.set()
+        await toy.hold_finish.wait()
+        return {"held": "done"}
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -313,6 +361,16 @@ class Caller:
         ).verified
 
 
+def replay_store(toy: Toy, store_kind: str, *, busy_timeout: float) -> Any:
+    """The kit's replay store of ``store_kind`` over the toy's database."""
+
+    if store_kind == "sqlite3":
+        return sqlite_replay_store(lambda: sqlite3.connect(toy.database, timeout=busy_timeout))
+    engine = create_engine(f"sqlite:///{toy.database}", connect_args={"timeout": busy_timeout})
+    toy.engines.append(engine)
+    return sqlalchemy_replay_store(engine)
+
+
 def make_core(
     toy: Toy,
     *,
@@ -321,6 +379,9 @@ def make_core(
     outcomes: list[SignedOutcome] | None = None,
     sleep: Any = asyncio.sleep,
     wrap_store: Any = lambda store: store,
+    store_kind: str = "sqlite3",
+    busy_timeout: float = 5.0,
+    trust: Callable[[str], TrustedIdentitySet] | None = None,
 ) -> AdmissionCore:
     trusted = {
         "seller": TrustedIdentitySet(identities=(caller.identity,)),
@@ -328,8 +389,8 @@ def make_core(
     }
     return AdmissionCore(
         signer=lambda: authority,
-        trust=lambda role: trusted[role],
-        store=wrap_store(sqlite_replay_store(toy.connect)),
+        trust=trust or (lambda role: trusted[role]),
+        store=wrap_store(replay_store(toy, store_kind, busy_timeout=busy_timeout)),
         settings=AuthenticatedRequestsSettings(recorded_outcome_retention_seconds=RETENTION),
         max_skew_seconds=SKEW,
         lease_seconds=LEASE,
@@ -372,7 +433,11 @@ class World:
                     )
                 )
 
-        asyncio.run(main())
+        try:
+            asyncio.run(main())
+        finally:
+            for engine in self.toy.engines:
+                engine.dispose()
 
 
 def make_world(
@@ -383,11 +448,18 @@ def make_world(
     authority: Signer | None = None,
     sleep: Any = asyncio.sleep,
     wrap_store: Callable[[Any], Any] = lambda store: store,
+    store_kind: str = "sqlite3",
+    busy_timeout: float = 5.0,
+    trust: Callable[[str], TrustedIdentitySet] | None = None,
 ) -> World:
+    """The toy in ``form`` over a replay store of ``store_kind``; a test meeting a
+    held write lock passes ``busy_timeout=0``."""
+
     toy = Toy(migrated_database(tmp_path / f"{form}.sqlite3"))
     signer = authority or authority_signer()
     outcomes: list[SignedOutcome] = []
     core = make_core(
-        toy, caller=caller_signer, authority=signer, outcomes=outcomes, sleep=sleep, wrap_store=wrap_store
+        toy, caller=caller_signer, authority=signer, outcomes=outcomes, sleep=sleep, wrap_store=wrap_store,
+        store_kind=store_kind, busy_timeout=busy_timeout, trust=trust,
     )
     return World(toy=toy, core=core, app=build_app(toy, core, form=form), caller_signer=caller_signer, authority=signer, outcomes=outcomes)
