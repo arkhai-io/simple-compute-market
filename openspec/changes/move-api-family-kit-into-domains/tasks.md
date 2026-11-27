@@ -260,10 +260,11 @@ Delivers D10, D12, the reason D7 states, and D4's consequence for the roadmap. T
       `derive-buyer-settlement-inputs` — the collaborators section 5 adds to
       the Alkahest buyer stage (D12). Verify: `change-workflow check index`.
 - [ ] 6.7 The index's unowned work for the kit goal: add the payments adapter
-      the VM and bare-metal buyers each construct in near-identical lines;
-      replace the row saying the API-credit lane has never run against the
-      family kit with the run that did, recorded in `compose-api-family-kit`'s
-      row (D12). Verify: `change-workflow check index`.
+      the VM and bare-metal buyers each construct in near-identical lines
+      (D12). The row saying the API-credit lane has never run against the
+      family kit, which D12 also names, left the index with
+      `compose-api-family-kit`'s archive cleanup, whose row records the run.
+      Verify: `change-workflow check index`.
 - [ ] 6.8 Verification. `make check-doc-citations
       CHANGE=move-api-family-kit-into-domains`; `change-workflow run
       pre-commit move-api-family-kit-into-domains`.
