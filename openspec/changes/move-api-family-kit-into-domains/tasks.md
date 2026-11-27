@@ -208,6 +208,20 @@ companions that cite the path, and the active changes' documents that cite it.
       move-api-family-kit-into-domains --base origin/dev` passes: the
       section changes documents only, so only its closing checks ran.
       Nothing is owed by validation.
+      *Note (round 1 triage, 02 F1):* D1, the proposal's "What Changes"
+      bullet and "Knowledge to promote" line, task 7.9 and the promotion
+      record's D1 row named `ARCHITECTURE.md` as stating the placement
+      rule, which section 2 states only in `package-layers.md`, "Scope".
+      They now name that section as the rule's home and
+      `ARCHITECTURE.md`, "Family kits", as the description of the api
+      family at `domains/api`. Documents only, so no suite runs; `change-workflow
+      run pre-commit move-api-family-kit-into-domains --base origin/dev`
+      passes. The fresh-context check found the edits true against both
+      documents and no claim left; its three wording corrections ("no
+      placement rule", this note's phrasing, the promotion line's
+      separators) were made. It also noted that the proposal's D1 line
+      omits `openspec/specs/api-credits/spec.md`, which the promotion
+      record names; closeout's step 7.9 reads the record, so it is left.
 
 ## 3. The authority refuses a pinned key's consumption at another amount
 
@@ -388,8 +402,9 @@ Delivers D10, D12, the reason D7 states, and D4's consequence for the roadmap. T
       validation gathered, its result on the four lanes, and that
       `e2e_credits_deal` and `e2e_inference_deal` exercise the moved family.
 - [ ] 7.9 **Promotion.** Confirm what sections 2 and 6 wrote —
-      `docs/guidance/repository/package-layers.md`, "Scope";
-      `docs/development/ARCHITECTURE.md`, "Family kits";
+      `docs/guidance/repository/package-layers.md`, "Scope", the rule;
+      `docs/development/ARCHITECTURE.md`, "Family kits", its description of
+      the api family at `domains/api`;
       `docs/development/ROADMAP.md`'s inference goal;
       `openspec/specs/inference/architecture.md`, "Role composition over the
       family kit" — and write `openspec/specs/api-family/architecture.md`:
@@ -412,7 +427,7 @@ Delivers D10, D12, the reason D7 states, and D4's consequence for the roadmap. T
 
 | Accepted decision | Permanent location |
 |---|---|
-| D1: a family kit lives under its family's directory | `docs/guidance/repository/package-layers.md`, "Scope"; `docs/development/ARCHITECTURE.md`, "Family kits"; `openspec/specs/api-family/spec.md`; `openspec/specs/market-composition/spec.md`; `openspec/specs/api-credits/spec.md` |
+| D1: a family kit lives under its family's directory | `docs/guidance/repository/package-layers.md`, "Scope", the rule's home; `docs/development/ARCHITECTURE.md`, "Family kits", which describes the api family at `domains/api` and states no placement rule; `openspec/specs/api-family/spec.md`; `openspec/specs/market-composition/spec.md`; `openspec/specs/api-credits/spec.md` |
 | D4: the authority refuses a pinned key's consumption at another amount | `openspec/specs/api-family/spec.md`, "A key is scoped to its first grant"; `openspec/specs/api-family/architecture.md`, "The gate" |
 | D5: the selling library takes the stage-event emitter by injection | `openspec/specs/api-family/architecture.md`, "Current limits" |
 | D7: the selling library assembles the settlement composition; inference composes no dispute policy | `openspec/specs/api-family/architecture.md`, "Mechanism stages"; `openspec/specs/inference/architecture.md`, "Role composition over the family kit" |

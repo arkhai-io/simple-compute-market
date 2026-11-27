@@ -40,8 +40,8 @@ owns the corrections.
   `domains/api` and each distribution directly beneath it. Distribution and
   import names do not change.
 - Restore the placement rule: `read_path` reads a family only under
-  `domains/`, and `package-layers.md` and `ARCHITECTURE.md` say a family kit
-  lives under its family's directory.
+  `domains/`, and `package-layers.md`, "Scope", says a family kit lives under
+  its family's directory; `ARCHITECTURE.md` describes the api family there.
 - Follow the move wherever the path is written: the Makefile recipes and
   aggregates, the continuous-integration job, the release components manifest
   and the published-packages table, tests that reach the family by path, and
@@ -127,9 +127,10 @@ None.
 ### Knowledge to promote
 
 - D1: a family kit lives under its family's directory and `kit/` holds no
-  specialization — `docs/guidance/repository/package-layers.md`,
-  `docs/development/ARCHITECTURE.md`, `openspec/specs/api-family/spec.md`,
-  `openspec/specs/market-composition/spec.md`.
+  specialization — `docs/guidance/repository/package-layers.md`, "Scope";
+  `openspec/specs/api-family/spec.md`;
+  `openspec/specs/market-composition/spec.md`. `docs/development/ARCHITECTURE.md`,
+  "Family kits", describes the api family at `domains/api`.
 - D2: no permanent destination — the modules do not move;
   `move-escrow-into-alkahest` records its own outcome.
 - D3: no permanent destination — nothing changes.

@@ -35,9 +35,10 @@ it has today under a new parent. Distribution names and import names do not
 change. The family's `directory` in `docs/development/ARCHITECTURE.toml` names
 `domains/api`, `read_path` returns to reading a family only under `domains/`,
 and the test asserting the loosened reading is removed.
-`package-layers.md` and `ARCHITECTURE.md` state the rule again: a package
-several domains of a family share goes under the family's directory, and
-`kit/` holds no specialization.
+`package-layers.md`, "Scope", states the rule again: a package several
+domains of a family share goes under the family's directory, and `kit/` holds
+no specialization. `ARCHITECTURE.md`, "Family kits", describes the api
+family at `domains/api` and states no placement rule.
 
 This supersedes the placement recorded when commit `e87f744f3` put the family
 under `kit/`, whose reason was that a family is not a listing schema a buyer shops for. That
