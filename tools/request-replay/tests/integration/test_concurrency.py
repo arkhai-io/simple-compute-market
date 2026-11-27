@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 
-from request_replay import Admission, Dispatch, InProgress, Resolution, SqliteReplayStore
+from request_replay import Admission, Dispatch, InProgress, Resolution, SqliteReplayStore, StoreUnavailable
 from request_replay.sqlalchemy_store import SqlAlchemyReplayStore
 
 from tests.support import POLICY, ManualClock, entry, guard
@@ -77,8 +77,9 @@ def test_a_sqlite_step_waits_for_the_write_lock_before_it_reads(database: Path) 
     holder.execute("BEGIN IMMEDIATE")
     store = SqliteReplayStore(lambda: sqlite3.connect(database, timeout=0))
     try:
-        with pytest.raises(sqlite3.OperationalError, match="locked"):
+        with pytest.raises(StoreUnavailable, match="locked") as refused:
             guard(store, ManualClock()).admit(entry(Resolution.RERUN))
+        assert isinstance(refused.value.__cause__, sqlite3.OperationalError)
     finally:
         holder.execute("ROLLBACK")
         holder.close()
@@ -107,7 +108,7 @@ def test_a_claim_whose_conflicting_row_vanished_claims_again(database: Path) -> 
         store = VanishingConflicts(engine, conflicts=1)
 
         assert isinstance(guard(store, ManualClock()).admit(entry(Resolution.RERUN)), Dispatch)
-        with pytest.raises(RuntimeError, match="kept changing"):
+        with pytest.raises(StoreUnavailable, match="kept changing"):
             guard(VanishingConflicts(engine, conflicts=3), ManualClock()).admit(
                 entry(Resolution.RERUN, request_id="request-2")
             )

@@ -6,6 +6,12 @@ running it, and, for a recorded request, the response that attempt returned. A
 row whose expiry has passed is absent to every step but the sweep: it answers
 nothing and refuses nothing, and a reservation under its key replaces it.
 
+A recorded row with no response is in progress while its lease is held. Once the
+lease has ended, a retry concludes the attempt: its lease's end is cleared and
+its owner kept, so the row is concluded -- no lease, an owner, no response -- and
+the attempt's own later record still lands. Recording clears the owner, and only
+a re-run row is ever released, so no other row has that shape.
+
 Each method is one transaction. Instants are integer seconds on the caller's time
 source; the store reads no clock.
 """
@@ -71,6 +77,27 @@ class Row:
     def lease_held(self, now: int) -> bool:
         return self.lease_until is not None and self.lease_until > now
 
+    @property
+    def concluded(self) -> bool:
+        """Whether a retry concluded this recorded row's ended attempt."""
+
+        return (
+            self.resolution is Resolution.RECORDED
+            and self.outcome is None
+            and self.lease_until is None
+            and self.lease_owner is not None
+        )
+
+
+class StoreUnavailable(Exception):
+    """A store step failed, so the caller may rely on nothing it did.
+
+    The guard raises it for whatever a store raises -- a lock held past its
+    timeout, a lost connection -- so a caller answers every such failure one way:
+    nothing about the request is concluded, and the caller tries the same request
+    again.
+    """
+
 
 class ReplayStore(Protocol):
     """The atomic steps a replay guard takes on its rows."""
@@ -104,8 +131,21 @@ class ReplayStore(Protocol):
         """
         ...
 
+    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+        """Conclude a live recorded row's ended attempt, and answer the row after.
+
+        In one writing transaction: where the row has no response and its lease
+        has ended at ``now``, clear the lease's end and keep its owner; then read the
+        row. Answers the live row as it then stands -- concluded, or recorded in the
+        meantime -- or ``None`` when no live row holds the key. Under SQLite the
+        write takes the database's one write lock, so the answer waits for any
+        transaction the attempt still holds on that database; a database with
+        finer locks, PostgreSQL among them, gives no such order.
+        """
+        ...
+
     def record(self, principal: str, request_id: str, owner: str, outcome: Outcome) -> bool:
-        """Record ``owner``'s response and clear its lease."""
+        """Record ``owner``'s response and clear its lease, concluded or not."""
         ...
 
     def release(self, principal: str, request_id: str, owner: str) -> bool:

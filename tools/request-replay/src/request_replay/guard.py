@@ -11,12 +11,18 @@ answers what to do with it:
 - :class:`InProgress` -- an attempt holds the request's lease;
 - :class:`ChangedReuse` -- the key was reserved with a different hash;
 - :class:`OutcomeUnknown` -- a recorded request's attempt ended without
-  recording a response, so whether it applied is not known here;
+  recording a response, so whether it applied is not known here. It is answered
+  only once a store write has concluded the attempt: where the attempt writes the
+  same SQLite database, that write waits for any transaction the attempt still
+  holds there;
 - :class:`Expired` -- a recorded request past its retention, or whose origin
   is too old for a first use and whose row is gone.
 
 Once its handler returns or raises, an attempt is completed: a recorded request's
 response is recorded, a re-run request's lease released.
+
+A store step that fails, however it fails, raises :class:`StoreUnavailable`: the
+step concluded nothing, so the caller may only try the same request again.
 """
 
 from __future__ import annotations
@@ -25,10 +31,13 @@ import logging
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Union
+from typing import ParamSpec, TypeVar, Union
 
 from request_replay.policy import Policy, Resolution
-from request_replay.store import Entry, Outcome, ReplayStore, Row
+from request_replay.store import Entry, Outcome, ReplayStore, Row, StoreUnavailable
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +130,11 @@ class RequestReplay:
         ):
             # Only a row answers a recorded retry: with none it may already have
             # applied, and dispatching it again could apply it twice.
-            row = self._store.get(entry.principal, entry.request_id, now=now)
+            row = self._step(self._store.get, entry.principal, entry.request_id, now=now)
             return Expired() if row is None else self._resolve(entry, row, now)
         owner = self._new_owner()
-        held = self._store.claim(
+        held = self._step(
+            self._store.claim,
             entry,
             now=now,
             expires_at=self._policy.expires_at(entry.resolution, entry.origin, lease_until),
@@ -147,7 +157,8 @@ class RequestReplay:
 
         now = self._clock()
         lease_until = now + self._policy.lease_seconds
-        held = self._store.renew(
+        held = self._step(
+            self._store.renew,
             attempt.principal,
             attempt.request_id,
             attempt.owner,
@@ -160,13 +171,13 @@ class RequestReplay:
         """End an attempt: record a recorded request's response, release a re-run one."""
 
         if attempt.resolution is Resolution.RECORDED:
-            done = self._store.record(attempt.principal, attempt.request_id, attempt.owner, outcome)
+            done = self._step(self._store.record, attempt.principal, attempt.request_id, attempt.owner, outcome)
         else:
-            done = self._store.release(attempt.principal, attempt.request_id, attempt.owner)
+            done = self._step(self._store.release, attempt.principal, attempt.request_id, attempt.owner)
         if not done:
             # The row left this attempt: swept after its lease ended, or reclaimed
-            # by a re-run retry. A recorded retry since was told the outcome is
-            # unknown, or will be told the response expired.
+            # by a re-run retry; a recorded retry since will be told the response
+            # expired.
             logger.warning(
                 "request %s of %s was not held by its attempt when it completed",
                 attempt.request_id,
@@ -181,7 +192,7 @@ class RequestReplay:
         now = self._clock()
         total = 0
         while True:
-            deleted = self._store.sweep_batch(now=now, limit=batch_size)
+            deleted = self._step(self._store.sweep_batch, now=now, limit=batch_size)
             total += deleted
             if deleted < batch_size:
                 return total
@@ -194,12 +205,26 @@ class RequestReplay:
                 return Expired()
             if row.outcome is not None:
                 return Answered(row.outcome)
-            return InProgress() if row.lease_held(now) else OutcomeUnknown()
+            if row.lease_held(now):
+                return InProgress()
+            # What a read found is not enough to say the outcome is unknown: under
+            # SQLite a plain read passes the write lock an attempt's own
+            # transaction may still hold. The concluding write waits for that lock.
+            after = self._step(self._store.conclude, entry.principal, entry.request_id, now=now)
+            if after is None:
+                # Gone since the read: another process, its clock later, swept it.
+                return Expired()
+            if after.outcome is not None:
+                return Answered(after.outcome)
+            # Neither recorded nor concluded: its lease is held on the store's
+            # terms, renewed by a process whose clock is behind this one's.
+            return OutcomeUnknown() if after.concluded else InProgress()
         if row.lease_held(now):
             return InProgress()
         owner = self._new_owner()
         lease_until = now + self._policy.lease_seconds
-        reclaimed = self._store.reclaim(
+        reclaimed = self._step(
+            self._store.reclaim,
             entry,
             now=now,
             expires_at=self._policy.expires_at(entry.resolution, entry.origin, lease_until),
@@ -208,6 +233,15 @@ class RequestReplay:
         )
         # Another retry reclaimed the lease between the read and the update.
         return Dispatch(self._attempt(entry, owner, lease_until), exact_retry=True) if reclaimed else InProgress()
+
+    @staticmethod
+    def _step(step: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        """Run one store step; any failure of it is :class:`StoreUnavailable`."""
+
+        try:
+            return step(*args, **kwargs)
+        except Exception as error:
+            raise StoreUnavailable(f"the replay store failed: {error}") from error
 
     @staticmethod
     def _attempt(entry: Entry, owner: str, lease_until: int) -> Attempt:

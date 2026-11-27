@@ -91,6 +91,18 @@ class SqliteReplayStore:
             )
             return cursor.rowcount == 1
 
+    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+        with self._transaction() as connection:
+            connection.execute(
+                f"UPDATE {self._table} SET lease_until = NULL "
+                "WHERE principal = ? AND request_id = ? AND resolution = ? "
+                "AND outcome_status IS NULL AND lease_until <= ? "
+                "AND expires_at > ?",
+                (principal, request_id, Resolution.RECORDED.value, now, now),
+            )
+            row = self._row(connection, principal, request_id)
+        return row if row is not None and row.expires_at > now else None
+
     def record(self, principal: str, request_id: str, owner: str, outcome: Outcome) -> bool:
         with self._transaction() as connection:
             cursor = connection.execute(

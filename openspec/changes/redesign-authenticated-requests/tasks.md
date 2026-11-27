@@ -969,7 +969,7 @@ retry is resolved"). Touches `tools/request-replay` (`store.py`, `guard.py`,
 `sqlite_store.py`, `sqlalchemy_store.py`, `tests/support.py`, `tests/rules.py`,
 `tests/integration/`). The component is new in this change, so nothing is bumped.
 
-- [ ] 5b.1 Add the concluding step to the store contract and both stores. One
+- [x] 5b.1 Add the concluding step to the store contract and both stores. One
       conditional write marks a `RECORDED` row concluded where it has no outcome and its
       lease has ended. It keeps the row's owner, so the attempt's own later `complete`
       still records its outcome. `RequestReplay.admit` answers `OutcomeUnknown` only when
@@ -981,7 +981,36 @@ retry is resolved"). Touches `tools/request-replay` (`store.py`, `guard.py`,
       - the attempt's later `complete` records, and a later retry receives the outcome;
       - a renewal after conclusion revives nothing;
       - a store refusing the concluding write surfaces store-unavailable.
-- [ ] 5b.2 Prove the ordering against a real database. Library integration on both
+
+      `ReplayStore.conclude(principal, request_id, *, now)`: one transaction that
+      clears a live `RECORDED` row's lease end where it has no outcome and its lease
+      has ended, keeping the owner, then reads the row — `None` when no live row holds
+      the key. A concluded row is no lease end, an owner, no outcome; no other row has
+      that shape, so it needs no column. `SqliteReplayStore` runs it under `BEGIN
+      IMMEDIATE`; `SqlAlchemyReplayStore` as an `UPDATE` then a read in one
+      transaction, the update taking SQLite's write lock even when it matches nothing
+      (5b.2's second test). `RequestReplay._resolve` answers a `RECORDED` row with no
+      outcome and an ended lease only from `conclude`'s row: `Answered` if recorded
+      meanwhile, `OutcomeUnknown` only if that row is concluded (`Row.concluded`),
+      `Expired` if gone, else `InProgress`. `StoreUnavailable` (exported) is raised,
+      chained, for any failure of any store step in `admit`, `renew`, `complete` and
+      `sweep`. Rule cases in `tests/rules.py`, unit against the in-memory double
+      (which gains `conclude`) and library integration on both stores over real
+      SQLite files: the first three cases above (the conclusion keeping the owner
+      and a second retry still `OutcomeUnknown`), and an outcome recorded between
+      the retry's read and its concluding write (a test adapter recording first)
+      answered `Answered`; passed. Unit, `tests/unit/test_store_failures.py`,
+      against the double behind an adapter failing the named step: the concluding
+      write refused surfacing `StoreUnavailable` chained to the store's error with
+      the row not concluded, and every other step refused (`claim`, `get`,
+      `release`, `record`, `renew`, `sweep_batch`, `reclaim`) surfacing it, each
+      chained; passed. The task asked for the refused concluding write as a rule case
+      on both stores too; the adapter raises before any store is reached, so a real
+      store adds nothing there, and a real lock refusing the concluding write is
+      5b.2's SQLAlchemy cases. Existing integration tests now expect `StoreUnavailable`:
+      two chained to the driver's error, one ("kept changing") to the SQLAlchemy
+      store's own `RuntimeError`.
+- [x] 5b.2 Prove the ordering against a real database. Library integration on both
       stores over one SQLite file the "handler" also writes. The handler holds its own
       write transaction past its lease; its exact retry is not answered `OutcomeUnknown`
       while that transaction is open. It is answered store-unavailable, or waits, as the
@@ -989,9 +1018,77 @@ retry is resolved"). Touches `tools/request-replay` (`store.py`, `guard.py`,
       attempt. A read then shows the handler's write, and a replacement write is not
       overwritten. Cover the SQLAlchemy store's retry older than the skew, which read
       plainly before (D7's 61 F1 note).
-- [ ] 5b.3 Verify the section: `make test-request-replay` (unit and library
+      Library integration, `tests/integration/test_conclusion_order.py`, on both
+      stores, each meeting the held lock with no busy timeout, for a retry within the
+      skew and one older than it: the handler's connection holds `BEGIN IMMEDIATE`
+      and an insert past the lease; the retry raises `StoreUnavailable` and the row's
+      lease end is untouched; after the handler commits, the retry is
+      `OutcomeUnknown`, a read shows the handler's write, the caller's replacement
+      write stands after the attempt's late `complete`, and a later retry receives
+      the recorded outcome; passed (4 cases). Which step meets the lock: the claim
+      within the skew on both stores, the `sqlite3` store's `get` (under `BEGIN
+      IMMEDIATE`) older than it, and only on the SQLAlchemy store older than the
+      skew the concluding write itself, after a plain read. The replacement check
+      shows that the late `complete` touches no domain row; the handler writes once,
+      so nothing of its could overwrite it. A second test, both stores: a concluded
+      attempt's retry older than the skew is still refused while a transaction holds
+      the lock, then `OutcomeUnknown`; passed (2 cases). Only on the SQLAlchemy store
+      is that refusal the matchless concluding write's; the `sqlite3` store's read
+      already takes the lock.
+      `change-workflow run test-before` at `f4af51435` on a scratch copy expecting any
+      exception (so it imports nothing new): only the SQLAlchemy store's retry older
+      than the skew fails there, answered `OutcomeUnknown` from the read (`DID NOT
+      RAISE`); the `sqlite3` store already ordered it, and the SQLAlchemy claim met
+      the lock. The scratch copy was deleted.
+- [x] 5b.3 Verify the section: `make test-request-replay` (unit and library
       integration).
       End-to-end: none — nothing deployed uses it until section 16.
+      `make test-request-replay`: mypy strict clean; 73 unit and 91
+      library-integration tests passed. `make -C kit/authenticated-requests test`
+      against the rebuilt wheel: 146 passed. End-to-end confirmed: none.
+
+Notes (section 5b):
+
+- For section 5c: catch `StoreUnavailable` from `RequestReplay.admit` for the 503;
+  `complete` raises it too, which `AdmissionCore.finish` already logs and survives.
+  A store wrapper in a test refuses a step by raising anything — the guard wraps it.
+- The README's admission table, its stores section, the renewal module's docstring
+  and its loss log now say a retry concludes the attempt before `OutcomeUnknown`, and
+  that a handler holding its own SQLite database's write lock loses its lease but
+  keeps the guarantee.
+- For the round's review and the authority sections: the ordering holds on SQLite
+  alone, where the concluding write waits for the database's one write lock. On
+  PostgreSQL, which the stores and the DDL support and the registry may run, a
+  handler's transaction on its own tables does not conflict with the replay row, so
+  `OutcomeUnknown` may precede its commit. D7 states the guarantee for SQLite, but
+  the delta's requirement ("Each route declares how an exact retry is resolved")
+  says it without that scope; the docstrings and README here say SQLite. No
+  authority runs a `RECORDED` route on PostgreSQL in this change's tests; whether the
+  requirement is narrowed or PostgreSQL needs its own ordering is the owner's.
+- `RequestReplay._step` maps every exception a store step raises to
+  `StoreUnavailable`, a store's own defect included, as the delta's "a failure of the
+  authority's replay store" reads; the caller retries the same request.
+- Fixed from the fresh-context check: the ordering claims, stated for any database,
+  now name SQLite; `OutcomeUnknown` after `conclude` required no concluded row
+  (`Row.concluded` now); an unreachable re-raise in `_step` and a redundant
+  `lease_until IS NOT NULL` were removed; the conclude/record race, a refused
+  `record`, the chained cause in the refusal cases and a non-matching concluding
+  write against a held lock were untested; the refusal cases ran at both levels
+  though the adapter never reaches a store (now unit only, the adapter in
+  `tests/support.py`); the ordering test left connections open and its comment
+  misdescribed the `sqlite3` store's read; the renewal's loss log said a retry is
+  told the outcome is unknown where SQLite's lock orders it. Declined: a
+  `MagicMock(wraps=...)` in place of the adapters, which `testing-python.md` names
+  for injected collaborators; the package's existing tests interleave and refuse
+  steps through small adapters (`CompetingFirst`, `VanishingConflicts`), which
+  `concurrency-tests.md` admits, and these follow them.
+- A second fresh-context check found the second ordering test's claim and comment
+  stated for both stores where only the SQLAlchemy store's concluding write meets the
+  lock (reworded), the two branches after `conclude` reachable only across processes
+  uncommented (each now names its case), and wording nits; fixed. It repeated the
+  PostgreSQL scope and the broad `StoreUnavailable` mapping, both recorded above for
+  the owner. The section's "Touches" line omits the README, `renewal.py`,
+  `__init__.py` and `tests/unit/`, which it also changed.
 
 ## 5c. The admission core amended
 

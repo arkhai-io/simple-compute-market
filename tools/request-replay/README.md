@@ -44,13 +44,29 @@ The caller admits each request as an `Entry`:
 | `Answered(outcome)` | An exact retry of a `RECORDED` request whose response is recorded | Answers the recorded status, headers and body |
 | `InProgress()` | An attempt holds the lease | Refuses the retry as in progress |
 | `ChangedReuse()` | The key is held under another hash | Refuses the request |
-| `OutcomeUnknown()` | A `RECORDED` attempt's lease ended with no response recorded | Refuses the retry; the sender reads current state before writing again under a new ID |
+| `OutcomeUnknown()` | A `RECORDED` attempt's lease ended with no response recorded, and the retry concluded it | Refuses the retry; the sender reads current state before writing again under a new ID |
 | `Expired()` | A `RECORDED` retry whose origin is older than the retention, or older than the skew with no row | Refuses the retry as expired |
 
 A `RECORDED` request is dispatched once: its lease is never reclaimed. A `RERUN`
 request's ended lease is reclaimed by one retry. `complete` records a `RECORDED`
 attempt's `Outcome` and clears its lease; for a `RERUN` attempt it only clears the
 lease, recording nothing.
+
+A retry that finds a `RECORDED` attempt's lease ended with no response first
+concludes the attempt, by one conditional write in the store, and only then is
+answered `OutcomeUnknown`; a retry finding it already concluded is answered the same.
+Where the handler writes the same SQLite database, the write waits for SQLite's one
+write lock, so the answer cannot precede a transaction the handler still holds: a
+caller's read after it sees whatever that transaction wrote. A database with finer
+locks, PostgreSQL among them, gives no such order. Concluding keeps
+the attempt's owner, so its handler's later `complete` still records the response, and
+a later retry receives it; a renewal after conclusion revives nothing.
+
+Every store step that fails — refused, timed out on a lock, its connection lost —
+raises `StoreUnavailable`, chained to what the store raised, from `admit`, `renew`,
+`complete` and `sweep` alike. It concludes nothing about the request: its caller tries
+the same request again, never reading state and replacing it, since an attempt may
+still be running.
 
 `renewing(replay, attempt)` is an async context manager renewing the attempt's lease
 every third of its period while its body runs, and stopping when the body returns or
@@ -61,9 +77,12 @@ one place and stops it, with `await renewal.stop()`, in another. Hold a `RECORDE
 attempt's handler inside one, so a lease ends only when its process is gone and
 `OutcomeUnknown` means the attempt has ended — unless renewal cannot write for a whole
 lease period: a handler blocking the event loop that long, or a store refusing every
-renewal that long (under SQLite, a handler holding the write lock). The lease then
-ends while the handler still runs; renewal logs that once as an error naming the
-request and stops, and the handler is not stopped. `replay.renew(attempt)` answers
+renewal that long. The lease then ends while the handler still runs; renewal logs that
+once as an error naming the request and stops, and the handler is not stopped. A
+handler holding its own SQLite database's write lock past its lease loses its lease
+the same way, but the guarantee holds for it: its retry's concluding write waits for
+that lock, so the retry is answered `StoreUnavailable` or, once the handler commits,
+`OutcomeUnknown` after its write. `replay.renew(attempt)` answers
 when the lease now ends, or `None` when the attempt does not hold it, and
 `replay.now()` is the time source's instant leases are written on.
 
@@ -103,7 +122,8 @@ the `CREATE TABLE` and expiry-index statements for `sqlite` and `postgresql`, fo
 caller's own migrations to run. The default table is `request_replay`. A row holds the
 key, the hash, the resolution, the origin, the expiry, the lease's end and owner, and
 for a recorded request the response's status, headers as a JSON array of pairs, and
-body bytes. A principal is at most 512 characters, a request ID and a request hash
+body bytes. A concluded recorded row is one with no lease's end, an owner, and no
+response. A principal is at most 512 characters, a request ID and a request hash
 each at most 128, and a lease owner at most 64; PostgreSQL enforces these limits and
 SQLite does not. Another store implements `ReplayStore`, each method one transaction.
 

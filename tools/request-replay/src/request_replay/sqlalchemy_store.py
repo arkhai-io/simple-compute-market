@@ -147,6 +147,27 @@ class SqlAlchemyReplayStore:
         )
         return self._changed_one(statement)
 
+    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+        t = self._table
+        key = (t.c.principal == principal) & (t.c.request_id == request_id)
+        statement = (
+            update(t)
+            .where(
+                key
+                & (t.c.resolution == Resolution.RECORDED.value)
+                & t.c.outcome_status.is_(None)
+                & (t.c.lease_until <= now)
+                & (t.c.expires_at > now)
+            )
+            .values(lease_until=None)
+        )
+        # Under SQLite the update takes the database's write lock whether or not it
+        # matches, and the read after it is in the same transaction, behind it.
+        with self._engine.begin() as connection:
+            connection.execute(statement)
+            row = self._row(connection, principal, request_id)
+        return row if row is not None and row.expires_at > now else None
+
     def record(self, principal: str, request_id: str, owner: str, outcome: Outcome) -> bool:
         t = self._table
         statement = (

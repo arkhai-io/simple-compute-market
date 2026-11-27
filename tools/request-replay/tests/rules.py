@@ -17,7 +17,7 @@ from request_replay import (
     Resolution,
 )
 
-from tests.support import OUTCOME, POLICY, START, ManualClock, entry, guard
+from tests.support import OUTCOME, POLICY, START, ManualClock, RecordingFirst, entry, guard
 
 RERUN = Resolution.RERUN
 RECORDED = Resolution.RECORDED
@@ -231,3 +231,56 @@ def test_completing_an_attempt_that_lost_its_row_changes_nothing(store) -> None:
     replay.complete(first.attempt, OUTCOME)
 
     assert store.get("scheme:caller-1", "request-1", now=clock()).lease_owner == second.attempt.owner
+
+
+def test_a_retry_after_the_lease_ends_concludes_the_attempt_keeping_its_owner(store) -> None:
+    clock = ManualClock()
+    replay = guard(store, clock)
+    first = replay.admit(entry(RECORDED))
+    assert isinstance(first, Dispatch)
+
+    clock.advance(LEASE)
+    assert replay.admit(entry(RECORDED)) == OutcomeUnknown()
+
+    row = store.get("scheme:caller-1", "request-1", now=clock())
+    assert (row.lease_until, row.lease_owner, row.outcome) == (None, first.attempt.owner, None)
+    assert replay.admit(entry(RECORDED)) == OutcomeUnknown()
+
+
+def test_a_concluded_attempts_late_outcome_is_recorded_and_answers_a_later_retry(store) -> None:
+    clock = ManualClock()
+    replay = guard(store, clock)
+    first = replay.admit(entry(RECORDED))
+    assert isinstance(first, Dispatch)
+    clock.advance(LEASE)
+    assert replay.admit(entry(RECORDED)) == OutcomeUnknown()
+
+    replay.complete(first.attempt, OUTCOME)
+
+    assert replay.admit(entry(RECORDED)) == Answered(OUTCOME)
+
+
+def test_a_renewal_after_conclusion_revives_nothing(store) -> None:
+    clock = ManualClock()
+    replay = guard(store, clock)
+    first = replay.admit(entry(RECORDED))
+    assert isinstance(first, Dispatch)
+    clock.advance(LEASE)
+    assert replay.admit(entry(RECORDED)) == OutcomeUnknown()
+
+    assert replay.renew(first.attempt) is None
+    assert store.get("scheme:caller-1", "request-1", now=clock()).lease_until is None
+    assert replay.admit(entry(RECORDED)) == OutcomeUnknown()
+
+
+def test_an_outcome_recorded_before_the_concluding_write_is_answered(store) -> None:
+    clock = ManualClock()
+    replay = guard(store, clock)
+    first = replay.admit(entry(RECORDED))
+    assert isinstance(first, Dispatch)
+    clock.advance(LEASE)
+
+    racing = RecordingFirst(store, lambda: replay.complete(first.attempt, OUTCOME))
+
+    assert guard(racing, clock).admit(entry(RECORDED)) == Answered(OUTCOME)
+    assert racing.recorded

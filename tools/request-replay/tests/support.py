@@ -1,8 +1,13 @@
-"""Test doubles: a clock a test moves, an in-memory store, and entry builders."""
+"""Test doubles: a clock, an in-memory store, store adapters, and entry builders.
+
+The clock is moved by the test; the adapters refuse a store step or run another
+party's step inside it.
+"""
 
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable
 from dataclasses import replace
 
 from request_replay import Entry, Outcome, Policy, RequestReplay, Resolution, Row
@@ -111,6 +116,20 @@ class MemoryStore:
         )
         return True
 
+    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+        row = self.rows.get((principal, request_id))
+        if row is None or row.expires_at <= now:
+            return None
+        if (
+            row.resolution is Resolution.RECORDED
+            and row.outcome is None
+            and row.lease_until is not None
+            and row.lease_until <= now
+        ):
+            row = replace(row, lease_until=None)
+            self.rows[(principal, request_id)] = row
+        return row
+
     def record(self, principal: str, request_id: str, owner: str, outcome: Outcome) -> bool:
         row = self.rows.get((principal, request_id))
         if row is None or row.lease_owner != owner:
@@ -134,3 +153,42 @@ class MemoryStore:
         for _, key in expired[:limit]:
             del self.rows[key]
         return min(len(expired), limit)
+
+
+class Refusing:
+    """A store whose named steps fail, as a store refusing or timing out does."""
+
+    def __init__(self, store: object, *steps: str) -> None:
+        self._store = store
+        self._steps = steps
+
+    def __getattr__(self, name: str) -> object:
+        if name in self._steps:
+
+            def refused(*args: object, **kwargs: object) -> object:
+                raise ConnectionError("database is locked")
+
+            return refused
+        return getattr(self._store, name)
+
+
+class RecordingFirst:
+    """A store whose concluding step lets the attempt record its outcome first, as
+    when the handler returns between the retry's read and its write."""
+
+    def __init__(self, store: object, record: Callable[[], None]) -> None:
+        self._store = store
+        self._record = record
+        self.recorded = False
+
+    def __getattr__(self, name: str) -> object:
+        target = getattr(self._store, name)
+        if name != "conclude":
+            return target
+
+        def recorded_first(*args: object, **kwargs: object) -> object:
+            self._record()
+            self.recorded = True
+            return target(*args, **kwargs)
+
+        return recorded_first

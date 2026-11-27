@@ -1,15 +1,15 @@
 """Holding an attempt's lease for as long as its handler runs.
 
 A recorded request is never dispatched twice, so a retry that finds its lease
-ended is told the outcome is unknown, and its caller reads current state before
-writing again. That answer is true only if the attempt has ended: a handler still
-running past a fixed lease could commit after the caller's read. So while a
-handler runs, its lease is renewed every third of the period, and an attempt
-loses it only when its process is gone or cannot renew it for a whole period: a
-handler that blocks the event loop that long, or a store that refuses every
-renewal that long -- under SQLite, a handler of its own holding the write lock.
-Such a loss is logged as an error naming the request, since a retry is then told
-the outcome is unknown while the attempt can still commit.
+ended concludes the attempt and is told the outcome is unknown, and its caller
+reads current state before writing again. That answer is true only if the attempt
+has ended: a handler still running past a fixed lease could commit after the
+caller's read. So while a handler runs, its lease is renewed every third of the
+period, and an attempt loses it only when its process is gone or cannot renew it
+for a whole period: a handler that blocks the event loop that long, or a store
+that refuses every renewal that long. Such a loss is logged as an error naming the
+request, since a retry may then be told the outcome is unknown while the attempt
+can still commit.
 """
 
 from __future__ import annotations
@@ -107,8 +107,9 @@ class Renewal:
             return
         self._lost = True
         logger.error(
-            "request %s of %s lost its lease while its handler runs: an exact retry is "
-            "answered that its outcome is unknown, though this attempt can still commit",
+            "request %s of %s lost its lease while its handler runs: once its store "
+            "accepts writes, an exact retry is told its outcome is unknown, though a later "
+            "transaction of this attempt can still commit",
             self._attempt.request_id,
             self._attempt.principal,
             exc_info=exc_info,

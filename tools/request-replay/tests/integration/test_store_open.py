@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError as SqlAlchemyOperationalError
 
-from request_replay import Answered, Dispatch, Resolution, SqliteReplayStore
+from request_replay import Answered, Dispatch, Resolution, SqliteReplayStore, StoreUnavailable
 from request_replay.sqlalchemy_store import SqlAlchemyReplayStore
 
 from tests.support import OUTCOME, ManualClock, entry, guard
@@ -49,10 +49,12 @@ def test_a_store_over_a_database_without_its_table_creates_nothing(tmp_path: Pat
         sqlite_store = SqliteReplayStore(lambda: sqlite3.connect(path))
         engine_store = SqlAlchemyReplayStore(engine)
 
-        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        with pytest.raises(StoreUnavailable, match="no such table") as from_sqlite:
             guard(sqlite_store, ManualClock()).admit(entry(Resolution.RERUN))
-        with pytest.raises(SqlAlchemyOperationalError, match="no such table"):
+        with pytest.raises(StoreUnavailable, match="no such table") as from_engine:
             guard(engine_store, ManualClock()).admit(entry(Resolution.RERUN))
+        assert isinstance(from_sqlite.value.__cause__, sqlite3.OperationalError)
+        assert isinstance(from_engine.value.__cause__, SqlAlchemyOperationalError)
     finally:
         engine.dispose()
 

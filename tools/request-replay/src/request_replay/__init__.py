@@ -26,7 +26,7 @@ from request_replay.guard import (
 from request_replay.policy import Policy, Resolution
 from request_replay.renewal import Renewal, renewing
 from request_replay.sqlite_store import SqliteReplayStore
-from request_replay.store import Entry, Outcome, ReplayStore, Row
+from request_replay.store import Entry, Outcome, ReplayStore, Row, StoreUnavailable
 
 __all__ = [
     "DEFAULT_SWEEP_BATCH",
@@ -49,6 +49,7 @@ __all__ = [
     "Resolution",
     "Row",
     "SqliteReplayStore",
+    "StoreUnavailable",
     "renewing",
     "statements",
 ]
