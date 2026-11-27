@@ -53,10 +53,11 @@ owns the corrections.
   the two storefronts repeat; each storefront passes its own resources.
 - The family's pin test replays the inference-label case.
 - The two test modules take their doubles through seams: the Alkahest buyer
-  stage gains optional collaborators for the seller calls, and the file
-  credential store optional `replace` and `fsync` parameters.
+  stage gains optional collaborators for the seller calls and the chain
+  resolver, and the file credential store optional `replace`, `fsync`, and
+  `open` parameters.
 - The authority refuses a pinned key's consumption at an amount other than its
-  pinned charge, as `charge_mismatch`.
+  pinned charge, as `charge_mismatch`, after the refusals of the key itself.
 - The roadmap's inference goal no longer fixes a delivery order.
 
 ## Capabilities
@@ -75,8 +76,8 @@ None.
 
 ## Non-Goals
 
-- No change to a route, a digest, a persisted record, a distribution name, or
-  an import name. The pinned API-credits digests hold byte for byte.
+- No change to a route's path, method, or success shape, a digest, a
+  persisted record, a distribution name, or an import name. The pinned API-credits digests hold byte for byte.
 - No change to API-credits behaviour: its keys are unpinned and are charged
   the amount sent, as before.
 - No move of the Alkahest buyer modules in the family's buying library; that
@@ -98,7 +99,8 @@ None.
   the selling library, the Alkahest buying library, the buying library's
   credential store, and the authority's key service; the API-credits and
   inference storefronts.
-- Tests: the family's suites move with their packages; tests in the
+- Tests: the family's suites move with their packages; the issue-discovery
+  bootstrap test that runs a recipe in the family's directory; tests in the
   API-credits and inference domains that reach the family by path; the pin
   tests; the two test modules.
 - Evidence: each implementation round is validated on the pipeline's four
@@ -168,4 +170,4 @@ None.
 
 ## Status
 
-In design; the design is settled and awaits its review.
+Ready for planning; design review 01 is triaged.

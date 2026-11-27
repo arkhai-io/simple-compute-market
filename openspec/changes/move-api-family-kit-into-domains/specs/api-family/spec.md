@@ -48,7 +48,10 @@ MUST NOT admit a charge on a verification the authority has since refused. The
 authority MUST refuse, uncharged and naming the refusal `charge_mismatch`, a
 `consume` or a batched consume item whose amount differs from the request
 charge pinned on the key's first grant; a key whose first grant pins none MUST
-be charged the amount sent.
+be charged the amount sent. It MUST apply that refusal after the refusals of
+the key itself — unknown, revoked, or out of scope — and before recognising
+an idempotent replay or weighing the balance, and the refusal MUST carry the
+key's balance.
 
 #### Scenario: A key is topped up from another listing
 
@@ -69,8 +72,20 @@ be charged the amount sent.
 
 - **WHEN** a trusted caller consumes two credits from a key whose first grant
   pins a request charge of one
-- **THEN** the authority answers `409 charge_mismatch` and the key's balance
-  is unchanged
+- **THEN** the authority answers `409 charge_mismatch` carrying the key's
+  balance, which is unchanged
+
+#### Scenario: A revoked pinned key is charged another amount
+
+- **WHEN** a trusted caller consumes two credits from a revoked key whose
+  first grant pins a request charge of one
+- **THEN** the authority refuses it as revoked, not as a mismatch
+
+#### Scenario: A request is repeated at another amount
+
+- **WHEN** a trusted caller repeats an applied consume under the same
+  idempotency key at an amount other than the key's pinned charge
+- **THEN** the authority refuses it as `charge_mismatch`, not as a duplicate
 
 #### Scenario: A batch carries one mismatched item
 

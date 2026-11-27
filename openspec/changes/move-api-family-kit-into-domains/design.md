@@ -39,8 +39,8 @@ and the test asserting the loosened reading is removed.
 several domains of a family share goes under the family's directory, and
 `kit/` holds no specialization.
 
-This supersedes the placement recorded when the family was put under `kit/`,
-whose reason was that a family is not a listing schema a buyer shops for. That
+This supersedes the placement recorded when commit `e87f744f3` put the family
+under `kit/`, whose reason was that a family is not a listing schema a buyer shops for. That
 reason distinguishes a family from a domain; it does not make a family
 market-neutral, which is what `kit/` means. The compute family already lives
 at `domains/compute`, and one rule for both families is what the scope rule
@@ -60,9 +60,10 @@ domain tests installs Node and Rust, because the gate ports' tests run with
 the family's.
 
 Rejected: `domains/api/vocabulary` for the vocabulary project.
-`align-package-paths-with-layers` holds that question open for all four
-vocabulary packages; three sit at their scope root today, and placing this
-one there pre-empts neither answer. Rejected: leaving the family under `kit/`
+`align-package-paths-with-layers` holds that question open for every
+vocabulary package. Of the six today, four sit at a scope root under
+`domains/`, one at `domains/vms/domain`, and this one at `kit/api`; placing it
+at its scope root pre-empts neither answer. Rejected: leaving the family under `kit/`
 with an override row per project, which records the divergence instead of
 removing it.
 
@@ -77,7 +78,7 @@ removing it.
   Moving the module into `kit/alkahest` closes a cycle between the two kits.
   An exception row could excuse it, but `package-layers.md` asks that no new
   dependency of an already-excepted shape be added.
-- `escrow_client.py` is not a copy of the VM buyer's module. Eight helper
+- `escrow_client.py` is not a copy of the VM buyer's module. Six of its seven
   functions are the same; the settlement payload builder differs in behaviour,
   since the family's sends the chain name and the VM buyer's does not, and the
   codec class is the family's own.
@@ -87,7 +88,7 @@ removing it.
 - Any change to `kit/alkahest`'s contents takes a version step, because a
   release records its present version.
 
-Rejected: moving the eight shared helpers alone. It removes about a hundred
+Rejected: moving the six shared functions alone. It removes about a hundred
 lines, costs the kit a version step and its dependents a relock, and edits VM
 buyer modules that `move-escrow-into-alkahest` reworks. Rejected here: a
 separate buyer-side Alkahest kit, which avoids the cycle and the version step
@@ -115,7 +116,20 @@ no duplicate and costs the payments kit a version step.
 grant pins a request charge and the amount sent differs from it. The refusal
 is named `charge_mismatch`, a single consume answers `409`, and a batched item
 is an outcome in its place that leaves the other items applied. Nothing is
-debited. A key whose first grant is unpinned is charged the amount sent, so
+debited.
+
+The check runs after the refusals of the key — not found, revoked, out of
+scope — and before the idempotency lookup and the balance check. A caller
+therefore always learns a key refusal first, and a request repeated under its
+idempotency key at another amount is a mismatch, not a duplicate. The refusal
+carries the key's balance, as the revoked refusal does: the caller has already
+shown its scope.
+
+The reason is declared in the contracts package beside the others and outside
+`CONSUME_REFUSALS`, which is the refusals of a key or its credit; the consume
+refusal model's description says so. The gate's own refusal set stays equal to
+that tuple, and the tests holding the two equal, and holding the tuple to the
+API-credits baseline, stand. A key whose first grant is unpinned is charged the amount sent, so
 API credits, every one of whose keys is unpinned, behaves as before and its
 recorded baselines do not move.
 
@@ -123,7 +137,11 @@ The gate needs no change. It already charges a verified key its pinned charge,
 and it answers a consume refusal outside the key refusals it knows as a
 refusal of its own call, `502` naming the reason, leaving the key's balance
 and credit untouched. The conformance trace charges an unpinned key and does
-not change.
+not change. A batched item so refused is one the gate neither resends nor
+charges, so its request was served unpaid; no gate in the tree can send one,
+since the Python gate always sends the pinned charge and the ported gates name
+no scope, which the inference authority refuses first. The family's companion
+says so.
 
 The authority is the one party that holds both the pinned charge and the
 ledger, and the requirement that a key's balance is spent at the charge each
@@ -211,15 +229,17 @@ a factory on the module that defines it and nothing else.
   production code changes.
 - Its test that a scope refusal is reported once and not retried moves to the
   Alkahest buying library's tests, since the behaviour is that library's.
-  `AlkahestBuyerStage` gains two optional keyword collaborators for the seller
-  calls, resolved when called, as its wallet is, so the module-level
-  replacements other tests still make keep working. The test passes a
-  settlement resume whose log, buy configuration, and seller principals are
-  doubles. The chain lookup is left as it is.
+  `AlkahestBuyerStage` gains three optional keyword collaborators — the two
+  seller calls and the chain resolver its settle path uses — each resolved
+  when called and falling back to the module's own function, as its wallet
+  does, so the module-level replacements other tests still make keep working.
+  The test passes a settlement resume whose log, buy configuration, and seller
+  principals are doubles.
 
 `kit/api/buying/tests/unit/test_credentials.py` patches the standard library
-and a collaborator's class. `FileCredentialStore` gains optional `replace` and
-`fsync` parameters, the patch of a method no code under test calls is deleted,
+and a collaborator's class. `FileCredentialStore` gains optional `replace`,
+`fsync`, and `open` parameters, the last for the test of a directory that
+cannot be opened, the patch of a method no code under test calls is deleted,
 and the log failures use a log double or a real unwritable path.
 
 The remaining replacements of library names across the family's and the
@@ -275,7 +295,14 @@ the change lands with the branch that introduces the family.
   `redesign-storefront-stage-events`'s.
 - `sign-multi-language-credits-middleware`'s row notes that the TypeScript and
   Rust gates send no key scope and ignore a pinned charge, though the family's
-  companion says the three gates implement one protocol.
+  companion says the three gates implement one protocol, and that the
+  TypeScript gate answers a refusal it does not know as exhausted credit, so
+  in front of a pinned key it would report every request as out of credit.
+- `keep-buyer-credentials-private`'s row notes the parameters D8 adds to the
+  credential store and the rewrite of its test module, and
+  `derive-buyer-settlement-inputs`'s row the collaborators D8 adds to the
+  Alkahest buyer stage, so each closeout rechecks its design against the
+  signatures it finds.
 - The index's unowned work gains the payments adapter the VM and bare-metal
   buyers each construct in near-identical lines.
 - The unowned row saying the API-credit lane has never run against the family
@@ -311,6 +338,8 @@ validation of its own.
 - An ignored `domains/api` directory of stale environments and caches is in
   the working tree. It is removed before the move, or `git mv` nests the
   family beneath it.
+- `tools/issue-discovery/tests/test_bootstrap.py` runs a recipe in the
+  family's directory, and its suite is not in the tests workflow's matrix.
 - Six files build the family's path from separate words and are found by no
   search for `kit/api`: the wheel-source lists in the API-credits and
   inference test support, the API-credits service's baseline test, both
