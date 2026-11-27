@@ -40,10 +40,18 @@ chain is Alembic over SQLAlchemy on SQLite and PostgreSQL. And the newest releas
 storefronts already held the unencrypted table; the RFQ forms were never in a tagged
 release.
 
+One more fact bears on encryption. `kit/config` already holds an encryption-at-rest helper,
+`market_config.secret_at_rest`: one Fernet key from the service's profile, no associated
+data, no key id in a token, and nothing that re-encrypts. The compute provisioning service
+stores a host's SSH key and each relay's admission token and grant keys with it, and after a
+key change the operator handbook has every such secret submitted again. `harden-shared-relays`
+(deferred) owns replacing that scheme with one that names each value's key, binds it to its
+host and rotates without losing a secret, its gap (4).
+
 ## Decisions
 
-D1–D9 were settled in the review of pull request #401 on 2026-11-27, and D10–D28 in this
-change's design discussion.
+D1–D9 were settled in the review of pull request #401 on 2026-11-27, D10–D28 in this
+change's design discussion, and D29 and D30 when planning's return reopened it the same day.
 
 ### D1 — One custody layer for every introduction
 
@@ -123,7 +131,7 @@ dispatch claim, and completion stays the buyer's, by a start of its own.
 ### D10 — A mechanism-neutral kit and its own capability
 
 Custody is a new kit, `kit/introduction-custody`: kit layer, empty scope, foundation area,
-with a package allowlist. Its requirements are a new capability, `introduction-custody`,
+with a package allowlist of `arkhai-keyset-aead` (D29) and `sqlalchemy`. Its requirements are a new capability, `introduction-custody`,
 stated for any host. `contact-exchange-settlement` keeps settlement by introduction, and its
 custody requirements reduce to the storefront holding its introductions in custody. Each
 requirement sits with the party that enforces it, and `buyer-compute-rfqs` will cite custody
@@ -175,16 +183,28 @@ Rejected:
 Contacts are encrypted with Tink AEAD (AES-256-GCM) under a keyset loaded from outside the
 database. A ciphertext carries Tink's prefix naming its key, so rows written under retained
 keys keep decrypting; associated data is passed on every call (D13). A KMS-wrapped keyset is
-Tink's optional extra, open to a later operator without code change. Custody wraps Tink's
-cleartext keyset loading once. No keyring, key-file format or ciphertext format is built
-here.
+Tink's optional extra, open to a later operator without code change. Custody reaches Tink only
+through the standalone keyed-encryption component (D29), and an operator edits a keyset with
+Tink's own tool, Tinkey. No keyring, key-file format or ciphertext format is built here.
+
+Custody's requirements differ from those of the secrets `market_config.secret_at_rest`
+protects today: a ciphertext bound to its record and slot (D13), and rotation that loses no
+payload and can count what each key still holds (D14). Fernet tokens carry neither associated
+data nor a key id, so custody does not compose that helper; `harden-shared-relays` moves its
+secrets onto custody's component (D30).
 
 Rejected:
 
 - AES-GCM from `cryptography` with a keyring of our own, the RFQ stack's design, even as a
   standalone `tools/` component. An existing library meets every requirement, so building
   one is not admitted.
-- `MultiFernet`. It has no associated data, so a ciphertext cannot be bound to its row.
+- `MultiFernet`, or `kit/config`'s Fernet helper with the associated data sealed inside the
+  plaintext and checked on decrypt. Either builds the binding Fernet lacks, and a Fernet token
+  names no key, so D14's per-key counts and the refusal naming a missing key could come only
+  from trial-decrypting every row under every key.
+- `sqlalchemy-utils`' encrypted column types, which bind nothing per row and name no key, and
+  the AWS Encryption SDK's raw AES keyrings, which bind an encryption context but need a
+  keyring of our own to hold their keys.
 - Encrypting the database file. It protects a stolen file but not a read through the running
   service, differs per host, and rotates only by re-keying the whole database.
 
@@ -237,13 +257,16 @@ Rejected:
 
 ### D14 — Rotation re-encrypts; the one-way rule is over decrypted values
 
-An operator rotates by adding a key to the keyset and making it primary. A custody worker,
+An operator rotates by adding a key to the keyset and making it primary, with Tinkey's
+`add-key` and `promote-key` (D29), and updating the Secret the host reads it from. A custody worker,
 `introduction-rekey`, then re-encrypts unredacted contacts and held contacts not under the
 primary key, in bounded batches, oldest first, with the same pause, preview and step as the
-sweep (D17). Custody's single re-encryption operation decrypts, encrypts under the primary
-key, decrypts the result and compares it with the original before committing; no host is
-given a write over a stored contact. Each host's status reports the unredacted contacts each
-key holds, and a key is removable once its count is zero. A host refuses to start when a
+sweep (D17). Custody's single re-encryption operation uses the component's verified
+re-encryption, which decrypts, encrypts under the primary key, decrypts the result and
+compares it with the original, and commits only what that returns; no host is given a write
+over a stored contact. Each host's status reports the unredacted contacts each key holds,
+counted from the key id the component reads from each stored ciphertext's prefix, and a key
+is removable once its count is zero. A host refuses to start when a
 stored ciphertext names a key missing from its keyset, naming the key ids. A compromised key
 is answered by rotating.
 
@@ -406,7 +429,8 @@ public development value, the case `configuration.md` gives for a stack run unat
 a clean checkout: each storefront's Secret overlay under `dev-env/identities/` is one file
 that the lanes, which run unattended, and the full local stack both mount
 (`compose.vms-local.yml`, `compose.bare-metal-local.yml`, layered under each lane), and the
-local cluster's topology script writes the same keyset into the storefronts' Secrets. No
+local cluster's topology script writes the same keyset into the storefronts' Secrets. Those
+keysets are generated once with Tink's Python API and committed. No
 storefront stack reads a gitignored copy of its overlay, so no `.example` and no generating
 target are added; a stack that comes to take its own copy follows `configuration.md` then.
 The registry's form, a keyset file its profile names, is its own precedent, applied by
@@ -465,18 +489,22 @@ configuration 0.4.0 accepted for no stated harm.
 
 ### D25 — Implementation cadence
 
-Two rounds, the kit reviewed before anything adopts it:
+Two rounds, the component and the kit reviewed before anything adopts them:
 
-- Round 1, one session: `kit/introduction-custody` — the SQLite schema and trigger, the Core
-  store (`reveal`, `read`, `redact`, `end`, `hold`, `discard`, `promote`, per-key counts,
-  `redact_restored`), Tink keyset loading and startup checks, the validator, the disclosure
-  value, the two workers, and the conformance suite.
+- Round 1, two sessions: first, `tools/keyset-aead` (D29) — the component, its capability,
+  its structure test, its root test target, its published-package row and release unit, and
+  its README as its published interface; second, `kit/introduction-custody` on it — the
+  SQLite schema and trigger, the Core store (`reveal`, `read`, `redact`, `end`, `hold`,
+  `discard`, `promote`, per-key counts, `redact_restored`), the keyset setting and startup
+  checks, the validator, the disclosure value, the two workers, and the conformance suite.
 - Round 2, two sessions: first, `kit/contact-exchange` onto custody — its asynchronous
   adapter for the storefronts, the D15 migration, the D27 route, client and buyer command,
   the route service's exact retry running again (D28), the dispatch claim untouched; second, both storefronts' wiring — keyset settings and
   refusals, the startup sweep, `introduction-rekey` registration, the migration-command mode,
   the credential-capable routes and the D28 migration, the charts' values schemas, and the
-  lane and local keysets — closing with the integration and lane scenarios.
+  lane and local keysets — closing with the integration and lane scenarios. The storefronts
+  pin `kit/contact-exchange` exactly, so the first session keeps their composition working
+  until the second switches them over.
 
 ### D26 — The registry composes custody with RFQs
 
@@ -553,53 +581,81 @@ Rejected:
   copy of every reveal beside the encrypted one until that redesign lands.
 - Encrypting the replay records, which redesigns replay state for one route family.
 
+### D29 — Keyed encryption is a standalone component, and Tinkey edits keysets
+
+Custody's keyed encryption is generic infrastructure, not specific to the market, so it is a
+standalone component under `tools/`, as `package-layers.md` and `implementation.md`'s
+"Generic infrastructure is a standalone component" place such work: `tools/keyset-aead`,
+published as `arkhai-keyset-aead`, imported as `keyset_aead`, with its own capability,
+`keyset-aead`. It depends on `tink` alone, names no market concept, carries its own licence,
+semantic version and structure test, and can be lifted into a repository of its own as it
+stands; `tools/injected-time` is the precedent. Custody consumes it as a wheel.
+
+```python
+from keyset_aead import Keyset, KeysetError, DecryptionError
+
+keyset = Keyset.load(text)            # refuses a non-AEAD keyset, a RAW-prefix key, no enabled primary
+token = keyset.encrypt(b"...", associated_data=b'{"protocol": ...}')
+keyset.decrypt(token, associated_data=...)      # DecryptionError: moved, forged or unknown key
+keyset.key_id_of(token) -> int                  # from Tink's prefix, without decrypting
+keyset.primary_key_id -> int; keyset.key_ids -> frozenset[int]
+keyset.reencrypt(token, associated_data) -> bytes | None  # None when under the primary; verifies equality
+```
+
+The component holds what Tink's Python package leaves to its user: reading a ciphertext's key
+id from its prefix, whose helper Tink keeps private; refusing a keyset that is not
+AES-256-GCM AEAD, has no enabled primary, or holds a `RAW`-prefix key whose ciphertexts would
+name no key; verified re-encryption (D14); and errors that name the problem and never key
+material. What is the market's stays in custody: the associated-data layout (D13), the
+tables, the workers, the per-key counts over its own rows, and the startup refusal naming its
+setting. An operator generates, adds and promotes keys with Tinkey, Tink's own tool, so no
+keyset-editing command is built; tests that rotate build keysets with Tink's own helpers.
+
+Rejected:
+
+- The Tink wrapper inside `kit/introduction-custody`. Generic infrastructure in a market
+  package, the fault the review of pull request #401 found in the RFQ stack, and out of
+  provisioning's reach without an extraction.
+- A keyset module in `kit/config` beside the Fernet helper. Encryption at rest is a
+  persistence concern, not configuration; it would also give the registry, which does not
+  depend on `kit/config`, `dynaconf`, `eth-account` and `arkhai-kit-settlement-runtime`, and
+  give Tink to every one of `kit/config`'s dependents, the buyers among them.
+- A new foundation kit for keyed encryption. A kit is a market package, which the
+  standalone-component rule excludes for generic infrastructure however few packages use it.
+- The component in a repository of its own now. Every fix during this change would need a
+  release and a cross-repository pin; `tools/` holds it ready to lift when a second
+  repository consumes it.
+- A keyset-editing command of our own (`generate`, `add-key`, `promote`, `list`). Tinkey
+  exists and does it; rotation is rare, and a JVM on the operator's machine is its only cost.
+- Moving provisioning onto the component here. A conversion of values released in marketplace
+  0.4.0 and a second subsystem, which is `harden-shared-relays`' gap (4), none of whose
+  triggers has fired (D30).
+
+### D30 — `secret_at_rest` is recorded as superseded, retired by `harden-shared-relays`
+
+The repository has two encryption-at-rest components until `harden-shared-relays` runs:
+custody's keyed component and `kit/config`'s Fernet helper. That change's row records that its
+keyed scheme for provisioning's secrets is `arkhai-keyset-aead`, and that it retires
+`market_config.secret_at_rest`, whose placement in configuration the same reasoning as D29's
+rejects. This change amends that helper's docstring, which today calls it the one place such
+encryption lives, to say the keyed component supersedes it and why it remains.
+
+Rejected:
+
+- An unowned row in the change index, which would duplicate the gap `harden-shared-relays`
+  already owns.
+- Leaving the docstring as it is, which would keep stating something false.
+
 ## Open Questions
 
 What `add-buyer-compute-rfqs` implements for the registry is decided here (D11, D16, D17,
 D18, D19, D23, D26).
 
-### Q1 — The encryption component the repository already has
-
-Found by planning on 2026-11-27; no design discussion or review weighed it.
-`kit/config` already holds encryption at rest, `market_config.secret_at_rest`
-(`encrypt_secret`, `decrypt_secret`): one Fernet key from the service's profile, no
-associated data, no key id in a token, and nothing that re-encrypts. The compute
-provisioning service stores a host's SSH key and each relay's admission token and grant
-keys with it (`compute_provisioning_ansible/connection.py`,
-`compute_provisioning/relays/`), and the operator handbook's "Rotating the key that
-protects stored secrets" has every such secret resubmitted after a key change. Its
-docstring places it with configuration loading because "a second copy of it beside a
-second subsystem would be a second thing to rotate and a second thing to get wrong", and
-`implementation.md`'s "Composition from one component" asks the same. D12 chose Tink for
-custody, and rejected `MultiFernet`, without knowing this component existed, so the
-change as designed leaves two encryption-at-rest components with different key formats
-and different rotation.
-
-The options planning sees:
-
-- **Custody keeps Tink inside `kit/introduction-custody`, and the divergence is recorded.**
-  D12 then states why custody's requirements — a ciphertext bound to its row and slot, and
-  rotation without losing a payload — differ from secrets an operator can resubmit, and
-  moving provisioning's secrets onto the same encryption becomes an unowned row in the
-  change index. No scope change.
-- **The Tink keyset encryption goes into `kit/config` beside the Fernet helper, and custody
-  uses it there**, provisioning's move recorded as unowned. One home for encryption at rest,
-  as the existing docstring asks. It costs custody a dependency on `kit/config`, which
-  depends on `arkhai-kit-settlement-runtime`, `dynaconf` and `eth-account`, against D10's
-  light, foundation-area kit with a package allowlist; the helper might instead move to a
-  lighter module first.
-- **As the second, and provisioning moves onto the keyset encryption in this change.** One
-  component in use everywhere; its stored values — released in marketplace 0.4.0 — need a
-  conversion, a second subsystem and acceptance boundary, which `changes.md`'s "Defects
-  found during a change" frames as its own change.
-
-Planning's recommendation, for the design discussion to weigh: the first, because custody's
-binding and rotation requirements are ones the Fernet helper does not meet and provisioning
-has not asked for, and a component's lightness is part of D10; with the second as the
-alternative if the owner wants the one home now. The plan is written once this is settled.
-
 ## Verification
 
+Unit tests in `tools/keyset-aead` prove encryption and decryption with associated data, a
+refused moved or forged ciphertext, key ids read from prefixes, the keyset refusals, verified
+re-encryption, and that no error carries key material; its structure test holds its boundary.
 Integration tests in `kit/introduction-custody` prove, on SQLite: encryption and the
 associated-data binding, a slot swap failing under repeated role labels among it,
 re-encryption with plaintext equality and per-key counts, the startup refusals, one-way
@@ -631,3 +687,5 @@ databases. The contact-exchange lane scenarios keep passing, with early end adde
 | D20 | `openspec/specs/introduction-delivery/architecture.md` |
 | D26, D28 | `docs/development/ROADMAP.md`, Goals 6 and 9 |
 | D28 | `docs/guidance/repository/`, a rule on what a route records for exact retry |
+| D29 | the `keyset-aead` capability's specification and architecture companion, created at closeout; `tools/README.md`, "Standalone infrastructure components"; `docs/guidance/repository/package-layers.md`; `docs/guidance/repository/published-packages.md`; `docs/operator-handbook.md` |
+| D30 | `openspec/changes/README.md`, `harden-shared-relays`' row; `kit/config/src/market_config/secret_at_rest.py`'s docstring |

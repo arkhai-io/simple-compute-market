@@ -23,6 +23,9 @@ This change builds one custody layer with both sets, and composes it into the st
   transaction (design D1, D10, D11, D13).
 - **Contacts are encrypted at rest** with Tink AEAD keysets held outside the database, and a
   storefront refuses to start without a usable keyset (D2, D12, D19).
+- **Keyed encryption is a standalone component**, `tools/keyset-aead`, published as
+  `arkhai-keyset-aead` with its own capability, which custody consumes and provisioning's
+  secrets can later move onto; operators edit keysets with Tinkey (D29, D30).
 - **Redaction is one-way over decrypted values**: the database enforces what it can observe
   and custody the rest, and a read after redaction answers the existing deleted outcome (D3,
   D21).
@@ -62,6 +65,9 @@ This change builds one custody layer with both sets, and composes it into the st
 - `introduction-custody`: the custody of introduction contacts for any host — encryption,
   one-way redaction, retention, early end, the sweep, re-encryption, held contacts, restore
   redaction, disclosure and the payload validator.
+- `keyset-aead`: the standalone keyed-encryption component — authenticated encryption under a
+  Tink keyset with associated data, the key id a ciphertext names, the keysets it admits, and
+  verified re-encryption.
 
 ### Modified Capabilities
 
@@ -73,12 +79,17 @@ This change builds one custody layer with both sets, and composes it into the st
 
 ## Impact
 
-- New kit `kit/introduction-custody`, depending on SQLAlchemy and Tink.
+- New standalone component `tools/keyset-aead`, published as `arkhai-keyset-aead`,
+  depending on Tink alone.
+- New kit `kit/introduction-custody`, depending on SQLAlchemy and `arkhai-keyset-aead`.
+- `kit/config`: `secret_at_rest`'s docstring names the keyed component as its successor (D30).
 - `kit/contact-exchange` onto custody, with a new route, client method and buyer command.
 - The VM and bare-metal storefronts: a SQLAlchemy runtime dependency, a keyset in the Secret
   overlay, two storefront migrations, a new lifecycle loop, a migration-command mode, the
   credential-capable route declarations, and their charts' values schemas.
-- Local stacks and lanes: a development keyset and a make target generating a hand-run copy.
+- Local stacks and lanes: a committed public development keyset in each storefront's Secret
+  overlay and in the local cluster's topology script; no generating target (D19).
+- Operators: keysets are generated and rotated with Tinkey (D14, D29).
 
 ## Dependencies and Related Changes
 
@@ -86,6 +97,9 @@ This change builds one custody layer with both sets, and composes it into the st
   takes the registry's composition of custody (D26).
 - `redesign-authenticated-requests` owns the unbounded replay records; this change takes
   their introduction slice (D28).
+- `harden-shared-relays` (deferred) owns replacing provisioning's Fernet scheme, its gap (4);
+  its row records that the replacement is `arkhai-keyset-aead` and that it retires
+  `market_config.secret_at_rest` (D30).
 
 ## Permanent documentation impact
 
@@ -110,11 +124,11 @@ This change builds one custody layer with both sets, and composes it into the st
   companion, `contact-exchange-settlement`, and `docs/development/ARCHITECTURE.md`, "Kit
   areas".
 - D11: the schema in both dialects and the Core store to `introduction-custody`'s companion.
-- D12: Tink to `introduction-custody`'s companion and
-  `docs/guidance/repository/production-code.md`, "Libraries".
+- D12: Tink, reached through the keyed-encryption component, to `introduction-custody`'s
+  companion and `docs/guidance/repository/production-code.md`, "Libraries".
 - D13: the record and its associated data to `introduction-custody` and its companion.
-- D14: rotation by re-encryption to `introduction-custody`, its companion and
-  `docs/operator-handbook.md`; the rule that an integrity guarantee over encrypted data is
+- D14: rotation by re-encryption, with keys added and promoted through Tinkey, to
+  `introduction-custody`, its companion and `docs/operator-handbook.md`; the rule that an integrity guarantee over encrypted data is
   stated over its decrypted value, the database enforcing what it can observe and the
   service the rest, to `docs/guidance/engineering/persistence.md`, with a short example.
 - D15: the upgrade's redaction to `contact-exchange-settlement`,
@@ -142,3 +156,10 @@ This change builds one custody layer with both sets, and composes it into the st
   a response re-derivable from a record protected from modification is not recorded for
   exact retry to a file under `docs/guidance/repository/`; the narrowed replay gap to
   `docs/development/ROADMAP.md`, Goal 6.
+- D29: the standalone keyed-encryption component to the new `keyset-aead` specification and
+  companion, `tools/README.md`, "Standalone infrastructure components",
+  `docs/guidance/repository/package-layers.md`'s list of standalone components,
+  `docs/guidance/repository/published-packages.md`, and `docs/operator-handbook.md` for
+  rotating with Tinkey.
+- D30: the superseded Fernet helper to `harden-shared-relays`' row in
+  `openspec/changes/README.md` and `secret_at_rest`'s docstring.
