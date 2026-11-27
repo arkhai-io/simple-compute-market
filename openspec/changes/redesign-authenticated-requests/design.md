@@ -487,8 +487,10 @@ unauthenticated on every authority and outside it, as is the registry's API-key
 `/admin/time`. "Several transactions" names a `RECORDED` route whose handler writes in
 more than one transaction, D7's third residual case; no `RECORDED` handler holds a
 write transaction across a call to another service. "Read" names, for a `RECORDED`
-route whose write is not itself idempotent, the read that shows whether it applied
-(D31).
+route whose write is not itself idempotent, the read that shows whether it applied; an
+absolute setter, toggle, delete or import's read is the get or list read of the resource
+it writes, in the same table, and one with none is marked "no read", a replacement sent
+on it last-writer-wins (D31).
 
 **Registry** (section 6, as built):
 
@@ -504,11 +506,12 @@ its mock-profile routes):
 
 | Declaration | Routes | Basis |
 |---|---|---|
-| `RECORDED` | `provisioning_relay_update`, `provisioning_relay_enable`, `provisioning_relay_disable`, `provisioning_relay_rotate_token`, `provisioning_relay_grant_key_stage` | absolute setters and toggles; staging replaces any staged key (27 F4); one transaction each |
+| `RECORDED` | `provisioning_relay_update`, `provisioning_relay_enable`, `provisioning_relay_disable`, `provisioning_relay_grant_key_stage` | absolute setters and toggles; staging replaces any staged key (27 F4); one transaction each |
+| `RECORDED` | `provisioning_relay_rotate_token` | an absolute setter; one transaction; no read: the relay view shows only `token_configured` (D31) |
 | `RECORDED` | `provisioning_host_update`, `provisioning_host_enable`, `provisioning_host_disable`, `provisioning_host_key_capture`, `provisioning_hosts_import`, `provisioning_host_definitions_import` | absolute setters, toggles and upserts; capture re-pins with or without `replace`; an exact retry of the multipart import resends identical bytes; one transaction each |
 | `RECORDED` | `provisioning_pool_replace`, `provisioning_pool_update`, `provisioning_pool_disable` (`DELETE`, a soft disable), `provisioning_pools_import` | absolute setters and a reconciling import; one transaction each |
 | `RECORDED` | `provisioning_check_leases`, `provisioning_fulfillment_convergence` (`run-cycle`), `provisioning_fulfillment_convergence_advance` | a cycle acts on whatever is due when it runs; several transactions, the provider and storefront calls outside them; convergent, so sending again is harmless |
-| `RECORDED` | `provisioning_fulfillment_convergence_pause`, `_resume`, `provisioning_lease_watchdog_pause`, `_resume` | toggles in process memory |
+| `RECORDED` | `provisioning_fulfillment_convergence_pause`, `_resume`, `provisioning_lease_watchdog_pause`, `_resume` | toggles in process memory; no read but the toggles' own answers (D31) |
 | `RECORDED` | `provisioning_lease_retry_release` | `release_failed` can recur, so a retry is not recognised; several transactions; read: the lease's state |
 | `RECORDED` | `provisioning_test_rule_add`, `_rule_delete`, `_rule_resume` and their `/test/bare-metal` copies (mock profile only) | a rule added without an ID is new, with one replaced; a delete or resume by name acts on a rule re-added since; in memory; read: the rule list |
 | `RERUN` | `provisioning_relay_create` | `relay_id` required (D40); a repeat answers 409 under it |
@@ -562,8 +565,8 @@ it):
 | `RECORDED` | `close_listing` | VM, bare metal | a resume reopens a seller close; several transactions |
 | `RECORDED` | `admin_put_pool_override`, `admin_delete_pool_override` | VM, bare metal | absolute replace and a delete by address; one transaction |
 | `RECORDED` | `admin_reserve_capacity` | VM, bare metal | the site keys it by the route's own request ID (D32); read: the VM's stage event, the site's reservation list |
-| `RECORDED` | `admin_delete_introduction_payloads` | VM, bare metal | a call that found no reveal lets a delayed retry redact a later one |
-| `RECORDED` | `admin_release_reservations`, `admin_refresh_site_projections` | VM | releases every hold held then; refreshes a cache; convergent |
+| `RECORDED` | `admin_delete_introduction_payloads` | VM, bare metal | a call that found no reveal lets a delayed retry redact a later one; no read (D31) |
+| `RECORDED` | `admin_release_reservations`, `admin_refresh_site_projections` | VM | releases every hold held then; refreshes a cache; convergent; no read (D31) |
 | `RECORDED` | `create_listing` | VM | a server-made listing ID; several transactions; read: the listings |
 | `RECORDED` | `refund_listing`, `arbitrate_listing`, `claim_listing`, `reclaim_listing` | VM | an unkeyed transfer, arbitration of every pending fulfillment, unconditional status writes; read: the listing's status and stage events |
 | `RECORDED` | `publish-from-quota` | API credits | a server-made listing ID; read: the listings |
@@ -730,13 +733,14 @@ adjust's commit and before its outcome is recorded, whose exact retry is answere
 running past its lease is renewed, its exact retry refused as in progress and then
 answered with the recorded outcome; and a third, that a write raising after it commits
 is answered with a recorded 500 whose exact retry dispatches nothing, the balance
-adjusted once. A caller told the outcome is unknown needs to learn by reading
-whether its write applied only where the write is not itself idempotent — a create
-keyed by nothing, a relative write, a round that moves a thread on; for an absolute
-setter, a toggle, a delete by name or an import, sending its intended value again under
-a new request ID is correct either way (D31). Such a route with no read, an operator's
-included, would need the unit of work; D6's table names each such route's read, and
-the buyer's negotiation routes, which have none, are accepted there.
+adjusted once. A caller told the outcome is unknown reads current state before sending
+a replacement under a new request ID wherever the route has a read (D31). A route whose
+write is not itself idempotent — a create keyed by nothing, a relative write, a round
+that moves a thread on — and that has no read, an operator's included, would need the
+unit of work; D6's table names each such route's read, and the buyer's negotiation
+routes, which have none, are accepted there. An absolute setter, a toggle, a delete by
+name or an import need not gain a read; where it has none, D6's table marks it, and a
+replacement sent on it is last-writer-wins.
 
 The origin rule depends on the route's kind. On a `RERUN` route the origin decides only
 when the row is pruned; a re-signed retry that finds no row is dispatched, which its
@@ -965,8 +969,8 @@ remain.
   rotation or retirement answering its exact retry first (D27).
 - `marketplace-identity`: a `RERUN` repeat recognised by a record answered as applied
   before any check governing a new request, one recognised by state answered from
-  current state (D30); a read needed only where the write is not itself idempotent
-  (D31); a secret-bearing route re-reading or superseding its secret (D38); the
+  current state (D30); a read needed only where the write is not itself idempotent,
+  and read first before any replacement wherever a route has one (D31); a secret-bearing route re-reading or superseding its secret (D38); the
   storefronts' identity rotation and retirement answering an applied request first
   (D36).
 - `site-capacity`: `placement_key` a required field of every reserve, and release
@@ -1491,16 +1495,29 @@ every route that fails the strict reading `RECORDED`, impossible for the settles
 answers carry credentials (D6), and a reversal of D27; dropping the answer half, which
 reverses D27 and tells callers that did everything right that they failed.
 
-### D31 — A `RECORDED` route needs a read only where its write is not itself idempotent
+### D31 — Which `RECORDED` routes need a read, and when a caller reads first
 
 D7 asked each `RECORDED` route to let a caller told `exact_retry_outcome_unknown`, or
-answered a recorded 500, learn by reading whether its write applied. That read matters
-only where sending the write again under a new request ID could apply it twice: a
-create keyed by nothing, a relative write, a round that moves a thread on. An absolute
-setter, a toggle, a delete by name or an import is a write whose side effect is itself
-idempotent (D30), so sending the intended value again is correct whether or not the
-first attempt applied, and needs no read. An operator's read counts. D6's table names
-each read.
+answered a recorded 500, learn by reading whether its write applied. Two questions
+follow: which routes must offer such a read, and when a caller must use one.
+
+A route must offer a read only where sending the write again under a new request ID
+could apply it twice: a create keyed by nothing, a relative write, a round that moves a
+thread on. An absolute setter, a toggle, a delete by name or an import is a write whose
+side effect is itself idempotent (D30), so it need not gain a read in this change. An
+operator's read counts. D6's table names each read.
+
+A caller so answered reads current state before it sends a replacement write under a
+new request ID, on every `RECORDED` route that has a read, whatever its write. The
+read is what shows the caller a write another caller made since: an absolute write
+does not commute with a later one (D6), so re-sending its intended value blind could
+undo a later, informed write. What the caller then sends is its own decision, a new
+request. On a route whose write is itself idempotent and that has no read, a
+replacement sent without one is last-writer-wins over any write made since — the
+exposure two callers writing the same resource concurrently already have, which D6
+leaves to domain concurrency control. D6's table marks each such route "no read"; the
+plan's route check confirms every read the table names and marks any further route
+with none.
 
 The buyer's `negotiate_new` and `negotiate_continue` have none: negotiation reads are
 the administrator's, and the buyer's lifecycle read exists only after acceptance. This
@@ -1509,12 +1526,28 @@ thread is inert, and a duplicate capacity hold placed by a round-0 acceptance la
 at its expiry. It arises only after a crash or an outage of a whole lease, since a live
 attempt renews its lease (D7).
 
-Rejected: a read for every `RECORDED` route, which adds reads for relay token rotation,
-convergence pause state, payload deletion, fleet release and bare metal's reservations
-that protect nothing; a buyer negotiation read on all three storefronts, a new route,
-contract and client operation each, for an inert orphan; a unit of work for
-negotiation, rejected under 27 F1; dropping the requirement, which stops checking
-future creates.
+*Design review 112, F1:* D31 first said an absolute setter, a toggle, a delete by name
+or an import needed no read because "sending the intended value again is correct
+whether or not the first attempt applied", and the identity delta let such a caller
+re-send without reading. That holds only where nobody wrote in between: a relay disable
+commits and loses its answer, another operator enables the relay, and a blind re-sent
+disable under a new request ID undoes the enable — the 16 F3 hazard returning through a
+fresh request ID, which the recorded outcome cannot catch. It also contradicted the
+signed-500 rule and the proposal, which ask for a read before any replacement. The
+owner chose the reviewer's first alternative, narrowed to the routes that have a read:
+the caller reads first wherever a read exists, no route gains one for this, and the
+routes without one are named as last-writer-wins.
+
+Rejected: a read for every `RECORDED` route, which adds reads for relay token
+rotation, convergence pause state, payload deletion and fleet release, each a new read or field for an exposure concurrent writes already have
+(112 F1's first alternative in full); conditional versions on the setters, which
+refuse a stale replacement automatically but are the domain concurrency control D6
+leaves to a design of its own; re-sending a setter's intended value without a read,
+stated as last-writer-wins on every setter, which permits on routes that have a read
+exactly what D6 rules out for exact retries; a buyer negotiation read on all three
+storefronts, a new route, contract and client operation each, for an inert orphan; a
+unit of work for negotiation, rejected under 27 F1; dropping the requirement, which
+stops checking future creates.
 
 ### D32 — A capacity reserve requires its placement key
 

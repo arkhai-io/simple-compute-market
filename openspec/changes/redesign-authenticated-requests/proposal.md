@@ -74,7 +74,8 @@ release may stop accepting the version before
   write in the store, which on the authority's own SQLite database cannot overtake a
 transaction the attempt still holds, and
   is then answered with a signed "outcome unknown"; a recorded 500's effect is likewise
-  unknown, and the caller reads current state before writing again (D3, D7). A replay
+  unknown, and the caller reads current state before writing again wherever the route
+  has a read (D3, D7, D31). A replay
   store failing while it admits a request is a signed 503, after which the caller
   retries the same request (D7). A response carrying a secret is
   never recorded.
@@ -124,7 +125,8 @@ transaction the attempt still holds, and
   its reservation, a grant-key activation names its key, relay create requires its ID,
   and the host job reads are keyed by request (D32–D35, D40). A `RECORDED` route needs
   a read showing whether its write applied only where the write is not itself
-  idempotent (D31). The deal-lifecycle transport rows are deleted (D37).
+  idempotent; a caller reads first before any replacement wherever a route has a read,
+  and a replacement on a route with none is last-writer-wins (D31). The deal-lifecycle transport rows are deleted (D37).
 - **Corrections that fall out of the move:** the deal-lifecycle routes reserve request
   IDs and stop signing refusals over an invented identity; the VM callback middleware's
   refusals are signed (D3, D15).
@@ -324,8 +326,8 @@ section on idempotent operations (D30).
   operations" in `docs/guidance/engineering/implementation.md`; the replay-specific
   part, exact retries and keeping a first outcome, to `marketplace-identity` spec and
   its `architecture.md`.
-- D31 a read only where the write is not itself idempotent: `marketplace-identity`
-  spec and `architecture.md`.
+- D31 a read only where the write is not itself idempotent, read first wherever one
+  exists: `marketplace-identity` spec and `architecture.md`.
 - D32 the required placement key: `site-capacity` spec, "Reservation lifecycle" and
   "Reserve replay is keyed by the deal's placement". The owner's principle that this
   cutover may change the wire to help idempotency or retention is not promoted: it is
