@@ -161,3 +161,38 @@ def test_a_response_record_holding_what_no_signature_carries_is_refused(
     ).record
     with pytest.raises(ValueError):
         ResponseRecord.model_validate({**json.loads(record.model_dump_json()), field: value})
+
+
+@pytest.mark.parametrize("query", ["?limit=50&offset=0&status=open", ""])
+def test_a_record_carries_its_covered_query_through_a_json_round_trip(signer: Signer, query: str) -> None:
+    signed = sign_market_request(
+        signer=signer, request=TARGETLESS, body=BODY, created=CREATED, query=query, audience=_audience()
+    )
+    record = signed.record
+    assert record is not None and record.query == (query or "?")
+    stored = json.loads(record.model_dump_json())
+    assert stored["query"] == (query or "?")
+    assert list(stored)[:5] == ["protocol", "principal", "role", "method", "query"]
+    assert RequestRecord.model_validate(stored) == record
+    verified = verify_market_request(method="POST", headers=signed.headers, body=BODY, query=query).request
+    assert verified is not None and verified.record == record
+
+
+@pytest.mark.parametrize("query", ["", "limit=50", "?q=two words", "?q=%zz"])
+def test_a_record_query_other_than_a_covered_value_is_refused(signer: Signer, query: str) -> None:
+    record = sign_market_request(
+        signer=signer, request=TARGETED, body=BODY, created=CREATED, audience=_audience()
+    ).record
+    assert record is not None
+    with pytest.raises(ValueError):
+        RequestRecord.model_validate({**json.loads(record.model_dump_json()), "query": query})
+
+
+def test_a_request_record_requires_its_query(signer: Signer) -> None:
+    record = sign_market_request(
+        signer=signer, request=TARGETED, body=BODY, created=CREATED, audience=_audience()
+    ).record
+    assert record is not None
+    stored = {k: v for k, v in json.loads(record.model_dump_json()).items() if k != "query"}
+    with pytest.raises(ValueError):
+        RequestRecord.model_validate(stored)

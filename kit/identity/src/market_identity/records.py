@@ -17,6 +17,7 @@ no party builds one; :mod:`market_identity.evidence` verifies one offline.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import (
@@ -40,6 +41,11 @@ from market_identity.models import (
 from market_identity.wire import REQUEST_PROFILE, RESPONSE_PROFILE, RecordField
 
 MAX_RESOURCE_CHARACTERS = 1024
+
+# RFC 3986's query grammar after its ``?``: unreserved and sub-delimiter characters,
+# ``:``, ``@``, ``/``, ``?`` and percent escapes. The signature library parses every
+# URL it reads to this grammar, so no verified request carries a query outside it.
+_QUERY = re.compile(r"(?:[A-Za-z0-9._~!$&'()*+,;=:@/?-]|%[0-9A-Fa-f]{2})*")
 
 
 def principal_text(identity: Identity) -> str:
@@ -67,6 +73,21 @@ def resource_is_signable(value: str) -> bool:
     """Whether a header field, and so a signature base, can hold ``value`` as it is."""
 
     return bool(value) and value.isascii() and value.isprintable() and value == value.strip(" \t")
+
+
+def covered_query(query: str) -> str:
+    """The ``@query`` a request with this query suffix covers.
+
+    ``query`` is the request target's query suffix as sent: empty where the request
+    has no query, or ``?`` and the query. RFC 9421 covers both an absent and an
+    empty query as ``?`` alone. A query outside RFC 3986's grammar is refused.
+    """
+
+    if query and not query.startswith("?"):
+        raise ValueError("a query suffix is empty or starts with '?'")
+    if not _QUERY.fullmatch(query[1:]):
+        raise ValueError("a query is RFC 3986 query characters and percent escapes")
+    return query or "?"
 
 
 def _method(value: str) -> str:
@@ -112,6 +133,9 @@ class RequestRecord(ContractModel):
     principal: str = Field(min_length=1, max_length=256)
     role: str = Field(min_length=1, max_length=64)
     method: str = Field(min_length=1, max_length=32)
+    #: The covered ``@query``, ``?`` where the request had no query. Unbounded
+    #: beyond what a request target carries, since every verified request has one.
+    query: str = Field(min_length=1)
     operation: str = Field(min_length=1, max_length=128)
     resource: str | None = Field(default=None, max_length=MAX_RESOURCE_CHARACTERS)
     request_id: str = Field(min_length=1, max_length=128)
@@ -153,6 +177,15 @@ class RequestRecord(ContractModel):
     @classmethod
     def validate_method(cls, value: str) -> str:
         return _method(value)
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: str) -> str:
+        # The covered value itself, never an empty suffix: one spelling of each
+        # query, so a record rebuilds the signature base it was taken from.
+        if covered_query(value) != value:
+            raise ValueError("query is the covered @query value, '?' for no query")
+        return value
 
     @field_validator("resource")
     @classmethod

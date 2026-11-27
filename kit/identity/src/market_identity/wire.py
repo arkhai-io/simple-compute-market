@@ -50,7 +50,7 @@ class RecordField(str, Enum):
     """The keys of a retained signed message's record.
 
     A request record holds ``protocol``, ``principal``, ``role``, ``method``,
-    ``operation``, ``resource`` exactly when the request carried one,
+    ``query``, ``operation``, ``resource`` exactly when the request carried one,
     ``request_id``, ``timestamp``, ``origin``, ``audience`` and ``proof``; a
     response record holds ``protocol``, ``principal``, ``status``, ``timestamp``,
     ``proof``, and the answered request's ``method``, ``operation``, ``resource``
@@ -61,6 +61,8 @@ class RecordField(str, Enum):
     PRINCIPAL = "principal"
     ROLE = "role"
     METHOD = "method"
+    #: The request's covered ``@query``: ``?`` and its query as sent, or ``?`` alone.
+    QUERY = "query"
     OPERATION = "operation"
     RESOURCE = "resource"
     REQUEST_ID = "request_id"

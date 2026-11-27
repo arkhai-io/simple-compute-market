@@ -54,6 +54,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "starlette", version = "1.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "starlette", version = "1.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -73,6 +74,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "starlette", specifier = ">=0.40" },
 ]
@@ -144,6 +146,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5b/82/a8cc5172dba50c90d7cc89d9f5c1cfb99deb77af10b4762eb75ece52e20a/bitarray-3.8.1-cp313-cp313-win32.whl", hash = "sha256:21add0aa968496a2bd8341d85720d09808e22e0adc7dbefc1e0f8f67c4b83f36", size = 143503, upload-time = "2026-04-02T16:27:30.948Z" },
     { url = "https://files.pythonhosted.org/packages/7f/b2/f647dcd098c275a67b89d21c92471180996a797cec11e308b4d1936d170d/bitarray-3.8.1-cp313-cp313-win_amd64.whl", hash = "sha256:40d1b57012bf9b4fefd25345aaa95aab3ca510cc693f33c2cb02a4b771d8e51a", size = 150441, upload-time = "2026-04-02T16:27:32.642Z" },
     { url = "https://files.pythonhosted.org/packages/ba/78/bde39d566f70149c6858c7e61c0a0d902a643a136a56dd37b6135cc59a68/bitarray-3.8.1-cp313-cp313-win_arm64.whl", hash = "sha256:72b32d8c471930c95d49640ec99f7694f9b040ca1342ff03ed69d3aea90f9339", size = 147209, upload-time = "2026-04-02T16:27:34.289Z" },
+]
+
+[[package]]
+name = "certifi"
+version = "2026.11.20"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/33/4cd27639502f010084bcef7a2036391dd637439901341ce1a530f36f6e51/certifi-2026.11.20.tar.gz", hash = "sha256:af1cb240a8133f105aa52684a3a3258339d7f2fd0bd4e2812698ff5cf5588c4e", size = 128901, upload-time = "2026-11-20T23:37:49.522Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/39/5eec3296860b94ac20bb8ed807725b88f6adfab3f343df592afd975f5f86/certifi-2026.11.20-py3-none-any.whl", hash = "sha256:7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f", size = 127913, upload-time = "2026-11-20T23:37:48.117Z" },
 ]
 
 [[package]]
@@ -548,6 +559,15 @@ wheels = [
 ]
 
 [[package]]
+name = "h11"
+version = "0.16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1", size = 101250, upload-time = "2025-04-24T03:35:25.427Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86", size = 37515, upload-time = "2025-04-24T03:35:24.344Z" },
+]
+
+[[package]]
 name = "hexbytes"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -579,6 +599,34 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/44/d1/af2d7665a9cb295f95a4125826a45443bd6f554946d1ca9876cf3ef1dc3b/http_sf-1.5.0.tar.gz", hash = "sha256:b54cfa55f428dd7cb1cfcc6fbd5020f967060df136ffa37cab5b9798f647612f", size = 55553, upload-time = "2026-10-23T01:43:58.992Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/4a/5a1d3b0fcb58cbd827a968f69d6139c1af419dd008f2c4caf8a8ab78b7bd/http_sf-1.5.0-py3-none-any.whl", hash = "sha256:031282bd376549b04fcaa397d9ef351acdc5bd383435cccd1d8ea17b1661c80e", size = 27696, upload-time = "2026-10-23T01:43:57.816Z" },
+]
+
+[[package]]
+name = "httpcore"
+version = "1.0.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "h11" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784, upload-time = "2025-04-24T22:06:20.566Z" },
+]
+
+[[package]]
+name = "httpx"
+version = "0.29.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "certifi" },
+    { name = "httpcore" },
+    { name = "idna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9a/d5/b4d2c4d397b7c0222635cd069098f232fb5cba31f6749e77b339e263b52c/httpx-0.29.0.tar.gz", hash = "sha256:700928ee6c1f4213795e67c47eba8f8553639069fea89199f71d654e38edc593", size = 141642, upload-time = "2026-11-26T15:58:37.028Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/c6/dddba524648da23345e446e6413530474e19e44122dba752d34ae7c4ae57/httpx-0.29.0-py3-none-any.whl", hash = "sha256:6734dcf742ced6e8018e45d3f9f7728975b6b3e1085a24f3e2c056069d858bd1", size = 73532, upload-time = "2026-11-26T15:58:35.703Z" },
 ]
 
 [[package]]

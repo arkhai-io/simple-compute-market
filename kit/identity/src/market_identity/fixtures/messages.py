@@ -10,10 +10,13 @@ pinned by the identity kit's published vectors. Each boundary is a pair:
 
 Usage in a consumer test::
 
-    from market_identity.fixtures.messages import build_signed_request
+    from market_identity.fixtures.messages import READ_QUERY, build_signed_request
 
-    message = build_signed_request(scheme="eip191", resource=None)
-    client.post(path, content=message.body, headers=message.headers)
+    message = build_signed_request(
+        scheme="eip191", method="GET", operation="listing.list", resource=None,
+        body=b"", query=READ_QUERY,
+    )
+    client.get(path + message.query, headers=message.headers)
 
 The keys are derived from fixed labels and are well-known development values,
 never for a public network.
@@ -44,6 +47,9 @@ SCHEMES = ("ed25519", "eip191")
 #: The signing instant of every fixture message unless a test gives another.
 CREATED = 1_795_000_000
 REQUEST_BODY = b'{"quantity":1}'
+#: A read's query suffix, as :func:`market_identity.http_profile.encode_query`
+#: builds it, for a fixture request that carries a query.
+READ_QUERY = "?limit=50&offset=0&status=open"
 RESPONSE_BODY = b'{"accepted":true}'
 
 _CALLER = 0
@@ -77,9 +83,11 @@ def development_authority(scheme: str = "ed25519") -> Signer:
 
 @dataclass(frozen=True)
 class FixtureRequest:
-    """A signed request as sent: its method, headers and body, and its record."""
+    """A signed request as sent: its method, query suffix, headers and body, and its
+    record. ``query`` is appended to the request's path as it is."""
 
     request: MarketRequest
+    query: str
     headers: dict[str, str]
     body: bytes
     record: RequestRecord
@@ -117,10 +125,12 @@ def build_signed_request(
     audience: TrustedIdentitySet | None = None,
     body: bytes = REQUEST_BODY,
     created: int = CREATED,
+    query: str = "",
     **fields: Any,
 ) -> FixtureRequest:
     """A version 3 request, signed under ``scheme`` by the development caller or by
-    ``signer``, addressed to the development authority or to ``audience``.
+    ``signer``, addressed to the development authority or to ``audience``, and sent
+    with the query suffix ``query`` -- by default none, so it covers ``?``.
 
     Any field of :func:`build_market_request` may be given.
     """
@@ -128,9 +138,13 @@ def build_signed_request(
     request = build_market_request(**({"origin": created} | fields))
     caller = signer or development_signer(scheme)
     addressed = audience or TrustedIdentitySet(identities=(development_authority(scheme).identity,))
-    signed = sign_market_request(signer=caller, request=request, body=body, created=created, audience=addressed)
+    signed = sign_market_request(
+        signer=caller, request=request, body=body, created=created, query=query, audience=addressed
+    )
     assert signed.record is not None
-    return FixtureRequest(request=request, headers=signed.headers, body=body, record=signed.record, signer=caller)
+    return FixtureRequest(
+        request=request, query=query, headers=signed.headers, body=body, record=signed.record, signer=caller
+    )
 
 
 def build_signed_response(
@@ -170,6 +184,11 @@ def validate_response_record(document: Mapping[str, Any], *, resource: bool) -> 
 
     record = ResponseRecord.model_validate(dict(document))
     assert (RecordField.RESOURCE.value in document) is resource, "a record names a resource exactly when its operation has a target"
-    excluded = {RecordField.ROLE.value, RecordField.ORIGIN.value, RecordField.AUDIENCE.value}
+    excluded = {
+        RecordField.ROLE.value,
+        RecordField.QUERY.value,
+        RecordField.ORIGIN.value,
+        RecordField.AUDIENCE.value,
+    }
     assert set(document) <= {field.value for field in RecordField} - excluded
     return record

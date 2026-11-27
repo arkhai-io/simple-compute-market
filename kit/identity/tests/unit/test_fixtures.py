@@ -19,6 +19,7 @@ from market_identity import (
 )
 from market_identity.fixtures.messages import (
     CREATED,
+    READ_QUERY,
     SCHEMES,
     build_market_request,
     build_signed_request,
@@ -40,12 +41,21 @@ def fields(request: pytest.FixtureRequest) -> dict:
     return {} if request.param == "targeted" else {"operation": "listing.publish", "resource": None}
 
 
-def test_every_fixture_request_verifies_live_and_as_evidence(scheme: str, fields: dict) -> None:
-    message = build_signed_request(scheme=scheme, **fields)
-    live = verify_market_request(method=message.method, headers=message.headers, body=message.body)
+@pytest.fixture(params=["", READ_QUERY], ids=["no-query", "query"])
+def query(request: pytest.FixtureRequest) -> str:
+    return str(request.param)
 
+
+def test_every_fixture_request_verifies_live_and_as_evidence(scheme: str, fields: dict, query: str) -> None:
+    message = build_signed_request(scheme=scheme, query=query, **fields)
+    live = verify_market_request(
+        method=message.method, headers=message.headers, body=message.body, query=message.query
+    )
+
+    assert message.query == query
     assert live.verified and live.request is not None
     assert live.request.record == message.record
+    assert message.record.query == (query or "?")
     assert live.request.addressed_to(development_authority(scheme).identity)
     evidence = verify_request_evidence(
         json.loads(message.record.model_dump_json()), body=message.body,

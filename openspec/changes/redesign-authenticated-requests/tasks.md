@@ -1314,7 +1314,7 @@ signed without request authentication"). Touches `kit/identity/src/market_identi
 against this build: a verification given no query reads `?` until 5e passes the raw
 one.
 
-- [ ] 5d.1 Cover `@query` (D2, D25). `sign_market_request` takes the request's encoded
+- [x] 5d.1 Cover `@query` (D2, D25). `sign_market_request` takes the request's encoded
       query string and signs it as `@query`, the string with its leading `?`, or `?`
       alone where there is none. It sits second in both request coverage lists, after
       `@method`, and the delivery shape (D10a) covers it too. `verify_market_request`
@@ -1331,7 +1331,22 @@ one.
       - 2.1's interoperability oracle, `http-message-signatures`, agrees on a base
         covering `@query`;
       - a delivery covering `@target-uri` covers its query too.
-- [ ] 5d.2 Carry `query` in the request record (D21, D25). `RequestRecord.query` is
+
+      `sign_market_request` and `verify_market_request` take `query`, the target's
+      query suffix: empty for none, else `?` and the query, as `encode_query` builds
+      it; the authority passes `?` and the raw received query. `""` and `?` both cover
+      `?`. A suffix not starting with `?` is a `ValueError`; a received query outside
+      RFC 3986's grammar is `malformed_envelope` (the library parses every URL to it).
+      A delivery's query is its target URI's, so passing both is a `ValueError`.
+      `VerifiedRequest.query` is the covered value; `request_hash` frames the query's
+      SHA-256, since `frame_fields` caps a field at 4096 bytes. The published vectors
+      `tests/unit/vectors/market_v3.json` were regenerated (request vectors changed,
+      response vectors byte-identical, asserted while regenerating) and gained a
+      `query_request_headers` vector for `GET ?limit=50&offset=0&status=open`. Unit,
+      `test_http_profile.py`, both schemes: each listed case, plus the query vector
+      byte-identical, an uncovered `@query` malformed, a query longer than a framed
+      field still hashing, suffixes outside the grammar refused for signing; passed.
+- [x] 5d.2 Carry `query` in the request record (D21, D25). `RequestRecord.query` is
       required, `?` where the request had no query. Its wire name is `RecordField`'s,
       and the evidence verifier rebuilds the signature base with it. A version 2 record
       is unaffected. Regenerate 5a.7's producer fixture with a request carrying a query.
@@ -1342,7 +1357,22 @@ one.
       - a publish record with `query` `?` verifying;
       - the version 2 evidence vectors still verifying;
       - the record's fields held to `RecordField`.
-- [ ] 5d.3 Add the one query encoding (D25). One `kit/identity` function encodes an
+
+      `RecordField.QUERY` sits after `method`, so a record serializes in the
+      design's order (`protocol`, `principal`, `role`, `method`, `query`, …).
+      `RequestRecord.query` is required and only a covered value (`?…`, never `""`).
+      `market_identity.fixtures.messages.build_signed_request` takes `query`, which
+      `FixtureRequest.query` carries for the consumer to append to its path, and
+      `READ_QUERY` gives a read's query; `validate_response_record` refuses `query`.
+      Unit, both schemes: `test_records.py`, a round trip with a query and with
+      none, its JSON order, an empty, unprefixed, spaced or bad-escape query refused,
+      a missing query refused; `test_evidence.py`, a publish record's query `?` and
+      it verifying, an altered query among the altered fields, a queried record
+      verifying and failing as `invalid_proof` once its query is altered, the version
+      2 vectors unchanged and verifying; `test_wire.py`, the fields held to
+      `RecordField`; `test_fixtures.py`, every fixture request with and without a
+      query verifying live and as evidence; passed.
+- [x] 5d.3 Add the one query encoding (D25). One `kit/identity` function encodes an
       ordered sequence of query items into the exact string a typed client signs and
       sends: RFC 3986 percent-encoding with spaces as `%20`, repeated keys kept in their
       given order, with the leading `?` added only for a non-empty query. Typed clients
@@ -1352,7 +1382,15 @@ one.
       - repeated keys and reserved characters encode as stated;
       - a URL built from the encoded string and sent through `httpx`'s mock transport
         arrives with a byte-identical query, so the authority verifies what was signed.
-- [ ] 5d.4 Add the public request builder and the public-shape check (D24, D28). The
+
+      `encode_query(items)` in `http_profile.py`: `urllib.parse.quote(…, safe="")`
+      on each key and value, so only unreserved characters stay literal. It takes
+      `(str, str)` pairs; a typed client converts its integers. `httpx` joins
+      `kit/identity`'s dev group for the transport test (relocked). Unit,
+      `test_http_profile.py`: deterministic and empty for no items; repeated keys,
+      reserved characters, `+`, `~` and non-ASCII as stated; a URL sent through
+      `httpx.MockTransport` arriving with the signed query and verifying; passed.
+- [x] 5d.4 Add the public request builder and the public-shape check (D24, D28). The
       builder takes the method and operation, a targetless operation stating no resource,
       and returns the headers — `Market-Operation` and a fresh 128-bit
       `Market-Request-ID`, nothing else the profile adds — with the `RequestBinding`
@@ -1367,10 +1405,46 @@ one.
         bootstrap", at its unit);
       - the check holds for the builder's request and fails for a signed one, or for one
         missing `Market-Operation` or `Market-Request-ID`.
-- [ ] 5d.5 Verify the section: `make -C kit/identity test` (unit); `make -C
+
+      `build_public_request(method=, operation=)` answers `PublicRequest(headers,
+      binding)`, its request ID `secrets.token_hex(16)`; `is_public_request(headers)`
+      reads the fields case-insensitively and checks presence only: whether the stated
+      values can be signed over is `stated_request_binding`'s, as for every refusal.
+      Unit, `test_http_profile.py`: each listed case, the binding equal to what
+      `stated_request_binding` reads from the headers, the check holding for
+      lower-cased names and failing for either signature field alone; passed.
+- [x] 5d.5 Verify the section: `make -C kit/identity test` (unit); `make -C
       kit/authenticated-requests test` against this build, still passing; `make
       check-architecture`.
       End-to-end: none — no authority composes the core until section 6.
+      `make -C kit/identity test`: 538 passed (unit). `make -C
+      kit/authenticated-requests test` against the rebuilt identity wheel: 199 passed
+      (unit and library integration), its verification covering `?`. `make
+      check-architecture`: passed. End-to-end confirmed: none.
+
+Notes (section 5d):
+
+- For 5e and sections 6–15: an authority passes `query="?" + raw` where the ASGI
+  `query_string` is non-empty, else nothing; a typed client signs and sends
+  `encode_query(items)` appended to its path, never `params=`. The public request's
+  answer verifies through `verify_market_response(request=public.binding, …)`.
+- `change-workflow run test-before` for `test_evidence.py` at the round's base
+  (`2744f8d1c`): 34 failed, 24 passed — the base's `sign_market_request` takes no
+  `query`, so every case signing through the helper fails with a `TypeError`, which
+  shows the API is new more than a behavioural failure. `test_http_profile.py` fails
+  there at collection, importing `encode_query`.
+- `query` defaults to `""` on signing and verifying, so the core's suite passes until
+  5e hands it the raw query. An authority verifying outside the core with no query
+  would cover `?` while its URL carries one; every authority verifies through the
+  core (D3), which passes it from 5e.
+- Fixed from the fresh-context check: the received-query grammar check was tested
+  only with a character the library refuses anyway (now also a `#`, which a URL
+  parser would read as a fragment, covering less than the verified request states);
+  docstring wrapping; `_UNCOVERED_TARGET` renamed `_PLACEHOLDER_URL`, since its query
+  is covered; the fixture's usage example now imports `READ_QUERY` and sends a GET;
+  the change index row's "Planning next" sentence, stale since the re-plan. Declined:
+  making the fixture sign a query by default — consumers opt in with `query=`, and
+  the default request, a POST reservation, has none.
 
 ## 5e. The admission core: raw query, public operations and unmatched public requests
 

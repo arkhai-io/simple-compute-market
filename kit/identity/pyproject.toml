@@ -29,6 +29,9 @@ testpaths = ["tests/unit"]
 
 [dependency-groups]
 dev = [
+    # Sends a URL built from the query encoding through a mock transport, as a
+    # typed client does, to show its query arrives as it was signed.
+    "httpx>=0.27",
     "pytest>=8.3.4,<9.0.0",
     # Reads a request through Starlette, as an authority does, to verify it.
     "starlette>=0.40",

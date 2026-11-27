@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import http_sf
+import httpx
 import pytest
 from http_message_signatures import (
     HTTPMessageSigner,
@@ -31,7 +32,10 @@ from market_identity import (
     TrustedIdentitySet,
     VerificationCode,
     VerifiedRequest,
+    build_public_request,
+    encode_query,
     get_identity_verifier,
+    is_public_request,
     principal_text,
     sign_market_request,
     sign_market_response,
@@ -85,8 +89,8 @@ def _signed(signer: Signer, *, created: int = CREATED, request: MarketRequest = 
     ).headers
 
 
-def _verify(headers: dict[str, str], *, method: str = "POST", body: bytes = BODY):
-    return verify_market_request(method=method, headers=headers, body=body)
+def _verify(headers: dict[str, str], *, method: str = "POST", body: bytes = BODY, query: str = ""):
+    return verify_market_request(method=method, headers=headers, body=body, query=query)
 
 
 def _response_headers(signer: Signer, *, status: int = 201, created: int = CREATED + 1) -> dict[str, str]:
@@ -143,6 +147,16 @@ def test_a_signed_request_verifies_and_states_its_fields(signer: Signer) -> None
 
 def test_a_vector_request_verifies_without_resigning(signer: Signer) -> None:
     assert _verify(VECTORS[_scheme(signer)]["request_headers"]).verified
+
+
+def test_a_query_vector_is_byte_identical_and_verifies_against_its_query(signer: Signer) -> None:
+    vector = VECTORS[_scheme(signer)]
+    signed = sign_market_request(
+        signer=signer, request=READ, body=b"", created=CREATED, query=vector["query"],
+        audience=_audience(AUTHORITY),
+    ).headers
+    assert signed == vector["query_request_headers"]
+    assert _verify(signed, method="GET", body=b"", query=vector["query"]).verified
 
 
 @pytest.mark.parametrize(
@@ -231,6 +245,7 @@ def test_a_request_with_no_profile_signature_is_an_unsupported_version(signer: S
         pytest.param(lambda v: v.replace(";tag=", ';alg="ed25519";tag='), id="alg-stated"),
         pytest.param(lambda v: v.replace(";tag=", ";expires=1795000300;tag="), id="expires-stated"),
         pytest.param(lambda v: v.replace(' "market-audience"', ""), id="audience-uncovered"),
+        pytest.param(lambda v: v.replace(' "@query"', ""), id="query-uncovered"),
         pytest.param(lambda v: v.replace(' "content-digest"', ""), id="digest-uncovered"),
         pytest.param(lambda v: v.replace(' "content-digest"', ' "content-digest" "content-type"'),
                      id="extra-coverage"),
@@ -602,7 +617,7 @@ def test_a_negative_skew_is_refused(signer: Signer) -> None:
 
 TARGETLESS = REQUEST.model_copy(update={"operation": "listing.publish", "resource": None})
 _COMPONENTS = [
-    "@method", "market-role", "market-operation", "market-resource", "market-audience",
+    "@method", "@query", "market-role", "market-operation", "market-resource", "market-audience",
     "market-request-id", "market-request-origin", "content-digest",
 ]
 
@@ -680,11 +695,11 @@ def _parameters(signer: Signer, order: list[str], *, created: int = CREATED, tag
 
 def _rfc_signed(
     signer: Signer, headers: dict[str, str], *, components: list[str], parameters: list[str],
-    keyid: str | None = None,
+    keyid: str | None = None, method: str = "POST", url: str = "https://market.invalid/",
 ) -> dict[str, str]:
     """``headers`` signed under RFC 9421 as given, by the library."""
 
-    message = _Message("POST", "https://market.invalid/", dict(headers))
+    message = _Message(method, url, dict(headers))
     _LibrarySigner(signature_algorithm=_OracleAlgorithm).sign_as_given(
         signer, message, components=components, parameters=_parameters(signer, parameters, keyid=keyid),
     )
@@ -749,7 +764,7 @@ def test_a_request_signing_its_parameters_in_another_order_is_malformed(signer: 
 
 
 def test_a_request_covering_its_components_in_another_order_is_malformed(signer: Signer) -> None:
-    reordered = ["@method", "market-operation", "market-role", *_COMPONENTS[3:]]
+    reordered = ["@method", "@query", "market-operation", "market-role", *_COMPONENTS[4:]]
     resigned = _rfc_signed(signer, _unsigned(_signed(signer)), components=reordered,
                            parameters=["created", "keyid", "tag"])
     assert _rfc_verifies(resigned)
@@ -901,3 +916,191 @@ def test_an_audience_member_spelling_its_address_otherwise_is_malformed(
     resigned = _rfc_signed(signer, headers, components=_COMPONENTS, parameters=["created", "keyid", "tag"])
     assert _rfc_verifies(resigned)
     assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+# -- the query -----------------------------------------------------------------------
+
+READ = MarketRequest(
+    method="GET", role="buyer", operation="listing.list", request_id="7c2d4b9e1a0f4e3d8c6b5a4f3e2d1c0b",
+    origin=CREATED,
+)
+OPEN = "?limit=50&offset=0&status=open"
+
+
+def _read(signer: Signer, query: str = OPEN, *, request: MarketRequest = READ) -> dict[str, str]:
+    return sign_market_request(
+        signer=signer, request=request, body=b"", created=CREATED, query=query, audience=_audience(AUTHORITY),
+    ).headers
+
+
+def _verify_read(headers: dict[str, str], query: str = OPEN):
+    return verify_market_request(method="GET", headers=headers, body=b"", query=query)
+
+
+def test_a_read_signed_for_its_query_verifies_against_that_raw_string(signer: Signer) -> None:
+    headers = _read(signer)
+    assert '"@method" "@query" "market-role"' in headers[SIGNATURE_INPUT]
+    result = _verify_read(headers)
+    assert result.verified and result.request is not None
+    assert result.request.query == OPEN
+    assert result.request.record is not None and result.request.record.query == OPEN
+
+
+def test_a_read_whose_query_is_changed_in_transit_fails_as_an_invalid_proof(signer: Signer) -> None:
+    result = _verify_read(_read(signer), "?limit=50&offset=0&status=closed")
+    assert result.code == VerificationCode.INVALID_PROOF
+
+
+def test_a_request_with_no_query_covers_a_bare_question_mark(signer: Signer) -> None:
+    headers = _read(signer, "")
+    for received in ("", "?"):
+        result = _verify_read(headers, received)
+        assert result.verified and result.request is not None and result.request.query == "?"
+    assert _verify_read(headers, "?a=1").code == VerificationCode.INVALID_PROOF
+    assert _verify_read(_read(signer, "?"), "").verified
+
+
+def test_a_query_signed_with_percent_20_fails_against_the_same_query_spelled_with_plus(signer: Signer) -> None:
+    headers = _read(signer, "?q=two%20words")
+    assert _verify_read(headers, "?q=two%20words").verified
+    assert _verify_read(headers, "?q=two+words").code == VerificationCode.INVALID_PROOF
+
+
+def test_two_requests_differing_only_in_their_query_hash_differently(signer: Signer) -> None:
+    first = _verify_read(_read(signer)).request
+    resigned = _verify_read(sign_market_request(
+        signer=signer, request=READ, body=b"", created=CREATED + 60, query=OPEN, audience=_audience(AUTHORITY),
+    ).headers).request
+    other = _verify_read(_read(signer, "?limit=50&offset=50&status=open"), "?limit=50&offset=50&status=open").request
+    assert first is not None and resigned is not None and other is not None
+    assert resigned.request_hash == first.request_hash
+    assert other.request_hash != first.request_hash
+
+
+def test_a_query_longer_than_one_framed_field_still_hashes(signer: Signer) -> None:
+    long = "?q=" + "a" * 8000
+    verified = _verify_read(_read(signer, long), long).request
+    assert verified is not None and len(verified.request_hash) == 64
+
+
+@pytest.mark.parametrize("query", ["limit=50", "?q=two words", "?q=é", "?q=%zz"])
+def test_a_query_outside_the_suffix_grammar_is_refused_for_signing(signer: Signer, query: str) -> None:
+    with pytest.raises(ValueError, match="query"):
+        _read(signer, query)
+
+
+def test_a_received_query_outside_rfc_3986_is_malformed(signer: Signer) -> None:
+    assert _verify_read(_read(signer), '?status="open"').code == VerificationCode.MALFORMED_ENVELOPE
+    # A URL parser would read what follows ``#`` as a fragment and cover only the
+    # query before it, while the verified request would state the whole string.
+    signed = _read(signer, "?limit=50")
+    assert _verify_read(signed, "?limit=50").verified
+    assert _verify_read(signed, "?limit=50#x").code == VerificationCode.MALFORMED_ENVELOPE
+    with pytest.raises(ValueError, match="query"):
+        _verify_read(_read(signer), "limit=50")
+
+
+def test_the_oracle_agrees_on_a_base_covering_the_query(signer: Signer) -> None:
+    headers = _read(signer)
+    assert _oracle(_Message("GET", "https://market.invalid/" + OPEN, headers), REQUEST_PROFILE)
+    assert not _oracle(
+        _Message("GET", "https://market.invalid/?limit=50&offset=0&status=closed", headers), REQUEST_PROFILE
+    )
+    resigned = _rfc_signed(
+        signer, _unsigned(headers), components=[c for c in _COMPONENTS if c != "market-resource"],
+        parameters=["created", "keyid", "tag"], method="GET", url="https://market.invalid/" + OPEN,
+    )
+    assert _verify_read(resigned).verified
+
+
+def test_a_delivery_covers_its_target_uris_query(signer: Signer) -> None:
+    target = DELIVERY_TARGET + "?tenant=a"
+    headers = sign_market_request(
+        signer=signer, request=REQUEST, body=BODY, created=CREATED, target_uri=target,
+    ).headers
+    assert '"@method" "@query"' in headers[SIGNATURE_INPUT]
+    delivered = verify_market_request(method="POST", headers=headers, body=BODY, target_uri=target)
+    assert delivered.verified and delivered.request is not None and delivered.request.query == "?tenant=a"
+    elsewhere = verify_market_request(
+        method="POST", headers=headers, body=BODY, target_uri=DELIVERY_TARGET + "?tenant=b")
+    assert elsewhere.code == VerificationCode.INVALID_PROOF
+    with pytest.raises(ValueError, match="target URI"):
+        sign_market_request(
+            signer=signer, request=REQUEST, body=BODY, created=CREATED, target_uri=target, query="?x=1")
+    with pytest.raises(ValueError, match="target URI"):
+        verify_market_request(method="POST", headers=headers, body=BODY, target_uri=target, query="?x=1")
+
+
+# -- the one query encoding -----------------------------------------------------------
+
+
+def test_the_query_encoding_is_deterministic_and_empty_for_no_items() -> None:
+    items = [("status", "open"), ("limit", "50")]
+    assert encode_query(items) == encode_query(iter(items)) == "?status=open&limit=50"
+    assert encode_query([]) == ""
+
+
+def test_the_query_encoding_keeps_repeated_keys_in_order_and_escapes_reserved_characters() -> None:
+    encoded = encode_query([
+        ("tag", "b"), ("q", "two words"), ("tag", "a"), ("p&q", "x=y/z?#+~"), ("é", "ü"),
+    ])
+    assert encoded == "?tag=b&q=two%20words&tag=a&p%26q=x%3Dy%2Fz%3F%23%2B~&%C3%A9=%C3%BC"
+
+
+def test_a_url_built_from_the_encoding_arrives_byte_identical_and_verifies(signer: Signer) -> None:
+    query = encode_query([("status", "open now"), ("tag", "a+b"), ("tag", "é")])
+    headers = _read(signer, query)
+    received: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        received.append(request.url.query)
+        return httpx.Response(200)
+
+    with httpx.Client(transport=httpx.MockTransport(handler), base_url="https://registry.example") as client:
+        client.get("/listings" + query, headers=headers)
+    assert received == [query[1:].encode("ascii")]
+    assert _verify_read(headers, "?" + received[0].decode("ascii")).verified
+
+
+# -- the public request ---------------------------------------------------------------
+
+DESCRIPTOR = "registry.descriptor.read"
+
+
+def test_a_public_request_carries_only_its_request_identity() -> None:
+    first = build_public_request(method="GET", operation=DESCRIPTOR)
+    second = build_public_request(method="GET", operation=DESCRIPTOR)
+    assert set(first.headers) == {MARKET_OPERATION, MARKET_REQUEST_ID}
+    for absent in (SIGNATURE, SIGNATURE_INPUT, MARKET_AUDIENCE, MARKET_REQUEST_ORIGIN, CONTENT_DIGEST,
+                   MARKET_RESOURCE, MARKET_ROLE):
+        assert absent not in first.headers
+    assert first.headers[MARKET_OPERATION] == DESCRIPTOR
+    assert re.fullmatch(r"[0-9a-f]{32}", first.headers[MARKET_REQUEST_ID])
+    assert first.headers[MARKET_REQUEST_ID] != second.headers[MARKET_REQUEST_ID]
+    assert first.binding == RequestBinding(
+        method="GET", operation=DESCRIPTOR, request_id=first.headers[MARKET_REQUEST_ID])
+
+
+def test_a_public_answer_verifies_over_its_binding_and_no_other(signer: Signer) -> None:
+    public = build_public_request(method="GET", operation=DESCRIPTOR)
+    stated = stated_request_binding(method="GET", headers=public.headers)
+    assert stated == public.binding
+    answer = sign_market_response(signer=signer, status=200, body=b"{}", request=stated, created=CREATED)
+    verify = lambda binding: verify_market_response(  # noqa: E731
+        status=200, headers=answer.headers, body=b"{}", request=binding,
+        expected_principals=_audience(signer), now=CREATED, max_skew=300,
+    )
+    assert verify(public.binding).verified
+    replayed = build_public_request(method="GET", operation=DESCRIPTOR).binding
+    assert verify(replayed).code == VerificationCode.INVALID_PROOF
+
+
+def test_the_public_shape_check(signer: Signer) -> None:
+    public = build_public_request(method="GET", operation=DESCRIPTOR).headers
+    assert is_public_request(public)
+    assert is_public_request({name.lower(): value for name, value in public.items()})
+    assert not is_public_request(_signed(signer))
+    assert not is_public_request({**public, SIGNATURE: "market=:AA==:"})
+    assert not is_public_request({**public, SIGNATURE_INPUT: "market=()"})
+    for missing in (MARKET_OPERATION, MARKET_REQUEST_ID):
+        assert not is_public_request({k: v for k, v in public.items() if k != missing})

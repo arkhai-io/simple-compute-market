@@ -1,13 +1,22 @@
 """The version 3 marketplace profile of RFC 9421 HTTP Message Signatures.
 
-A request signs its method, the covered ``Market-*`` fields, and an RFC 9530
-``Content-Digest`` over the body bytes sent. Its ``keyid`` is the complete
-principal, ``created`` its signing instant, and ``tag`` the profile. ``alg`` is
-omitted: the principal's scheme selects the cryptography, through the scheme
-registry every marketplace proof dispatches on. A request addressed to marketplace
+A request signs its method, RFC 9421's ``@query`` -- its query string exactly as
+sent, with its leading ``?``, or ``?`` alone where it has none -- the covered
+``Market-*`` fields, and an RFC 9530 ``Content-Digest`` over the body bytes sent.
+Its ``keyid`` is the complete principal, ``created`` its signing instant, and
+``tag`` the profile. ``alg`` is omitted: the principal's scheme selects the
+cryptography, through the scheme registry every marketplace proof dispatches on. A request addressed to marketplace
 authorities covers ``Market-Audience``, the principals its caller would accept the
 answer from; a signed delivery to an endpoint known only by its URL covers
 ``@target-uri`` in its place.
+
+An authority verifies ``@query`` against the raw query string it received, never a
+re-encoding, so a typed client sends exactly the query it signed: it builds both
+from :func:`encode_query`.
+
+A public operation's request carries a request identity -- ``Market-Operation`` and
+``Market-Request-ID`` -- and no signature (:func:`build_public_request`); its
+answer is signed as every response is, over that identity.
 
 ``Market-Resource`` is present exactly when the request's operation acts on one
 object, which the route, not the request, decides; so a request, and the response
@@ -35,6 +44,8 @@ from __future__ import annotations
 import datetime
 import hashlib
 import re
+import secrets
+import urllib.parse
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
@@ -66,6 +77,7 @@ from market_identity.records import (
     MAX_RESOURCE_CHARACTERS,
     RequestRecord,
     ResponseRecord,
+    covered_query,
     principal_text,
     resource_is_signable,
 )
@@ -90,11 +102,12 @@ _ORIGIN = re.compile(r"^(?:0|[1-9][0-9]{0,14})$")
 _SIGNATURE_PARAMETERS = ("created", "keyid", "tag")
 _DIGEST_ALGORITHM = "sha-256"
 
-# A request bound by its audience covers no part of its URL, and a response's
-# ``req`` components name only the request's method and fields; the library still
-# parses a URL for every request message, so those messages carry this reserved,
-# never-resolvable one, which no signature base reads.
-_UNCOVERED_TARGET = "https://market.invalid/"
+# A request bound by its audience covers its URL's query and nothing else of it,
+# and a response's ``req`` components name only the request's method and fields;
+# the library still parses a URL for every request message, so those messages carry
+# this reserved, never-resolvable one, with the request's query appended, whose
+# scheme, host and path no signature base reads.
+_PLACEHOLDER_URL = "https://market.invalid/"
 
 
 def _request_coverage(*, resource: bool, delivery: bool) -> tuple[str, ...]:
@@ -102,6 +115,7 @@ def _request_coverage(*, resource: bool, delivery: bool) -> tuple[str, ...]:
 
     return (
         "@method",
+        "@query",
         MARKET_ROLE.lower(),
         MARKET_OPERATION.lower(),
         *((MARKET_RESOURCE.lower(),) if resource else ()),
@@ -198,6 +212,8 @@ class VerifiedRequest(MarketRequest):
 
     principal: Identity
     created: int = Field(ge=0)
+    #: The covered ``@query``: ``?`` and the query as received, or ``?`` alone.
+    query: str = Field(min_length=1)
     audience: tuple[Identity, ...] | None = None
     target_uri: str | None = None
     body_digest: str
@@ -231,6 +247,7 @@ class VerifiedRequest(MarketRequest):
             principal=principal_text(self.principal),
             role=self.role,
             method=self.method,
+            query=self.query,
             operation=self.operation,
             resource=self.resource,
             request_id=self.request_id,
@@ -244,12 +261,13 @@ class VerifiedRequest(MarketRequest):
     def request_hash(self) -> str:
         """Fingerprint what the request asks, for its replay reservation.
 
-        Covers the profile, principal, role, method, operation, whether it names
-        a resource and which, origin and body. ``created`` is excluded, since every
-        re-signing of a retry is fresh; so is the request ID, the reservation's
-        key; and so is the audience or target, which say where the request is
-        addressed rather than what it asks, and which a caller's trust set,
-        rotated between attempts, may change.
+        Covers the profile, principal, role, method, query, operation, whether it
+        names a resource and which, origin and body; the query by its digest, as the
+        body, since a query may be longer than one framed field holds. ``created``
+        is excluded, since every re-signing of a retry is fresh; so is the request
+        ID, the reservation's key; and so is the audience or target, which say where
+        the request is addressed rather than what it asks, and which a caller's
+        trust set, rotated between attempts, may change.
         """
 
         resource = ("absent",) if self.resource is None else ("present", self.resource)
@@ -261,6 +279,7 @@ class VerifiedRequest(MarketRequest):
                     self.principal.identifier,
                     self.role,
                     self.method,
+                    hashlib.sha256(self.query.encode("ascii")).hexdigest(),
                     self.operation,
                     *resource,
                     str(self.origin),
@@ -310,6 +329,15 @@ class SignedRequest:
 
 
 @dataclass(frozen=True)
+class PublicRequest:
+    """The headers a public operation's request carries, and the binding its signed
+    answer is verified against through :func:`verify_market_response`."""
+
+    headers: dict[str, str]
+    binding: RequestBinding
+
+
+@dataclass(frozen=True)
 class SignedResponse:
     """The headers signing adds to a response, and the response's evidence record."""
 
@@ -333,18 +361,25 @@ def sign_market_request(
     request: MarketRequest,
     body: bytes,
     created: int,
+    query: str = "",
     audience: TrustedIdentitySet | None = None,
     target_uri: str | None = None,
 ) -> SignedRequest:
     """Sign a request: every header the profile adds to it, and its record.
 
-    A request to marketplace authorities names its ``audience``, the principals its
-    caller would accept the answer from. A delivery to an endpoint that is no
-    marketplace authority names its ``target_uri``, the endpoint's URL, instead.
+    ``query`` is the query suffix the request is sent with, as :func:`encode_query`
+    builds it: empty where it has none, or ``?`` and the query. A request to
+    marketplace authorities names its ``audience``, the principals its caller would
+    accept the answer from. A delivery to an endpoint that is no marketplace
+    authority names its ``target_uri``, the endpoint's URL, instead, and its query
+    is the target URI's own.
     """
 
     if (audience is None) == (target_uri is None):
         raise ValueError("a request binds exactly one of its audience or its target URI")
+    if target_uri is not None and query:
+        raise ValueError("a delivery's query is its target URI's")
+    covered = covered_query(query)
     headers = {
         MARKET_ROLE: request.role,
         MARKET_OPERATION: request.operation,
@@ -355,7 +390,7 @@ def sign_market_request(
         headers[MARKET_RESOURCE] = request.resource
     if audience is not None:
         headers[MARKET_AUDIENCE] = format_audience(audience)
-        url = _UNCOVERED_TARGET
+        url = _PLACEHOLDER_URL + covered
     else:
         assert target_uri is not None
         url = target_uri
@@ -373,6 +408,7 @@ def sign_market_request(
             principal=principal_text(signer.identity),
             role=request.role,
             method=request.method,
+            query=covered,
             operation=request.operation,
             resource=request.resource,
             request_id=request.request_id,
@@ -416,16 +452,25 @@ def verify_market_request(
     method: str,
     headers: Mapping[str, str],
     body: bytes,
+    query: str = "",
     target_uri: str | None = None,
 ) -> RequestVerification:
     """Verify a request's profile signature, spelling and body digest.
 
-    An authority verifies a request bound by its audience; a delivery's receiver
-    passes its own endpoint as ``target_uri``, so a delivery made for any other
-    endpoint fails. A request carrying no signature under the profile is
-    ``unsupported_version``. Freshness, the audience's membership, and whom the
-    principal is trusted as are the caller's to judge from the verified request.
+    An authority verifies a request bound by its audience, passing as ``query`` the
+    raw query string it received with its ``?`` prepended -- never one decoded and
+    re-encoded, which a signature over another spelling would fail -- or nothing
+    where it received none. A delivery's receiver passes its own endpoint, query
+    included, as ``target_uri``, so a delivery made for any other endpoint fails. A
+    request carrying no signature under the profile is ``unsupported_version``.
+    Freshness, the audience's membership, and whom the principal is trusted as are
+    the caller's to judge from the verified request.
     """
+
+    if target_uri is not None and query:
+        raise ValueError("a delivery's query is its target URI's")
+    if query and not query.startswith("?"):
+        raise ValueError("a query suffix is empty or starts with '?'")
 
     fields = get_header_fields(headers)
     coverage = _request_coverage(resource=MARKET_RESOURCE in fields, delivery=target_uri is not None)
@@ -448,13 +493,14 @@ def verify_market_request(
         audience = _audience(fields[MARKET_AUDIENCE]) if target_uri is None else None
         _require_canonical_digest(fields[CONTENT_DIGEST])
         proof = _proof(fields[SIGNATURE], label, principal)
+        if target_uri is None:
+            covered = covered_query(query)
+            url = _PLACEHOLDER_URL + covered
+        else:
+            covered, url = "?" + urllib.parse.urlsplit(target_uri).query, target_uri
     except (KeyError, ValueError, ValidationError):
         return RequestVerification(code=VerificationCode.MALFORMED_ENVELOPE)
-    message = _RequestMessage(
-        method=stated.method,
-        url=_UNCOVERED_TARGET if target_uri is None else target_uri,
-        headers=headers,
-    )
+    message = _RequestMessage(method=stated.method, url=url, headers=headers)
     failure = _verify(message, tag=REQUEST_PROFILE, label=label, body=body)
     if failure is not None:
         return RequestVerification(code=failure)
@@ -464,6 +510,7 @@ def verify_market_request(
             **stated.model_dump(mode="python"),
             principal=principal,
             created=created,
+            query=covered,
             audience=audience,
             target_uri=target_uri,
             body_digest=hashlib.sha256(body).hexdigest(),
@@ -569,6 +616,53 @@ def stated_request_binding(
         operation=operation,
         resource=resource,
         request_id=request_id,
+    )
+
+
+def encode_query(items: Iterable[tuple[str, str]]) -> str:
+    """The query suffix a typed client both signs and sends for ``items``.
+
+    Each key and value is percent-encoded as RFC 3986 asks, every character but
+    the unreserved ones escaped and a space as ``%20``, and the items are joined in
+    their given order, a repeated key kept where it stands. The suffix is ``?`` and
+    the query for a non-empty sequence and empty otherwise, so a client appends it
+    to its path as it is. A client never lets its HTTP library encode the query,
+    whose spelling (``+`` for a space, say) the authority would verify as another.
+    """
+
+    pairs = [
+        f"{urllib.parse.quote(key, safe='')}={urllib.parse.quote(value, safe='')}"
+        for key, value in items
+    ]
+    return "?" + "&".join(pairs) if pairs else ""
+
+
+def build_public_request(*, method: str, operation: str) -> PublicRequest:
+    """A public operation's request identity, under a fresh request ID.
+
+    A public operation acts on no target, so its request states no resource, and it
+    carries no signature, audience, origin or digest: only ``Market-Operation`` and
+    ``Market-Request-ID``, over which the authority signs its answer. The request ID
+    is 128 random bits, so the signed answer binds this request and no replay of an
+    older answer verifies.
+    """
+
+    binding = RequestBinding(method=method, operation=operation, request_id=secrets.token_hex(16))
+    headers = {MARKET_OPERATION: binding.operation, MARKET_REQUEST_ID: binding.request_id}
+    return PublicRequest(headers=headers, binding=binding)
+
+
+def is_public_request(headers: Mapping[str, str]) -> bool:
+    """Whether a request has a public operation's shape: it states a request
+    identity, ``Market-Operation`` and ``Market-Request-ID``, and carries neither
+    ``Signature`` nor ``Signature-Input``."""
+
+    fields = get_header_fields(headers)
+    return (
+        MARKET_OPERATION in fields
+        and MARKET_REQUEST_ID in fields
+        and SIGNATURE not in fields
+        and SIGNATURE_INPUT not in fields
     )
 
 
@@ -873,4 +967,4 @@ def _bound_request(request: RequestBinding) -> _RequestMessage:
     headers = {MARKET_OPERATION: request.operation, MARKET_REQUEST_ID: request.request_id}
     if request.resource is not None:
         headers[MARKET_RESOURCE] = request.resource
-    return _RequestMessage(method=request.method, url=_UNCOVERED_TARGET, headers=headers)
+    return _RequestMessage(method=request.method, url=_PLACEHOLDER_URL, headers=headers)

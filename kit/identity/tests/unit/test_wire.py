@@ -66,6 +66,7 @@ def test_the_record_field_names_are_exactly_the_records() -> None:
         "principal",
         "role",
         "method",
+        "query",
         "operation",
         "resource",
         "request_id",
@@ -78,6 +79,7 @@ def test_the_record_field_names_are_exactly_the_records() -> None:
     assert set(RequestRecord.model_fields) == {field.value for field in RecordField} - {"status"}
     assert set(ResponseRecord.model_fields) == {field.value for field in RecordField} - {
         "role",
+        "query",
         "origin",
         "audience",
     }

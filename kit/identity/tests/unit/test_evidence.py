@@ -59,9 +59,9 @@ def _trusted(*signers: Signer) -> TrustedIdentitySet:
     return TrustedIdentitySet(identities=tuple(s.identity for s in signers))
 
 
-def _stored_request(signer: Signer, request: MarketRequest = PUBLISH) -> dict:
+def _stored_request(signer: Signer, request: MarketRequest = PUBLISH, query: str = "") -> dict:
     record = sign_market_request(
-        signer=signer, request=request, body=BODY, created=SIGNED_AT, audience=_trusted(AUTHORITY)
+        signer=signer, request=request, body=BODY, created=SIGNED_AT, query=query, audience=_trusted(AUTHORITY)
     ).record
     assert record is not None
     return json.loads(record.model_dump_json())
@@ -75,6 +75,7 @@ def _stored_response(signer: Signer, request: MarketRequest = UPDATE) -> dict:
 
 
 def test_a_publication_verifies_long_after_it_was_signed(signer: Signer) -> None:
+    assert _stored_request(signer)["query"] == "?"
     stored = json.dumps(_stored_request(signer))
     # Read back days later: nothing here reads a clock, and no window applies.
     result = verify_request_evidence(
@@ -97,6 +98,7 @@ ALTERED_REQUEST = [
     ("timestamp", lambda: SIGNED_AT + 1),
     ("origin", lambda: SIGNED_AT - 1),
     ("audience", lambda: [principal_text(STRANGER.identity)]),
+    ("query", lambda: "?status=open"),
 ]
 
 
@@ -257,3 +259,12 @@ def test_a_version_2_empty_resource_reads_as_none(scheme: str) -> None:
 
     result = verify_request_evidence(captured, body=V2_BODY, trusted=principal, expected_resource=None)
     assert result.verified and result.evidence is not None and result.evidence.resource is None
+
+
+def test_a_record_with_a_query_verifies_and_fails_once_its_query_is_altered(signer: Signer) -> None:
+    stored = _stored_request(signer, UPDATE, query="?limit=50&offset=0&status=open")
+    assert verify_request_evidence(stored, body=BODY, trusted=_trusted(signer)).verified
+    altered = {**stored, "query": "?limit=50&offset=0&status=closed"}
+    assert verify_request_evidence(altered, body=BODY, trusted=_trusted(signer)).code == (
+        VerificationCode.INVALID_PROOF
+    )

@@ -213,7 +213,10 @@ def _expected(
 
 def _verify_request_record(record: RequestRecord, body: bytes) -> RequestEvidence | VerificationCode:
     verification = verify_market_request(
-        method=record.method, headers=_rebuild_request_headers(record, body), body=body
+        method=record.method,
+        headers=_rebuild_request_headers(record, body),
+        body=body,
+        query=record.query,
     )
     if not verification.verified or verification.request is None:
         return verification.code
