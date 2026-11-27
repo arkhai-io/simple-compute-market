@@ -86,8 +86,8 @@ operator's explicit registrations, and freezes one registry of offering mode, do
 identity and contract version. Listings, negotiation threads, and fulfillment contexts
 carry immutable domain, offering-mode, selected-site, and provenance bindings;
 negotiation, settlement, fulfillment, result recovery, and teardown resolve their
-contract from those records, never from a payload, installed order, or a default. All
-three storefronts compose that registry.
+contract from those records, never from a payload, installed order, or a default. Every
+storefront composes that registry.
 
 Resource Pools declare exact deliverable offering modes. Capacity claims carry that
 mode through reservation, scheduling, and provider dispatch, and accepted records
@@ -436,8 +436,8 @@ one configured fixed amount per admitted request; that domain's architecture
 companion records that variable-cost metering is not established.
 
 What is reusable is real and specific. The settlement runtime, the negotiation
-runtime, the storefront shell, the capacity/publication kit, and the registry
-are domain-neutral and need nothing. The credits authority's consumption route
+runtime, the storefront composition seam (`kit/storefront`), the
+capacity/publication kit, and the registry are domain-neutral and need nothing. The credits authority's consumption route
 already accepts a variable amount with an idempotency key, though every caller
 passes one. Issuance — the immutable request with its digest, the deterministic
 fulfillment identity, the client, the rollback, the signed evidence — is generic

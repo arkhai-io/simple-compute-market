@@ -357,10 +357,9 @@ durable binding resolves only to the registered object: no storefront selects
 a contract from installed order, a payload, or a default, or reconstructs one
 from stored strings.
 
-VM, bare metal, and API credits each run a dedicated storefront executable,
-and each executable builds its services, routes, and migration chain for one
-registration. The bare-metal and API-credit executables register their own
-contract alone. The VM executable discovers the installed
+Each domain runs a dedicated storefront executable, and each executable builds
+its services, routes, and migration chain for one registration. Every
+executable but VM's registers its own contract alone. The VM executable discovers the installed
 `market.storefront_contributions` entry points, applies the operator's explicit
 `[[storefront_domains]]` selection, and freezes the result; its image installs
 the bare-metal contribution too, so a selection may name both. A registration

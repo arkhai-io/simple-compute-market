@@ -193,8 +193,8 @@ whose publication capability supplies that contribution's publication source.
 Installed domain packages publish one `StorefrontDomainContribution`, an ID
 and a contract builder, through the canonical `market.storefront_contributions`
 entry group. The VM executable's public configuration selects an exact
-contribution/mode/domain/version set among them, which startup validates; the
-bare-metal and API-credit executables register their own contract alone.
+contribution/mode/domain/version set among them, which startup validates; every
+other storefront executable registers its own contract alone.
 
 Application, persistence, publication, negotiation, settlement, fulfillment,
 recovery, result, and teardown layers resolve bindings only through the
@@ -381,8 +381,9 @@ storefront executable owns its process configuration. The
 bare-metal contribution uses shared lifecycle contexts with its own
 site/capacity/fulfillment adapters and never imports VM services. VM and bare
 metal share the frozen-registry lifecycle and those contexts, each in its own
-executable, while API credits composes the same registry and kit mechanisms at
-its own non-physical storefront boundary. No topology gains a default domain, global
+executable, while the `api` family's storefronts, API credits and inference,
+compose the same registry and kit mechanisms at their own non-physical
+storefront boundary. No topology gains a default domain, global
 selector, or no-op fulfillment implementation.
 
 ## The negotiation runtime's opening unit of work

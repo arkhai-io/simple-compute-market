@@ -191,8 +191,8 @@ contributes its listing schema, its publication guard, its materialization,
 and its wiring.
 
 An inference storefront is its own executable on the storefront shell,
-registered as a storefront domain as API credits is, and not a contribution to
-the compute-family shell. Its listing therefore binds a quota resource in the
+registered as a storefront domain as API credits is, and not one of the compute
+contributions the VM storefront executable selects. Its listing therefore binds a quota resource in the
 authority's ledger, not a capacity binding to a resource pool.
 
 ## Role composition over the family kit
@@ -304,11 +304,9 @@ proof `kind` is defined.
   by the card's per-unit image rate.
 - On an asset with cents as its base unit the finest expressible rate is one
   cent per million tokens.
-- The model card requires `endpoint` and the rate card `asset`. Each is an
-  unowned gap in the
-  [change index](../../changes/README.md#roadmap-goal--sell-metered-inference-as-its-own-market-domain):
-  an address a seller writes by hand, and a second statement of the asset
-  beside the settlement option's.
+- The model card requires `endpoint` and the rate card `asset`: an address a
+  seller writes by hand, which nothing checks, and a second statement of the
+  asset beside the settlement option's.
 
 ## Related contracts
 

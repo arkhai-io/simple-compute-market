@@ -40,7 +40,7 @@ status, and serves nothing
 
 ## The storefront's time source
 
-Every storefront — VM, bare metal and API credits — reads `[Time] source` from its
+Every storefront reads `[Time] source` from its
 `storefront.toml`, `"wall"` when unset or `"injected"`; any other value refuses
 startup naming `[Time] source` and the value. The composition root installs the
 source through `market_storefront_kit.time_controls` before anything reads the
