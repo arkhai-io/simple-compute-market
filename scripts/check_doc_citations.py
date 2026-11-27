@@ -17,6 +17,12 @@ pending deletion and whose content is gone. The predicate for that lives in
 check that disagreed with the prune utility about what a tombstone is would
 pass on files the prune then deletes.
 
+A specification also names no change (docs/guidance/engineering/documentation.md,
+"Permanent documents name no change"): a path under `openspec/changes/`, or the name
+of an open or archived change in backticks, is refused in any file under
+`openspec/specs/` but the capabilities that govern the change process itself and the
+specifications' own README (`CHANGE_SUBJECT`).
+
 Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
 archived, and their citations are allowed to have moved on. Scoped to one
@@ -63,6 +69,44 @@ CITATION = re.compile(
     r"(?<![\w./-])((?:%s)/[\w./-]+?\.(?:%s))(?![\w/-])"
     % ("|".join(map(re.escape, CITED_ROOTS)), "|".join(CITED_SUFFIXES))
 )
+
+
+#: Capabilities whose subject is the change process, which cite the change index and
+#: the changes' directory as the things they govern; the specifications' own README
+#: describes where changes sit beside them.
+CHANGE_SUBJECT = frozenset({"market-change-workflow", "planning-governance"})
+
+#: A path under the changes' directory.
+CHANGE_PATH = re.compile(r"(?<![\w./-])openspec/changes/")
+
+#: A backticked run that may name a change.
+BACKTICKED = re.compile(r"`([a-z0-9][a-z0-9-]*)`")
+
+
+def _change_names(root: Path) -> frozenset[str]:
+    """The name of every open and archived change."""
+    changes = root / "openspec" / "changes"
+    names = {p.name for p in changes.iterdir() if p.is_dir() and p.name != "archive"}
+    archive = changes / "archive"
+    if archive.is_dir():
+        names.update(re.sub(r"^\d{4}-\d{2}-\d{2}-", "", p.name) for p in archive.iterdir() if p.is_dir())
+    return frozenset(names)
+
+
+def specification_change_references(root: Path) -> list[tuple[str, str]]:
+    """Every reference to a change from a specification, as (reference, document)."""
+    names = _change_names(root)
+    specs = root / "openspec" / "specs"
+    found: list[tuple[str, str]] = []
+    for document in sorted(specs.glob("**/*.md")):
+        relative = document.relative_to(specs)
+        if relative.parts[0] in CHANGE_SUBJECT or relative.as_posix() == "README.md":
+            continue
+        text = document.read_text(encoding="utf-8", errors="ignore")
+        cited = {"openspec/changes/..." for _ in CHANGE_PATH.finditer(text)}
+        cited |= {name for name in BACKTICKED.findall(text) if name in names}
+        found.extend((reference, document.relative_to(root).as_posix()) for reference in sorted(cited))
+    return found
 
 
 def _found(root: Path, change: str) -> dict:
@@ -152,6 +196,7 @@ def main() -> int:
     change = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
     scanned = documents(root, change)
     problems = unresolvable(root, change)
+    references = [] if change else specification_change_references(root)
     scope = (
         "change %s" % change
         if change
@@ -161,8 +206,17 @@ def main() -> int:
         "Checking documentation citations in %d documents (%s)..."
         % (len(scanned), scope)
     )
+    for reference, document in references:
+        print(
+            "CHANGE:    %s\n  named by %s\n"
+            "  a specification names no change; state the fact without the pointer"
+            % (reference, document)
+        )
     if not problems:
-        print("OK: every cited path resolves and none is a tombstone.")
+        if references:
+            print("\n%d reference(s) to a change from a specification." % len(references))
+            return 1
+        print("OK: every cited path resolves and none is a tombstone, and no specification names a change.")
         return 0
     for kind, cited, document in problems:
         if kind == "absent":

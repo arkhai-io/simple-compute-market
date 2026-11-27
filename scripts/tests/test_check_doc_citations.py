@@ -153,3 +153,33 @@ def test_an_active_change_citing_its_own_path_must_resolve_as_written(tmp_path: 
 
     assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
         "openspec/changes/shape-bounds/gone.md"]
+
+
+def _specs(root: Path) -> None:
+    (root / "openspec/changes/open-one").mkdir(parents=True)
+    (root / "openspec/changes/archive/2026-10-01-old-one").mkdir(parents=True)
+    for capability in ("kit", "planning-governance"):
+        (root / "openspec/specs" / capability).mkdir(parents=True)
+
+
+def test_a_specification_naming_a_change_is_reported(tmp_path: Path) -> None:
+    _specs(tmp_path)
+    spec = tmp_path / "openspec/specs/kit/spec.md"
+    spec.write_text("Gap in `open-one`, once `old-one`, see openspec/changes/README.md.\n", "utf-8")
+
+    found = checker.specification_change_references(tmp_path)
+
+    assert sorted(found) == [
+        ("old-one", "openspec/specs/kit/spec.md"),
+        ("open-one", "openspec/specs/kit/spec.md"),
+        ("openspec/changes/...", "openspec/specs/kit/spec.md"),
+    ]
+
+
+def test_a_capability_governing_changes_may_name_their_directory(tmp_path: Path) -> None:
+    _specs(tmp_path)
+    (tmp_path / "openspec/specs/planning-governance/spec.md").write_text(
+        "The index is openspec/changes/README.md.\n", "utf-8")
+    (tmp_path / "openspec/specs/kit/spec.md").write_text("A `plain-word` and an anchor.\n", "utf-8")
+
+    assert checker.specification_change_references(tmp_path) == []
