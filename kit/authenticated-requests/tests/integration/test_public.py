@@ -1,4 +1,5 @@
-"""A public operation, and requests of its shape that no route serves, in each form.
+"""A public operation, and unsigned requests stating an identity that no route
+serves, in each form.
 
 Library integration, as the admission tests are: the toy's ``GET /descriptor`` is a
 public operation, bound in the middleware form's table or admitted through its
@@ -16,7 +17,14 @@ from pathlib import Path
 import pytest
 from fastapi import Depends, FastAPI, Request
 from market_identity import MarketRequest, Signer, sign_market_request
-from market_identity.wire import MARKET_RESOURCE, SIGNATURE, SIGNATURE_INPUT
+from market_identity.wire import (
+    CONTENT_DIGEST,
+    MARKET_AUDIENCE,
+    MARKET_REQUEST_ORIGIN,
+    MARKET_RESOURCE,
+    SIGNATURE,
+    SIGNATURE_INPUT,
+)
 
 from market_authenticated_requests import (
     REPLAY_TABLE,
@@ -39,6 +47,9 @@ from tests.integration.support import (
     make_core,
     migrated_database,
 )
+
+
+PUBLIC_SHAPE_DETAIL = "A public operation's request carries no signature, audience, origin or content digest"
 
 
 def _replay_rows(world: World) -> int:
@@ -71,10 +82,52 @@ def test_a_signed_request_to_a_public_operation_is_refused_as_malformed(world: W
         )
 
         assert signed.status_code == 400
-        assert signed.json() == {"detail": "A public operation's request carries no signature"}
+        assert signed.json() == {"detail": PUBLIC_SHAPE_DETAIL}
         assert caller.verified(signed, method="GET", operation=DESCRIPTOR_OPERATION)
         assert half.status_code == 400 and caller.verified_binding(half, binding)
         assert input_only.status_code == 400 and caller.verified_binding(input_only, input_binding)
+
+    world.run(scenario)
+    assert _replay_rows(world) == 0
+
+
+# Fields only a signed request carries, sent without a signature (marketplace-identity
+# "A public operation is answered signed without request authentication": a public
+# request carries no audience, origin or content digest).
+UNSIGNED_EXTRAS = {
+    MARKET_AUDIENCE: "ed25519:AAAA",
+    MARKET_REQUEST_ORIGIN: "1795000000",
+    CONTENT_DIGEST: "sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:",
+}
+
+
+@pytest.mark.parametrize("name", list(UNSIGNED_EXTRAS))
+def test_a_public_request_carrying_a_signed_requests_field_is_refused_as_malformed(
+    world: World, name: str
+) -> None:
+    async def scenario(caller: Caller) -> None:
+        response, binding = await caller.send_public("GET", DESCRIPTOR_PATH, extra={name: UNSIGNED_EXTRAS[name]})
+
+        assert response.status_code == 400
+        assert response.json() == {"detail": PUBLIC_SHAPE_DETAIL}
+        assert caller.verified_binding(response, binding)
+
+    world.run(scenario)
+    assert _replay_rows(world) == 0
+
+
+@pytest.mark.parametrize("name", list(UNSIGNED_EXTRAS))
+def test_an_unsigned_request_carrying_a_signed_requests_field_on_a_mistyped_path_is_a_signed_404(
+    world: World, name: str
+) -> None:
+    async def scenario(caller: Caller) -> None:
+        response, binding = await caller.send_public(
+            "GET", DESCRIPTOR_PATH + "s", extra={name: UNSIGNED_EXTRAS[name]}
+        )
+
+        assert response.status_code == 404
+        assert response.json() == {"code": "operation_not_served", "operation": DESCRIPTOR_OPERATION}
+        assert caller.verified_binding(response, binding)
 
     world.run(scenario)
     assert _replay_rows(world) == 0
@@ -114,7 +167,7 @@ def test_a_request_to_a_public_operation_stating_no_identity_is_answered_unsigne
     world.run(scenario)
 
 
-# -- unmatched requests of a public operation's shape --------------------------------
+# -- unmatched requests stating an identity and carrying no signature field -----------
 
 
 def test_a_public_request_on_a_mistyped_path_is_a_signed_404(world: World) -> None:

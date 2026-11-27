@@ -86,7 +86,8 @@ class PublicAdmission:
     """A public operation's route, admitting each of its requests when called.
 
     The operation acts on no target and admits no role: its request carries a
-    request identity and no signature, and nothing is reserved.
+    request identity and no signature, audience, origin or content digest, and
+    nothing is reserved.
     """
 
     def __init__(self, core: AdmissionCore, *, operation: str) -> None:

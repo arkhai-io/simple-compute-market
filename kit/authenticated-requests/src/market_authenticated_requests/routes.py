@@ -56,8 +56,8 @@ class RouteBinding:
 class PublicBinding:
     """A public operation's route: its operation, which acts on no target.
 
-    Its request states a request identity and carries no signature, and its answer
-    is signed over that identity; nothing is reserved, since a public operation
+    Its request states a request identity and carries no signature, audience,
+    origin or content digest, and its answer is signed over that identity; nothing is reserved, since a public operation
     changes nothing and has nothing to replay.
     """
 

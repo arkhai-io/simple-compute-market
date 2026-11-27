@@ -15,8 +15,9 @@ re-encoding, so a typed client sends exactly the query it signed: it builds both
 from :func:`encode_query`.
 
 A public operation's request carries a request identity -- ``Market-Operation`` and
-``Market-Request-ID`` -- and no signature (:func:`build_public_request`); its
-answer is signed as every response is, over that identity.
+``Market-Request-ID`` -- and no signature, audience, origin or content digest
+(:func:`build_public_request`); its answer is signed as every response is, over that
+identity.
 
 ``Market-Resource`` is present exactly when the request's operation acts on one
 object, which the route, not the request, decides; so a request, and the response
@@ -101,6 +102,8 @@ _TARGET_URI = "@target-uri"
 _ORIGIN = re.compile(r"^(?:0|[1-9][0-9]{0,14})$")
 _SIGNATURE_PARAMETERS = ("created", "keyid", "tag")
 _DIGEST_ALGORITHM = "sha-256"
+# The fields only a signed request carries, none of which a public request may.
+_SIGNED_ONLY = (SIGNATURE, SIGNATURE_INPUT, MARKET_AUDIENCE, MARKET_REQUEST_ORIGIN, CONTENT_DIGEST)
 
 # A request bound by its audience covers its URL's query and nothing else of it,
 # and a response's ``req`` components name only the request's method and fields;
@@ -653,17 +656,26 @@ def build_public_request(*, method: str, operation: str) -> PublicRequest:
 
 
 def is_public_request(headers: Mapping[str, str]) -> bool:
-    """Whether a request has a public operation's shape: it states a request
-    identity, ``Market-Operation`` and ``Market-Request-ID``, and carries neither
-    ``Signature`` nor ``Signature-Input``."""
+    """Whether a request has a public operation's shape, the one
+    :func:`build_public_request` builds: it states a request identity,
+    ``Market-Operation`` and ``Market-Request-ID``, and carries no ``Signature``,
+    ``Signature-Input``, ``Market-Audience``, ``Market-Request-Origin`` or
+    ``Content-Digest``."""
 
     fields = get_header_fields(headers)
     return (
         MARKET_OPERATION in fields
         and MARKET_REQUEST_ID in fields
-        and SIGNATURE not in fields
-        and SIGNATURE_INPUT not in fields
+        and not any(name in fields for name in _SIGNED_ONLY)
     )
+
+
+def carries_signature_fields(headers: Mapping[str, str]) -> bool:
+    """Whether a request carries ``Signature`` or ``Signature-Input``, so that an
+    authority verifies it before answering, whatever else it states."""
+
+    fields = get_header_fields(headers)
+    return SIGNATURE in fields or SIGNATURE_INPUT in fields
 
 
 def _rebuild_request_headers(record: RequestRecord, body: bytes) -> dict[str, str]:

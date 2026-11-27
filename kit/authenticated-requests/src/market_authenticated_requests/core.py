@@ -18,11 +18,12 @@ before its admission outside the replay store.
 A request's ``@query`` is verified against the raw query string the authority
 received, which the wrapper and a route's admission hand the core as it arrived.
 
-A public operation's request states a request identity and carries no signature; the
-core answers it signed over that identity, unverified and reserving nothing, and
-refuses one carrying signature fields as malformed. A request of a public
-operation's shape that no route serves is refused signed and unverified as well,
-since the core cannot know which authority its caller meant.
+A public operation's request states a request identity and carries no signature,
+audience, origin or content digest; the core answers it signed over that identity,
+unverified and reserving nothing, and refuses one carrying any of those fields as
+malformed. A request stating a request identity and carrying no signature field that
+no route serves is refused signed and unverified as well, since the core cannot know
+which authority its caller meant.
 """
 
 from __future__ import annotations
@@ -81,6 +82,12 @@ DEFAULT_LEASE_SECONDS = 30
 #: The detail of the signed 500 answering a route that raised after
 #: authentication; it reveals nothing of the error, which is logged.
 ROUTE_FAILURE_DETAIL = "The request failed"
+
+#: The detail of the signed 400 refusing a public operation's request that carries
+#: a field only a signed request carries.
+_PUBLIC_SHAPE_DETAIL = (
+    "A public operation's request carries no signature, audience, origin or content digest"
+)
 
 #: The detail of the signed 503 answering a request whose replay store failed.
 ADMISSION_UNAVAILABLE_DETAIL = (
@@ -264,8 +271,9 @@ class AdmissionCore:
         return self._not_served(verified.request.binding, not_served, verified=verified)
 
     def refuse_unserved_public(self, stated: RequestBinding, not_served: RouteNotServed) -> Answer:
-        """A request of a public operation's shape no route serves: the signed 404,
-        or 405 with ``Allow``, over the identity it states, unverified."""
+        """A request stating a request identity and carrying no signature field
+        that no route serves: the signed 404, or 405 with ``Allow``, over the
+        identity it states, unverified."""
 
         return self._not_served(stated, not_served, verified=None)
 
@@ -427,8 +435,9 @@ class AdmissionCore:
         """Check a request to a public operation's route, which reserves nothing.
 
         Its request must be of a public operation's shape: a request carrying
-        signature fields is malformed, since each operation's message has one
-        shape, and one stating no request identity is answered unsigned. It must
+        signature fields, an audience, an origin or a content digest is malformed,
+        since each operation's message has one shape, and one stating no request
+        identity is answered unsigned. It must
         state the route's operation and no resource, or it is a mismatch, signed
         over the route's operation.
         """
@@ -439,7 +448,7 @@ class AdmissionCore:
                 None, 400, {"detail": "A public operation's request states Market-Operation and Market-Request-ID"}
             )
         if not is_public_request(headers):
-            return self.answer(stated, 400, {"detail": "A public operation's request carries no signature"})
+            return self.answer(stated, 400, {"detail": _PUBLIC_SHAPE_DETAIL})
         route = RequestBinding.model_construct(
             method=stated.method, operation=public.operation, resource=None, request_id=stated.request_id
         )

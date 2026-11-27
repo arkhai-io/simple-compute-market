@@ -1424,6 +1424,10 @@ one.
 
 Notes (section 5d):
 
+- Corrected by implementation review 92 F1 (triage of round 3, recorded in 5e's
+  notes): 5d.4's check tested only the signature fields, short of the delta's public
+  request; `is_public_request` is now the strict shape, and the fallback's rule is
+  `carries_signature_fields`.
 - For 5e and sections 6–15: an authority passes `query="?" + raw` where the ASGI
   `query_string` is non-empty, else nothing; a typed client signs and sends
   `encode_query(items)` appended to its path, never `params=`. The public request's
@@ -1566,6 +1570,46 @@ Notes (section 5e):
   `answer(None, …)`); the claims of both schemes for public cases, and of a
   malformed query byte through the core, overstated (now reworded, and the byte
   tested); the stated-resource mismatch's code unasserted (now asserted).
+- Fix from implementation review 92 F1 (triage of round 3): one predicate,
+  `is_public_request`, served both the public route and the unmatched fallback, and
+  checked only that `Signature` and `Signature-Input` were absent, as 5d.4 planned,
+  so a descriptor request carrying `Market-Audience`, `Market-Request-Origin` or
+  `Content-Digest` without a signature was dispatched and answered 200, though the
+  delta's public request carries none of them. `is_public_request` is now that
+  shape, the builder's: both identity fields and none of the five a signed request
+  carries; `admit_public` refuses any other request stating an identity with the
+  signed 400, its detail naming the five. The unmatched fallback keeps the delta's
+  broader rule through the new `carries_signature_fields` (`kit/identity`): an
+  identity stated and no signature field, whatever else it carries, is answered the
+  signed 404/405 unverified, so review 85 F1's disposition stands. Docstrings of the
+  profile, `PublicBinding`, `PublicAdmission` and the fallback follow. Unit,
+  `test_http_profile.py`: each of the five fields, in either case, defeats the public
+  shape, and only the two signature fields set `carries_signature_fields`. Library
+  integration, `test_public.py`, both forms and schemes: audience, origin and digest
+  each sent unsigned to the descriptor is a signed 400 bound over the stated
+  identity, the handler not answering and no replay row; each on a mistyped path is
+  still the signed 404, no replay row.
+  Evidence: `make -C kit/identity test`: 545 passed (unit). `make -C
+  kit/authenticated-requests test` against the rebuilt identity wheel: 279 passed
+  (31 unit, 248 library integration). `make check-architecture`: passed.
+  `change-workflow run test-before --at 38ba2876a` (`TEST_BEFORE_DIST=dist-identity`)
+  over `test_public.py`: 16 failed, 44 passed — the twelve matched-route cases
+  answered 200, and the signed-request case's four on the detail now naming five
+  fields; the mistyped-path cases pass there, as the fallback was already this broad.
+  Over `test_http_profile.py`: a collection error, `carries_signature_fields` being
+  new. End-to-end: none — no authority composes the core until section 6.
+  The fresh-context check found no correctness defect. Fixed from it: the profile's
+  module docstring, `PublicBinding`'s and `PublicAdmission`'s, and the test module's
+  heading still describing the signature-only shape; `_SIGNED_ONLY` moved beside
+  the module's other constants with a `#` comment; the origin test value given its
+  wire form, integer seconds; a repeated signature-field assertion folded; the
+  mistyped-path cases now assert no replay row. Declined: exporting the refusal's
+  detail as the neighbouring `ROUTE_FAILURE_DETAIL` is, which would add to the kit's
+  interface for a test's literal; a 405 case with an extra field, which runs the
+  404's code.
+  `change-workflow run pre-commit` (local validation of tree `844658931`): `after-functional-change
+  at 38ba2876a: passed, exit 0`; `pre-commit-functional at 38ba2876a: passed, exit
+  0`; `pre-commit at 38ba2876a: passed, exit 0`.
 
 ## 6. The registry on the admission core
 

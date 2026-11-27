@@ -33,6 +33,7 @@ from market_identity import (
     VerificationCode,
     VerifiedRequest,
     build_public_request,
+    carries_signature_fields,
     encode_query,
     get_identity_verifier,
     is_public_request,
@@ -1104,3 +1105,30 @@ def test_the_public_shape_check(signer: Signer) -> None:
     assert not is_public_request({**public, SIGNATURE_INPUT: "market=()"})
     for missing in (MARKET_OPERATION, MARKET_REQUEST_ID):
         assert not is_public_request({k: v for k, v in public.items() if k != missing})
+
+
+SIGNED_ONLY_FIELDS = {
+    SIGNATURE: "market=:AA==:",
+    SIGNATURE_INPUT: "market=()",
+    MARKET_AUDIENCE: "ed25519:AAAA",
+    MARKET_REQUEST_ORIGIN: "1795000000",
+    CONTENT_DIGEST: "sha-256=:AA==:",
+}
+
+
+@pytest.mark.parametrize("name", list(SIGNED_ONLY_FIELDS))
+def test_a_field_only_a_signed_request_carries_defeats_the_public_shape(name: str) -> None:
+    public = build_public_request(method="GET", operation=DESCRIPTOR).headers
+    extended = {**public, name: SIGNED_ONLY_FIELDS[name]}
+    assert not is_public_request(extended)
+    assert not is_public_request({key.lower(): value for key, value in extended.items()})
+
+
+def test_only_the_signature_fields_mark_a_request_to_be_verified(signer: Signer) -> None:
+    public = build_public_request(method="GET", operation=DESCRIPTOR).headers
+    assert not carries_signature_fields(public)
+    assert carries_signature_fields(_signed(signer))
+    for name, value in SIGNED_ONLY_FIELDS.items():
+        signature_field = name in (SIGNATURE, SIGNATURE_INPUT)
+        assert carries_signature_fields({**public, name: value}) == signature_field
+        assert carries_signature_fields({**public, name.lower(): value}) == signature_field

@@ -8,8 +8,8 @@ application runs. In the dependency form a route admits it through its
 finishes what the route admitted. In
 both, a request carrying a request identity that no route of the application
 serves is answered with a signed refusal, since in the dependency form no route's
-admission ever runs for it -- verified first, unless it is of a public operation's
-shape, which is refused over its stated identity unverified; and the wrapper holds
+admission ever runs for it -- verified first, unless it carries no signature
+field, when it is refused over its stated identity unverified; and the wrapper holds
 a handler's response until it is recorded and signed. A public operation's route,
 bound in the middleware form's table or admitted through its
 :class:`~market_authenticated_requests.dependency.PublicAdmission`, is answered
@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from market_identity import is_public_request, stated_request_binding
+from market_identity import carries_signature_fields, stated_request_binding
 from request_replay.asgi import (
     CapturedResponse,
     Receive,
@@ -209,12 +209,13 @@ class AuthenticatedApplication:
     def _refuse_unserved(
         self, scope: Scope, method: str, headers: Headers, body: bytes, not_served: RouteNotServed
     ) -> Answer:
-        # A public operation's request carries no signature to verify, so it is
-        # refused over the identity it states; a request carrying signature fields
-        # is verified first, so that an unknown profile is still answered as one
-        # and a forged signature as invalid.
+        # A request stating an identity and carrying no signature field has no
+        # signature to verify, so it is refused over the identity it states,
+        # whatever else it carries; a request carrying signature fields is verified
+        # first, so that an unknown profile is still answered as one and a forged
+        # signature as invalid.
         stated = stated_request_binding(method=method, headers=headers)
-        if stated is not None and is_public_request(headers):
+        if stated is not None and not carries_signature_fields(headers):
             return self._core.refuse_unserved_public(stated, not_served)
         verified = self._core.verify(method, headers, body, query=received_query(scope))
         if isinstance(verified, Verified):
