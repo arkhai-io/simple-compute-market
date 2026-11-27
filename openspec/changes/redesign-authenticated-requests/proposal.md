@@ -95,7 +95,8 @@ transaction the attempt still holds, and
 - **The registry's descriptor is a public read answered signed.** Its request carries
   only a request identity, so a client adding a registry by its URL, knowing no
   principal yet, verifies the signed answer against the principals the descriptor names
-  (D24). The listing read's filter-spec ETag becomes a covered query parameter (D26);
+  (D24), over HTTPS unless its caller opts into plain HTTP, refusing a descriptor that
+  claims another base URL (design review 85, F2). The listing read's filter-spec ETag becomes a covered query parameter (D26);
   an applied publisher rotation or retirement answers its exact retry before its expiry
   and primary checks (D27); singleton and collection reads carry no resource (D28).
 - **Signed messages retained as evidence are records of their signed values.** The
@@ -180,7 +181,7 @@ attempt holds;
 version 2 requests are refused and version 2 evidence still verifies; version 3
 evidence verifies offline from its record and body alone; a request whose query was
 changed after signing is refused; a client knowing no registry principal bootstraps
-from the registry's public descriptor read and verifies its signed answer.
+from the registry's public descriptor read over HTTPS and verifies its signed answer.
 
 ## Impact
 

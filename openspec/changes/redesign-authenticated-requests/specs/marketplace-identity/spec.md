@@ -322,7 +322,7 @@ A response carrying a secret — access material, an API-key secret, a password,
 
 ### Requirement: A public operation is answered signed without request authentication
 
-A public operation's request MUST carry a request identity — `Market-Operation` and `Market-Request-ID` — and no signature, audience, origin or content digest, and the authority MUST answer it with the `arkhai.market-response-signature.v3` response bound over that identity, reserving nothing. The authority MUST refuse a request to a public operation that carries signature fields as malformed, and MUST answer one stating another operation, or a resource, as `operation_mismatch`. The registry's descriptor read is the only public operation. A client MUST generate a fresh request ID for each public request and MUST verify the answer's binding to it and its signer against the principals it trusts for the answer.
+A public operation's request MUST carry a request identity — `Market-Operation` and `Market-Request-ID` — and no signature, audience, origin or content digest, and the authority MUST answer it with the `arkhai.market-response-signature.v3` response bound over that identity, reserving nothing. The authority MUST refuse a request to a public operation that carries signature fields as malformed, and MUST answer one stating another operation, or a resource, as `operation_mismatch`. A request that states a request identity, carries no signature field, and reaches a path or method no route serves MUST be answered, at every authority, with the signed 404, or 405 with `Allow`, whose body code is `operation_not_served`, bound over its stated identity and without verification; a request carrying signature fields that no route serves MUST still be verified before it is so answered. The registry's descriptor read is the only public operation. A client MUST generate a fresh request ID for each public request and MUST verify the answer's binding to it and its signer against the principals it trusts for the answer.
 
 #### Scenario: A client reads a public operation knowing no principal
 
@@ -333,3 +333,13 @@ A public operation's request MUST carry a request identity — `Market-Operation
 
 - **WHEN** a request to the registry's descriptor read carries `Signature` and `Signature-Input`
 - **THEN** the registry refuses it as malformed under a signed refusal bound over its stated request identity
+
+#### Scenario: A public request names a path no route serves
+
+- **WHEN** a request carrying only `Market-Operation: registry.descriptor.read` and a fresh `Market-Request-ID` reaches the registry on a mistyped descriptor path
+- **THEN** the registry answers a signed 404 whose body code is `operation_not_served`, bound over the stated operation and request ID, rather than an `unsupported_protocol` refusal
+
+#### Scenario: A public request uses a method its path does not serve
+
+- **WHEN** a request carrying only `Market-Operation` and a fresh `Market-Request-ID` is sent as a POST to the registry's descriptor path
+- **THEN** the registry answers a signed 405 with `Allow: GET` whose body code is `operation_not_served`, bound over the stated operation and request ID

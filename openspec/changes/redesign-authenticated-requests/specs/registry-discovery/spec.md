@@ -89,7 +89,10 @@ ordinary configuration. Signer credentials and read keys MUST NOT enter the
 descriptor. A bootstrap client, which needs no key of its own, MUST verify the signed
 response, bound to its fresh request ID, against the principal set carried in the
 validated descriptor before returning it; a client configured with the registry's
-principals MUST verify it against them.
+principals MUST verify it against them. A bootstrap client MUST refuse a URL whose
+scheme is not `https`, with certificate verification, unless its caller explicitly
+opts into plain HTTP for local or test use, and MUST refuse a descriptor whose base
+URL is not the URL it bootstrapped from.
 
 #### Scenario: Client inspects a public registry
 
@@ -115,6 +118,16 @@ principals MUST verify it against them.
 
 - **WHEN** a bootstrap client receives a descriptor whose signed response binds a request ID other than the one it sent
 - **THEN** the client rejects the descriptor
+
+#### Scenario: A bootstrap is given a plain-HTTP URL
+
+- **WHEN** a client bootstraps a registry from an `http` URL without opting into plain HTTP
+- **THEN** the client refuses before sending any request, naming the scheme
+
+#### Scenario: A descriptor claims another base URL
+
+- **WHEN** a bootstrap client reads a correctly signed descriptor whose base URL differs from the URL it bootstrapped from
+- **THEN** the client rejects the descriptor rather than pinning its principal under the claimed URL
 
 ### Requirement: Durable replay reservation
 

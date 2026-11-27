@@ -244,7 +244,9 @@ The component's interface, walked through every caller:
   `Market-Request-ID` and signature fields) that no route admitted — a path or method
   no route serves, answered 404 or 405 by the router before any dependency runs — is
   verified and answered with D11's signed refusal, its body naming only what the
-  caller stated;
+  caller stated; one stating a request identity and carrying no signature field, a
+  public request's shape (D24), is answered with that refusal over its stated identity
+  without verification, at every authority (design review 85, F1);
 - a route inventory, checked when the core is constructed over the application: every
   route in the application's route table carries an exact-retry declaration through
   its admission, in either form, an explicit unauthenticated mark (health and the
@@ -771,6 +773,19 @@ An answer is unauthenticated only when the request carries no request identity. 
 name what the caller sent and the authority's expectation, and never list the operations
 an authority serves.
 
+*Design review 85, F1:* the fallback first verified every unmatched request carrying a
+request identity, so a public request (D24) — a request identity and no signature —
+sent to a mistyped path or with the wrong method was answered `unsupported_protocol`,
+not `operation_not_served`. An unmatched request stating a request identity and
+carrying no signature field is now answered with the first row's signed 404 or 405
+over its stated identity without verification, as the core already signs a refusal
+over stated values, at every authority, since the fallback cannot know which authority
+the caller meant; a request carrying signature fields is verified first, so a later
+profile's tag is still `unsupported_protocol` (D16) and a forged signature still 401.
+The owner rejected restricting the unmatched promise to signed requests with a
+separate 400 for public ones, which gives a public caller another error vocabulary
+for the same mistake.
+
 A version 2 request carries none of the version 3 fields — its request ID is
 `X-Market-Request-ID`, and its route supplies the operation and resource — so its
 `unsupported_protocol` refusal is unsigned, and no identity is invented to sign it. An
@@ -1167,9 +1182,24 @@ possession, not that the key is the URL's rightful operator: first contact rests
 TLS, or on a directory's countersignature over the descriptor body, a separate trust
 layer; after it, every pinned read is verified against the learned principal.
 
+The bootstrap makes TLS its precondition (design review 85, F2): it refuses a URL
+whose scheme is not `https` unless its caller passes `allow_insecure_http=True`, an
+opt-in named for local stacks and tests, and the client's default certificate checking
+gives TLS's proof of the host; it refuses a descriptor whose base URL is not the URL
+it bootstrapped from, so a site holding a certificate for its own name cannot pin its
+key under another registry's base URL. Version 2's bootstrap had the same gap — it
+verified against the same self-advertised key over any scheme — and no production
+code calls the bootstrap yet; the check lands on the interface this decision already
+changes. A caller that already knows the registry's principal is a configured client
+and verifies against it. Rejected: requiring a caller-supplied principal or directory
+attestation, which removes the by-URL flow; plain-HTTP trust on first use as the
+default with HTTPS opt-in, the safe and unsafe defaults swapped; correcting only this
+paragraph's wording and deferring enforcement, which leaves a known hole in an
+interface this change rewrites.
+
 `kit/identity` gains a public request builder that returns the request-identity
 headers and the binding its answer is verified against; the bootstrap drops its
-`signer` and `caller_role` arguments, and an ordinary client's
+`signer` and `caller_role` arguments and gains `allow_insecure_http`, and an ordinary client's
 `get_registry_descriptor` sends the same public request and verifies the answer
 against its configured registries. The admission core's route inventory gains the
 public mark beside a declaration and the unauthenticated mark (D3).
