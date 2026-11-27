@@ -40,7 +40,7 @@ is scheduled.
 - **THEN** the seller's side is dispatched once, by that next start
 - **AND** no later start dispatches again
 
-#### Scenario: A failed start is retried exactly
+#### Scenario: A failed start is replayed exactly
 
 - **WHEN** a start whose completion failed and answered 503 is resent as an exact retry
 - **THEN** the retry runs the start again, completes the reveal and answers it
