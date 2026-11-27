@@ -632,12 +632,6 @@ states is [`local-clusters.md`](../guidance/repository/local-clusters.md#a-scena
 and how the releases' Helm test pods are labelled is
 [`helm-charts.md`](../guidance/repository/helm-charts.md#helm-test-pods-carry-no-workload-selector-label)'s.
 
-### Registry RFQ configuration and recovery
-
-RFQ admission requires a packaged family schema, pinned account-authority signers, a replay digest keyring and a separate contact encryption keyring. Select the compute schema with `registry.config.rfqSpecPath` and supply the public authority pins in the registry's selected profile. Mount the two keyrings through `registry.rfqReplayKeysSecret` and `registry.rfqContactKeysSecret`. Supply discovery continues under its own admission settings. Set `registry.config.rfqContactWindowSeconds` to override the 30-day contact window for new introductions.
-
-Keep the registry database and its keyrings under separate custody. Before opening contact operations on a restored database, reconcile eligibility with authoritative history or use startup redaction. The [RFQ settings](../../openspec/specs/registry-discovery/configuration.md#rfq-registry-settings) and [operator handbook](../operator-handbook.md#operate-and-recover-rfqs) describe these controls. A deployment also needs a trusted account entry point that supports the RFQ operation contract. Qualification of an actual hosted credential adapter is separate from the repository's synthetic authority and deployed registry scenarios.
-
 ## Migrations at startup
 
 Each stateful service's migration command, and the phase it runs in, are

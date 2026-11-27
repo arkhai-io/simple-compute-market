@@ -127,17 +127,3 @@ Durably bind the verified account request ID before dispatch, even when the oper
 ### Qualification and review
 
 The SCM deliverable includes the authority-side typed invocation builder and a typed client for the shared account entry point. A synthetic account authority exercises the same contract with the shipped signing and verification code. Qualify the terminal journey through contact exchange on the same operations a browser client calls. Prove permission separation, omitted consent, current counterparty and revision checks, authority pins and audience, independent account namespaces, credential replacement and revocation, and retries across signer changes. Exercise cosmetic and ambiguous edits, concurrent selection and withdrawal, the exact access cutoff even when ciphertext is still present, timed cleanup, and restoration before reopening service. In addition to the synthetic adapter checks, require hosted non-production qualification before the PR. A real hosted session and an authorized programmatic credential must traverse the same account routes with synthetic RFQs and contacts. Demonstrate interactive and noninteractive CLI behavior, successful delegated sharing, and refusal for missing or revoked sharing permission. The RFQ authority applies to the submitted RFQ contact and creates no authority over checkout or settlement.
-
-## Design promotion
-
-| Decision | Permanent location | Knowledge |
-| --- | --- | --- |
-| D1–D5 and D9–D11 | openspec/specs/buyer-compute-rfqs/spec.md | The request and introduction lifecycle, public commercial details, partial quantity, and consent. |
-| D6–D7 and D12 | openspec/specs/buyer-compute-rfqs/spec.md and openspec/specs/buyer-compute-rfqs/architecture.md | The encrypted contact trust model, configurable retrieval window, expiry, and recovery. |
-| D6–D7 and D12 | openspec/specs/registry-discovery/configuration.md#rfq-registry-settings and docs/operator-handbook.md#operate-and-recover-rfqs | Key management, new-introduction duration, restore and monitoring. |
-| D7–D8 | openspec/specs/registry-discovery/spec.md#durable-replay-reservation and openspec/specs/registry-discovery/architecture.md#body-bound-exchanges-and-durable-replay | Current authority and retry rules. |
-| D8 and D13 | openspec/specs/marketplace-identity/spec.md#body-bound-authenticated-request-and-response-version and openspec/specs/marketplace-identity/architecture.md#canonical-version-2-proofs | Account proof, scope, exact target and rotation. |
-| D8 and D15 | docs/development/ARCHITECTURE.md#buyer-rfq-authority and docs/development/DEPLOYMENT_AND_CONFIG.md#registry-rfq-configuration-and-recovery | Authority, schema, admission and deployment. |
-| D13 | openspec/specs/buyer-compute-rfqs/spec.md and docs/buyer-quickstart.md#post-a-compute-request-and-exchange-contact-details | Shared operations and terminal use. |
-| D14 | This change's design and task record | Implementation cadence and qualification history. |
-| D15 | openspec/specs/buyer-compute-rfqs/spec.md and openspec/specs/buyer-compute-rfqs/architecture.md | Compute models and the registry's declarative validation boundary. |

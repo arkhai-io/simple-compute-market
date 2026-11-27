@@ -75,10 +75,6 @@ Registry responses are authenticated in the opposite direction. Their proof bind
 
 Replay reservations are durable database state keyed by principal and request ID. A reservation is acquired before dispatch and leased to one attempt. Changed reuse is rejected, a concurrent attempt cannot run beside the lease owner, and an expired unfinished lease can be reclaimed. Once complete, the recorded status and body are returned under a newly signed response for an exact retry. This makes retry after a lost acknowledgement safe without weakening request freshness or duplicating a mutation.
 
-RFQs use the same version 2 exchange with a delegated account claim and exact registry audience in the signed body. The registry verifies the authority pin, freshness, target and current account admission before consulting its RFQ replay store. Replay bindings use the stable authority namespace, account subject and request ID. A private digest keyring binds logical request inputs. Signer rotation preserves the account namespace, and an approved registry-signer change preserves the logical binding for that registry.
-
-The replay store retains a binding after a failed action. It commits a successful mutation and its contact-free receipt together. Read retries re-run current authorization and eligibility checks. See [Buyer compute RFQs](../buyer-compute-rfqs/spec.md).
-
 ## Publisher principal rotation
 
 Publisher identity history is separate from publisher and listing records. Rotation proves possession of both the active current principal and the replacement over one canonical intent scoped to the stable publisher and this registry authority. A nonce and intent hash make application idempotent; row locking, uniqueness constraints, and a single-active-overlap rule serialize competing ownership transitions.

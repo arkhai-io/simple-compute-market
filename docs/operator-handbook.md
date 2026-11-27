@@ -849,16 +849,6 @@ at render, naming `secretProfile`. To move off them:
 A bootstrap key seeds a key only into an empty table, so moving an existing
 registry changes no key it already holds.
 
-### Operate and recover RFQs
-
-To override the 30-day retrieval window, set `REGISTRY_RFQ_CONTACT_WINDOW_SECONDS` in the registry profile or `registry.config.rfqContactWindowSeconds` in Helm. The registry applies the setting when a new introduction completes, and each earlier introduction retains its recorded cutoff.
-
-Use separate Secret-backed keyrings for retry digests and contact encryption. The contact keyring contains a current writer ID and retained readers. Keep the keys available for every eligible payload and store key material separately from database backups. The registry logs expired-row counts, oldest overdue age and sweep failures. Escalate repeated failures or overdue age above one hour.
-
-For key rotation, drain the deployment and stop all its registry writers. Add a new current writer key to the mounted keyring and keep every current reader. Run `registry-rfq-contact rotate` with the same database, registry authority and mixed keyring. The command re-encrypts retained payloads in batches and checks that every retained row has a reader. After it succeeds, retire the old key from the live keyring and restart the registry. Handle keys held for backups according to the deployment's restore policy.
-
-Keep RFQ admission closed throughout restoration. If you can establish each payload's current eligibility, reconcile intervening terminations and expiries before starting ordinary service. If you lack authoritative intervening history, set `REGISTRY_RFQ_REDACT_RESTORED_CONTACTS=true` in the registry profile and start the restored registry behind closed admission. With Helm, supply this setting in the environment profile selected by `registry.secretProfile`. Startup deletes restored contact payloads, ends restored introductions, clears pending consent, and keeps RFQ operations unavailable in this mode. After redaction succeeds, clear the setting and restart with admission still closed. Verify that the authorized participant cannot retrieve a previously accessible contact before reopening admission. The normal startup sweep also removes expired ciphertext before serving traffic.
-
 ## Storefront configuration under Helm
 
 How the VM and bare-metal storefront charts render an agent's configuration is

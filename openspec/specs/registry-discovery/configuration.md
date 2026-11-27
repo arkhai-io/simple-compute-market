@@ -61,16 +61,3 @@ the time section in either mode. Publisher authentication and listing decisions
 read that source. No chart default, production Compose stack or example env file
 sets it; only the lanes' registry profile, `dev-env/registry/config-payments-lane.env`,
 does ([injected time](../injected-time/architecture.md)).
-
-## RFQ registry settings
-
-| Setting | Purpose |
-| --- | --- |
-| `REGISTRY_RFQ_SPEC_PATH` | Selects the installed family's RFQ requirements, response-quantity and filter declarations. The compute registry image packages `/app/rfq-schema.json`. |
-| `REGISTRY_RFQ_AUTHORITIES` | Maps stable account-authority namespaces to their allowed public signing identities. The trust set can temporarily include both signers during rotation. |
-| `REGISTRY_RFQ_REPLAY_KEYS_FILE` | References the mounted digest keyring used for the logical request bindings in the RFQ replay store. |
-| `REGISTRY_RFQ_CONTACT_KEYS_FILE` | References the mounted encryption keyring used by responses and introductions. Retain each key with live payloads until rotation verifies coverage. |
-| `REGISTRY_RFQ_CONTACT_WINDOW_SECONDS` | Sets the window for new introductions in whole seconds. Defaults to 2592000 seconds (30 days). The Helm value is `registry.config.rfqContactWindowSeconds`. |
-| `REGISTRY_RFQ_REDACT_RESTORED_CONTACTS` | Enables startup redaction for a restored database whose retained contact eligibility cannot be reconstructed. Contact operations stay closed while the setting is enabled. |
-
-RFQ admission requires a schema, authority trust, a replay digest keyring and a separate contact encryption keyring. Startup and background retention remove expired contact rows independently of RFQ admission. The [operator handbook](../../../docs/operator-handbook.md#operate-and-recover-rfqs) covers rotation and restore.

@@ -15,7 +15,6 @@ An architecture companion does not replace a normative requirement. When explana
 | Capability | Normative contract | Architecture and rationale |
 |---|---|---|
 | API credits | [Spec](api-credits/spec.md) | [Architecture](api-credits/architecture.md) |
-| Buyer compute RFQs | [Spec](buyer-compute-rfqs/spec.md) | [Architecture](buyer-compute-rfqs/architecture.md) |
 | Buyer orchestration | [Spec](buyer-orchestration/spec.md) | [Architecture](buyer-orchestration/architecture.md) |
 | Change workflow | [Spec](change-workflow/spec.md) | [README](change-workflow/README.md), [index](change-workflow/index.md) |
 | CLI query language | [Spec](cli-query-language/spec.md) | [Architecture](cli-query-language/architecture.md) |
