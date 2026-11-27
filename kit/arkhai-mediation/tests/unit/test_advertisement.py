@@ -27,3 +27,14 @@ def test_published_default_description_is_unchanged():
     description = vectors()["description"]
     assert description["minimum_dispute_window_seconds"] == 14 * 86400
     assert validate("Description", description) == description
+
+
+@pytest.mark.parametrize("change", [
+    lambda body: body.update(automatic_rulings="every_claim"),
+    lambda body: body.update(unknown=True),
+], ids=["unpublished-automatic-rulings", "extra-field"])
+def test_a_description_outside_the_published_schema_is_refused(change):
+    description = deepcopy(vectors()["description"])
+    change(description)
+    with pytest.raises(ValidationError):
+        validate("Description", description)

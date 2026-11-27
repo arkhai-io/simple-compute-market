@@ -115,6 +115,19 @@ class MediationClient:
     async def close(self) -> None:
         await self._http.aclose()
 
+    async def describe(self) -> dict[str, Any]:
+        """The authority's public description, which it serves at its root.
+
+        It is returned as the published ``Description`` validates it: an
+        advertisement stays schema data, read by whoever relies on one of its
+        values, not a model this kit interprets. A description naming another
+        authority than the pinned one is refused.
+        """
+        description = await self._document("Description", "GET", "/")
+        if DisputeAuthority.model_validate(description["dispute"]) != self.authority:
+            raise MediationProtocolError("description names another authority")
+        return description
+
     async def file(self, filing: Filing, *, idempotency_key: str) -> FilingAnswer:
         return await self._request(
             FilingAnswer, "FilingAnswer", "POST", "/cases",
@@ -190,6 +203,14 @@ class MediationClient:
     async def _request(
         self, model: type[ModelT], definition: str, method: str, path: str, **kwargs: Any,
     ) -> ModelT:
+        value = await self._document(definition, method, path, **kwargs)
+        try:
+            return model.model_validate(value)
+        except ValidationError as exc:
+            raise MediationProtocolError("mediation response violates its contract") from exc
+
+    async def _document(self, definition: str, method: str, path: str, **kwargs: Any) -> Any:
+        """The response body, validated as the published ``definition``."""
         try:
             response = await self._http.request(method, path, **kwargs)
         except httpx.TransportError as exc:
@@ -208,8 +229,8 @@ class MediationClient:
         try:
             value = response.json()
             validate(definition, value)
-            return model.model_validate(value)
-        except (ValueError, ValidationError, SchemaValidationError) as exc:
+            return value
+        except (ValueError, SchemaValidationError) as exc:
             raise MediationProtocolError("mediation response violates its contract") from exc
 
 

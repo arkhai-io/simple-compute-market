@@ -134,7 +134,7 @@ Delivers D6's adapter path and D14's `describe` client method. Implements
 callers" and "Revised cases carry their prior rulings". Touches `kit/arkhai-mediation`
 and the two compute storefronts' integration tests.
 
-- [ ] 2.1 In `kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`, replace the
+- [x] 2.1 In `kit/arkhai-mediation/src/market_arkhai_mediation/adapter.py`, replace the
   `repair required: delivery-end revision requires resolved prior rulings and effects`
   answer in `MediationAdapter.submit`: adopt a filed `delivery_end` equal to the claim,
   whoever filed it; otherwise file the claim at once as a new case, its single-writer
@@ -148,12 +148,60 @@ and the two compute storefronts' integration tests.
   filed case; a revision behind an unknown earlier filing of the same caller stays
   pending; a buyer's claim after a seller's case is filed too (the delta's scenario "A
   changed claim follows a filed one").
-- [ ] 2.2 Add `describe()` to `MediationClient`
+  Done: `MediationAdapter.submit` adopts the latest filed `delivery_end` equal to the claim,
+  by either party; otherwise it takes a writer reservation keyed by the claim
+  (`mediation-delivery-end:<sha256([identity, claim])>`, owner the operation key and
+  filing, as before but per claim) and files under the same digest as its idempotency
+  key. "The caller's own earlier filing of unknown outcome" is kept as numbered order
+  slots in the caller's operation store (`_earlier_claim_unresolved`), checked before the
+  claim's writer reservation is taken: a claim walks them until it finds its own or a
+  free one, and a slot holding a claim the record does not show answers `Pending`. A
+  store marketplace 0.4.0 (kit 0.3.1) wrote holds one writer per Agreement, an owner
+  digest under `mediation-delivery-end:<identity>`, and no slots; any other store holds
+  `slotted` there. That writer's own operation goes on to the slots; every other claim
+  waits until a `delivery_end` is on the record. This path retires once no store
+  marketplace 0.4.0 wrote can hold an unresolved original: two marketplace releases
+  after the one first carrying kit 0.4.0, its row added to the release handbook's
+  "Compatibility to retire" at closeout (8.9). After that, such a store's original is
+  not waited for. New durable keys go into the caller's operation store, the claim's
+  writer and the `mediation-delivery-end-order:*` slots, with no schema change; D12's
+  "Persistence: none" names no store table. No path answers `repair required`
+  now: a filed entry is a verified signed record whose claim the schema requires, and
+  the adapter's own refusals stay those of an invalid request. Library integration,
+  `make -C kit/arkhai-mediation test`: passed (130). `test_semantic_filing.py`: a
+  changed claim after a filed original is a second case whose filed request is the claim
+  alone; a changed claim behind an unsent earlier filing stays pending, then is filed
+  after it; a store holding only the released adapter's reservation holds a changed
+  claim back until its original is filed, while that original, retried, files; a payee claim after the buyer's
+  `delivery_end(cause=payer)` case and a buyer's claim after the seller's are each filed;
+  an equal claim adopts the other party's case with no write. `test_ruling_traces.py`:
+  the adapter surface now files the second claim of `manual-second-mechanical-claim` and
+  `operator-nets-earlier-ruling` itself, the producer's later checkpoints then matching.
+  test-before at `96433de38`: those four filing cases and both trace replays fail; the
+  adoption case passes there, as it pins unchanged behaviour. Version: 0.4.0; both
+  storefronts require `arkhai-kit-arkhai-mediation>=0.4.0`. The buyers' bounds stay
+  `>=0.3.1`, no buyer code having changed; the pre-commit relock moves their locks to
+  0.4.0. `kit/arkhai-mediation/README.md` describes the filing as it now is, what SCM
+  relies on the authority for, and `describe()`.
+- [x] 2.2 Add `describe()` to `MediationClient`
   (`kit/arkhai-mediation/src/market_arkhai_mediation/client.py`), reading the
   authority's public description route and returning its `Description`, validated
   against the vendored schema (D14). Verify with the kit's tests against the vendored
   vectors' `description`, and a refusal of a body the schema refuses.
-- [ ] 2.3 Prove the revision through each storefront at application integration: in the
+  Done: `describe()` reads `GET /`, where the authority serves its description (as
+  `docs/attachments/vm-end-classification/readiness.py` reads it), validates it as the
+  vendored `Description` and returns it as schema data, not a generated model — the kit
+  keeps advertisements as validated data (`schema/SOURCE.md`); a description naming
+  another authority than the pinned one is refused. `_request` now validates through a
+  shared `_document`. Library integration, `tests/integration/test_describe.py` (the
+  client over an in-process transport, as `test_case_read.py`): the vectors' description
+  returned as served from `GET /`; a body missing a field refused; another authority
+  refused. test-before: all fail. Unit, `tests/unit/test_advertisement.py`: an unpublished
+  `automatic_rulings` value and an extra field refused by the schema.
+  The vendored schema holds `automatic_rulings` to its one published value, so an
+  authority advertising R4's value fails `describe()` until the schema is re-vendored;
+  section 5's scenario reads the advertisement through it.
+- [x] 2.3 Prove the revision through each storefront at application integration: in the
   VM storefront (`domains/vms/storefront/tests/integration/test_lifecycle_mediation_trust.py`
   or `test_lifecycle_ends.py`) and the bare-metal storefront
   (`domains/bare_metal/storefront/tests/integration/test_lifecycle_mediation_trust.py`),
@@ -161,11 +209,65 @@ and the two compute storefronts' integration tests.
   earlier seller failure files the payee's `delivery_end` as a new case, is listed with
   that case open, never repair required, and records the delivery end a programmed
   ruling of it applies, classified as a ruling, sending no stop or reverse of its own.
-- [ ] 2.4 Verify the section: `make -C kit/arkhai-mediation test`, both storefronts'
+  Done, application integration, in a new module in each storefront,
+  `tests/integration/test_lifecycle_revision.py` (the `test_lifecycle_mediation_trust.py`
+  modules hold CA-bundle cases and no deal flow): the buyer ends delivery through its typed
+  `LifecycleClient` and files its `delivery_end(cause=payer)` case through its own adapter;
+  a signed site report of a `force_release` before that end arrives (VM through the
+  composed ingress, bare metal through the site's signed callback route); two servicing
+  cycles (VM on the composed lifecycle, bare metal stepped through the typed admin client)
+  file the payee claim at the failure's instant as a second case and read it back; the
+  seller's typed list shows `ending` with `case_open`, `open_cases` naming that case, and
+  its filing accepted; a programmed operator ruling's `end_delivery` is then recorded as a final
+  request classified `ruling` (read from the journal) and the case read closed through the
+  typed read, with no payments write after the report. Both run on `injected_source`, the
+  VM Agreement starting at its instant (`start=`); each records the deal's availability,
+  which neither harness's delivery double records. The bare-metal `harness` now publishes
+  the mediation contract's own authority (`_option()` in
+  `test_payment_settlement_client.py`), so the fake's signed records verify there, and the
+  buy-command case there renders that authority's `params`.
+- [x] 2.4 Verify the section: `make -C kit/arkhai-mediation test`, both storefronts'
   integration suites, and `change-workflow run pre-commit converge-ongoing-compute-leases`
   passing. End-to-end: none today; `e2e_vm_rate_dispute` and
   `e2e_bare_metal_rate_dispute` exercise it once sections 5 and 6 add row 2 and row 3's
   revision, and `e2e_vm_live_dispute` live, through section 5's scenario.
+  Done, under one known exception: `kit/arkhai-mediation` passed (130),
+  `kit/deal-servicing` (144), the VM storefront (664) and the bare-metal storefront
+  (700), and `change-workflow run pre-commit`, whose one failure is the expected
+  citation of section 7's attachment, which that section creates. End-to-end scenarios
+  confirmed as planned.
+
+  Handoff:
+  - A claim's writer reservation is now keyed by the claim. Marketplace 0.4.0's
+    per-Agreement reservation is still honoured as an original, but only until any
+    `delivery_end` is on the record: should the other party's case land first, a
+    changed claim is filed though that original's outcome is unknown. The store names
+    no claim for that writer, so nothing narrower can be checked.
+  - An earlier claim of the caller's that the authority refused outright holds every
+    later claim `Pending`, since the operation store answers only whether a key holds
+    a digest, and reading a key writes it when absent. In the storefront the refusal
+    is terminal and the deal repair required; the buyer kit files one claim.
+    Releasing the slot needs a store read, which the `OperationStore` port lacks. This
+    departs from the delta's "pending … while … of unknown outcome" for a refused claim;
+    declined from the fresh-context check for the round's triage, the fix being a read
+    on the port in `kit/deal-lifecycle` and each store.
+  - Also declined: both storefronts' revision tests send the site report without a typed
+    sender — bare metal through `authenticated_request` on `LEASE_ENDED_CALLBACK`, as its
+    existing release cases do; no typed client method for that callback exists.
+  - Declined from the fresh-context check: the VM revision test hands the site report to
+    the composed ingress, since the `make` harness mounts no lease-report route;
+    `test_lifecycle_ends.py` proves that route.
+  - For section 5: the vendored schema holds `automatic_rulings` to its one published
+    value, so `describe()` refuses an authority advertising R4's value. 5.4's scenario
+    must either run against a re-vendored publication carrying that value, or read
+    that refusal as the requirement unproven; re-vendoring follows
+    `kit/arkhai-mediation/schema/SOURCE.md`.
+  - The mediation fake signs with the vectors' key only: a harness whose Agreement
+    names another `record_key` reads none of its records (the bare-metal harness did,
+    which is why its filings once answered "signed record unavailable").
+  - The storefront's list reflects the authority view the cycle's read saved, and the
+    read precedes filing dispatch, so a case the cycle filed is listed after the next
+    cycle.
 
 ## 3. The site's sends to a storefront held by a pause
 
@@ -408,6 +510,11 @@ coordinator writes.
   record:
   - `openspec/specs/deal-lifecycle/architecture.md`, "External authorities": what SCM
     relies on the dispute authority for, R1–R4, without naming where they are built;
+    the paragraph on case payloads and semantic filings, which still says changed
+    requests and linked revisions require repair;
+  - `docs/release-handbook.md`, "Compatibility to retire": the mediation adapter's reading
+    of marketplace 0.4.0's per-Agreement delivery-end writer, retiring two marketplace
+    releases after the one first carrying `arkhai-kit-arkhai-mediation` 0.4.0;
     "One end instant, transactional admission": the leading physical pass and
     `filing_unanswered`; and the promoted diagrams cited (D6, D7, D11, D12);
   - `openspec/specs/physical-provisioning/architecture.md`, "Lease-end report delivery"

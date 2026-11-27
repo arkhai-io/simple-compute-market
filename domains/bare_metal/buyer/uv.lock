@@ -292,7 +292,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-mediation"
-version = "0.3.1"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -304,7 +304,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_mediation-0.3.1-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_mediation-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

@@ -36,6 +36,7 @@ from held_loops import held_loop_controller
 from loopback import serving
 from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt, dispute_lifecycle
+from market_arkhai_mediation.fixtures.authority import MediationContractFake
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_deal_servicing.journal import stable_ref
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -167,7 +168,9 @@ def _option() -> SettlementOption:
     params = {"payee_account": PAYEE, "window": "P7D", "deposit_agreement": False}
     rates = [RateValue(field="amount", per="hour", value=100)]
     lifecycle = dispute_lifecycle(DISPUTE)
-    lifecycle["adjudication"]["dispute"]["interface"] = "arkhai.mediation.v1"
+    # The mediation contract's published authority, so its in-process peer's
+    # signed records verify against the Agreement.
+    lifecycle["adjudication"]["dispute"] = MediationContractFake().authority
     lifecycle["delivery_deadline_seconds"] = 3600
     return SettlementOption(
         option_id=derive_settlement_option_id(
@@ -661,7 +664,9 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             f'origin = "{dispute["origin"]}"\n'
             f'account = "{dispute["account"]}"\n'
             f'record_key = "{dispute["record_key"]}"\n'
-            "params = {}\n"
+            "params = {"
+            + ", ".join(f'{key} = "{value}"' for key, value in dispute["params"].items())
+            + "}\n"
             "[Dispute.advertisement]\n"
             'mechanisms = ["arkhai.payments.v1"]\n'
             "minimum_dispute_window_seconds = 60\n"

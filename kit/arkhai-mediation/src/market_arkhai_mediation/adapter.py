@@ -9,7 +9,7 @@ import injected_time
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from market_deal_lifecycle.adapters import DeliveryEndIntent, DisputeBinding, InterfaceRequest
 from market_deal_lifecycle.respondent import RespondentCase, RespondentPage
-from market_deal_lifecycle.operations import OperationKeys
+from market_deal_lifecycle.operations import OperationKeys, OperationStore
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DeliveryEndEffect, DisputeEvent, EvidenceItem,
@@ -249,6 +249,7 @@ class MediationAdapter:
             filing = self._filing(request)
             filing_key = keys.filing()
             if wire(filing)["request"]["kind"] == "delivery_end":
+                fixed = wire(filing)["request"]
                 identity = hashlib.sha256(canonical_json({
                     "commitment": self.binding.commitment_ref, "agreement": self.agreement_digest,
                     "authority": self.binding.authority.model_dump(mode="json"),
@@ -256,29 +257,36 @@ class MediationAdapter:
                 view = await self.read()
                 if not isinstance(view.outcome, Accepted):
                     return view.outcome
-                originals = [event for event in view.disputes if event.kind == "filed" and
-                             json.loads(event.items[0].body)["entry"]["filing"]["request"]["kind"] == "delivery_end"]
-                if originals:
-                    fixed = wire(filing)["request"]
-                    if len(originals) != 1 or json.loads(originals[0].items[0].body)["entry"]["filing"]["request"] != fixed:
-                        return Rejected(reason="repair required: delivery-end revision requires resolved prior rulings and effects")
+                filed = _filed_delivery_ends(view.disputes)
+                # A claim equal to one already filed, by either party, adopts
+                # that case; any other claim is a case of its own, which the
+                # authority orders against the Agreement's earlier cases.
+                equal = next((case_ref for case_ref, claim in reversed(filed) if claim == fixed), None)
+                if equal is not None:
                     answer = wire(await self.client.case(
-                        originals[0].case_ref, agreement=self.agreement_digest,
-                        transaction=self.binding.commitment_ref,
+                        equal, agreement=self.agreement_digest, transaction=self.binding.commitment_ref,
                     ))
                     if answer["status"] != "accepted":
                         return _failure(answer)
                     return await self._filing_answer(answer["case"])
-                # Only the original caller may write while its result is uncertain.
-                # Other callers adopt a signed equivalent above, or fail closed.
+                if keys.store is None:
+                    return Pending(reason="delivery-end filing must resolve its writer before it is sent")
+                claim = hashlib.sha256(canonical_json([identity, fixed])).hexdigest()
                 owner = hashlib.sha256(canonical_json({
                     "operation_key": command.operation_key, "filing": wire(filing),
                 })).hexdigest()
-                if keys.store is None or not await keys.store.check_and_record(
-                    command.negotiation_id, "mediation-delivery-end:" + identity, owner,
+                if await _earlier_claim_unresolved(
+                    keys.store, command.negotiation_id, identity, claim, owner,
+                    [hashlib.sha256(canonical_json([identity, earlier])).hexdigest() for _, earlier in filed],
                 ):
-                    return Pending(reason="original delivery-end filing must resolve before adoption or revision")
-                filing_key = hashlib.sha256(canonical_json([identity, wire(filing)["request"]])).hexdigest()
+                    return Pending(reason="an earlier delivery-end filing must resolve before this claim is filed")
+                # Only the claim's first caller may write it while its result is
+                # uncertain; another caller adopts the signed case once it is filed.
+                if not await keys.store.check_and_record(
+                    command.negotiation_id, "mediation-delivery-end:" + claim, owner,
+                ):
+                    return Pending(reason="this claim's original filing must resolve before adoption")
+                filing_key = claim
             sent = True
             answer = wire(await self.client.file(filing, idempotency_key=filing_key))
             if answer["status"] != "accepted":
@@ -393,6 +401,58 @@ class MediationAdapter:
             sequence=entry["sequence"], record_ref=entry["record_ref"],
             items=[evidence], outcome=effects,
         )
+
+
+def _filed_delivery_ends(disputes: list[DisputeEvent]) -> list[tuple[str, dict]]:
+    """Each filed ``delivery_end`` case on the Agreement with its claim, in the
+    authority's record order; ``read`` keeps each signed entry as its event's
+    one item."""
+    filed = []
+    for event in disputes:
+        if event.kind == "filed":
+            request = json.loads(event.items[0].body)["entry"]["filing"]["request"]
+            if request["kind"] == "delivery_end":
+                filed.append((event.case_ref, request))
+    return filed
+
+
+async def _earlier_claim_unresolved(
+    store: OperationStore, negotiation_id: str, identity: str, claim: str, owner: str, filed: list[str],
+) -> bool:
+    """Whether this caller sent an earlier, different ``delivery_end`` claim on
+    the Agreement that the authority's record does not yet show.
+
+    The caller's claims hold numbered slots in its operation store, in the
+    order it first sent them. A claim walks the slots until it finds its own
+    or takes the first free one; a slot held by another claim is resolved once
+    that claim appears among the filed ones (``filed``, by digest). An earlier
+    claim of unknown outcome holds back every later one, since one sent after
+    it but accepted first would reverse the order in which the authority reads
+    them as revisions. The store answers only whether a slot holds a digest,
+    so an earlier claim the authority refused outright stays unresolved: the
+    refusal is terminal, and the seller's list shows the deal repair required.
+
+    A store that marketplace 0.4.0's adapter wrote holds its one writer per
+    Agreement, an operation's owner digest, under
+    ``mediation-delivery-end:<identity>``, and no slots. Any other store holds
+    ``slotted`` there, written by the first claim to look. That writer's own
+    operation goes on to the slots; every other claim waits until a
+    ``delivery_end`` is on the record, the store naming no claim to look for.
+    """
+    legacy = "mediation-delivery-end:" + identity
+    if not await store.check_and_record(negotiation_id, legacy, "slotted"):
+        if not await store.check_and_record(negotiation_id, legacy, owner) and not filed:
+            return True
+    slot = 0
+    while True:
+        key = f"mediation-delivery-end-order:{identity}:{slot}"
+        if await store.check_and_record(negotiation_id, key, claim):
+            return False
+        # The slot is held, so these probes compare and never write.
+        held = [await store.check_and_record(negotiation_id, key, digest) for digest in filed]
+        if not any(held):
+            return True
+        slot += 1
 
 
 def _check_items(items: list) -> None:

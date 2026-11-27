@@ -162,17 +162,10 @@ def test_published_ruling_trace(trace, surface):
                         command = LifecycleCommand(negotiation_id=binding.negotiation_id, kind=kind,
                                                    operation_key=str(i), payload=command_payload)
                         table = DisputeAdapterTable([(INTERFACE, lambda _: adapter)])
-                        if item["operation"] == "file" and any(
-                            prior["operation"] == "file" for prior in trace["inputs"][:i]
-                        ):
-                            # Lifecycle cannot map linked revisions safely. The raw
-                            # client still replays the producer's operator workflow.
-                            refused = await submit_dispute(command, binding, table, operations)
-                            assert isinstance(refused, Rejected) and "repair required" in refused.reason
-                            answer = await client.file(Filing.model_validate(payload),
-                                idempotency_key=input_keys[item["idempotency_key"]])
-                            identical(wire(answer), item["response"])
-                            continue
+                        # A later filing on the Agreement is mapped and filed at
+                        # once like the first, as a case of its own; the
+                        # checkpoints that follow show the authority holding it
+                        # as the producer's trace does.
                         peer.lose_next_response = True
                         unknown = await submit_dispute(command, binding, table, operations)
                         assert isinstance(unknown, Unknown), unknown

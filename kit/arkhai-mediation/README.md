@@ -67,12 +67,20 @@ env -u ALL_PROXY -u all_proxy NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,12
   seller principal. Invalid concurrence can still be submitted as raw evidence
   in an `InterfaceRequest` for operator review. Neither mapper calculates remedies.
   The foundation's caller-owned atomic operation store rejects changed command
-  content before I/O. Delivery-end filing reserves one original writer per exact
-  commitment, Agreement and authority; its authority key binds the fixed request,
-  not the caller key. A different caller adopts one equivalent signed filed record.
-  Concurrent callers without a signed original, multiple originals and changed
-  requests return repair required rather than allocate another case or amend by
-  append. Safe linked revision/netting is not mapped by this client.
+  content before I/O. A delivery-end claim equal to one already filed on the
+  Agreement, by either party, adopts that signed case. Any other claim is filed at
+  once as a case of its own, naming no earlier case: SCM relies on the authority to
+  read it as a revision from its own record and net earlier cases' effects, and an
+  authority that does not treats it as an ordinary case for an operator. Each claim
+  reserves one writer per exact commitment, Agreement, authority and fixed request,
+  and its authority key binds that request, not the caller key; a concurrent
+  caller of the same claim is pending until the signed case can be adopted. A claim
+  is pending while an earlier, different claim of the same caller is not on the
+  authority's record, whether its outcome is unknown or it was refused outright,
+  since the caller's operation store records only that it was sent. Under a store
+  marketplace 0.4.0's adapter wrote, whose one writer names no claim, a changed
+  claim is pending until any delivery-end is on the record. `MediationClient.describe()` reads the authority's public
+  description at its root, validated as the published `Description`.
   The authority has no record for an Agreement until its first filing, and
   answers a read of the first record page `404 invalid_request`. `read`, which
   the delivery-end filing also reads through, takes that answer as an accepted,
