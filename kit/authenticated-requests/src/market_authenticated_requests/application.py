@@ -8,8 +8,15 @@ application runs. In the dependency form a route admits it through its
 finishes what the route admitted. In
 both, a request carrying a request identity that no route of the application
 serves is answered with a signed refusal, since in the dependency form no route's
-admission ever runs for it; and the wrapper holds a handler's response until it is
-recorded and signed.
+admission ever runs for it -- verified first, unless it is of a public operation's
+shape, which is refused over its stated identity unverified; and the wrapper holds
+a handler's response until it is recorded and signed. A public operation's route,
+bound in the middleware form's table or admitted through its
+:class:`~market_authenticated_requests.dependency.PublicAdmission`, is answered
+signed over the request identity its request states.
+
+Each form verifies a request against the raw query string it arrived with
+(:func:`received_query`), never one the framework decoded and re-encoded.
 """
 
 from __future__ import annotations
@@ -17,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from market_identity import stated_request_binding
+from market_identity import is_public_request, stated_request_binding
 from request_replay.asgi import (
     CapturedResponse,
     Receive,
@@ -31,8 +38,14 @@ from request_replay.asgi import (
 from starlette.datastructures import Headers
 from starlette.routing import BaseRoute, Match
 
-from market_authenticated_requests.core import Admitted, AdmissionCore, Answer, Verified
-from market_authenticated_requests.routes import ResourceUnbound, RouteNotServed, RouteTable, Unauthenticated
+from market_authenticated_requests.core import Admitted, AdmissionCore, Answer, PublicAdmitted, Verified
+from market_authenticated_requests.routes import (
+    PublicBinding,
+    ResourceUnbound,
+    RouteNotServed,
+    RouteTable,
+    Unauthenticated,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +55,18 @@ logger = logging.getLogger(__name__)
 BODY_KEY = "authenticated_request_body"
 ADMITTED_KEY = "authenticated_request"
 ANSWER_KEY = "authenticated_request_answer"
+
+
+def received_query(scope: Scope) -> str:
+    """The query suffix a request arrived with, as the profile verifies it: ``?``
+    and the ASGI ``query_string`` exactly as received, or empty where it is empty.
+
+    The bytes are decoded one character each, so a byte no URL query may hold
+    reaches verification as it came and fails it as malformed.
+    """
+
+    raw: bytes = scope.get("query_string", b"")
+    return "?" + raw.decode("latin-1") if raw else ""
 
 
 class AuthenticatedApplication:
@@ -84,7 +109,7 @@ class AuthenticatedApplication:
             if stated_request_binding(method=method, headers=headers) is None:
                 await self._app(scope, downstream, send)
                 return
-            await self._send(send, self._refuse_unserved(method, headers, body, not_served))
+            await self._send(send, self._refuse_unserved(scope, method, headers, body, not_served))
             return
 
         marked = self._unauthenticated.marks(_route_path(self._app_routes(), scope))
@@ -97,16 +122,19 @@ class AuthenticatedApplication:
         self, scope: Scope, receive: Receive, method: str, headers: Headers, body: bytes
     ) -> Answer:
         assert self._routes is not None
+        query = received_query(scope)
         try:
             binding = self._routes.resolve(method, str(scope["path"]), body)
         except RouteNotServed as not_served:
-            return self._refuse_unserved(method, headers, body, not_served)
+            return self._refuse_unserved(scope, method, headers, body, not_served)
         except ResourceUnbound as unbound:
-            verified = self._core.verify(method, headers, body)
+            verified = self._core.verify(method, headers, body, query=query)
             return verified if isinstance(verified, Answer) else self._core.refuse_unbound(verified, unbound)
         except Exception as error:
             return self._core.fail_unadmitted(method, headers, error)
-        verified = self._core.verify(method, headers, body, route=binding)
+        if isinstance(binding, PublicBinding):
+            return await self._public(scope, receive, method, headers, binding)
+        verified = self._core.verify(method, headers, body, query=query, route=binding)
         if isinstance(verified, Answer):
             return verified
         try:
@@ -132,6 +160,8 @@ class AuthenticatedApplication:
             admitted = state.get(ADMITTED_KEY)
             if isinstance(admitted, Admitted):
                 return await self._core.fail(admitted, error)
+            if isinstance(admitted, PublicAdmitted):
+                return self._core.fail_public(admitted, error)
             if marked:
                 raise
             return self._core.fail_unadmitted(method, headers, error)
@@ -144,6 +174,8 @@ class AuthenticatedApplication:
         admitted = state.get(ADMITTED_KEY)
         if isinstance(admitted, Admitted):
             return await self._core.finish(admitted, captured.status, captured.headers, captured.body)
+        if isinstance(admitted, PublicAdmitted):
+            return self._core.finish_public(admitted, captured.status, captured.headers, captured.body)
         if marked:
             return Answer(captured.status, captured.headers, captured.body)
         # A declared route answered before its admission ran -- another of its
@@ -161,8 +193,30 @@ class AuthenticatedApplication:
             raise
         return await self._core.finish(admitted, captured.status, captured.headers, captured.body)
 
-    def _refuse_unserved(self, method: str, headers: Headers, body: bytes, not_served: RouteNotServed) -> Answer:
-        verified = self._core.verify(method, headers, body)
+    async def _public(
+        self, scope: Scope, receive: Receive, method: str, headers: Headers, binding: PublicBinding
+    ) -> Answer:
+        admitted = self._core.admit_public(method, headers, binding)
+        if isinstance(admitted, Answer):
+            return admitted
+        scope["state"][ADMITTED_KEY] = admitted
+        try:
+            captured = await capture(self._app, scope, receive)
+        except Exception as error:
+            return self._core.fail_public(admitted, error)
+        return self._core.finish_public(admitted, captured.status, captured.headers, captured.body)
+
+    def _refuse_unserved(
+        self, scope: Scope, method: str, headers: Headers, body: bytes, not_served: RouteNotServed
+    ) -> Answer:
+        # A public operation's request carries no signature to verify, so it is
+        # refused over the identity it states; a request carrying signature fields
+        # is verified first, so that an unknown profile is still answered as one
+        # and a forged signature as invalid.
+        stated = stated_request_binding(method=method, headers=headers)
+        if stated is not None and is_public_request(headers):
+            return self._core.refuse_unserved_public(stated, not_served)
+        verified = self._core.verify(method, headers, body, query=received_query(scope))
         if isinstance(verified, Verified):
             return self._core.refuse_unserved(verified, not_served)
         return verified

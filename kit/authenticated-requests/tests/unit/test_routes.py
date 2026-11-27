@@ -5,6 +5,7 @@ from market_identity import ExactRetry
 
 from market_authenticated_requests import (
     DOCUMENTATION_PATHS,
+    PublicBinding,
     RouteBinding,
     RouteNotServed,
     Unauthenticated,
@@ -41,3 +42,9 @@ def test_the_unauthenticated_marks_carry_the_openapi_document_by_default() -> No
 
     assert marks.marks("/health") and all(marks.marks(path) for path in DOCUMENTATION_PATHS)
     assert not Unauthenticated.of("/health", documentation=False).marks("/openapi.json")
+
+
+def test_a_public_route_binds_its_operation() -> None:
+    assert PublicBinding("toy.descriptor.read").operation == "toy.descriptor.read"
+    with pytest.raises(ValueError, match="operation"):
+        PublicBinding("")

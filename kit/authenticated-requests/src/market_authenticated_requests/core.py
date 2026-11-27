@@ -14,6 +14,15 @@ answered with a signed 503 ``admission_unavailable``: nothing about the request 
 concluded, so its caller retries the same request. A signed 500 answers any other
 failure: a route raising after the request was admitted, or the request failing
 before its admission outside the replay store.
+
+A request's ``@query`` is verified against the raw query string the authority
+received, which the wrapper and a route's admission hand the core as it arrived.
+
+A public operation's request states a request identity and carries no signature; the
+core answers it signed over that identity, unverified and reserving nothing, and
+refuses one carrying signature fields as malformed. A request of a public
+operation's shape that no route serves is refused signed and unverified as well,
+since the core cannot know which authority its caller meant.
 """
 
 from __future__ import annotations
@@ -36,6 +45,7 @@ from market_identity import (
     TrustedIdentitySet,
     VerificationCode,
     VerifiedRequest,
+    is_public_request,
     principal_text,
     sign_market_response,
     stated_request_binding,
@@ -60,7 +70,7 @@ from request_replay import (
     StoreUnavailable,
 )
 
-from market_authenticated_requests.routes import ResourceUnbound, RouteBinding, RouteNotServed
+from market_authenticated_requests.routes import PublicBinding, ResourceUnbound, RouteBinding, RouteNotServed
 from market_authenticated_requests.settings import AuthenticatedRequestsSettings
 
 logger = logging.getLogger(__name__)
@@ -140,6 +150,15 @@ class Admitted:
         return Verified(self.request, self.body)
 
 
+@dataclass(frozen=True)
+class PublicAdmitted:
+    """A public operation's request admitted for dispatch: the request identity its
+    answer is signed over, which is the route's operation and the request ID the
+    caller stated."""
+
+    binding: RequestBinding
+
+
 class AdmissionCore:
     """Admits an authority's requests and signs its answers.
 
@@ -198,16 +217,20 @@ class AdmissionCore:
         headers: Mapping[str, str],
         body: bytes,
         *,
+        query: str,
         route: RouteBinding | None = None,
     ) -> Verified | Answer:
         """The verified request, or the answer refusing it.
 
+        ``query`` is the raw query string received, with its ``?`` prepended, or
+        empty where there was none
+        (:func:`~market_authenticated_requests.application.received_query`).
         A refusal binds the caller's stated request ID, and the operation and
         resource of ``route`` where the request reached one, else those it
         states. An unsupported protocol is answered over the stated fields alone.
         """
 
-        verification = verify_market_request(method=method, headers=headers, body=body)
+        verification = verify_market_request(method=method, headers=headers, body=body, query=query)
         if verification.verified and verification.request is not None:
             return Verified(verification.request, body)
         stated = stated_request_binding(method=method, headers=headers)
@@ -238,13 +261,24 @@ class AdmissionCore:
     def refuse_unserved(self, verified: Verified, not_served: RouteNotServed) -> Answer:
         """A verified request no route serves: a signed 404, or 405 with ``Allow``."""
 
+        return self._not_served(verified.request.binding, not_served, verified=verified)
+
+    def refuse_unserved_public(self, stated: RequestBinding, not_served: RouteNotServed) -> Answer:
+        """A request of a public operation's shape no route serves: the signed 404,
+        or 405 with ``Allow``, over the identity it states, unverified."""
+
+        return self._not_served(stated, not_served, verified=None)
+
+    def _not_served(
+        self, binding: RequestBinding, not_served: RouteNotServed, *, verified: Verified | None
+    ) -> Answer:
         headers: Headers = []
         if not_served.allowed_methods:
             headers.append((b"allow", ", ".join(not_served.allowed_methods).encode("latin-1")))
         return self.answer(
-            verified.request.binding,
+            binding,
             not_served.status_code,
-            {"code": RefusalCode.OPERATION_NOT_SERVED.value, "operation": verified.request.operation},
+            {"code": RefusalCode.OPERATION_NOT_SERVED.value, "operation": binding.operation},
             headers=headers,
             verified=verified,
         )
@@ -388,6 +422,54 @@ class AdmissionCore:
             },
             verified=verified,
         )
+
+    def admit_public(self, method: str, headers: Mapping[str, str], public: PublicBinding) -> PublicAdmitted | Answer:
+        """Check a request to a public operation's route, which reserves nothing.
+
+        Its request must be of a public operation's shape: a request carrying
+        signature fields is malformed, since each operation's message has one
+        shape, and one stating no request identity is answered unsigned. It must
+        state the route's operation and no resource, or it is a mismatch, signed
+        over the route's operation.
+        """
+
+        stated = stated_request_binding(method=method, headers=headers)
+        if stated is None:
+            return self.answer(
+                None, 400, {"detail": "A public operation's request states Market-Operation and Market-Request-ID"}
+            )
+        if not is_public_request(headers):
+            return self.answer(stated, 400, {"detail": "A public operation's request carries no signature"})
+        route = RequestBinding.model_construct(
+            method=stated.method, operation=public.operation, resource=None, request_id=stated.request_id
+        )
+        if (stated.operation, stated.resource) != (route.operation, route.resource):
+            return self.answer(
+                route,
+                400,
+                {
+                    "code": RefusalCode.OPERATION_MISMATCH.value,
+                    "stated": {"operation": stated.operation, "resource": stated.resource},
+                    "bound": {"operation": route.operation, "resource": None},
+                },
+            )
+        return PublicAdmitted(route)
+
+    def finish_public(self, admitted: PublicAdmitted, status: int, headers: Headers, body: bytes) -> Answer:
+        """A public operation's handler's response, signed over its request identity."""
+
+        return self._signed(admitted.binding, status, headers, body, verified=None)
+
+    def fail_public(self, admitted: PublicAdmitted, error: BaseException) -> Answer:
+        """A public operation whose handler raised: a signed 500, nothing recorded."""
+
+        logger.error(
+            "public route %s failed",
+            admitted.binding.operation,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        status, headers, body = _json(500, {"detail": ROUTE_FAILURE_DETAIL})
+        return self.finish_public(admitted, status, headers, body)
 
     async def finish(self, admitted: Admitted, status: int, headers: Headers, body: bytes) -> Answer:
         """Complete an admitted request with its handler's response, and sign it.

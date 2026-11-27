@@ -5,8 +5,9 @@ replay store bound to its own database (:func:`sqlite_replay_store`, or
 ``market_authenticated_requests.sqlalchemy_support.sqlalchemy_replay_store`` with
 the ``sqlalchemy`` extra), and wraps its application with :func:`install`. In the
 middleware form it passes its route table; in the dependency form each route takes
-a :class:`RouteAdmission`. Its migration chain composes the replay table's
-migration, and its lifespan :meth:`AdmissionCore.sweeping`. Its settings compose
+a :class:`RouteAdmission`, and a public operation's route a :class:`PublicAdmission`.
+Its migration chain composes the replay table's migration, and its lifespan
+:meth:`AdmissionCore.sweeping`. Its settings compose
 :class:`AuthenticatedRequestsSettings` as ``authenticated_requests``.
 """
 
@@ -19,10 +20,11 @@ from market_authenticated_requests.core import (
     Admitted,
     AdmissionCore,
     Answer,
+    PublicAdmitted,
     SignedOutcome,
     Verified,
 )
-from market_authenticated_requests.dependency import RouteAdmission
+from market_authenticated_requests.dependency import PublicAdmission, RouteAdmission
 from market_authenticated_requests.inventory import RouteInventoryError, install, undeclared_routes
 from market_authenticated_requests.migrations import (
     REPLAY_TABLE,
@@ -33,6 +35,7 @@ from market_authenticated_requests.migrations import (
 )
 from market_authenticated_requests.routes import (
     DOCUMENTATION_PATHS,
+    PublicBinding,
     ResourceUnbound,
     RouteBinding,
     RouteNotServed,
@@ -57,6 +60,9 @@ __all__ = [
     "Answer",
     "AuthenticatedApplication",
     "AuthenticatedRequestsSettings",
+    "PublicAdmission",
+    "PublicAdmitted",
+    "PublicBinding",
     "ResourceUnbound",
     "RouteAdmission",
     "RouteBinding",

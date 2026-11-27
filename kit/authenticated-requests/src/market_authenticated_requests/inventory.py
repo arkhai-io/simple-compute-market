@@ -2,8 +2,8 @@
 
 An authority that authenticates inside its routes cannot see a route that forgot
 to, so the core reads the application's own route table when it is installed and
-refuses to start, naming each route that neither admits through the core with a
-declaration nor is marked unauthenticated.
+refuses to start, naming each route that admits through the core with neither a
+declaration nor a public operation's mark, and is not marked unauthenticated.
 """
 
 from __future__ import annotations
@@ -17,15 +17,15 @@ from starlette.routing import BaseRoute
 
 from market_authenticated_requests.application import AuthenticatedApplication
 from market_authenticated_requests.core import AdmissionCore
-from market_authenticated_requests.dependency import RouteAdmission
+from market_authenticated_requests.dependency import PublicAdmission, RouteAdmission
 from market_authenticated_requests.routes import RouteTable, Unauthenticated
 
 class RouteInventoryError(RuntimeError):
-    """Routes with neither an exact-retry declaration nor an unauthenticated mark."""
+    """Routes with no exact-retry declaration, public mark, or unauthenticated mark."""
 
     def __init__(self, routes: list[str]) -> None:
         super().__init__(
-            "routes with neither an exact-retry declaration nor an unauthenticated mark: "
+            "routes with no exact-retry declaration, public mark, or unauthenticated mark: "
             + ", ".join(routes)
         )
         self.routes = routes
@@ -83,6 +83,6 @@ def _routes(routes: list[BaseRoute]) -> Iterator[tuple[str, BaseRoute]]:
 
 
 def _admits(dependant: Dependant) -> bool:
-    if isinstance(dependant.call, RouteAdmission):
+    if isinstance(dependant.call, (RouteAdmission, PublicAdmission)):
         return True
     return any(_admits(child) for child in dependant.dependencies)

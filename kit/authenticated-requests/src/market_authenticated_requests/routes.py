@@ -4,9 +4,12 @@ Every authenticated route binds an operation and, where the operation acts on on
 object, that object's identifier as its resource; the route, not the request, says
 whether its operation has a target. It admits a set of caller roles, and declares
 how an exact retry is resolved, with no default (:class:`market_identity.ExactRetry`).
-A route that admits through a contract table the core consults before the
-application runs is in the middleware form; one that admits inside the application,
-through its :class:`~market_authenticated_requests.dependency.RouteAdmission`, is in
+A public operation's route binds its operation alone (:class:`PublicBinding`): it
+has no target, admits no role, and reserves nothing. A route that admits through a
+contract table the core consults before the application runs is in the middleware
+form; one that admits inside the application, through its
+:class:`~market_authenticated_requests.dependency.RouteAdmission`, or a public
+operation's :class:`~market_authenticated_requests.dependency.PublicAdmission`, is in
 the dependency form.
 """
 
@@ -49,6 +52,22 @@ class RouteBinding:
             raise ValueError(f"route {self.operation} admits no role")
 
 
+@dataclass(frozen=True)
+class PublicBinding:
+    """A public operation's route: its operation, which acts on no target.
+
+    Its request states a request identity and carries no signature, and its answer
+    is signed over that identity; nothing is reserved, since a public operation
+    changes nothing and has nothing to replay.
+    """
+
+    operation: str
+
+    def __post_init__(self) -> None:
+        if not self.operation:
+            raise ValueError("a public route binds its operation")
+
+
 class RouteNotServed(Exception):
     """No route serves the request's path, or none its method there."""
 
@@ -72,8 +91,9 @@ class ResourceUnbound(Exception):
 class RouteTable(Protocol):
     """The middleware form's routes: how a request is bound, and what is declared."""
 
-    def resolve(self, method: str, path: str, body: bytes) -> RouteBinding:
-        """The binding of the route serving the request.
+    def resolve(self, method: str, path: str, body: bytes) -> RouteBinding | PublicBinding:
+        """The binding of the route serving the request, a public operation's
+        included.
 
         Raises :class:`RouteNotServed` or :class:`ResourceUnbound`.
         """
@@ -81,7 +101,7 @@ class RouteTable(Protocol):
 
     def declares(self, method: str, path_template: str) -> bool:
         """Whether a route of the application, by its method and path template,
-        is one this table binds."""
+        is one this table binds, as a declared or a public route."""
         ...
 
 

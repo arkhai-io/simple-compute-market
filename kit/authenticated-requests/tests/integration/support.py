@@ -9,8 +9,8 @@ no target, recorded, and keeps the request's record and body as evidence. ``POST
 /fail`` and ``POST /fail-again`` raise after writing, recorded and re-run. ``POST
 /slow`` waits for the test before answering, and ``POST /hold`` holds the
 database's write lock until the test lets it commit. ``POST /admin/time`` sets the
-injected time and re-runs. ``GET /health`` is unauthenticated. Every write counts
-its dispatches.
+injected time and re-runs. ``GET /descriptor`` is a public operation, answering the
+toy's name. ``GET /health`` is unauthenticated. Every write counts its dispatches.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from market_identity import (
     RequestBinding,
     Signer,
     TrustedIdentitySet,
+    build_public_request,
     sign_market_request,
     verify_market_response,
 )
@@ -46,6 +47,9 @@ from market_authenticated_requests import (
     AdmissionCore,
     Admitted,
     AuthenticatedRequestsSettings,
+    PublicAdmission,
+    PublicAdmitted,
+    PublicBinding,
     ResourceUnbound,
     RouteAdmission,
     RouteBinding,
@@ -162,14 +166,24 @@ ROUTES = (
 )
 
 
+#: The toy's public operation, ``GET /descriptor``.
+DESCRIPTOR_PATH = "/descriptor"
+DESCRIPTOR_OPERATION = "toy.descriptor.read"
+
+
 class Table:
-    """The middleware form's contract table over :data:`ROUTES`."""
+    """The middleware form's contract table over :data:`ROUTES` and the public
+    descriptor read."""
 
     def __init__(self, routes: tuple[Route, ...] = ROUTES) -> None:
         self._routes = routes
 
-    def resolve(self, method: str, path: str, body: bytes) -> RouteBinding:
+    def resolve(self, method: str, path: str, body: bytes) -> RouteBinding | PublicBinding:
         allowed = set()
+        if path == DESCRIPTOR_PATH:
+            if method == "GET":
+                return PublicBinding(DESCRIPTOR_OPERATION)
+            allowed.add("GET")
         for route in self._routes:
             match = route.pattern.fullmatch(path)
             if match is None:
@@ -185,7 +199,9 @@ class Table:
         raise RouteNotServed(allowed_methods=allowed)
 
     def declares(self, method: str, path_template: str) -> bool:
-        return any(r.method == method and r.template == path_template for r in self._routes)
+        return (method, path_template) == ("GET", DESCRIPTOR_PATH) or any(
+            r.method == method and r.template == path_template for r in self._routes
+        )
 
 
 def body_resource(name: str) -> Callable[[dict[str, str], bytes], str]:
@@ -289,6 +305,18 @@ def build_app(toy: Toy, core: AdmissionCore, *, form: str, extra: list[Route] | 
         await toy.hold_finish.wait()
         return {"held": "done"}
 
+    if form == "dependency":
+        public = Depends(PublicAdmission(core, operation=DESCRIPTOR_OPERATION))
+    else:
+        async def public_from_state(request: Request) -> PublicAdmitted:
+            return request.state.authenticated_request
+
+        public = Depends(public_from_state)
+
+    @app.get(DESCRIPTOR_PATH)
+    async def descriptor(admission: PublicAdmitted = public) -> dict[str, str]:
+        return {"name": "toy", "request_id": admission.binding.request_id}
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -327,7 +355,12 @@ class Caller:
         audience: TrustedIdentitySet | None = None,
         signer: Signer | None = None,
         raw_body: bytes | None = None,
+        query: str = "",
+        sent_query: str | None = None,
     ) -> httpx.Response:
+        """Send a signed request covering ``query``, sent with ``sent_query`` where
+        a test alters it after signing, else with ``query`` itself."""
+
         payload = raw_body if raw_body is not None else (b"" if body is None else json.dumps(body).encode())
         now = injected_time.now()
         headers = sign_market_request(
@@ -342,9 +375,32 @@ class Caller:
             ),
             body=payload,
             created=now if created is None else created,
+            query=query,
             audience=audience or self.authority,
         ).headers
-        return await self.client.request(method, path, content=payload, headers=headers)
+        target = path + (query if sent_query is None else sent_query)
+        return await self.client.request(method, target, content=payload, headers=headers)
+
+    async def send_public(
+        self, method: str, path: str, *, operation: str = DESCRIPTOR_OPERATION, extra: dict[str, str] | None = None
+    ) -> tuple[httpx.Response, RequestBinding]:
+        """Send a public operation's request, with any ``extra`` header, and answer
+        the binding its signed answer verifies against."""
+
+        public = build_public_request(method=method, operation=operation)
+        response = await self.client.request(method, path, headers={**public.headers, **(extra or {})})
+        return response, public.binding
+
+    def verified_binding(self, response: httpx.Response, binding: RequestBinding) -> bool:
+        return verify_market_response(
+            status=response.status_code,
+            headers=response.headers,
+            body=response.content,
+            request=binding,
+            expected_principals=self.authority,
+            now=injected_time.now(),
+            max_skew=SKEW,
+        ).verified
 
     def verified(
         self, response: httpx.Response, *, method: str, operation: str, resource: str | None = None,

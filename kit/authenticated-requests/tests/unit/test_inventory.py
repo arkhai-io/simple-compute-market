@@ -15,6 +15,8 @@ from market_identity import Ed25519Signer, ExactRetry, TrustedIdentitySet
 from market_authenticated_requests import (
     AdmissionCore,
     AuthenticatedApplication,
+    PublicAdmission,
+    PublicBinding,
     RouteAdmission,
     RouteBinding,
     RouteInventoryError,
@@ -154,3 +156,65 @@ def test_a_route_admitting_through_a_dependency_in_the_middleware_form_is_refuse
 
     with pytest.raises(RouteInventoryError, match=r"POST /items/\{item\}/set \(admits through a dependency"):
         install(app, core(), routes=OneRouteTable())
+
+
+def test_a_public_marked_route_passes_the_inventory_in_either_form() -> None:
+    app = admitted_app(core())
+
+    @app.get("/descriptor")
+    async def descriptor(admitted: object = Depends(PublicAdmission(core(), operation="toy.descriptor.read"))) -> None:
+        ...
+
+    assert undeclared_routes(app, routes=None, unauthenticated=Unauthenticated.of()) == []
+    install(app, core())
+
+    class WithPublic(OneRouteTable):
+        def resolve(self, method: str, path: str, body: bytes) -> RouteBinding | PublicBinding:
+            if (method, path) == ("GET", "/descriptor"):
+                return PublicBinding("toy.descriptor.read")
+            return super().resolve(method, path, body)
+
+        def declares(self, method: str, path_template: str) -> bool:
+            return (method, path_template) == ("GET", "/descriptor") or super().declares(method, path_template)
+
+    table_app = FastAPI()
+
+    @table_app.post("/items/{item}/set")
+    async def item_set(item: str) -> None: ...
+
+    @table_app.get("/descriptor")
+    async def table_descriptor() -> None: ...
+
+    install(table_app, core(), routes=WithPublic())
+
+
+def test_a_route_with_no_mark_beside_a_public_route_still_refuses_startup_naming_it() -> None:
+    app = FastAPI()
+
+    @app.get("/descriptor")
+    async def descriptor(admitted: object = Depends(PublicAdmission(core(), operation="toy.descriptor.read"))) -> None:
+        ...
+
+    @app.get("/forgotten")
+    async def forgotten() -> None: ...
+
+    with pytest.raises(RouteInventoryError, match="GET /forgotten") as refused:
+        install(app, core())
+
+    assert refused.value.routes == ["GET /forgotten"]
+    assert "public mark" in str(refused.value)
+
+
+def test_a_public_route_admitting_through_a_core_it_is_not_wrapped_in_refuses_to_serve() -> None:
+    app = FastAPI()
+
+    @app.get("/descriptor")
+    async def descriptor(admitted: object = Depends(PublicAdmission(core(), operation="toy.descriptor.read"))) -> None:
+        ...
+
+    async def call() -> None:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://authority.test") as client:
+            await client.get("/descriptor")
+
+    with pytest.raises(RuntimeError, match="public route toy.descriptor.read .* not installed"):
+        asyncio.run(call())

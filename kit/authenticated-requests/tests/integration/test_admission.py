@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
+
 from market_identity import (
     REQUEST_PROTOCOL,
     ExactRetry,
@@ -463,3 +465,124 @@ def test_a_handler_reads_the_admissions_record_and_body(world: World) -> None:
         expected_role="seller", expected_operation="item_publish", expected_resource=None,
     )
     assert kept.verified
+
+
+# -- the query --------------------------------------------------------------------
+
+
+def test_a_read_whose_query_was_altered_after_signing_is_refused_signed_and_unrun(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        read = await caller.send(
+            "GET", "/items/a", operation="item_read", resource="a",
+            query="?status=open", sent_query="?status=closed",
+        )
+        write = await caller.send(
+            "POST", "/items/a/raise", operation="item_raise", resource="a", body={"value": 5},
+            query="?note=a", sent_query="?note=b", request_id="request-2",
+        )
+
+        for response, operation, request_id in ((read, "item_read", "request-1"), (write, "item_raise", "request-2")):
+            assert response.status_code == 401 and response.json() == {"detail": "Invalid request proof"}
+            assert caller.verified(
+                response, method="GET" if operation == "item_read" else "POST", operation=operation,
+                resource="a", request_id=request_id,
+            )
+        signed = await caller.send(
+            "GET", "/items/a", operation="item_read", resource="a", query="?status=open", request_id="request-3",
+        )
+        assert signed.status_code == 200
+
+    world.run(scenario)
+    assert world.toy.dispatches == {}
+    assert world.toy.items() == {}
+
+
+def test_an_exact_retry_with_the_same_query_resolves_as_its_route_declares(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        recorded = await caller.send(
+            "POST", "/items/a/set", operation="item_set", resource="a", body={"value": 5}, query="?mode=x",
+        )
+        recorded_retry = await caller.send(
+            "POST", "/items/a/set", operation="item_set", resource="a", body={"value": 5}, query="?mode=x",
+            origin=START,
+        )
+        await caller.send(
+            "POST", "/items/b/raise", operation="item_raise", resource="b", body={"value": 5}, query="?mode=x",
+            request_id="request-2",
+        )
+        rerun_retry = await caller.send(
+            "POST", "/items/b/raise", operation="item_raise", resource="b", body={"value": 5}, query="?mode=x",
+            request_id="request-2", origin=START,
+        )
+
+        assert (recorded_retry.status_code, recorded_retry.content) == (recorded.status_code, recorded.content)
+        assert caller.verified(recorded_retry, method="POST", operation="item_set", resource="a")
+        assert rerun_retry.status_code == 200
+        assert caller.verified(rerun_retry, method="POST", operation="item_raise", resource="b", request_id="request-2")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {"item_set": 1, "item_raise": 2}
+    assert world.toy.retries == [False, True]
+
+
+def test_a_request_id_reused_with_a_changed_query_is_changed_reuse(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        first = await caller.send(
+            "POST", "/items/a/raise", operation="item_raise", resource="a", body={"value": 5}, query="?mode=x",
+        )
+        reused = await caller.send(
+            "POST", "/items/a/raise", operation="item_raise", resource="a", body={"value": 5}, query="?mode=y",
+        )
+        no_query = await caller.send(
+            "POST", "/items/a/raise", operation="item_raise", resource="a", body={"value": 5},
+        )
+
+        assert first.status_code == 200
+        for response in (reused, no_query):
+            assert response.status_code == 409
+            assert response.json() == {"detail": "Request ID was reused with changed signed content"}
+            assert caller.verified(response, method="POST", operation="item_raise", resource="a")
+
+    world.run(scenario)
+    assert world.toy.dispatches == {"item_raise": 1}
+
+
+def test_a_query_byte_no_url_may_hold_is_refused_as_malformed(world: World) -> None:
+    async def scenario(caller: Caller) -> None:
+        headers = sign_market_request(
+            signer=caller.signer,
+            request=MarketRequest(
+                method="GET", operation="item_read", resource="a", request_id="request-1", role="seller", origin=START
+            ),
+            body=b"",
+            created=START,
+            query="?status=open",
+            audience=caller.authority,
+        ).headers
+        # An HTTP client percent-encodes what it sends, so the raw byte reaches the
+        # application through its ASGI scope directly, as a server would pass it.
+        scope = {
+            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+            "scheme": "http", "path": "/items/a", "raw_path": b"/items/a", "query_string": b"status=\xe9",
+            "root_path": "", "server": ("authority.test", 80), "client": ("127.0.0.1", 1),
+            "headers": [(name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in headers.items()],
+        }
+        sent: list[dict] = []
+
+        async def receive() -> dict:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: dict) -> None:
+            sent.append(message)
+
+        await world.app(scope, receive, send)
+        start, body = sent[0], b"".join(message.get("body", b"") for message in sent[1:])
+        response = httpx.Response(
+            start["status"], headers=[(k.decode("latin-1"), v.decode("latin-1")) for k, v in start["headers"]],
+            content=body,
+        )
+
+        assert response.status_code == 401 and response.json() == {"detail": "Malformed request proof"}
+        assert caller.verified(response, method="GET", operation="item_read", resource="a")
+
+    world.run(scenario)

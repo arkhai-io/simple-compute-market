@@ -1457,7 +1457,7 @@ the raw query). Touches `kit/authenticated-requests/src/market_authenticated_req
 (`core.py`, `application.py`, `dependency.py`, `routes.py`, `inventory.py`,
 `__init__.py`) and its tests. The kit is new in this change, so nothing is bumped.
 
-- [ ] 5e.1 Hand the raw query to verification in both forms (D25). Each form reads the
+- [x] 5e.1 Hand the raw query to verification in both forms (D25). Each form reads the
       ASGI scope's `query_string` and passes it, decoded as received, to
       `verify_market_request`; the reservation keys on 5d.1's request hash. Verify by
       library integration tests in both forms and schemes:
@@ -1465,7 +1465,22 @@ the raw query). Touches `kit/authenticated-requests/src/market_authenticated_req
         over its stated identity, nothing dispatched;
       - an exact retry with the same query resolved as its route declares;
       - a request ID reused with a changed query refused as changed reuse.
-- [ ] 5e.2 Add the public route mark (D3, D24). A route admission declares a public
+
+      `received_query(scope)` (`application.py`) answers `?` and the
+      `query_string` decoded as Latin-1, so a byte no query may hold fails as
+      malformed, or `""`; `AdmissionCore.verify` now requires `query=`, which the
+      wrapper and `RouteAdmission` pass, and which the unmatched-request fallback
+      passes too. Library integration, `test_admission.py`, both forms and schemes:
+      a read and a re-run write whose query was changed after signing each a signed
+      401 `Invalid request proof` bound over the route, nothing dispatched, and the
+      same read with its signed query then served (before this the core covered `?`
+      for every request, so that read would have been refused too); a recorded and a
+      re-run route's exact retries with the same query answered the recorded outcome
+      and re-run told it is a retry; a request ID reused with a changed query, or
+      none, a signed 409 changed reuse; a raw `\xe9` query byte, sent through the
+      application's ASGI scope since an HTTP client percent-encodes it, a signed 401
+      `Malformed request proof` bound over the route; passed.
+- [x] 5e.2 Add the public route mark (D3, D24). A route admission declares a public
       operation: its operation, and no target. The core answers its request with the
       version 3 response signed over the stated binding, through the route's handler, and
       reserves nothing. A request to it carrying signature fields is refused as
@@ -1481,7 +1496,29 @@ the raw query). Touches `kit/authenticated-requests/src/market_authenticated_req
 
       Add a unit test, `test_inventory.py`: a public-marked route passes the inventory,
       and a route with no mark still fails it naming the route.
-- [ ] 5e.3 Answer unmatched public requests (D3, D11, design review 85 F1). The fallback
+
+      The mark is `PublicBinding(operation)` (`routes.py`), which a middleware-form
+      table's `resolve` returns and its `declares` covers, and
+      `PublicAdmission(core, operation=)` (`dependency.py`) in the dependency form;
+      the handler receives `PublicAdmitted(binding)`. `AdmissionCore.admit_public`
+      refuses a request carrying `Signature` or `Signature-Input` with a 400 signed
+      over its stated identity, answers `operation_mismatch` signed over the route's
+      operation and the stated request ID, and answers a request stating no request
+      identity unsigned; `finish_public` signs the handler's answer over the
+      binding, `fail_public` a 500, and neither reserves, records, nor calls the
+      signed-outcome hook, which carries a verified request's record. Library
+      integration, `test_public.py`, both forms and schemes: the public read 200,
+      verifying through 5d.4's binding and not another's, no replay row and no hooked
+      outcome; a signed request, and one carrying either signature field alone,
+      refused 400 signed; another operation and a stated resource each a signed
+      `operation_mismatch`; no identity unsigned; a raising public handler a signed
+      500 whose log holds the error. The caller's scheme varies only the signed
+      request's case: a public request carries no caller signature, and the toy
+      authority signs under Ed25519. Unit: `test_inventory.py`, a public route
+      passing the inventory in either form, a route with no mark beside it still
+      refusing startup naming it, a public route outside the core's wrapper refusing
+      to serve; `test_routes.py`, an empty public operation refused; passed.
+- [x] 5e.3 Answer unmatched public requests (D3, D11, design review 85 F1). The fallback
       answers an unmatched request that states a request identity and carries no
       signature field with the signed 404, or 405 with `Allow`, `operation_not_served`,
       over its stated identity and unverified. One carrying signature fields is verified
@@ -1494,9 +1531,41 @@ the raw query). Touches `kit/authenticated-requests/src/market_authenticated_req
       - a signed request under an unknown profile tag on an unmatched path still
         answered `unsupported_protocol` (D16);
       - a forged signature on an unmatched path still refused as an invalid proof.
-- [ ] 5e.4 Verify the section: `make -C kit/authenticated-requests test` (unit and
+
+      The wrapper's `_refuse_unserved`, which both forms' unmatched paths reach,
+      answers a request whose identity `stated_request_binding` reads and which
+      `is_public_request` holds through `AdmissionCore.refuse_unserved_public`,
+      unverified; any other is verified first, as before. Library integration,
+      `test_public.py`, both forms: each listed case, every answer verifying over the
+      stated identity; the caller's scheme varies the unknown-profile and forged
+      cases alone; passed.
+- [x] 5e.4 Verify the section: `make -C kit/authenticated-requests test` (unit and
       library integration) against 5d's build; `make check-architecture`.
       End-to-end: none — no authority composes the core until section 6.
+      `make -C kit/authenticated-requests test` against 5d's rebuilt identity wheel:
+      31 unit and 224 library-integration tests passed. `make check-architecture`:
+      passed. End-to-end confirmed: none.
+
+Notes (section 5e):
+
+- For sections 6–15: a middleware-form table returns `PublicBinding(operation)` for
+  a public route and declares it; a dependency-form route takes
+  `Depends(PublicAdmission(core, operation=...))`. The registry's descriptor read
+  is the only public operation (D24). A handler wanting the query reads it from the
+  framework as usual; only verification needs it raw, which the core reads itself.
+- `change-workflow run test-before` copies only the named file into the earlier
+  commit, and 5e's tests rest on `support.py`'s new public route and query
+  parameter, so it would show only their absence: not run.
+- `verify_market_request`'s `query` stays optional (5d's notes): the core now
+  always passes it, and the evidence verifier passes the record's.
+- Fixed from the fresh-context check: two docstrings left unwrapped, one
+  ungrammatical, and `routes.py`'s not naming `PublicAdmission`; the public
+  binding's test moved to `test_routes.py`; `PublicAdmission`'s missing-wrapper
+  guard untested (now tested); `received_query` exported with no consumer (no longer
+  exported); the 404/405 body and the unsigned 400 built twice (now one helper, and
+  `answer(None, …)`); the claims of both schemes for public cases, and of a
+  malformed query byte through the core, overstated (now reworded, and the byte
+  tested); the stated-resource mismatch's code unasserted (now asserted).
 
 ## 6. The registry on the admission core
 
