@@ -18,6 +18,7 @@ from market_identity.canonical import (
     canonical_rotation_bytes,
     request_hash,
 )
+from market_identity.codes import VerificationCode
 from market_identity.models import (
     REQUEST_PROTOCOL,
     RESPONSE_PROTOCOL,
@@ -31,22 +32,6 @@ from market_identity.models import (
     TrustedIdentitySet,
 )
 from market_identity.registry import get_identity_verifier
-
-
-class VerificationCode(str, Enum):
-    """Closed authentication classifications suitable for any transport."""
-
-    VERIFIED = "verified"
-    EXACT_RETRY = "exact_retry"
-    CHANGED_REUSE = "changed_reuse"
-    UNSUPPORTED_VERSION = "unsupported_version"
-    UNKNOWN_SCHEME = "unknown_scheme"
-    WRONG_PRINCIPAL = "wrong_principal"
-    MALFORMED_ENVELOPE = "malformed_envelope"
-    CONTEXT_MISMATCH = "context_mismatch"
-    BODY_HASH_MISMATCH = "body_hash_mismatch"
-    TIMESTAMP_SKEW = "timestamp_skew"
-    INVALID_PROOF = "invalid_proof"
 
 
 class ReplayCode(str, Enum):

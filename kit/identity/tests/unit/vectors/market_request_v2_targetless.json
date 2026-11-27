@@ -1,0 +1,38 @@
+{
+  "ed25519": {
+    "protocol": "arkhai.market-request-signature.v2",
+    "role": "seller",
+    "principal": {
+      "scheme": "ed25519",
+      "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+    },
+    "method": "POST",
+    "operation": "listing.publish",
+    "resource": "",
+    "request_id": "7f0ed41b-6ad8-4a1f-94dc-80691c28b842",
+    "timestamp": 1900000000,
+    "body_hash": "11a49f853eb8befe94fef278d487125cd20930b9e41c4c0934394443e7f00878",
+    "proof": {
+      "scheme": "ed25519",
+      "value": "puiYg1BVYAQJ8rX336o0o72DZemTaBo9gH_L0_JvmJGrrNyBlRWqor1fClWzh1UpNu-92iF_5eHdaVAvlEx8CQ"
+    }
+  },
+  "eip191": {
+    "protocol": "arkhai.market-request-signature.v2",
+    "role": "seller",
+    "principal": {
+      "scheme": "eip191",
+      "identifier": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    },
+    "method": "POST",
+    "operation": "listing.publish",
+    "resource": "",
+    "request_id": "7f0ed41b-6ad8-4a1f-94dc-80691c28b842",
+    "timestamp": 1900000000,
+    "body_hash": "11a49f853eb8befe94fef278d487125cd20930b9e41c4c0934394443e7f00878",
+    "proof": {
+      "scheme": "eip191",
+      "value": "0xe56d243521d11c128ad1255a402af4864fa11c921af86021fbc458489d452f9448b9166dc7cbf2eb4dfcc1a305dfbe5f6cd1611afe97e84642fda56141f6be271b"
+    }
+  }
+}

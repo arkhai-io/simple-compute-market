@@ -190,7 +190,7 @@ class AdmissionCore:
             stated = RequestBinding.model_construct(
                 method=stated.method,
                 operation=route.operation,
-                resource=route.resource,
+                resource=route.resource or None,
                 request_id=stated.request_id,
             )
         return self.answer(stated, 401, {"detail": _VERIFICATION_DETAIL.get(verification.code, "Invalid request proof")})
@@ -240,17 +240,17 @@ class AdmissionCore:
         route = RequestBinding(
             method=request.method,
             operation=binding.operation,
-            resource=binding.resource,
+            resource=binding.resource or None,
             request_id=request.request_id,
         )
-        if (request.operation, request.resource) != (binding.operation, binding.resource):
+        if (request.operation, request.resource) != (route.operation, route.resource):
             return self.answer(
                 route,
                 400,
                 {
                     "code": RefusalCode.OPERATION_MISMATCH.value,
                     "stated": {"operation": request.operation, "resource": request.resource},
-                    "bound": {"operation": binding.operation, "resource": binding.resource},
+                    "bound": {"operation": route.operation, "resource": route.resource},
                 },
                 verified=request,
             )
@@ -417,7 +417,7 @@ class AdmissionCore:
     ) -> Answer:
         signature = sign_market_response(
             signer=self._signer(), status=status, body=body, request=binding, created=self._clock()
-        )
+        ).headers
         signed = [*headers, *((name.lower().encode("latin-1"), value.encode("latin-1")) for name, value in signature.items())]
         if verified is not None and self._on_signed_outcome is not None:
             self._on_signed_outcome(

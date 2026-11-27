@@ -22,15 +22,24 @@ from market_identity.credentials import (
     SecretFileCredentialProvider,
     default_credential_registry,
 )
+from market_identity.evidence import (
+    RequestEvidence,
+    RequestEvidenceVerification,
+    ResponseEvidence,
+    ResponseEvidenceVerification,
+    verify_request_evidence,
+    verify_response_evidence,
+)
 from market_identity.exact_retry import ExactRetry
 from market_identity.http_profile import (
     MarketRequest,
     RequestBinding,
     RequestVerification,
     ResponseVerification,
+    SignedRequest,
+    SignedResponse,
     VerifiedRequest,
     format_audience,
-    principal_text,
     sign_market_request,
     sign_market_response,
     stated_request_binding,
@@ -81,6 +90,7 @@ from market_identity.profiles import (
     select_profile,
     set_authority_binding,
 )
+from market_identity.records import RequestRecord, ResponseRecord, principal_text
 from market_identity.registry import (
     IdentityVerifier,
     Signer,
@@ -181,11 +191,17 @@ __all__ = [
     "ReplayResult",
     "request_hash",
     "RequestBinding",
+    "RequestEvidence",
+    "RequestEvidenceVerification",
+    "RequestRecord",
     "REQUEST_PROTOCOL",
     "RequestEnvelope",
     "RequestVerification",
     "RESPONSE_PROTOCOL",
     "ResponseEnvelope",
+    "ResponseEvidence",
+    "ResponseEvidenceVerification",
+    "ResponseRecord",
     "ResponseVerification",
     "retire_principal",
     "retire_profile",
@@ -203,6 +219,8 @@ __all__ = [
     "sign_response",
     "sign_rotation",
     "SignatureProof",
+    "SignedRequest",
+    "SignedResponse",
     "Signer",
     "SignerFactory",
     "stated_request_binding",
@@ -213,6 +231,8 @@ __all__ = [
     "verify_market_request",
     "verify_market_response",
     "verify_request",
+    "verify_request_evidence",
     "verify_response",
+    "verify_response_evidence",
     "verify_rotation",
 ]

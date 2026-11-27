@@ -270,7 +270,7 @@ class Caller:
         path: str,
         *,
         operation: str,
-        resource: str = "",
+        resource: str | None = None,
         body: Any = None,
         request_id: str = "request-1",
         origin: int | None = None,
@@ -295,10 +295,13 @@ class Caller:
             body=payload,
             created=now if created is None else created,
             audience=audience or self.authority,
-        )
+        ).headers
         return await self.client.request(method, path, content=payload, headers=headers)
 
-    def verified(self, response: httpx.Response, *, method: str, operation: str, resource: str = "", request_id: str = "request-1") -> bool:
+    def verified(
+        self, response: httpx.Response, *, method: str, operation: str, resource: str | None = None,
+        request_id: str = "request-1",
+    ) -> bool:
         return verify_market_response(
             status=response.status_code,
             headers=response.headers,

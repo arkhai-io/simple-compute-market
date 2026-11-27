@@ -1,22 +1,38 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+import http_sf
 import pytest
+from http_message_signatures import (
+    HTTPMessageSigner,
+    HTTPMessageVerifier,
+    HTTPSignatureAlgorithm,
+    HTTPSignatureKeyResolver,
+    InvalidSignature,
+    PreparedSignature,
+)
 from starlette.requests import Request
 
 from market_identity import (
     Ed25519Signer,
     Eip191Signer,
+    Identity,
+    IdentityScheme,
     MarketRequest,
     RequestBinding,
     Signer,
     TrustedIdentitySet,
     VerificationCode,
     VerifiedRequest,
+    get_identity_verifier,
+    principal_text,
     sign_market_request,
     sign_market_response,
     stated_request_binding,
@@ -31,13 +47,16 @@ from market_identity.wire import (
     MARKET_REQUEST_ORIGIN,
     MARKET_RESOURCE,
     MARKET_ROLE,
+    REQUEST_PROFILE,
+    RESPONSE_PROFILE,
     SIGNATURE,
     SIGNATURE_INPUT,
 )
 
 VECTORS = json.loads((Path(__file__).parent / "vectors" / "market_v3.json").read_text())
 
-# The authority the requests are addressed to, a deterministic development key.
+# The authority the requests are addressed to, and another: deterministic
+# development keys, never for a public network.
 AUTHORITY = Ed25519Signer(bytes(range(32, 64)))
 OTHER_AUTHORITY = Ed25519Signer(bytes(range(64, 96)))
 CREATED = 1_795_000_000
@@ -63,7 +82,7 @@ def _signed(signer: Signer, *, created: int = CREATED, request: MarketRequest = 
     return sign_market_request(
         signer=signer, request=request, body=body, created=created,
         audience=_audience(AUTHORITY),
-    )
+    ).headers
 
 
 def _verify(headers: dict[str, str], *, method: str = "POST", body: bytes = BODY):
@@ -73,7 +92,7 @@ def _verify(headers: dict[str, str], *, method: str = "POST", body: bytes = BODY
 def _response_headers(signer: Signer, *, status: int = 201, created: int = CREATED + 1) -> dict[str, str]:
     return sign_market_response(
         signer=signer, status=status, body=RESPONSE_BODY, request=REQUEST.binding, created=created
-    )
+    ).headers
 
 
 def _verify_response(headers: dict[str, str], signer: Signer, *, status: int = 201,
@@ -91,6 +110,13 @@ def _with(headers: dict[str, str], name: str, value: str) -> dict[str, str]:
 
 def _scheme(signer: Signer) -> str:
     return signer.identity.scheme.value
+
+
+def _other_of_scheme(signer: Signer) -> Signer:
+    """Another deterministic development key under the same scheme as ``signer``,
+    never for a public network."""
+
+    return OTHER_AUTHORITY if _scheme(signer) == "ed25519" else Eip191Signer(bytes(range(96, 128)))
 
 
 def test_request_and_response_signatures_are_byte_identical_to_the_vectors(signer: Signer) -> None:
@@ -140,7 +166,7 @@ def test_an_audience_change_invalidates_the_proof(signer: Signer) -> None:
     widened = sign_market_request(
         signer=signer, request=REQUEST, body=BODY, created=CREATED,
         audience=_audience(AUTHORITY, OTHER_AUTHORITY),
-    )[MARKET_AUDIENCE]
+    ).headers[MARKET_AUDIENCE]
     assert _verify(_with(headers, MARKET_AUDIENCE, widened)).code == VerificationCode.INVALID_PROOF
 
 
@@ -167,11 +193,21 @@ def test_a_digest_replaced_with_the_new_bodys_invalidates_the_proof(signer: Sign
 
 def test_another_principals_keyid_invalidates_the_proof(signer: Signer) -> None:
     headers = _signed(signer)
+    other = _other_of_scheme(signer)
     swapped = headers[SIGNATURE_INPUT].replace(
-        f"{_scheme(signer)}:{signer.identity.identifier}",
-        f"ed25519:{OTHER_AUTHORITY.identity.identifier}",
+        f"{_scheme(signer)}:{signer.identity.identifier}", principal_text(other.identity),
     )
     assert _verify(_with(headers, SIGNATURE_INPUT, swapped)).code == VerificationCode.INVALID_PROOF
+
+
+def test_a_keyid_of_another_scheme_than_its_proof_is_malformed(signer: Signer) -> None:
+    # A deterministic development key, never for a public network.
+    other = Eip191Signer(bytes(range(96, 128))) if _scheme(signer) == "ed25519" else OTHER_AUTHORITY
+    headers = _signed(signer)
+    swapped = headers[SIGNATURE_INPUT].replace(
+        f"{_scheme(signer)}:{signer.identity.identifier}", principal_text(other.identity),
+    )
+    assert _verify(_with(headers, SIGNATURE_INPUT, swapped)).code == VerificationCode.MALFORMED_ENVELOPE
 
 
 def test_a_request_with_no_profile_signature_is_an_unsupported_version(signer: Signer) -> None:
@@ -179,7 +215,7 @@ def test_a_request_with_no_profile_signature_is_an_unsupported_version(signer: S
     unsigned = {k: v for k, v in headers.items() if k not in {SIGNATURE, SIGNATURE_INPUT}}
     assert _verify(unsigned).code == VerificationCode.UNSUPPORTED_VERSION
     retagged = _with(headers, SIGNATURE_INPUT, headers[SIGNATURE_INPUT].replace(
-        "arkhai.market-request.v3", "arkhai.market-request.v4"))
+        "arkhai.market-request-signature.v3", "arkhai.market-request-signature.v4"))
     assert _verify(retagged).code == VerificationCode.UNSUPPORTED_VERSION
     version_2 = {
         "X-Market-Signature-Version": "arkhai.market-request-signature.v2",
@@ -254,7 +290,7 @@ def test_the_request_hash_ignores_where_the_request_is_addressed(signer: Signer)
     wide = _verify(sign_market_request(
         signer=signer, request=REQUEST, body=BODY, created=CREATED,
         audience=_audience(AUTHORITY, OTHER_AUTHORITY),
-    )).request
+    ).headers).request
     assert narrow is not None and wide is not None
     assert wide.request_hash == narrow.request_hash
 
@@ -279,15 +315,18 @@ def test_freshness_bounds_created_both_ways_and_the_origin_from_above(signer: Si
 
 
 def test_a_delivery_binds_its_target_and_fails_at_another_endpoint(signer: Signer) -> None:
-    headers = sign_market_request(
+    signed = sign_market_request(
         signer=signer, request=REQUEST, body=BODY, created=CREATED, target_uri=DELIVERY_TARGET,
     )
+    assert signed.record is None
+    headers = signed.headers
     assert MARKET_AUDIENCE not in headers
     delivered = verify_market_request(
         method="POST", headers=headers, body=BODY, target_uri=DELIVERY_TARGET)
     assert delivered.verified and delivered.request is not None
     assert delivered.request.target_uri == DELIVERY_TARGET
     assert delivered.request.audience is None
+    assert delivered.request.record is None
 
     elsewhere = verify_market_request(
         method="POST", headers=headers, body=BODY, target_uri="https://other.example/hooks/market")
@@ -343,7 +382,7 @@ def test_a_response_signed_for_a_verified_request_binds_it(signer: Signer) -> No
     headers = sign_market_response(
         signer=AUTHORITY, status=201, body=RESPONSE_BODY, request=verified.binding,
         created=CREATED + 1,
-    )
+    ).headers
     assert _verify_response(headers, AUTHORITY).verified
 
 
@@ -360,6 +399,12 @@ def test_a_response_signed_for_a_verified_request_binds_it(signer: Signer) -> No
 def test_a_response_fails_against_any_other_request(signer: Signer, binding: RequestBinding) -> None:
     result = _verify_response(_response_headers(signer), signer, request=binding)
     assert result.code == VerificationCode.INVALID_PROOF
+
+
+def test_a_response_fails_against_its_request_without_the_resource(signer: Signer) -> None:
+    binding = REQUEST.binding.model_copy(update={"resource": None})
+    result = _verify_response(_response_headers(signer), signer, request=binding)
+    assert result.code == VerificationCode.MALFORMED_ENVELOPE
 
 
 def test_a_response_with_another_status_or_body_fails(signer: Signer) -> None:
@@ -400,9 +445,12 @@ def test_a_stated_request_identity_is_read_without_verifying() -> None:
         MARKET_REQUEST_ID: "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
     }
     assert stated_request_binding(method="post", headers=headers) == REQUEST.binding
-    for missing in headers:
+    for missing in (MARKET_OPERATION, MARKET_REQUEST_ID):
         assert stated_request_binding(
             method="POST", headers={k: v for k, v in headers.items() if k != missing}) is None
+    targetless = {k: v for k, v in headers.items() if k != MARKET_RESOURCE}
+    stated = stated_request_binding(method="POST", headers=targetless)
+    assert stated is not None and stated.resource is None
 
 
 def test_a_stated_identity_is_taken_as_stated_unless_no_signature_can_hold_it() -> None:
@@ -418,6 +466,19 @@ def test_a_stated_identity_is_taken_as_stated_unless_no_signature_can_hold_it() 
         method="POST", headers=_with(headers, MARKET_OPERATION, "réserve")) is None
 
 
+def test_a_refusal_over_long_stated_values_is_signed_and_verifies(signer: Signer) -> None:
+    stated = stated_request_binding(method="POST", headers={
+        MARKET_OPERATION: "o" * 200, MARKET_RESOURCE: "r" * 2000, MARKET_REQUEST_ID: "i" * 300})
+    assert stated is not None
+    signed = sign_market_response(signer=signer, status=401, body=b"{}", request=stated, created=CREATED)
+    assert signed.record.operation == "o" * 200
+    result = verify_market_response(
+        status=401, headers=signed.headers, body=b"{}", request=stated,
+        expected_principals=_audience(signer), now=CREATED, max_skew=300,
+    )
+    assert result.verified and result.record == signed.record
+
+
 def test_a_refusal_signed_over_a_stated_identity_verifies_against_it(signer: Signer) -> None:
     stated = stated_request_binding(method="POST", headers={
         MARKET_OPERATION: "not a token", MARKET_RESOURCE: "r", MARKET_REQUEST_ID: "id with spaces"})
@@ -425,7 +486,7 @@ def test_a_refusal_signed_over_a_stated_identity_verifies_against_it(signer: Sig
     headers = sign_market_response(
         signer=signer, status=400, body=b'{"code":"unsupported_protocol"}', request=stated,
         created=CREATED,
-    )
+    ).headers
     result = verify_market_response(
         status=400, headers=headers, body=b'{"code":"unsupported_protocol"}', request=stated,
         expected_principals=_audience(signer), now=CREATED, max_skew=300,
@@ -453,20 +514,20 @@ def test_a_response_digest_replaced_with_the_new_bodys_invalidates_the_proof(sig
     headers = _response_headers(signer)
     other = sign_market_response(
         signer=signer, status=201, body=b"{}", request=REQUEST.binding, created=CREATED + 1,
-    )[CONTENT_DIGEST]
+    ).headers[CONTENT_DIGEST]
     result = _verify_response(_with(headers, CONTENT_DIGEST, other), signer, body=b"{}")
     assert result.code == VerificationCode.INVALID_PROOF
 
 
 def test_a_response_keyid_swapped_to_another_expected_principal_fails(signer: Signer) -> None:
     headers = _response_headers(signer)
+    other = _other_of_scheme(signer)
     swapped = headers[SIGNATURE_INPUT].replace(
-        f"{_scheme(signer)}:{signer.identity.identifier}",
-        f"ed25519:{OTHER_AUTHORITY.identity.identifier}",
+        f"{_scheme(signer)}:{signer.identity.identifier}", principal_text(other.identity),
     )
     result = _verify_response(
         _with(headers, SIGNATURE_INPUT, swapped), signer,
-        expected=_audience(signer, OTHER_AUTHORITY),
+        expected=_audience(signer, other),
     )
     assert result.code == VerificationCode.INVALID_PROOF
 
@@ -505,7 +566,7 @@ def test_an_audience_of_anything_but_principal_tokens_is_malformed(signer: Signe
     )
 
 
-@pytest.mark.parametrize("resource", [" pool", "pool\t", "pool-é", "a\nb"])
+@pytest.mark.parametrize("resource", ["", " pool", "pool\t", "pool-é", "a\nb"])
 def test_a_resource_no_header_can_carry_is_refused(resource: str) -> None:
     with pytest.raises(ValueError):
         MarketRequest.model_validate({**REQUEST.model_dump(), "resource": resource})
@@ -535,3 +596,308 @@ def test_a_negative_skew_is_refused(signer: Signer) -> None:
             request=REQUEST.binding, expected_principals=_audience(signer), now=CREATED,
             max_skew=-1,
         )
+
+
+# -- one accepted spelling ----------------------------------------------------------
+
+TARGETLESS = REQUEST.model_copy(update={"operation": "listing.publish", "resource": None})
+_COMPONENTS = [
+    "@method", "market-role", "market-operation", "market-resource", "market-audience",
+    "market-request-id", "market-request-origin", "content-digest",
+]
+
+
+class _OracleAlgorithm(HTTPSignatureAlgorithm):
+    """RFC 9421 verification by a principal, through the public scheme registry."""
+
+    algorithm_id = "oracle"
+
+    def __init__(self, public_key: Identity | None = None, private_key: object = None) -> None:
+        self._principal = public_key
+
+    def sign(self, message: bytes) -> bytes:
+        raise NotImplementedError
+
+    def verify(self, signature: bytes, message: bytes) -> None:
+        assert self._principal is not None
+        if not get_identity_verifier(self._principal.scheme).verify_signature(self._principal, message, signature):
+            raise InvalidSignature("signature does not verify")
+
+
+class _OracleResolver(HTTPSignatureKeyResolver):
+    def resolve_public_key(self, key_id: str) -> Identity:
+        scheme, _, identifier = key_id.partition(":")
+        return Identity(scheme=IdentityScheme(scheme), identifier=identifier)
+
+    def resolve_private_key(self, key_id: str) -> None:
+        raise KeyError(key_id)
+
+
+class _Oracle(HTTPMessageVerifier):
+    def validate_created_and_expires(self, sig_input, max_age=None) -> None:
+        pass
+
+
+@dataclass
+class _Message:
+    method: str
+    url: str
+    headers: dict[str, str]
+
+
+@dataclass
+class _ResponseMessage:
+    status_code: int
+    headers: dict[str, str]
+    request: _Message
+
+
+class _LibrarySigner(HTTPMessageSigner):
+    """The library's own signer, signing whatever order and spelling a test gives.
+
+    Its public ``sign`` writes the parameters in the profile's order, so a test
+    asking for another builds the base through the library's base builder and
+    attaches it with the library's ``apply``: no framing is the test's own.
+    """
+
+    def sign_as_given(
+        self, signer: Signer, message: object, *, components: list[str], parameters: dict[str, object]
+    ) -> None:
+        base, params_node, _ = self._build_signature_base(
+            message,
+            covered_component_ids=self._parse_covered_component_ids(components),
+            signature_params=dict(parameters),
+        )
+        prepared = PreparedSignature(base.encode(), str(params_node), "market", _OracleAlgorithm.algorithm_id)
+        self.apply(message, prepared, signer.sign(base.encode()))
+
+
+def _parameters(signer: Signer, order: list[str], *, created: int = CREATED, tag: str = REQUEST_PROFILE,
+                keyid: str | None = None) -> dict[str, object]:
+    values = {"created": created, "keyid": keyid or principal_text(signer.identity), "tag": tag}
+    return {name: values[name] for name in order}
+
+
+def _rfc_signed(
+    signer: Signer, headers: dict[str, str], *, components: list[str], parameters: list[str],
+    keyid: str | None = None,
+) -> dict[str, str]:
+    """``headers`` signed under RFC 9421 as given, by the library."""
+
+    message = _Message("POST", "https://market.invalid/", dict(headers))
+    _LibrarySigner(signature_algorithm=_OracleAlgorithm).sign_as_given(
+        signer, message, components=components, parameters=_parameters(signer, parameters, keyid=keyid),
+    )
+    return message.headers
+
+
+def _rfc_signed_response(
+    signer: Signer, headers: dict[str, str], *, components: list[str], parameters: list[str],
+    keyid: str | None = None,
+) -> dict[str, str]:
+    """A response to ``REQUEST`` signed under RFC 9421 as given, by the library."""
+
+    request_headers = {MARKET_OPERATION: REQUEST.operation, MARKET_RESOURCE: str(REQUEST.resource),
+                       MARKET_REQUEST_ID: REQUEST.request_id}
+    message = _ResponseMessage(201, dict(headers), _Message("POST", "https://market.invalid/", request_headers))
+    serialized = [f'"{c}";req' if c in {"@method", *(n.lower() for n in request_headers)} else f'"{c}"'
+                  for c in components]
+    _LibrarySigner(signature_algorithm=_OracleAlgorithm).sign_as_given(
+        signer, message, components=serialized,
+        parameters=_parameters(signer, parameters, created=CREATED + 1, tag=RESPONSE_PROFILE, keyid=keyid),
+    )
+    return message.headers
+
+
+def _rfc_verifies(headers: dict[str, str]) -> bool:
+    return _oracle(_Message("POST", "https://market.invalid/", headers), REQUEST_PROFILE)
+
+
+def _rfc_verifies_response(headers: dict[str, str]) -> bool:
+    request_headers = {MARKET_OPERATION: REQUEST.operation, MARKET_RESOURCE: str(REQUEST.resource),
+                       MARKET_REQUEST_ID: REQUEST.request_id}
+    message = _ResponseMessage(201, headers, _Message("POST", "https://market.invalid/", request_headers))
+    return _oracle(message, RESPONSE_PROFILE)
+
+
+def _oracle(message: object, tag: str) -> bool:
+    try:
+        _Oracle(signature_algorithm=_OracleAlgorithm, key_resolver=_OracleResolver()).verify(
+            message, max_age=None, expect_tag=tag, expect_label="market",
+        )
+    except InvalidSignature:
+        return False
+    return True
+
+
+def _unsigned(headers: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in headers.items() if k not in {SIGNATURE, SIGNATURE_INPUT}}
+
+
+def test_the_oracle_accepts_the_profiles_own_spelling(signer: Signer) -> None:
+    resigned = _rfc_signed(signer, _unsigned(_signed(signer)), components=_COMPONENTS,
+                           parameters=["created", "keyid", "tag"])
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).verified
+
+
+def test_a_request_signing_its_parameters_in_another_order_is_malformed(signer: Signer) -> None:
+    resigned = _rfc_signed(signer, _unsigned(_signed(signer)), components=_COMPONENTS,
+                           parameters=["keyid", "created", "tag"])
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+def test_a_request_covering_its_components_in_another_order_is_malformed(signer: Signer) -> None:
+    reordered = ["@method", "market-operation", "market-role", *_COMPONENTS[3:]]
+    resigned = _rfc_signed(signer, _unsigned(_signed(signer)), components=reordered,
+                           parameters=["created", "keyid", "tag"])
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+def test_an_audience_spelled_otherwise_is_malformed(signer: Signer) -> None:
+    headers = _unsigned(sign_market_request(
+        signer=signer, request=REQUEST, body=BODY, created=CREATED,
+        audience=_audience(AUTHORITY, OTHER_AUTHORITY),
+    ).headers)
+    assert ", " in headers[MARKET_AUDIENCE]
+    headers[MARKET_AUDIENCE] = headers[MARKET_AUDIENCE].replace(", ", ",")
+    resigned = _rfc_signed(signer, headers, components=_COMPONENTS, parameters=["created", "keyid", "tag"])
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        pytest.param(lambda v: v + ", sha-512=:" + base64.b64encode(hashlib.sha512(BODY).digest()).decode() + ":",
+                     id="a-second-member"),
+        pytest.param(lambda v: v + ";p=1", id="a-parameter"),
+        pytest.param(lambda v: v.replace("sha-256", "sha-512"), id="another-algorithm"),
+    ],
+)
+def test_a_digest_spelled_otherwise_is_malformed(signer: Signer, rewrite) -> None:
+    headers = _unsigned(_signed(signer))
+    headers[CONTENT_DIGEST] = rewrite(headers[CONTENT_DIGEST])
+    resigned = _rfc_signed(signer, headers, components=_COMPONENTS, parameters=["created", "keyid", "tag"])
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+_RESPONSE_COMPONENTS = ["@status", "content-digest", "@method", "market-operation", "market-resource",
+                        "market-request-id"]
+
+
+@pytest.mark.parametrize(
+    ("components", "parameters", "digest_suffix"),
+    [
+        pytest.param(_RESPONSE_COMPONENTS, ["created", "keyid", "tag"], "", id="the-profiles-own"),
+        pytest.param(_RESPONSE_COMPONENTS, ["tag", "keyid", "created"], "", id="parameters-reordered"),
+        pytest.param(["content-digest", "@status", *_RESPONSE_COMPONENTS[2:]], ["created", "keyid", "tag"], "",
+                     id="components-reordered"),
+        pytest.param(_RESPONSE_COMPONENTS, ["created", "keyid", "tag"], ";p=1", id="digest-parameter"),
+    ],
+)
+def test_a_response_spelled_otherwise_is_malformed(
+    signer: Signer, components: list[str], parameters: list[str], digest_suffix: str
+) -> None:
+    headers = {CONTENT_DIGEST: _response_headers(signer)[CONTENT_DIGEST] + digest_suffix}
+    resigned = _rfc_signed_response(signer, headers, components=components, parameters=parameters)
+    assert _rfc_verifies_response(resigned)
+    own = components == _RESPONSE_COMPONENTS and parameters == ["created", "keyid", "tag"] and not digest_suffix
+    expected = VerificationCode.VERIFIED if own else VerificationCode.MALFORMED_ENVELOPE
+    assert _verify_response(resigned, signer).code == expected
+
+
+# -- an operation with no target ----------------------------------------------------
+
+
+def _targetless_signed(signer: Signer) -> dict[str, str]:
+    return _signed(signer, request=TARGETLESS)
+
+
+def _targetless_response(signer: Signer) -> dict[str, str]:
+    return sign_market_response(
+        signer=signer, status=201, body=RESPONSE_BODY, request=TARGETLESS.binding, created=CREATED + 1
+    ).headers
+
+
+def test_a_targetless_request_and_its_response_sign_and_verify(signer: Signer) -> None:
+    headers = _targetless_signed(signer)
+    assert MARKET_RESOURCE not in headers
+    assert '"market-resource"' not in headers[SIGNATURE_INPUT]
+    verified = _verify(headers).request
+    assert verified is not None and verified.resource is None
+    assert verified.binding == TARGETLESS.binding
+
+    response = _targetless_response(signer)
+    assert "market-resource" not in response[SIGNATURE_INPUT]
+    assert _verify_response(response, signer, request=TARGETLESS.binding).verified
+
+
+def test_targetless_vectors_verify_without_resigning(signer: Signer) -> None:
+    vector = VECTORS[_scheme(signer)]
+    assert _targetless_signed(signer) == vector["targetless_request_headers"]
+    assert _targetless_response(signer) == vector["targetless_response_headers"]
+    assert _verify(vector["targetless_request_headers"]).verified
+    assert _verify_response(vector["targetless_response_headers"], signer, request=TARGETLESS.binding).verified
+
+
+def test_adding_or_removing_the_resource_after_signing_fails(signer: Signer) -> None:
+    added = _with(_targetless_signed(signer), MARKET_RESOURCE, "listings")
+    removed = {k: v for k, v in _signed(signer).items() if k != MARKET_RESOURCE}
+    assert _verify(added).code == VerificationCode.MALFORMED_ENVELOPE
+    assert _verify(removed).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+def test_a_response_bound_with_the_other_coverage_list_fails(signer: Signer) -> None:
+    with_resource = TARGETLESS.binding.model_copy(update={"resource": "listings"})
+    assert _verify_response(_targetless_response(signer), signer, request=with_resource).code == (
+        VerificationCode.MALFORMED_ENVELOPE
+    )
+    without = REQUEST.binding.model_copy(update={"resource": None})
+    assert _verify_response(_response_headers(signer), signer, request=without).code == (
+        VerificationCode.MALFORMED_ENVELOPE
+    )
+
+
+def test_the_request_hash_tells_an_absent_resource_from_a_present_one(signer: Signer) -> None:
+    verified = _verify(_targetless_signed(signer)).request
+    assert verified is not None
+    named_absent = verified.model_copy(update={"resource": "absent"})
+    assert verified.request_hash != named_absent.request_hash
+
+
+# -- one spelling of a principal ----------------------------------------------------
+
+
+def test_a_keyid_spelling_its_address_otherwise_is_malformed(eip191_signer: Eip191Signer) -> None:
+    upper = "eip191:0x" + eip191_signer.identity.identifier[2:].upper()
+    resigned = _rfc_signed(eip191_signer, _unsigned(_signed(eip191_signer)), components=_COMPONENTS,
+                           parameters=["created", "keyid", "tag"], keyid=upper)
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+def test_a_response_keyid_spelling_its_address_otherwise_is_malformed(eip191_signer: Eip191Signer) -> None:
+    upper = "eip191:0x" + eip191_signer.identity.identifier[2:].upper()
+    headers = {CONTENT_DIGEST: _response_headers(eip191_signer)[CONTENT_DIGEST]}
+    resigned = _rfc_signed_response(eip191_signer, headers, components=_RESPONSE_COMPONENTS,
+                                    parameters=["created", "keyid", "tag"], keyid=upper)
+    assert _rfc_verifies_response(resigned)
+    assert _verify_response(resigned, eip191_signer).code == VerificationCode.MALFORMED_ENVELOPE
+
+
+def test_an_audience_member_spelling_its_address_otherwise_is_malformed(
+    signer: Signer, eip191_signer: Eip191Signer,
+) -> None:
+    headers = _unsigned(sign_market_request(
+        signer=signer, request=REQUEST, body=BODY, created=CREATED,
+        audience=_audience(eip191_signer),
+    ).headers)
+    identifier = eip191_signer.identity.identifier
+    headers[MARKET_AUDIENCE] = headers[MARKET_AUDIENCE].replace(identifier, "0x" + identifier[2:].upper())
+    resigned = _rfc_signed(signer, headers, components=_COMPONENTS, parameters=["created", "keyid", "tag"])
+    assert _rfc_verifies(resigned)
+    assert _verify(resigned).code == VerificationCode.MALFORMED_ENVELOPE

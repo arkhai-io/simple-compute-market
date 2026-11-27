@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from market_identity import ExactRetry
+from market_identity import ExactRetry, RequestRecord, ResponseRecord
 from market_identity import exact_retry, wire
-from market_identity.wire import RefusalCode
+from market_identity.wire import RecordField, RefusalCode
 
 
 def test_the_wire_module_exports_exactly_the_profiles_names() -> None:
@@ -19,14 +19,15 @@ def test_the_wire_module_exports_exactly_the_profiles_names() -> None:
         "CONTENT_DIGEST",
         "SIGNATURE_INPUT",
         "SIGNATURE",
+        "RecordField",
         "RefusalCode",
     }
 
 
 def test_the_covered_fields_and_tags_are_the_profiles() -> None:
     assert (wire.REQUEST_PROFILE, wire.RESPONSE_PROFILE) == (
-        "arkhai.market-request.v3",
-        "arkhai.market-response.v3",
+        "arkhai.market-request-signature.v3",
+        "arkhai.market-response-signature.v3",
     )
     assert {
         wire.MARKET_ROLE,
@@ -55,6 +56,30 @@ def test_the_refusal_codes_are_exactly_the_profiles() -> None:
         "unsupported_protocol",
         "exact_retry_expired",
         "exact_retry_outcome_unknown",
+        "admission_unavailable",
+    }
+
+
+def test_the_record_field_names_are_exactly_the_records() -> None:
+    assert [field.value for field in RecordField] == [
+        "protocol",
+        "principal",
+        "role",
+        "method",
+        "operation",
+        "resource",
+        "request_id",
+        "timestamp",
+        "origin",
+        "audience",
+        "proof",
+        "status",
+    ]
+    assert set(RequestRecord.model_fields) == {field.value for field in RecordField} - {"status"}
+    assert set(ResponseRecord.model_fields) == {field.value for field in RecordField} - {
+        "role",
+        "origin",
+        "audience",
     }
 
 

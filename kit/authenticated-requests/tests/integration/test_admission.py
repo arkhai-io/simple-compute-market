@@ -123,12 +123,12 @@ def test_a_request_under_an_unknown_profile_carrying_the_fields_is_a_signed_400(
             body=body,
             created=START,
             audience=caller.authority,
-        )
-        headers["Signature-Input"] = headers["Signature-Input"].replace("market-request.v3", "market-request.v4")
+        ).headers
+        headers["Signature-Input"] = headers["Signature-Input"].replace("market-request-signature.v3", "market-request-signature.v4")
         response = await caller.client.post("/items/a/set", content=body, headers=headers)
 
         assert response.status_code == 400
-        assert response.json() == {"code": "unsupported_protocol", "supported": ["arkhai.market-request.v3"]}
+        assert response.json() == {"code": "unsupported_protocol", "supported": ["arkhai.market-request-signature.v3"]}
         assert caller.verified(response, method="POST", operation="item_set", resource="a")
 
     world.run(scenario)
@@ -165,7 +165,7 @@ def test_a_version_2_request_is_an_unsigned_unsupported_protocol(world: World) -
         )
 
         assert response.status_code == 400
-        assert response.json() == {"code": "unsupported_protocol", "supported": ["arkhai.market-request.v3"]}
+        assert response.json() == {"code": "unsupported_protocol", "supported": ["arkhai.market-request-signature.v3"]}
         assert "signature" not in response.headers and "signature-input" not in response.headers
 
     world.run(scenario)
@@ -245,7 +245,7 @@ def test_a_reused_request_id_asking_anything_else_is_refused_before_dispatch(wor
                 body=b'{"value":1}',
                 created=START,
                 audience=caller.authority,
-            )
+            ).headers
         )
         headers["Signature-Input"] = headers["Signature-Input"].replace(
             caller.signer.identity.identifier, authority_signer().identity.identifier
@@ -332,7 +332,7 @@ def test_a_proof_that_fails_on_a_route_is_a_signed_401_bound_over_the_route(worl
             body=b'{"value":1}',
             created=START,
             audience=caller.authority,
-        )
+        ).headers
         response = await caller.client.post("/items/a/set", content=b'{"value":2}', headers=headers)
 
         assert response.status_code == 401

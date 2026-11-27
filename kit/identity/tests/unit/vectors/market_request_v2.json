@@ -1,0 +1,38 @@
+{
+  "ed25519": {
+    "protocol": "arkhai.market-request-signature.v2",
+    "role": "buyer",
+    "principal": {
+      "scheme": "ed25519",
+      "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+    },
+    "method": "POST",
+    "operation": "negotiation.advance",
+    "resource": "negotiation/thread-17",
+    "request_id": "7f0ed41b-6ad8-4a1f-94dc-80691c28b841",
+    "timestamp": 1900000000,
+    "body_hash": "11a49f853eb8befe94fef278d487125cd20930b9e41c4c0934394443e7f00878",
+    "proof": {
+      "scheme": "ed25519",
+      "value": "OtEQFvPhz8Unjre4yIn_EH86EFYRgV1WFa5Q6gdJH6qvyieNoL94EzoFo3hMvDO50rtUyts9GFaDBGaQ0RZ_CA"
+    }
+  },
+  "eip191": {
+    "protocol": "arkhai.market-request-signature.v2",
+    "role": "buyer",
+    "principal": {
+      "scheme": "eip191",
+      "identifier": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+    },
+    "method": "POST",
+    "operation": "negotiation.advance",
+    "resource": "negotiation/thread-17",
+    "request_id": "7f0ed41b-6ad8-4a1f-94dc-80691c28b841",
+    "timestamp": 1900000000,
+    "body_hash": "11a49f853eb8befe94fef278d487125cd20930b9e41c4c0934394443e7f00878",
+    "proof": {
+      "scheme": "eip191",
+      "value": "0xeba22c9b8913e86299af30c4563df28b7fe91090eea4d2f8118df0f381fee26457b61c5a7b212edb8b39044855849e486ec522967c48c2c2c239f6b412924c651c"
+    }
+  }
+}

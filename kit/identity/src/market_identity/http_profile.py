@@ -9,9 +9,20 @@ authorities covers ``Market-Audience``, the principals its caller would accept t
 answer from; a signed delivery to an endpoint known only by its URL covers
 ``@target-uri`` in its place.
 
+``Market-Resource`` is present exactly when the request's operation acts on one
+object, which the route, not the request, decides; so a request, and the response
+answering it, each have two coverage lists, with and without the resource.
+
 A response signs its status and content digest and binds the request it answers
-through RFC 9421's ``req`` flag over the request's method, operation, resource and
-request ID.
+through RFC 9421's ``req`` flag over the request's method, operation, resource where
+the request carries one, and request ID.
+
+The profile accepts one spelling of everything it signs: the covered components in
+the profile's order, the parameters ``created``, ``keyid``, ``tag`` in that order,
+the audience in its canonical list serialization, and one canonical ``sha-256``
+member of ``Content-Digest``. Any other spelling is malformed, though RFC 9421 would
+verify it, so that a record of the signed values (:mod:`market_identity.records`)
+rebuilds the exact signature base. Signing and verifying produce those records.
 
 Freshness belongs to the caller: an authority and a client each compare ``created``
 with their own process's time source, which this module never reads.
@@ -24,7 +35,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 import http_sf
@@ -41,16 +52,24 @@ from http_message_signatures.structures import get_header_fields
 from pydantic import Field, ValidationError, field_validator
 
 from market_identity.canonical import frame_fields
+from market_identity.codes import VerificationCode
 from market_identity.models import (
     _REQUEST_ID,
     _TOKEN,
     ContractModel,
     Identity,
     IdentityScheme,
+    SignatureProof,
     TrustedIdentitySet,
 )
+from market_identity.records import (
+    MAX_RESOURCE_CHARACTERS,
+    RequestRecord,
+    ResponseRecord,
+    principal_text,
+    resource_is_signable,
+)
 from market_identity.registry import Signer, get_identity_verifier
-from market_identity.verification import VerificationCode
 from market_identity.wire import (
     CONTENT_DIGEST,
     MARKET_AUDIENCE,
@@ -68,8 +87,8 @@ from market_identity.wire import (
 
 _TARGET_URI = "@target-uri"
 _ORIGIN = re.compile(r"^(?:0|[1-9][0-9]{0,14})$")
-_MAX_RESOURCE_CHARACTERS = 1024
-_SIGNATURE_PARAMETERS = frozenset({"created", "keyid", "tag"})
+_SIGNATURE_PARAMETERS = ("created", "keyid", "tag")
+_DIGEST_ALGORITHM = "sha-256"
 
 # A request bound by its audience covers no part of its URL, and a response's
 # ``req`` components name only the request's method and fields; the library still
@@ -77,28 +96,33 @@ _SIGNATURE_PARAMETERS = frozenset({"created", "keyid", "tag"})
 # never-resolvable one, which no signature base reads.
 _UNCOVERED_TARGET = "https://market.invalid/"
 
-_AUDIENCE_COVERAGE = (
-    "@method",
-    MARKET_ROLE.lower(),
-    MARKET_OPERATION.lower(),
-    MARKET_RESOURCE.lower(),
-    MARKET_AUDIENCE.lower(),
-    MARKET_REQUEST_ID.lower(),
-    MARKET_REQUEST_ORIGIN.lower(),
-    CONTENT_DIGEST.lower(),
-)
-_DELIVERY_COVERAGE = tuple(
-    _TARGET_URI if component == MARKET_AUDIENCE.lower() else component
-    for component in _AUDIENCE_COVERAGE
-)
-_RESPONSE_COVERAGE = (
-    '"@status"',
-    f'"{CONTENT_DIGEST.lower()}"',
-    '"@method";req',
-    f'"{MARKET_OPERATION.lower()}";req',
-    f'"{MARKET_RESOURCE.lower()}";req',
-    f'"{MARKET_REQUEST_ID.lower()}";req',
-)
+
+def _request_coverage(*, resource: bool, delivery: bool) -> tuple[str, ...]:
+    """A request's covered components in the profile's order."""
+
+    return (
+        "@method",
+        MARKET_ROLE.lower(),
+        MARKET_OPERATION.lower(),
+        *((MARKET_RESOURCE.lower(),) if resource else ()),
+        _TARGET_URI if delivery else MARKET_AUDIENCE.lower(),
+        MARKET_REQUEST_ID.lower(),
+        MARKET_REQUEST_ORIGIN.lower(),
+        CONTENT_DIGEST.lower(),
+    )
+
+
+def _response_coverage(*, resource: bool) -> tuple[str, ...]:
+    """A response's covered components, serialized, in the profile's order."""
+
+    return (
+        '"@status"',
+        f'"{CONTENT_DIGEST.lower()}"',
+        '"@method";req',
+        f'"{MARKET_OPERATION.lower()}";req',
+        *((f'"{MARKET_RESOURCE.lower()}";req',) if resource else ()),
+        f'"{MARKET_REQUEST_ID.lower()}";req',
+    )
 
 
 class RequestBinding(ContractModel):
@@ -106,7 +130,8 @@ class RequestBinding(ContractModel):
 
     method: str = Field(min_length=1, max_length=32)
     operation: str = Field(min_length=1, max_length=128)
-    resource: str = Field(max_length=_MAX_RESOURCE_CHARACTERS)
+    #: The object the operation acts on; ``None`` for an operation with no target.
+    resource: str | None = Field(default=None, max_length=MAX_RESOURCE_CHARACTERS)
     request_id: str = Field(min_length=1, max_length=128)
 
     @field_validator("method")
@@ -125,16 +150,13 @@ class RequestBinding(ContractModel):
 
     @field_validator("resource")
     @classmethod
-    def validate_resource(cls, value: str) -> str:
+    def validate_resource(cls, value: str | None) -> str | None:
         # The resource travels as a header field value, which a signature base
-        # holds as printable ASCII with surrounding whitespace trimmed.
-        if value and (
-            not value.isascii()
-            or not value.isprintable()
-            or value != value.strip(" \t")
-        ):
+        # holds as printable ASCII with surrounding whitespace trimmed; an
+        # operation with no target sends no field rather than an empty one.
+        if value is not None and not resource_is_signable(value):
             raise ValueError(
-                "resource must be printable ASCII with no surrounding whitespace"
+                "resource must be non-empty printable ASCII with no surrounding whitespace"
             )
         return value
 
@@ -179,6 +201,8 @@ class VerifiedRequest(MarketRequest):
     audience: tuple[Identity, ...] | None = None
     target_uri: str | None = None
     body_digest: str
+    #: The signature value, in its scheme's canonical encoding.
+    proof: str
 
     def addressed_to(self, identity: Identity) -> bool:
         """Whether the request's audience lists this complete principal."""
@@ -197,16 +221,38 @@ class VerifiedRequest(MarketRequest):
         return abs(now - self.created) <= max_skew and self.origin <= now + max_skew
 
     @property
+    def record(self) -> RequestRecord | None:
+        """The request's evidence record, or ``None`` for a delivery bound by its
+        target, which no record represents."""
+
+        if self.audience is None:
+            return None
+        return RequestRecord(
+            principal=principal_text(self.principal),
+            role=self.role,
+            method=self.method,
+            operation=self.operation,
+            resource=self.resource,
+            request_id=self.request_id,
+            timestamp=self.created,
+            origin=self.origin,
+            audience=tuple(principal_text(member) for member in self.audience),
+            proof=self.proof,
+        )
+
+    @property
     def request_hash(self) -> str:
         """Fingerprint what the request asks, for its replay reservation.
 
-        Covers the profile, principal, role, method, operation, resource, origin and
-        body. ``created`` is excluded, since every re-signing of a retry is fresh;
-        so is the request ID, the reservation's key; and so is the audience or
-        target, which say where the request is addressed rather than what it asks,
-        and which a caller's trust set, rotated between attempts, may change.
+        Covers the profile, principal, role, method, operation, whether it names
+        a resource and which, origin and body. ``created`` is excluded, since every
+        re-signing of a retry is fresh; so is the request ID, the reservation's
+        key; and so is the audience or target, which say where the request is
+        addressed rather than what it asks, and which a caller's trust set,
+        rotated between attempts, may change.
         """
 
+        resource = ("absent",) if self.resource is None else ("present", self.resource)
         return hashlib.sha256(
             frame_fields(
                 (
@@ -216,7 +262,7 @@ class VerifiedRequest(MarketRequest):
                     self.role,
                     self.method,
                     self.operation,
-                    self.resource,
+                    *resource,
                     str(self.origin),
                     self.body_digest,
                 )
@@ -236,29 +282,49 @@ class RequestVerification(ContractModel):
 
 
 class ResponseVerification(ContractModel):
-    """The outcome of verifying one response against its request and authority."""
+    """The outcome of verifying one response against its request and authority.
+
+    ``record`` is the verified response's evidence record.
+    """
 
     code: VerificationCode
     principal: Identity | None = None
     created: int | None = None
+    record: ResponseRecord | None = None
 
     @property
     def verified(self) -> bool:
         return self.code == VerificationCode.VERIFIED
 
 
-def principal_text(identity: Identity) -> str:
-    """The complete principal as the profile writes it: ``<scheme>:<identifier>``."""
+@dataclass(frozen=True)
+class SignedRequest:
+    """The headers signing adds to a request, and the request's evidence record.
 
-    return f"{identity.scheme.value}:{identity.identifier}"
+    ``record`` is ``None`` for a delivery bound by its target, which no record
+    represents.
+    """
+
+    headers: dict[str, str]
+    record: RequestRecord | None
+
+
+@dataclass(frozen=True)
+class SignedResponse:
+    """The headers signing adds to a response, and the response's evidence record."""
+
+    headers: dict[str, str]
+    record: ResponseRecord
 
 
 def format_audience(audience: TrustedIdentitySet) -> str:
     """Serialize an audience as a structured list of principal tokens."""
 
-    return http_sf.ser(
-        [(http_sf.Token(principal_text(identity)), {}) for identity in audience.identities]
-    )
+    return _serialize_audience(principal_text(identity) for identity in audience.identities)
+
+
+def _serialize_audience(members: Iterable[str]) -> str:
+    return http_sf.ser([(http_sf.Token(member), {}) for member in members])
 
 
 def sign_market_request(
@@ -269,8 +335,8 @@ def sign_market_request(
     created: int,
     audience: TrustedIdentitySet | None = None,
     target_uri: str | None = None,
-) -> dict[str, str]:
-    """Sign a request and return every header the profile adds to it.
+) -> SignedRequest:
+    """Sign a request: every header the profile adds to it, and its record.
 
     A request to marketplace authorities names its ``audience``, the principals its
     caller would accept the answer from. A delivery to an endpoint that is no
@@ -282,25 +348,40 @@ def sign_market_request(
     headers = {
         MARKET_ROLE: request.role,
         MARKET_OPERATION: request.operation,
-        MARKET_RESOURCE: request.resource,
         MARKET_REQUEST_ID: request.request_id,
         MARKET_REQUEST_ORIGIN: str(request.origin),
     }
+    if request.resource is not None:
+        headers[MARKET_RESOURCE] = request.resource
     if audience is not None:
         headers[MARKET_AUDIENCE] = format_audience(audience)
-        coverage, url = _AUDIENCE_COVERAGE, _UNCOVERED_TARGET
+        url = _UNCOVERED_TARGET
     else:
         assert target_uri is not None
-        coverage, url = _DELIVERY_COVERAGE, target_uri
-    _sign(
+        url = target_uri
+    proof = _sign(
         signer,
         _RequestMessage(method=request.method, url=url, headers=headers),
         tag=REQUEST_PROFILE,
-        coverage=coverage,
+        coverage=_request_coverage(resource=request.resource is not None, delivery=audience is None),
         body=body,
         created=created,
     )
-    return headers
+    record = None
+    if audience is not None:
+        record = RequestRecord(
+            principal=principal_text(signer.identity),
+            role=request.role,
+            method=request.method,
+            operation=request.operation,
+            resource=request.resource,
+            request_id=request.request_id,
+            timestamp=created,
+            origin=request.origin,
+            audience=tuple(principal_text(identity) for identity in audience.identities),
+            proof=proof,
+        )
+    return SignedRequest(headers=headers, record=record)
 
 
 def sign_market_response(
@@ -310,21 +391,24 @@ def sign_market_response(
     body: bytes,
     request: RequestBinding,
     created: int,
-) -> dict[str, str]:
-    """Sign a response to ``request`` and return the headers the profile adds."""
+) -> SignedResponse:
+    """Sign a response to ``request``: the headers the profile adds, and its record."""
 
     if isinstance(status, bool) or not isinstance(status, int) or not 100 <= status <= 599:
         raise ValueError("status must be an HTTP status code")
     headers: dict[str, str] = {}
-    _sign(
+    proof = _sign(
         signer,
         _ResponseMessage(status_code=status, headers=headers, request=_bound_request(request)),
         tag=RESPONSE_PROFILE,
-        coverage=_RESPONSE_COVERAGE,
+        coverage=_response_coverage(resource=request.resource is not None),
         body=body,
         created=created,
     )
-    return headers
+    return SignedResponse(
+        headers=headers,
+        record=_response_record(principal_text(signer.identity), status, request, created, proof),
+    )
 
 
 def verify_market_request(
@@ -334,7 +418,7 @@ def verify_market_request(
     body: bytes,
     target_uri: str | None = None,
 ) -> RequestVerification:
-    """Verify a request's profile signature, coverage and body digest.
+    """Verify a request's profile signature, spelling and body digest.
 
     An authority verifies a request bound by its audience; a delivery's receiver
     passes its own endpoint as ``target_uri``, so a delivery made for any other
@@ -343,25 +427,27 @@ def verify_market_request(
     principal is trusted as are the caller's to judge from the verified request.
     """
 
-    coverage = _AUDIENCE_COVERAGE if target_uri is None else _DELIVERY_COVERAGE
-    selected = _select(headers, REQUEST_PROFILE, _serialized(coverage))
+    fields = get_header_fields(headers)
+    coverage = _request_coverage(resource=MARKET_RESOURCE in fields, delivery=target_uri is not None)
+    selected = _select(headers, REQUEST_PROFILE, tuple(f'"{component}"' for component in coverage))
     if isinstance(selected, VerificationCode):
         return RequestVerification(code=selected)
     label, keyid, created = selected
     principal = _principal(keyid)
     if isinstance(principal, VerificationCode):
         return RequestVerification(code=principal)
-    fields = get_header_fields(headers)
     try:
         stated = MarketRequest(
             method=method,
             role=fields[MARKET_ROLE],
             operation=fields[MARKET_OPERATION],
-            resource=fields[MARKET_RESOURCE],
+            resource=fields.get(MARKET_RESOURCE),
             request_id=fields[MARKET_REQUEST_ID],
             origin=_origin(fields[MARKET_REQUEST_ORIGIN]),
         )
         audience = _audience(fields[MARKET_AUDIENCE]) if target_uri is None else None
+        _require_canonical_digest(fields[CONTENT_DIGEST])
+        proof = _proof(fields[SIGNATURE], label, principal)
     except (KeyError, ValueError, ValidationError):
         return RequestVerification(code=VerificationCode.MALFORMED_ENVELOPE)
     message = _RequestMessage(
@@ -381,6 +467,7 @@ def verify_market_request(
             audience=audience,
             target_uri=target_uri,
             body_digest=hashlib.sha256(body).hexdigest(),
+            proof=proof,
         ),
     )
 
@@ -397,14 +484,35 @@ def verify_market_response(
 ) -> ResponseVerification:
     """Verify a response against the request it answers and the authority expected.
 
-    The caller accepts a response only when its signature, body digest and request
-    binding verify, its principal is one the caller expected, and its ``created``
-    is within the skew of the caller's own instant.
+    The caller accepts a response only when its signature, spelling, body digest
+    and request binding verify, its principal is one the caller expected, and its
+    ``created`` is within the skew of the caller's own instant.
     """
 
     if max_skew < 0:
         raise ValueError("max_skew must not be negative")
-    selected = _select(headers, RESPONSE_PROFILE, frozenset(_RESPONSE_COVERAGE))
+    result = _check_market_response(
+        status=status, headers=headers, body=body, request=request, expected_principals=expected_principals
+    )
+    if result.verified and result.created is not None and abs(now - result.created) > max_skew:
+        return ResponseVerification(
+            code=VerificationCode.TIMESTAMP_SKEW, principal=result.principal, created=result.created
+        )
+    return result
+
+
+def _check_market_response(
+    *,
+    status: int,
+    headers: Mapping[str, str],
+    body: bytes,
+    request: RequestBinding,
+    expected_principals: TrustedIdentitySet,
+) -> ResponseVerification:
+    """Verify a response's signature, spelling, body digest, request binding and
+    principal, judging no freshness: a retained response is not a live answer."""
+
+    selected = _select(headers, RESPONSE_PROFILE, _response_coverage(resource=request.resource is not None))
     if isinstance(selected, VerificationCode):
         return ResponseVerification(code=selected)
     label, keyid, created = selected
@@ -413,18 +521,23 @@ def verify_market_response(
         return ResponseVerification(code=principal)
     if not expected_principals.allows(principal):
         return ResponseVerification(code=VerificationCode.WRONG_PRINCIPAL, principal=principal)
+    fields = get_header_fields(headers)
+    try:
+        _require_canonical_digest(fields[CONTENT_DIGEST])
+        proof = _proof(fields[SIGNATURE], label, principal)
+    except (KeyError, ValueError, ValidationError):
+        return ResponseVerification(code=VerificationCode.MALFORMED_ENVELOPE, principal=principal)
     message = _ResponseMessage(
         status_code=status, headers=headers, request=_bound_request(request)
     )
     failure = _verify(message, tag=RESPONSE_PROFILE, label=label, body=body)
     if failure is not None:
         return ResponseVerification(code=failure, principal=principal)
-    if abs(now - created) > max_skew:
-        return ResponseVerification(
-            code=VerificationCode.TIMESTAMP_SKEW, principal=principal, created=created
-        )
     return ResponseVerification(
-        code=VerificationCode.VERIFIED, principal=principal, created=created
+        code=VerificationCode.VERIFIED,
+        principal=principal,
+        created=created,
+        record=_response_record(keyid, status, request, created, proof),
     )
 
 
@@ -433,33 +546,105 @@ def stated_request_binding(
 ) -> RequestBinding | None:
     """The request identity a request states, whether or not it verifies.
 
-    A request carries a request identity when it carries ``Market-Operation``,
-    ``Market-Resource`` and ``Market-Request-ID``; an authority signs a refusal
-    over whatever values it stated, and answers a request carrying none
-    unauthenticated rather than inventing an identity to sign. A stated value is
-    taken as it is, unless no signature base can hold it.
+    A request carries a request identity when it carries ``Market-Operation`` and
+    ``Market-Request-ID``, with ``Market-Resource`` where it states one; an
+    authority signs a refusal over whatever values it stated, and answers a
+    request carrying none unauthenticated rather than inventing an identity to
+    sign. A stated value is taken as it is, unless no signature base can hold it.
     """
 
     fields = get_header_fields(headers)
     try:
-        stated = (
-            method,
-            fields[MARKET_OPERATION],
-            fields[MARKET_RESOURCE],
-            fields[MARKET_REQUEST_ID],
-        )
+        operation, request_id = fields[MARKET_OPERATION], fields[MARKET_REQUEST_ID]
     except KeyError:
         return None
-    if not all(_signable(value) for value in stated) or not stated[0].isalpha():
+    resource = fields.get(MARKET_RESOURCE)
+    stated = (method, operation, request_id, *(() if resource is None else (resource,)))
+    if not all(_signable(value) for value in stated) or not method.isalpha():
         return None
     # The stated values answer only for themselves: a refusal binds what the caller
     # sent, so they are not held to the token forms a verified request must take.
     return RequestBinding.model_construct(
         method=method.upper(),
-        operation=stated[1],
-        resource=stated[2],
-        request_id=stated[3],
+        operation=operation,
+        resource=resource,
+        request_id=request_id,
     )
+
+
+def _rebuild_request_headers(record: RequestRecord, body: bytes) -> dict[str, str]:
+    """The signed headers ``record`` was taken from, with ``body``'s digest.
+
+    The profile's one accepted spelling makes these the headers the request was
+    signed with whenever ``body`` is the body it carried.
+    """
+
+    headers = {
+        MARKET_ROLE: record.role,
+        MARKET_OPERATION: record.operation,
+        MARKET_AUDIENCE: _serialize_audience(record.audience),
+        MARKET_REQUEST_ID: record.request_id,
+        MARKET_REQUEST_ORIGIN: str(record.origin),
+        CONTENT_DIGEST: _digest(body),
+    }
+    if record.resource is not None:
+        headers[MARKET_RESOURCE] = record.resource
+    coverage = _request_coverage(resource=record.resource is not None, delivery=False)
+    return headers | _signature_fields(record, tuple((component, {}) for component in coverage))
+
+
+def _rebuild_response_headers(record: ResponseRecord, body: bytes) -> dict[str, str]:
+    """The signed headers ``record`` was taken from, with ``body``'s digest."""
+
+    components: list[tuple[str, dict[str, bool]]] = [("@status", {}), (CONTENT_DIGEST.lower(), {})]
+    components += [
+        ("@method", {"req": True}),
+        (MARKET_OPERATION.lower(), {"req": True}),
+        *(((MARKET_RESOURCE.lower(), {"req": True}),) if record.resource is not None else ()),
+        (MARKET_REQUEST_ID.lower(), {"req": True}),
+    ]
+    return {CONTENT_DIGEST: _digest(body)} | _signature_fields(record, tuple(components))
+
+
+def _record_binding(record: ResponseRecord) -> RequestBinding:
+    """The request binding a response record holds, as its signature binds it."""
+
+    return RequestBinding.model_construct(
+        method=record.method,
+        operation=record.operation,
+        resource=record.resource,
+        request_id=record.request_id,
+    )
+
+
+def _response_record(
+    principal: str, status: int, request: RequestBinding, created: int, proof: str
+) -> ResponseRecord:
+    return ResponseRecord(
+        principal=principal,
+        status=status,
+        timestamp=created,
+        method=request.method,
+        operation=request.operation,
+        resource=request.resource,
+        request_id=request.request_id,
+        proof=proof,
+    )
+
+
+def _signature_fields(
+    record: RequestRecord | ResponseRecord, components: tuple[tuple[str, dict[str, bool]], ...]
+) -> dict[str, str]:
+    signature = SignatureProof(scheme=record.identity.scheme, value=record.proof).to_bytes()
+    parameters = {"created": record.timestamp, "keyid": record.principal, "tag": record.protocol}
+    return {
+        SIGNATURE_INPUT: http_sf.ser({SIGNATURE_LABEL: (list(components), parameters)}),
+        SIGNATURE: http_sf.ser({SIGNATURE_LABEL: (signature, {})}),
+    }
+
+
+def _digest(body: bytes) -> str:
+    return http_sf.ser({_DIGEST_ALGORITHM: (hashlib.sha256(body).digest(), {})})
 
 
 def _signable(value: str) -> bool:
@@ -549,7 +734,9 @@ def _sign(
     coverage: tuple[str, ...],
     body: bytes,
     created: int,
-) -> None:
+) -> str:
+    """Sign ``message`` in place, adding the profile's headers; answer the proof."""
+
     if isinstance(created, bool) or not isinstance(created, int) or created < 0:
         raise ValueError("created must be a non-negative integer instant")
     HTTPMessageSigner(
@@ -565,6 +752,7 @@ def _sign(
         covered_component_ids=coverage,
         body=body,
     )
+    return _proof(get_header_fields(message.headers)[SIGNATURE], SIGNATURE_LABEL, signer.identity)
 
 
 def _verify(
@@ -585,9 +773,10 @@ def _verify(
 
 
 def _select(
-    headers: Mapping[str, str], tag: str, coverage: frozenset[str]
+    headers: Mapping[str, str], tag: str, coverage: tuple[str, ...]
 ) -> tuple[str, str, int] | VerificationCode:
-    """Find the one signature under ``tag``, checking its parameters and coverage."""
+    """Find the one signature under ``tag``, checking its parameters and coverage
+    are exactly the profile's, in its order."""
 
     fields = get_header_fields(headers)
     if SIGNATURE_INPUT not in fields:
@@ -606,19 +795,35 @@ def _select(
     if len(selected) > 1 or SIGNATURE not in fields:
         return VerificationCode.MALFORMED_ENVELOPE
     label, member, params = selected[0]
-    if not isinstance(member, list) or set(params) != _SIGNATURE_PARAMETERS:
+    if not isinstance(member, list) or tuple(params) != _SIGNATURE_PARAMETERS:
         return VerificationCode.MALFORMED_ENVELOPE
     created, keyid = params["created"], params["keyid"]
     if type(created) is not int or created < 0 or not isinstance(keyid, str):
         return VerificationCode.MALFORMED_ENVELOPE
-    covered = [http_sf.ser(component) for component in member]
-    if len(covered) != len(coverage) or set(covered) != coverage:
+    if tuple(http_sf.ser(component) for component in member) != coverage:
         return VerificationCode.MALFORMED_ENVELOPE
     return label, keyid, created
 
 
-def _serialized(coverage: tuple[str, ...]) -> frozenset[str]:
-    return frozenset(f'"{component}"' for component in coverage)
+def _require_canonical_digest(value: str) -> None:
+    """Refuse a ``Content-Digest`` other than one canonical ``sha-256`` member."""
+
+    members = http_sf.parse(value.encode("ascii"), tltype="dictionary")
+    if list(members) != [_DIGEST_ALGORITHM]:
+        raise ValueError("Content-Digest carries one sha-256 member")
+    digest, params = members[_DIGEST_ALGORITHM]
+    if not isinstance(digest, bytes) or params or http_sf.ser(members) != value:
+        raise ValueError("Content-Digest is spelled as its canonical serialization")
+
+
+def _proof(value: str, label: str, principal: Identity) -> str:
+    """The signature under ``label``, in its principal's scheme's canonical encoding."""
+
+    signatures = http_sf.parse(value.encode("ascii"), tltype="dictionary")
+    signature, params = signatures[label]
+    if not isinstance(signature, bytes) or params:
+        raise ValueError("a signature is a byte sequence")
+    return SignatureProof.from_bytes(principal.scheme, signature).value
 
 
 def _principal(text: str) -> Identity | VerificationCode:
@@ -630,9 +835,15 @@ def _principal(text: str) -> Identity | VerificationCode:
     except ValueError:
         return VerificationCode.UNKNOWN_SCHEME
     try:
-        return Identity(scheme=known, identifier=identifier)
+        identity = Identity(scheme=known, identifier=identifier)
     except ValidationError:
         return VerificationCode.MALFORMED_ENVELOPE
+    # One spelling of a principal, as of everything signed: an address spelled in
+    # another case names the same principal, but its record could not rebuild the
+    # signature base.
+    if principal_text(identity) != text:
+        return VerificationCode.MALFORMED_ENVELOPE
+    return identity
 
 
 def _origin(value: str) -> int:
@@ -653,16 +864,13 @@ def _audience(value: str) -> tuple[Identity, ...]:
         audience.append(principal)
     if not audience:
         raise ValueError("an audience names at least one principal")
+    if http_sf.ser(members) != value:
+        raise ValueError("an audience is spelled as its canonical list serialization")
     return tuple(audience)
 
 
 def _bound_request(request: RequestBinding) -> _RequestMessage:
-    return _RequestMessage(
-        method=request.method,
-        url=_UNCOVERED_TARGET,
-        headers={
-            MARKET_OPERATION: request.operation,
-            MARKET_RESOURCE: request.resource,
-            MARKET_REQUEST_ID: request.request_id,
-        },
-    )
+    headers = {MARKET_OPERATION: request.operation, MARKET_REQUEST_ID: request.request_id}
+    if request.resource is not None:
+        headers[MARKET_RESOURCE] = request.resource
+    return _RequestMessage(method=request.method, url=_UNCOVERED_TARGET, headers=headers)

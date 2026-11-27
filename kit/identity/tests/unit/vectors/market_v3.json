@@ -3,36 +3,66 @@
     "request_headers": {
       "Market-Role": "storefront",
       "Market-Operation": "capacity_reserve",
+      "Market-Request-ID": "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
+      "Market-Request-Origin": "1795000000",
       "Market-Resource": "pool-gpu-a100",
+      "Market-Audience": "ed25519:Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+      "Content-Digest": "sha-256=:YPyB8W+pAWev7/z4v08gpyA5XSQMEtEQ2yEikiY2m4A=:",
+      "Signature-Input": "market=(\"@method\" \"market-role\" \"market-operation\" \"market-resource\" \"market-audience\" \"market-request-id\" \"market-request-origin\" \"content-digest\");created=1795000000;keyid=\"ed25519:A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\";tag=\"arkhai.market-request-signature.v3\"",
+      "Signature": "market=:pqlfYnkxcLr6LwkryrXNavOoEQDnHN50RRjNx0qzWGEpisKmJpSvs++NgEB3hHsDsiwghm77Md1X3Tsoo7GyCg==:"
+    },
+    "response_headers": {
+      "Content-Digest": "sha-256=:QIqxadIFSPKuPjlsdV8/0D1I4oTeA4VvpreUL5+JaWQ=:",
+      "Signature-Input": "market=(\"@status\" \"content-digest\" \"@method\";req \"market-operation\";req \"market-resource\";req \"market-request-id\";req);created=1795000001;keyid=\"ed25519:A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\";tag=\"arkhai.market-response-signature.v3\"",
+      "Signature": "market=:Ye7u5q4v5PTMPuJ5zae8LTDfpyY5H7oY+S4otTCnN1v2jK8Fk/rW+1RbXRoMZbX1ZVf44lrnEkGSvD4TbK5wAw==:"
+    },
+    "targetless_request_headers": {
+      "Market-Role": "storefront",
+      "Market-Operation": "listing.publish",
       "Market-Request-ID": "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
       "Market-Request-Origin": "1795000000",
       "Market-Audience": "ed25519:Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
       "Content-Digest": "sha-256=:YPyB8W+pAWev7/z4v08gpyA5XSQMEtEQ2yEikiY2m4A=:",
-      "Signature-Input": "market=(\"@method\" \"market-role\" \"market-operation\" \"market-resource\" \"market-audience\" \"market-request-id\" \"market-request-origin\" \"content-digest\");created=1795000000;keyid=\"ed25519:A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\";tag=\"arkhai.market-request.v3\"",
-      "Signature": "market=:v7Rp5HRqHOvdI2184sMQUcyAPov40z8mdf7Tkptvn9QJ4FzP3HFCn544P27ZVgz7TX2747ycS9EfyL8n9WCQDQ==:"
+      "Signature-Input": "market=(\"@method\" \"market-role\" \"market-operation\" \"market-audience\" \"market-request-id\" \"market-request-origin\" \"content-digest\");created=1795000000;keyid=\"ed25519:A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\";tag=\"arkhai.market-request-signature.v3\"",
+      "Signature": "market=:980j96VjWutXSm0MyhBs7BIht1zZT926L6+ncs3BV8E3CZO1jVtcCOTm7TRJlAVQRQ7DUqDC0bZR9CEWWn37CQ==:"
     },
-    "response_headers": {
+    "targetless_response_headers": {
       "Content-Digest": "sha-256=:QIqxadIFSPKuPjlsdV8/0D1I4oTeA4VvpreUL5+JaWQ=:",
-      "Signature-Input": "market=(\"@status\" \"content-digest\" \"@method\";req \"market-operation\";req \"market-resource\";req \"market-request-id\";req);created=1795000001;keyid=\"ed25519:A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\";tag=\"arkhai.market-response.v3\"",
-      "Signature": "market=:uhkgW7xlszY1Dfm+8pksWvEfVvCwDpcU0PSmYAa4TSghDDdXDrgeJEFvEXNnRYpkBaOQUBNkTkBK4zhut7P6CA==:"
+      "Signature-Input": "market=(\"@status\" \"content-digest\" \"@method\";req \"market-operation\";req \"market-request-id\";req);created=1795000001;keyid=\"ed25519:A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\";tag=\"arkhai.market-response-signature.v3\"",
+      "Signature": "market=:vsBAncWOys7YepT3ds0Vy4YOdV5GMJuAXJt9Lgv2B9UaiCEzn1nF3iqZ6QanCJHlVcAhqhZIxP0All8PGyYVAg==:"
     }
   },
   "eip191": {
     "request_headers": {
       "Market-Role": "storefront",
       "Market-Operation": "capacity_reserve",
+      "Market-Request-ID": "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
+      "Market-Request-Origin": "1795000000",
       "Market-Resource": "pool-gpu-a100",
+      "Market-Audience": "ed25519:Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+      "Content-Digest": "sha-256=:YPyB8W+pAWev7/z4v08gpyA5XSQMEtEQ2yEikiY2m4A=:",
+      "Signature-Input": "market=(\"@method\" \"market-role\" \"market-operation\" \"market-resource\" \"market-audience\" \"market-request-id\" \"market-request-origin\" \"content-digest\");created=1795000000;keyid=\"eip191:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc\";tag=\"arkhai.market-request-signature.v3\"",
+      "Signature": "market=:lvdzYfakkOzu0Ey3/DCnn2BcTPAeqFpGGSImvzUo2m0Os9tprzbUTK9mqu+dmJjPW5zs0r1If8G8WILo1ssKoRw=:"
+    },
+    "response_headers": {
+      "Content-Digest": "sha-256=:QIqxadIFSPKuPjlsdV8/0D1I4oTeA4VvpreUL5+JaWQ=:",
+      "Signature-Input": "market=(\"@status\" \"content-digest\" \"@method\";req \"market-operation\";req \"market-resource\";req \"market-request-id\";req);created=1795000001;keyid=\"eip191:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc\";tag=\"arkhai.market-response-signature.v3\"",
+      "Signature": "market=:/icr+oZhumHc/h1Oe5kuTPHkWyIJ088N3E4k+nIxhNU7c7pskYaiZF8IeqqStbJvwQl6sV7sToxhzb/YvSUzkRs=:"
+    },
+    "targetless_request_headers": {
+      "Market-Role": "storefront",
+      "Market-Operation": "listing.publish",
       "Market-Request-ID": "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
       "Market-Request-Origin": "1795000000",
       "Market-Audience": "ed25519:Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
       "Content-Digest": "sha-256=:YPyB8W+pAWev7/z4v08gpyA5XSQMEtEQ2yEikiY2m4A=:",
-      "Signature-Input": "market=(\"@method\" \"market-role\" \"market-operation\" \"market-resource\" \"market-audience\" \"market-request-id\" \"market-request-origin\" \"content-digest\");created=1795000000;keyid=\"eip191:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc\";tag=\"arkhai.market-request.v3\"",
-      "Signature": "market=:dkWLU/f3QUPbTESlUihdtJFbzkAnol+hLm/6mDe7WNhOdlzFO2vhRgU8FB26gPVZ/Xt7AtekgFPitnMVRjyCvhs=:"
+      "Signature-Input": "market=(\"@method\" \"market-role\" \"market-operation\" \"market-audience\" \"market-request-id\" \"market-request-origin\" \"content-digest\");created=1795000000;keyid=\"eip191:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc\";tag=\"arkhai.market-request-signature.v3\"",
+      "Signature": "market=:C92S7gNlwsDWlZjoNHjGdIX2S2JkW+DI6bfG4jJSy/03Ij7U4iCCfvB7RwOS5bhmGy+B46MnF9PvFtKc/fvQ3Bw=:"
     },
-    "response_headers": {
+    "targetless_response_headers": {
       "Content-Digest": "sha-256=:QIqxadIFSPKuPjlsdV8/0D1I4oTeA4VvpreUL5+JaWQ=:",
-      "Signature-Input": "market=(\"@status\" \"content-digest\" \"@method\";req \"market-operation\";req \"market-resource\";req \"market-request-id\";req);created=1795000001;keyid=\"eip191:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc\";tag=\"arkhai.market-response.v3\"",
-      "Signature": "market=:jl4ITnvb3D7QaoaUMDA3DyQSSDa7J7/0rAZNi3/RQNs+QCOxQfFCg3a/GRmhKpBooC1Ax52TyaZwGkCO+GDWPBw=:"
+      "Signature-Input": "market=(\"@status\" \"content-digest\" \"@method\";req \"market-operation\";req \"market-request-id\";req);created=1795000001;keyid=\"eip191:0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc\";tag=\"arkhai.market-response-signature.v3\"",
+      "Signature": "market=:CdUMx/skf8DjuYn89XNxmR08u4h1cwmwE5q7crqKMRJ9D5FpBAXzKD99SACtmYBRQopHT4Nt2BiqcCOwQC3ubhs=:"
     }
   }
 }
