@@ -397,7 +397,8 @@ Two rounds, then a pause:
 - **Round 2**, two sessions: the VM lane's rows with the setup option and D14's live
   verification scenario; then the bare-metal lane's rows and twins.
 - **Pause**: the coordinator's live verification evidence (D14), then pre-closeout and
-  closeout.
+  closeout. The plan gives the pause a section of its own, implemented as a round of one
+  session that runs no scenario: it confirms the coordinator's summary and commits it.
 
 ### D14 — The revision's live verification is run by a coordinator, and closeout waits for it
 
@@ -413,7 +414,9 @@ route, and leaves the observation unproven without it.
 The change does not run the scenario. A coordinator deploys the change and a dispute
 authority meeting R1–R4 to a prepared topology, runs it, and writes the evidence into
 this change as a sanitized summary naming no host, project or path, each observation
-made, failed or unproven (`docs/guidance/engineering/system-tests.md`). The change takes
+made, failed or unproven (`docs/guidance/engineering/system-tests.md`), at
+`docs/attachments/converge-ongoing-compute-leases/live-verification.md`, as
+`switch-on-hosted-per-period-vm`'s live verification summary is kept. The change takes
 the evidence in good faith. Closeout waits for it, so the change reaches closeout only
 once R1–R4 are deployed. The other live twins of rows here stay with
 `qualify-per-period-bare-metal-and-setup-charges`.
