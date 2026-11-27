@@ -6,8 +6,8 @@ guidance, or the architecture description names no change
 architecture description and handbooks name no change"), so every task that
 writes one states the fact without the pointer.
 
-Implementation is gated by this change's dependency on `compose-api-family-kit`
-in the change index; its archive cleanup runs first.
+This change's dependency on `compose-api-family-kit`, which is archived on this
+branch, is released.
 
 ## 1. The family at `domains/api`, read as a family only there
 

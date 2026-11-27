@@ -154,8 +154,8 @@ None.
 
 ## Dependencies and Related Changes
 
-- Depends on `compose-api-family-kit`, which built the kit and whose archive
-  cleanup has not run.
+- Builds on `compose-api-family-kit`, which built the kit and is archived on
+  this branch; the dependency is released.
 - Hands to `move-escrow-into-alkahest` the Alkahest buyer modules in the
   family's buying library, with the question of a buyer-side Alkahest kit.
 - Notes for `kit-owned-storefront-auth-and-persistence` an import its

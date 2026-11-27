@@ -352,8 +352,8 @@ validation of its own.
   reinstalled; a dependent keeps a stale wheel of an unchanged version until
   the wheelhouse is rebuilt and its environment reinstalled.
 - The TypeScript gate's package metadata names its repository directory.
-- `compose-api-family-kit` reaches `archived` before implementation starts,
-  and this change's dependency on it is then dropped from its row.
+- `compose-api-family-kit` is archived on this branch, and this change's
+  dependency on it is released on the owner's word.
 
 ## Open Questions
 
