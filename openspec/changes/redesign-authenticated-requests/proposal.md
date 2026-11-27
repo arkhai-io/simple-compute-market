@@ -89,11 +89,19 @@ transaction the attempt still holds, and
   protocols, a version 2 request alone, which carries none of the version 3 fields,
   refused unsigned. Signed webhook deliveries bind their endpoint (D2, D10, D11).
   `Market-Resource` is sent only when the operation acts on one object, and the profile
-  accepts one spelling of everything it signs (D2, D21).
+  accepts one spelling of everything it signs (D2, D21). Every request's signature
+  covers its query string, `@query`, so a read's filters and paging are signed on every
+  authority (D25).
+- **The registry's descriptor is a public read answered signed.** Its request carries
+  only a request identity, so a client adding a registry by its URL, knowing no
+  principal yet, verifies the signed answer against the principals the descriptor names
+  (D24). The listing read's filter-spec ETag becomes a covered query parameter (D26);
+  an applied publisher rotation or retirement answers its exact retry before its expiry
+  and primary checks (D27); singleton and collection reads carry no resource (D28).
 - **Signed messages retained as evidence are records of their signed values.** The
   registry's publications, buyers' and storefronts' negotiation evidence and the
   end-delivery receipt keep, beside the exact body, a record readable as data —
-  protocol, principal, role, method, operation, resource where present, request ID,
+  protocol, principal, role, method, query, operation, resource where present, request ID,
   timestamp, origin, audience, proof — which `kit/identity`'s evidence verifiers check
   offline under either version, a response bound by its exact trusted principals; the
   listing read's evidence fields become `publication` and `updates`, names a seller's
@@ -124,11 +132,14 @@ None.
 - `marketplace-identity`: the version 3 profile; the three replay jobs and their
   lifetimes; per-route exact-retry resolution; a recorded route dispatched once; the
   retention and the 410; secrets never recorded; signed refusals; version 2 as an
-  evidence format.
+  evidence format; every request covering `@query`; a public operation answered signed.
 - `physical-provisioning`: exact retry per declaration; a failure after authentication
   recorded only on a recorded route.
 - `registry-discovery`: durable replay reservation per declaration; seller publication
-  evidence as `publication` and `updates`, each a request record and its body.
+  evidence as `publication` and `updates`, each a request record and its body; the
+  registry's authentication under version 3; the descriptor a public read answered
+  signed; the filter-spec ETag a query parameter; an applied rotation or retirement
+  answering its exact retry first.
 - `deal-lifecycle`: the end-delivery acknowledgement under version 3; commitment
   envelopes kept and captured as signed records with their exact bodies.
 - `storefront-publication`: version 3 authorization and exact retry per declaration.
@@ -167,7 +178,9 @@ signed 500, a replay store's failure while admitting a request a signed 503; on 
 database no `exact_retry_outcome_unknown` answer precedes the end of a transaction its
 attempt holds;
 version 2 requests are refused and version 2 evidence still verifies; version 3
-evidence verifies offline from its record and body alone.
+evidence verifies offline from its record and body alone; a request whose query was
+changed after signing is refused; a client knowing no registry principal bootstraps
+from the registry's public descriptor read and verifies its signed answer.
 
 ## Impact
 
@@ -264,3 +277,18 @@ Engineering guidance, shared across repositories, gains a messaging file and a
   messages retained as evidence".
 - D23 capture carrying records: `marketplace-identity` `architecture.md`, beside the
   admission core; `deal-lifecycle` spec, its capture requirements.
+- D24 the descriptor a public operation answered signed: `marketplace-identity` spec;
+  `registry-discovery` spec and its `architecture.md`, "Self-description boundary",
+  which states that the protocol keeps trust on first use for adding a registry by URL
+  and that a directory's countersignature is a separate layer;
+  `docs/development/ARCHITECTURE.md`'s discovery flow.
+- D25 `@query` on every request: `marketplace-identity` spec and `architecture.md`; the
+  principle that a signature covers every request input that changes behaviour, the
+  query included, to the new engineering `messaging.md`.
+- D26 the filter-spec ETag as a query parameter: `registry-discovery` spec, its
+  filter-spec consistency and query compilation requirements.
+- D27 an applied rotation or retirement answering its exact retry first:
+  `registry-discovery` spec, "Publisher principal rotation".
+- D28: no permanent destination — it applies D2's and D21's rule, which the
+  `marketplace-identity` spec records, and the routes' declarations are the record.
+- D29: no permanent destination — the cadence is the plan's, not current behaviour.

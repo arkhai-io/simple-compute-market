@@ -156,6 +156,9 @@ The version 3 request and response are an RFC 9421 profile with RFC 9530
   `tag`, the audience in its canonical list serialization, and one `sha-256`
   `Content-Digest`; any other spelling is refused as malformed, so a retained record
   of the signed values rebuilds the exact signature base (D21);
+- every request covers RFC 9421's `@query`, the target URI's query string exactly as
+  sent with its leading `?`, which is `?` alone for a request with no query, so a
+  read's filters and paging are signed on every authority (D25);
 - the request ID is a covered field, not the RFC's `nonce`, because an exact retry
   reuses it, re-signed;
 - `Content-Digest` hashes the bytes sent, not canonical JSON;
@@ -173,7 +176,7 @@ Market-Resource: pool-gpu-a100
 Market-Audience: ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE
 Market-Request-ID: 0f6c2b1e7d4a4c1e9a523e8b6d0f1a77
 Market-Request-Origin: 1795000000
-Signature-Input: market=("@method" "market-role" "market-operation" "market-resource" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
+Signature-Input: market=("@method" "@query" "market-role" "market-operation" "market-resource" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
 Signature: market=:3q2-7w...:
 ```
 
@@ -187,7 +190,7 @@ Market-Operation: listing.publish
 Market-Audience: ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE
 Market-Request-ID: 0f6c2b1e7d4a4c1e9a523e8b6d0f1a77
 Market-Request-Origin: 1795000000
-Signature-Input: market=("@method" "market-role" "market-operation" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
+Signature-Input: market=("@method" "@query" "market-role" "market-operation" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
 Signature: market=:3q2-7w...:
 ```
 
@@ -244,10 +247,11 @@ The component's interface, walked through every caller:
   caller stated;
 - a route inventory, checked when the core is constructed over the application: every
   route in the application's route table carries an exact-retry declaration through
-  its admission, in either form, or an explicit unauthenticated mark (health and the
+  its admission, in either form, an explicit unauthenticated mark (health and the
   OpenAPI document everywhere; the injected time route only where its authority does
-  not sign it, as the registry's API-key `/admin/time`), and the authority refuses to
-  start naming any route that has neither (D5). A signed time-setting route — a
+  not sign it, as the registry's API-key `/admin/time`), or a public mark (the
+  registry's descriptor read, D24), and the authority refuses to start naming any
+  route that has none of them (D5). A signed time-setting route — a
   storefront's, the API-credits service's — carries a `RERUN` declaration, since a
   time-set only moves forward (D6), and the core applies to it the freshness exemption
   `marketplace-identity`'s "The time-setting operation is exempt from request
@@ -825,7 +829,13 @@ remain.
   operation exempt from the origin's bound as from `created`'s; the route inventory refusing to start; version 2 as an evidence
   format; the profile's tags, its one accepted spelling and `Market-Resource` only
   where the operation has a target; a signed message retained as evidence verifying
-  offline as a record of its signed values, under either version (D21, D22).
+  offline as a record of its signed values, under either version (D21, D22); every
+  request covering `@query` (D25); a public operation answered signed, the registry's
+  descriptor read the only one (D24).
+- `registry-discovery`: the registry's authentication under version 3, its query values
+  covered by `@query` (D25); the descriptor a public read whose signed answer the
+  bootstrap verifies (D24); the filter-spec ETag a query parameter (D26); an applied
+  rotation or retirement answering its exact retry first (D27).
 - `registry-discovery`: seller publication evidence as `publication` and `updates`,
   each the body bytes and the seller's request record (D21).
 - `deal-lifecycle`: the end-delivery acknowledgement signed under version 3; each
@@ -903,8 +913,10 @@ The change keeps its name.
 
 ### D20 — Implementation cadence
 
-Three rounds. Rounds 1 and 3 are as first planned; round 2 was added when section 6
-found the evidence form undesigned, before any of the cutover was implemented:
+Four rounds. Rounds 1 and 2 are implemented and reviewed; round 3 was added when
+section 6 stopped a second time, on the descriptor bootstrap and the unsigned query
+(D24–D26, D29); round 4 is the cutover as first planned, with the registry's share of
+D26–D28 in its first session:
 
 - **Round 1, the foundations, in two sessions.** Session 1: `kit/identity`'s version 3
   profile, opening with D2's EIP-191 and ASGI gate, the wire names (D13), the declaration
@@ -924,8 +936,21 @@ found the evidence form undesigned, before any of the cutover was implemented:
   (D7, design review 61 F1). Unit and library integration tests, the record round trip
   under both schemes and a retry behind a handler's held write lock among them;
   reviewed before the cutover depends on it.
-- **Round 3, the cutover, in three sessions.** Session 1: the registry, with
-  `publication` and `updates` and their column rename (D21), the provisioning
+- **Round 3, the second foundation amendments, in one session.** `kit/identity`:
+  `@query` in both request coverage lists, in the request record and in rebuilding
+  the signature base, the one query encoding the typed clients sign and send, and the
+  public request builder with the binding its answer is verified against (D24, D25).
+  The admission core: the public route mark in the route inventory, the raw query
+  string handed to verification in both forms, the request hash over the query, and a
+  public route refusing signature fields as malformed (D3, D24, D25). Unit and
+  library integration tests, a record round trip with a non-empty query, a request
+  whose query was altered after signing refused, and a public read answered signed and
+  verified through the builder's binding among them; reviewed before the cutover
+  depends on it.
+- **Round 4, the cutover, in three sessions.** Session 1: the registry, with
+  `publication` and `updates` and their column rename (D21), the public descriptor
+  read and the bootstrap client (D24), the filter-spec ETag as a query parameter
+  (D26), the rotation and retirement retries answered first (D27), the provisioning
   service, the site kit and the API-credits service, and deal-servicing, with its
   lifecycle evidence and the end-delivery receipt as records (D23), with their typed
   clients, route declarations and double-dispatch cases, adjust's crash-boundary, renewed-lease and post-commit 500 cases (D7), the relay rotation and staging interleaved-write cases (D6), the table drops, the consume key
@@ -936,7 +961,7 @@ found the evidence form undesigned, before any of the cutover was implemented:
   version 2 publications and of its negotiation evidence (D22), a typed client's time advance beyond the skew (D8), the signed-delivery binding (D10a), the end-to-end lanes, and the
   documentation closeout promotes. Reviewed, then closeout.
 
-The cutover is atomic (D9), so round 3 lands whole before any end-to-end lane passes.
+The cutover is atomic (D9), so round 4 lands whole before any end-to-end lane passes.
 
 *Section 6's return:* the first cadence had two rounds, the cutover in round 2. Section
 6 stopped before its first task on finding that the cutover left the retained evidence
@@ -965,6 +990,7 @@ beside the exact body bytes. A seller's publication, in a listing read:
     "principal": "ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs",
     "role": "seller",
     "method": "POST",
+    "query": "?",
     "operation": "listing.publish",
     "request_id": "0f6c2b1e7d4a4c1e9a523e8b6d0f1a77",
     "timestamp": 1795000000,
@@ -981,6 +1007,8 @@ beside the exact body bytes. A seller's publication, in a listing read:
   principal's.
 - `resource` is present exactly when the request carries `Market-Resource` (D2): an
   update's record names its listing, a publish's has none.
+- `query` is the covered `@query` value, on every request record, `?` where the request
+  had no query (D25).
 - A response's record carries `protocol`, `principal`, `status`, `timestamp`,
   `proof`, and the method, operation, resource where present, and request ID of the
   request it answers, which its signature binds.
@@ -1019,8 +1047,9 @@ always present, even where in one message its value repeats another's. Presence 
 fixed by the kind of message, known to sender and receiver before it is sent, never by
 the values in one message. So `Market-Resource` is absent for an operation with no
 target, `Market-Request-Origin` is on every request, since every operation may be
-retried and a retry's origin is its only record of the first signing, and the record
-keeps no digest. The same rule is what makes one accepted spelling possible.
+retried and a retry's origin is its only record of the first signing, `@query` is
+covered on every request, since every request has a target URI and so a query value,
+and the record keeps no digest. The same rule is what makes one accepted spelling possible.
 
 `Market-Request-ID` stays although a body could fingerprint a request: every retry is
 re-signed with a fresh `created`, so only the request ID tells an exact retry from a
@@ -1101,6 +1130,160 @@ exact body in place of proof headers.
 
 Rejected: authorities reading the raw request from the framework beside the admission
 core, which is the interface gap the core exists to close.
+
+### D24 — The registry descriptor read is a public operation answered signed
+
+`GET /.well-known/arkhai/registry-descriptor.json` is a **public operation**: its
+request carries a request identity — `Market-Operation` and `Market-Request-ID` — and
+no signature, audience, origin or digest, and the registry answers it with the version
+3 signed response bound over that identity, as the core already signs a refusal over
+the values an unverified request states. Nothing is reserved: a public read changes
+nothing and has nothing to replay. A request to a public route carrying signature
+fields is refused as malformed, since each operation's message has one shape (D21).
+The descriptor is the only public operation; `marketplace-identity` names it.
+
+```http
+GET /.well-known/arkhai/registry-descriptor.json HTTP/1.1
+Market-Operation: registry.descriptor.read
+Market-Request-ID: 5b1e0c9a2f3d4e8b9c7a6d5e4f3a2b1c
+
+HTTP/1.1 200 OK
+Content-Digest: sha-256=:…:
+Signature-Input: market=("@status" "content-digest" "@method";req "market-operation";req "market-request-id";req);created=1795000003;keyid="ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE";tag="arkhai.market-response-signature.v3"
+Signature: market=:…:
+```
+
+The descriptor is a trust bootstrap: `RegistryClient.bootstrap_registry_descriptor`
+reads it knowing no registry principal, then verifies the signed answer against the
+principals the descriptor names, so a client adding a registry by its URL learns and
+pins its principal (`registry-discovery`'s "Registry self-description is
+authority-authenticated"). Under D10 every authenticated request names the authorities
+it would accept, which such a client cannot. What the bootstrap relies on is the
+registry's signature bound to the client's fresh request ID — proof that whoever
+answered holds the named key now, and no replay of an older descriptor — not the
+request's signature, which admitted any key under any of three roles and restricted
+nothing; the descriptor is readable without a read key. That proof establishes
+possession, not that the key is the URL's rightful operator: first contact rests on
+TLS, or on a directory's countersignature over the descriptor body, a separate trust
+layer; after it, every pinned read is verified against the learned principal.
+
+`kit/identity` gains a public request builder that returns the request-identity
+headers and the binding its answer is verified against; the bootstrap drops its
+`signer` and `caller_role` arguments, and an ordinary client's
+`get_registry_descriptor` sends the same public request and verifies the answer
+against its configured registries. The admission core's route inventory gains the
+public mark beside a declaration and the unauthenticated mark (D3).
+
+Rejected: exempting the descriptor's signed request from the audience check, which
+keeps a signature that restricts nothing at the cost of a third request coverage shape
+and an exception to D10's universal check; retiring the bootstrap, so that a new
+registry's principal always arrives from a directory or out of band, which removes the
+add-a-registry-by-URL flow its originating issue was opened for; sending a placeholder
+audience and learning the principal from the signed 421, which makes a refusal part of
+the protocol and costs two round trips (an empty list cannot be sent: RFC 8941 omits
+the field, and RFC 9421 refuses to cover an absent one); an unauthenticated route
+serving a self-signed descriptor document, which changes the descriptor's wire, gives
+up the binding to the client's request, and needs an issue time and expiry against a
+replayed stale descriptor.
+
+### D25 — Every request covers `@query`
+
+Every version 3 request covers RFC 9421's `@query` derived component, the target URI's
+query string exactly as sent with its leading `?`; a request with no query covers `?`
+alone. It sits second in both request coverage lists, after `@method` (D2):
+
+```http
+GET /listings?filter_spec_etag=3f9a2c&limit=50&offset=0&status=open HTTP/1.1
+Content-Digest: sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:
+Market-Role: buyer
+Market-Operation: listing.list
+Market-Audience: ed25519:Hq7kZp0TnR4vW9xYcB2dLmS8eJ5fQ1gA6uIoN3hK7rE
+Market-Request-ID: 7c2d4b9e1a0f4e3d8c6b5a4f3e2d1c0b
+Market-Request-Origin: 1795000000
+Signature-Input: market=("@method" "@query" "market-role" "market-operation" "market-audience" "market-request-id" "market-request-origin" "content-digest");created=1795000000;keyid="ed25519:9mQ3vX2kq8sJdLr0aYbWcZtNeHf1uGpRiOxTyEwKjVs";tag="arkhai.market-request-signature.v3"
+Signature: market=:…:
+```
+
+Version 2 signed a read's query values through a canonical query document both sides
+built and hashed without sending — the registry's `canonical_query_body`, the site
+kit's (`kit/site/src/market_site/auth.py`), provisioning's
+(`compute_provisioning_contracts/routes.py`). Version 3's `Content-Digest` hashes the
+bytes sent (D2), and the profile as first built covered no query, so an intermediary
+could change a read's filters or paging and the signed answer would still verify. The
+query is now part of what the request's signature covers, of the request hash (so a
+changed query under one request ID is changed reuse), and of the request record (D21).
+The response needs nothing more: the authority answers only a request whose signature
+verified, and the response binds its request ID.
+
+The authority verifies against the raw query string it received (the ASGI
+`query_string`), never a re-encoding; a proxy that re-encodes a query fails closed. A
+typed client must send exactly the string it signed, so `kit/identity` offers one query
+encoding from which each typed client builds both the signed value and the URL. The
+three canonical query forms go.
+
+Rejected: covering `@query` only on operations whose route declares query input, the
+strictest reading of D21's presence rule, which adds a second coverage dimension and a
+route property every authority must declare; sending the canonical query document as a
+GET body, which RFC 9110 gives no meaning, intermediaries may drop, and which carries
+every value twice; `@query-param` per parameter, whose coverage varies with the
+message, against D2's one spelling, and which the library refuses for repeated
+parameters; leaving query values unsigned, a regression from version 2.
+
+### D26 — The listing read's filter-spec ETag is a query parameter
+
+A listing read carries the filter-spec ETag it was compiled under as the query
+parameter `filter_spec_etag`, covered by `@query` (D25); the registry answers a stale
+value with 412 as it does today, and refuses an `If-Match` header on `listing.list` as
+malformed, naming it, so a caller sending the old form is not silently left unchecked.
+`registry-discovery`'s "Filter-spec consistency" and "Resource query compilation
+preserves filter-spec authority" are restated to it, with the filter-spec route's
+documentation and `registry_client.list_listings`, which `core_buyer`'s orchestrator and
+the client's query compiler call with the ETag.
+
+The ETag identifies the filter specification, not the `/listings` representation
+`If-Match` would name, so a parameter is also the more accurate HTTP. Rejected: covering
+`if-match` on `listing.list`, a header present on some messages only, against one
+spelling, or always sent as `*`, a coverage list for one operation; leaving it unsigned,
+which lets an intermediary strip the precondition while the answer still verifies.
+
+### D27 — An applied rotation or retirement answers its exact retry first
+
+Publisher identity rotation and retirement are `RERUN`, keyed by the rotation's nonce
+(D6), and their answer must tell a caller who lost its acknowledgement what happened.
+Each route therefore answers an applied rotation or retirement — the same nonce and
+intent hash, to the principal the intent names — before its proof-expiry, primary and
+overlap checks, which govern only applying a new intent. Today rotation checks the
+intent's expiry first (by default its signing time plus 300 s) and retirement checks
+that the replacement is still primary first, so a late retry is answered 401 or 403
+(`core/registry/src/core_registry/api/publisher_routes.py`). The answer discloses
+nothing the public rotation read does not serve. Each route's double-dispatch case
+(D5) sends its retry after the intent's expiry and after a later write.
+
+Rejected: making both `RECORDED`, which keeps bodies for a domain that recognises the
+retry; leaving the order, which fails D6's criterion.
+
+### D28 — Singleton and collection reads carry no `Market-Resource`
+
+The registry's descriptor, filter-spec, health and stats reads, its collection reads
+(`listing.list`, `publisher.list`) and `listing.validate` act on no identified object,
+so their routes declare no target and their requests carry no `Market-Resource` (D2,
+D21); version 2 stated constant names such as `filter-spec` and `health`. For the
+descriptor this fixes D24's public request at `Market-Operation` and
+`Market-Request-ID`. Rejected: a constant per singleton, the constant name D21 rejects.
+
+### D29 — A reviewed foundation round precedes the cutover again
+
+D24 and D25 amend `kit/identity`'s profile, record and client operations and the
+admission core's inventory and verification, which every authority of the cutover
+consumes. They are implemented as their own round, reviewed before the cutover depends
+on them, and the cutover follows as round 4 (D20). Section 6's two planning findings —
+section 9 cannot pass a functional commit's checks alone, and 6.5 omits the VM
+storefront's registry-client contract test — are planning's.
+
+Rejected, as at section 6's first return: folding the amendments into the cutover's
+first session, which would have a profile change first reviewed beside five
+authorities' cutover; placing each piece in the section that first needs it, which
+splits one profile change across its consumers.
 
 ## Open Questions
 
