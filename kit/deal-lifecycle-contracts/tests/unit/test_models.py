@@ -140,6 +140,15 @@ def test_an_ending_summary_names_its_codes_with_their_text():
     assert roundtrip(m.DealSummary, summary.model_dump(mode="json")) == summary
 
 
+@pytest.mark.parametrize("state", ["unstarted", "running", "ended", "repair_required"])
+def test_an_unanswered_filing_is_listed_only_while_ending(state):
+    summary = m.DealSummary(**dict(SUMMARY, state="ending"), ending=["filing_unanswered"])
+    assert summary.ending_reasons == [("filing_unanswered", m.ENDING_TEXT["filing_unanswered"])]
+    assert roundtrip(m.DealSummary, summary.model_dump(mode="json")) == summary
+    with pytest.raises(ValidationError):
+        m.DealSummary(**dict(SUMMARY, state=state), ending=["filing_unanswered"])
+
+
 def test_an_unknown_ending_code_is_refused():
     with pytest.raises(ValidationError):
         m.DealSummary(**dict(SUMMARY, state="ending"), ending=["unknown_code"])

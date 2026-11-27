@@ -8,7 +8,7 @@ from market_deal_lifecycle.adapters import DisputeAdapterTable, InterfaceRequest
 from market_deal_lifecycle.terms import DisputeAuthority
 from market_deal_lifecycle_contracts.models import (
     Accepted, AuthorityView, CaseRecord, DisputeEvent, LifecycleCommand, ListDealsRequest,
-    OpenExtension, PaymentEvent, PaymentPartObservation, Unknown,
+    OpenExtension, PaymentEvent, PaymentPartObservation, Pending, Rejected, Unknown,
 )
 from market_deal_servicing import (
     Classification, DeliveryRecord, EndSession, FinalRequest, PhysicalResult, SellerDeal, SellerServicing,
@@ -415,3 +415,146 @@ async def test_each_outstanding_condition_is_named_and_a_later_case_returns_a_de
     await rig["watch"]().poll()
 
     assert await listed(rig, "deal") == ("ending", ["case_open"])
+
+
+def filing_authority(rig, *outcomes):
+    """The rig's dispute authority answering each ``delivery_end`` filing in
+    turn with ``outcomes``, and every read with ``cases``."""
+    adapter = rig["dispute"]
+    adapter.supported_commands = {"delivery_end"}
+    adapter.supported_intents = {"delivery_end"}
+    adapter.build_request = Mock(return_value=InterfaceRequest(interface=rig["authority"].interface, payload={}))
+    adapter.validate_request = Mock(return_value=None)
+    adapter.submit.side_effect = list(outcomes)
+    return adapter
+
+
+def record_seller_failure(rig, negotiation_id, *, progress):
+    """An administrator's failure end at the rig's clock, journaling the
+    seller's ``delivery_end`` filing, its resource at ``progress``."""
+    now = rig["clock"][0]
+    with transaction(rig["path"]) as conn:
+        end = EndSession(conn)
+        request = FinalRequest(
+            negotiation_id=negotiation_id, source_ref="operator:failure", actor=rig["seller"].identity,
+            ended_at=now, observed_at=now, cause="operator_end", source="administrator",
+            evidence_refs=["operator:failure"],
+        )
+        end.record_end(
+            request, now=now,
+            classification=Classification(kind="unentitled_withdrawal", evidence_refs=request.evidence_refs),
+            filing_intent=end.failure_filing(request, now=now, delivered=False),
+        )
+        end.physical_progress(negotiation_id, progress)
+
+
+def register_unstarted(rig) -> SellerDeal:
+    """A committed once-only deal, ``early``, whose Agreement starts at 300."""
+    early = rig["deal"].model_copy(update={"negotiation_id": "early", "commitment_ref": "early-commitment"})
+    with transaction(rig["path"]) as conn:
+        EndSession(conn).register(DeliveryRecord(
+            negotiation_id="early", commitment_ref="early-commitment", seller=rig["seller"].identity,
+            start_at=300, term_end=1000, committed_at=100, delivery_deadline_seconds=500,
+        ))
+        SellerSession(conn).register(early)
+    return early
+
+
+def no_case_view():
+    return AuthorityView(outcome=Accepted())
+
+
+def closed_case_view():
+    return AuthorityView(outcome=Accepted(), cases=[CaseRecord(case_ref="case", state="closed", record_ref="closed")])
+
+
+async def test_a_filing_waiting_for_the_agreement_s_start_keeps_a_deal_ending(rig):
+    """A once-only deal ended as a seller failure before its Agreement's start,
+    nothing dispatched, its authority read showing no case, is ending with its
+    filing unanswered until the filing is accepted and its case closes."""
+    early = register_unstarted(rig)
+    adapter = filing_authority(rig, Accepted())
+    adapter.read.return_value = no_case_view()
+    record_seller_failure(rig, "early", progress="released")
+    await rig["watch"](deal=early).poll()
+    api = rig["service"]()
+    [waiting] = await api.dispatch_filings("early")
+    assert waiting.outcome == Pending(reason="delivery-end filing waits for Agreement start")
+
+    assert await listed(rig, "early") == ("ending", ["filing_unanswered"])
+    [summary] = [deal for deal in (await api.list()).deals if deal.negotiation_id == "early"]
+    assert summary.filings[0].outcome == Pending(reason="delivery-end filing has not been attempted")
+
+    rig["clock"][0] = 300
+    [filed] = await api.dispatch_filings("early")
+    assert filed.outcome.status == "accepted"
+    adapter.read.return_value = closed_case_view()
+    await rig["watch"](deal=early).poll()
+
+    assert await listed(rig, "early") == ("ended", [])
+
+
+async def test_a_filing_whose_answer_was_lost_keeps_a_released_deal_ending(rig):
+    adapter = filing_authority(rig, Unknown(reason="lost filing"), Accepted())
+    adapter.read.return_value = no_case_view()
+    record_seller_failure(rig, "deal", progress="released")
+    await rig["watch"]().poll()
+    api = rig["service"]()
+    [lost] = await api.dispatch_filings("deal")
+    assert lost.outcome.status == "unknown"
+
+    assert await listed(rig, "deal") == ("ending", ["filing_unanswered"])
+
+    # Resolved under its operation key, its case open and then closed.
+    [resolved] = await api.dispatch_filings("deal")
+    assert resolved.outcome.status == "accepted"
+    first, second = adapter.submit.await_args_list
+    assert first.args[2] == second.args[2]
+    adapter.read.return_value = AuthorityView(outcome=Accepted(), cases=[
+        CaseRecord(case_ref="case", state="filed", record_ref="filed"),
+    ])
+    await rig["watch"]().poll()
+    assert await listed(rig, "deal") == ("ending", ["case_open"])
+    adapter.read.return_value = closed_case_view()
+    await rig["watch"]().poll()
+    assert await listed(rig, "deal") == ("ended", [])
+
+
+async def test_a_filing_the_authority_holds_pending_keeps_a_deal_ending(rig):
+    adapter = filing_authority(rig, Pending(reason="authority is still deciding"))
+    adapter.read.return_value = closed_case_view()
+    record_seller_failure(rig, "deal", progress="released")
+    await rig["watch"]().poll()
+    await rig["service"]().dispatch_filings("deal")
+
+    assert await listed(rig, "deal") == ("ending", ["filing_unanswered"])
+
+
+async def test_a_rejected_filing_is_repair_required_not_unanswered(rig):
+    adapter = filing_authority(rig, Rejected(reason="claim refused"))
+    adapter.read.return_value = no_case_view()
+    record_seller_failure(rig, "deal", progress="released")
+    await rig["watch"]().poll()
+    await rig["service"]().dispatch_filings("deal")
+
+    assert await listed(rig, "deal") == ("repair_required", [])
+
+
+async def test_an_unserviceable_deal_with_an_unanswered_filing_stays_reported(rig):
+    rig["dispute"].read.return_value = no_case_view()
+    record_seller_failure(rig, "deal", progress="released")
+    await rig["watch"]().poll()
+    api = SellerServicing(
+        rig["path"], payments=PaymentAdapterTable([]),
+        disputes=DisputeAdapterTable([(rig["authority"].interface, lambda _: rig["dispute"])]),
+        credential_available=lambda _: True, watch_factory=rig["watch"], clock=lambda: rig["clock"][0],
+        missing_adapters={"fixture.payment.v1": "[Settlement].fixture"},
+    )
+    reason = "repair required: fixture.payment.v1 has no lifecycle adapter; configure [Settlement].fixture"
+
+    # Released and observed with no case, but its own filing was never sent.
+    assert api.unserviceable() == [("deal", reason)]
+
+    filing_authority(rig, Accepted())
+    await rig["service"]().dispatch_filings("deal")
+    assert api.unserviceable() == []

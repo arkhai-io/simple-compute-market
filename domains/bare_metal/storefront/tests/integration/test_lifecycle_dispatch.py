@@ -1,5 +1,6 @@
-"""Bare-metal surrender races, the servicing cycle's kit order and signed release
-through the mounted application."""
+"""Bare-metal surrender races, the servicing cycle's kit order — a recorded end
+torn down before any authority read, a deal with an unanswered filing kept
+ending — and signed release through the mounted application."""
 
 import asyncio
 import hashlib
@@ -324,13 +325,13 @@ class UnreachableSite:
         return PhysicalResult(progress="released", done=True)
 
 
-def _mediation(h):
+def _mediation(h, mediation=None):
     """Give the deal's dispute authority a usable credential whose client
-    reaches the mediation fixture."""
+    reaches ``mediation``, the mediation fixture by default."""
     lifecycle = h.runtime.lifecycle
     agreement = json.loads(lifecycle.agreement_bytes(h.negotiation_id))
     authority = decode_terms(agreement["settlement"]["lifecycle"]).adjudication.dispute
-    mediation = MediationContractFake()
+    mediation = mediation or MediationContractFake()
     lifecycle.clients[authority.model_dump_json()] = MediationClient(
         authority, MediationCredential(authority.identity, token=SecretStr("fixture-payee")),
         transport=mediation.transport(),
@@ -338,6 +339,100 @@ def _mediation(h):
     lifecycle.credential_available = lambda candidate: candidate == authority
     lifecycle.seller.credential_available = lifecycle.credential_available
     return mediation
+
+
+class UnansweringMediation:
+    """A network under the mediation client on which no request is answered."""
+
+    def __init__(self):
+        self.requests = []
+
+    def transport(self):
+        def refuse(request):
+            self.requests.append(request)
+            raise httpx.ConnectTimeout("mediation authority did not answer", request=request)
+
+        return httpx.MockTransport(refuse)
+
+
+class WitnessingSite:
+    """A physical port recording, at each call, how many authority requests had
+    been made by then."""
+
+    def __init__(self, payments, mediation):
+        self.payments = payments
+        self.mediation = mediation
+        self.witnessed = []
+
+    async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
+        self.witnessed.append((
+            sum(name == "get_transaction" for name, _ in self.payments.calls), len(self.mediation.requests),
+        ))
+        return PhysicalResult(progress="tearing_down", done=False)
+
+
+async def _operator_failure(h):
+    command = LifecycleCommand(negotiation_id=h.negotiation_id, operation_key="operator-failure", kind="delivery_end")
+    assert await h.runtime.lifecycle.seller.record_operator_end(
+        command, actor=ADMIN.identity, reason="fixture failure",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_end_is_torn_down_before_any_authority_read(harness):
+    """A deal whose administrator's failure end was recorded before the cycle,
+    while neither authority answers: the cycle, stepped through the typed admin
+    client, dispatches its termination before it reads the payments service or
+    reaches the mediation authority, and the seller's typed read shows the
+    resource tearing down."""
+    h = harness
+    h.serve()
+    await h.settle()
+    mediation = _mediation(h, UnansweringMediation())
+    await _operator_failure(h)
+    site = WitnessingSite(h.payments, mediation)
+    h.runtime.lifecycle.end.physical = site
+    reads = sum(name == "get_transaction" for name, _ in h.payments.calls)
+    h.payments.unavailable = True
+
+    async with StorefrontClient(
+        "http://test", signer=ADMIN, caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=httpx.ASGITransport(app=h.app),
+    ) as admin:
+        await step(h, "deal-servicing")
+        read = await SellerLifecycleClient(admin).read(h.negotiation_id)
+
+    assert site.witnessed[0] == (reads, 0)
+    assert read.delivery.progress == "tearing_down"
+    # The authorities were read after it, and answered nothing.
+    assert sum(name == "get_transaction" for name, _ in h.payments.calls) > reads
+    assert mediation.requests
+
+
+@pytest.mark.asyncio
+async def test_a_deal_whose_filing_is_unanswered_is_listed_ending(harness):
+    """A deal ended by an administrator's failure and released, whose filing
+    the mediation authority never answers, is listed ending with
+    ``filing_unanswered`` through the seller's typed client, its filing's
+    outcome unknown."""
+    h = harness
+    h.serve()
+    await h.settle()
+    mediation = _mediation(h, UnansweringMediation())
+    await _operator_failure(h)
+    h.runtime.lifecycle.end.physical = UnreachableSite(failures=0)
+    async with StorefrontClient(
+        "http://test", signer=ADMIN, caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+        transport=httpx.ASGITransport(app=h.app),
+    ) as admin:
+        await step(h, "deal-servicing")
+        [summary] = (await SellerLifecycleClient(admin).list()).deals
+
+    assert mediation.requests
+    assert (summary.state, summary.ending) == ("ending", ["case_unobserved", "filing_unanswered"])
+    assert [filing.outcome.status for filing in summary.filings] == ["unknown"]
 
 
 @pytest.mark.asyncio
@@ -350,12 +445,13 @@ async def test_a_failing_physical_end_still_dispatches_the_deals_filing_in_the_s
     assert await h.runtime.lifecycle.seller.record_operator_end(
         command, actor=ADMIN.identity, reason="fixture failure",
     ) is None
-    site = UnreachableSite(failures=2)
+    site = UnreachableSite(failures=3)
     h.runtime.lifecycle.end.physical = site
 
     await h.runtime.lifecycle.cycle()
 
-    assert site.calls == 2
+    # The leading pass, the deal's own physical end, and the one after its filing.
+    assert site.calls == 3
     # The filing reached the authority, which holds its case, and its
     # outcome is recorded against the journaled intent.
     assert len(mediation.cases) == 1

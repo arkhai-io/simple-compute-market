@@ -401,7 +401,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -410,19 +410,19 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]

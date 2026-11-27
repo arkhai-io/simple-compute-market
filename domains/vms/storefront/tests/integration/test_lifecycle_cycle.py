@@ -1,16 +1,21 @@
 """VM servicing cycles run the kit's order: they preserve admission CAS, keep
-filings independent of physical failures, observe an unfiled Agreement as no
-case, resume from the durable page position and finish report recovery."""
+filings independent of physical failures, tear down a recorded end before any
+authority read, keep a deal with an unanswered filing ending, observe an
+unfiled Agreement as no case, resume from the durable page position and finish
+report recovery."""
 
 import hashlib
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from compute_provisioning_contracts import LeaseEndedEvent, sign_lease_end
 from core_storefront.service_peers import ServicePeerTrust
 from market_arkhai_mediation.client import MediationClient, MediationCredential
 from market_arkhai_mediation.fixtures.authority import MediationContractFake
+from market_arkhai_payments.fixtures import FakePaymentsClient
 from market_deal_lifecycle.terms import DisputeAuthority, decode_terms
 from market_deal_lifecycle_client import LifecycleClient, SellerLifecycleClient
 from market_deal_lifecycle_contracts.models import LifecycleCommand
@@ -84,7 +89,8 @@ async def test_a_physical_failure_does_not_skip_the_deals_filing(make):
 
     await h.lifecycle.cycle()
 
-    assert site.calls == 2
+    # The leading pass, the deal's own physical end, and the one after its filing.
+    assert site.calls == 3
     assert len(mediation.cases) == 1
     assert mediation.entries[0]["entry"]["filing"]["request"]["cause"] == "payee"
     with transaction(h.lifecycle.path) as conn:
@@ -97,6 +103,108 @@ class ReleasingSite:
 
     async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
         return PhysicalResult(progress="released", done=True)
+
+
+class UnansweringMediation:
+    """A network under the mediation clients on which no request is answered."""
+
+    def __init__(self):
+        self.requests = []
+
+    def transport(self):
+        def refuse(request):
+            self.requests.append(request)
+            raise httpx.ConnectTimeout("mediation authority did not answer", request=request)
+
+        return httpx.MockTransport(refuse)
+
+
+def _dispute_credential(peer):
+    # Public deterministic contract-fake credential; never use on a public network.
+    return {"DisputeCredential": [{
+        key: peer.authority[key] for key in ("interface", "origin", "account", "record_key")
+    } | {"api_key": "fixture-payee"}]}
+
+
+class WitnessingSite:
+    """A physical port recording, at each call, how many authority requests had
+    been made by then."""
+
+    def __init__(self, payments, mediation):
+        self.payments = payments
+        self.mediation = mediation
+        self.witnessed = []
+
+    async def apply_end(self, negotiation_id, *, terminate, at, operation_key):
+        self.witnessed.append((
+            sum(name == "get_transaction" for name, _ in self.payments.calls), len(self.mediation.requests),
+        ))
+        return PhysicalResult(progress="tearing_down", done=False)
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_end_is_torn_down_before_any_authority_read(make):
+    """A deal whose administrator's failure end was recorded before the cycle,
+    while neither authority answers: the cycle, stepped as the deal-servicing
+    loop steps it, dispatches its termination before it reads the payments
+    service or reaches the mediation authority, and the seller's typed read
+    shows the resource tearing down."""
+    payments = FakePaymentsClient()
+    mediation = UnansweringMediation()
+    site = WitnessingSite(payments, mediation)
+    h = await make(
+        payments=payments, physical=lambda *_: site,
+        disputes=_dispute_credential(MediationContractFake()), mediation_transport=mediation.transport(),
+    )
+    h.serve()
+    await h.settle()
+    await h.delivered()
+    command = LifecycleCommand(negotiation_id=NEGOTIATION, operation_key="operator-failure", kind="delivery_end")
+    assert await h.lifecycle.seller.record_operator_end(
+        command, actor=SELLER.identity, reason="fixture failure",
+    ) is None
+    reads = sum(name == "get_transaction" for name, _ in payments.calls)
+    payments.unavailable = True
+
+    await h.lifecycle.cycle()
+
+    assert site.witnessed[0] == (reads, 0)
+    read = await SellerLifecycleClient(h.administrator).read(NEGOTIATION)
+    assert read.delivery.progress == "tearing_down"
+    # The authorities were read after it, and answered nothing.
+    assert sum(name == "get_transaction" for name, _ in payments.calls) > reads
+    assert mediation.requests
+
+
+@pytest.mark.asyncio
+async def test_a_deal_ended_before_its_agreement_s_start_is_ending_with_its_filing_unanswered(make):
+    """A deal whose Agreement starts in an hour, ended by an administrator's
+    failure before then: its filing waits for the start, so the seller's typed
+    list shows it ending with ``filing_unanswered`` though the authority's read
+    shows no case."""
+    peer = MediationContractFake()
+    h = await make(
+        start=datetime.now(timezone.utc) + timedelta(hours=1),
+        physical=lambda *_: ReleasingSite(),
+        disputes=_dispute_credential(peer), mediation_transport=peer.transport(),
+    )
+    h.serve()
+    await h.settle()
+    command = LifecycleCommand(negotiation_id=NEGOTIATION, operation_key="operator-failure", kind="delivery_end")
+    assert await h.lifecycle.seller.record_operator_end(
+        command, actor=SELLER.identity, reason="fixture failure",
+    ) is None
+
+    await h.lifecycle.cycle()
+
+    assert peer.entries == []
+    seller = SellerLifecycleClient(h.administrator)
+    [summary] = (await seller.list()).deals
+    assert (summary.state, summary.ending) == ("ending", ["filing_unanswered"])
+    assert [filing.outcome.status for filing in summary.filings] == ["pending"]
+    assert summary.ending_reasons == [
+        ("filing_unanswered", "A filing of the deal's own has no answer from the dispute authority."),
+    ]
 
 
 @pytest.mark.asyncio

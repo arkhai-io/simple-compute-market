@@ -263,7 +263,8 @@ class SellerServicing:
 
         A deal is open until the seller list's rule would call it ended: a
         recorded end, its resource proven released, nothing outstanding at
-        either authority in its saved views (``_outstanding``). With no adapter
+        either authority in its saved views and every filing of its own
+        answered (``_outstanding``). With no adapter
         nothing observes its payment again, so a released deal whose part last
         showed no stop stays reported until the adapter is restored; one whose
         dispute authority has no saved view stays reported until one is saved.
@@ -305,7 +306,10 @@ class SellerServicing:
             logger.exception("unserviceable deal %s: its authority views cannot be read", deal.negotiation_id)
             return False
         open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
-        return not self._outstanding(deal, authority, progress, open_cases, dispute_unobserved=unobserved)
+        return not self._outstanding(
+            deal, authority, progress, open_cases, dispute_unobserved=unobserved,
+            filings=self._filings(deal.negotiation_id),
+        )
 
     async def watch(self, negotiation_id: str):
         deal = await asyncio.to_thread(self._deal, negotiation_id)
@@ -352,13 +356,14 @@ class SellerServicing:
                 delivery = end.read(deal.negotiation_id)
                 selected = end.selected_end(deal.negotiation_id)
             open_cases = [case.case_ref for case in authority.cases if case.state != "closed"]
+            filings = self._filings(deal.negotiation_id)
             state: LifecycleState = authority.state or "unstarted"
             ending: list[EndingCode] = []
             if deal.once_only:
                 state = "running"
             if selected:
                 ending = self._outstanding(
-                    deal, authority, delivery.progress, open_cases, dispute_unobserved=unobserved,
+                    deal, authority, delivery.progress, open_cases, dispute_unobserved=unobserved, filings=filings,
                 )
                 state = "ending" if ending else "ended"
             if authority.state == "repair_required" or delivery.progress == "repair_required":
@@ -369,13 +374,14 @@ class SellerServicing:
                 state=state, ending=ending,
                 deadline=selected.ended_at if selected else authority.deadline or delivery.term_end,
                 parts=authority.parts, has_open_extension=bool(authority.extensions),
-                open_cases=open_cases, filings=self._filings(deal.negotiation_id),
+                open_cases=open_cases, filings=filings,
             ))
         return DealPage(deals=summaries, continuation=continuation)
 
     def _outstanding(
         self, deal: SellerDeal, authority: AuthorityView, progress: PhysicalProgress,
         open_cases: builtins.list[str], *, dispute_unobserved: bool,
+        filings: builtins.list[FilingProgress],
     ) -> builtins.list[EndingCode]:
         """What still keeps a deal with a recorded end from being ended.
 
@@ -393,6 +399,12 @@ class SellerServicing:
         A deal naming a dispute authority of which no view is saved
         (``dispute_unobserved``) has no case known closed, so it is not ended
         until a view of that authority is saved.
+
+        Every journaled filing is the deal's own ``delivery_end``. One the
+        authority has neither accepted nor rejected — unsent, waiting for the
+        Agreement's start, pending or of unknown outcome — may yet open a case
+        that no saved view shows, so the deal is not ended until it is
+        answered. A rejected filing shows repair required instead.
         """
         now = self.clock()
         ending: builtins.list[EndingCode] = []
@@ -407,6 +419,8 @@ class SellerServicing:
             ending.append("case_open")
         if dispute_unobserved:
             ending.append("case_unobserved")
+        if any(not isinstance(filing.outcome, (Accepted, Rejected)) for filing in filings):
+            ending.append("filing_unanswered")
         return ending
 
     async def submit(

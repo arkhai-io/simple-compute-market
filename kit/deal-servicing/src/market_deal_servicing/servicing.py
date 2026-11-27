@@ -1,14 +1,20 @@
 """One kit-owned order for servicing a page of a storefront's deals.
 
 A storefront's servicing loop runs :meth:`ServicingCycle.cycle`. The cycle
-first discovers counterparty cases, once per dispute authority, then runs each
-deal's steps in one order: the authorities read, the domain's recovery steps,
-the physical end, local reconciliation, site-report correction, filing dispatch
-and the physical end again. Each step runs in its own error handler, so a
-failed step never skips the steps after it. The physical end runs twice
-because reconciliation, correction and filing may record an end the first
-drive could not see. See openspec/specs/deal-lifecycle/spec.md, "Each deal's
-servicing steps run in one kit-owned order".
+first drives the physical end of every deal on its page, then discovers
+counterparty cases, once per dispute authority, then runs each deal's steps in
+one order: the authorities read, the domain's recovery steps, the physical end,
+local reconciliation, site-report correction, filing dispatch and the physical
+end again. Each step runs in its own error handler, so a failed step never
+skips the steps after it, nor a failed physical end in the leading pass another
+deal's. The leading pass tears down an end recorded before the cycle without
+waiting behind any authority read, each of which may take a client's whole
+timeout; a deal with no pending end costs it one local transaction. Within a
+deal's steps the physical end runs twice because reconciliation, correction and
+filing may record an end the first drive could not see; an end a deal's own
+read discovers is thus torn down in its own steps, before later deals' reads.
+See openspec/specs/deal-lifecycle/spec.md, "Each deal's servicing steps run in
+one kit-owned order".
 """
 
 from __future__ import annotations
@@ -97,8 +103,14 @@ class ServicingCycle:
 
     async def cycle(self, *, limit: int = 100) -> int:
         """Service one page of every registered deal, committed or not; the
-        number of deals it held."""
+        number of deals it held.
+
+        The page's physical ends are driven first, then discovery, then each
+        deal's steps in turn.
+        """
         deals, continuation = await in_transaction(self.path, lambda conn: self._page(conn, limit))
+        for deal in deals:
+            await self._step(deal, "physical end", partial(self.end.drive_physical, deal.negotiation_id))
         await self.discover(deals)
         for deal in deals:
             await self.service(deal)
@@ -195,12 +207,16 @@ class ServicingCycle:
             ("physical end", lambda: self.end.drive_physical(deal.negotiation_id)),
         ]
         for name, step in steps:
-            try:
-                await step()
-            except Exception:
-                logger.exception(
-                    "%s servicing step %s awaits recovery for %s", self.domain, name, deal.negotiation_id,
-                )
+            await self._step(deal, name, step)
+
+    async def _step(self, deal: SellerDeal, name: str, step: Callable[[], Awaitable[object]]) -> None:
+        """Run one step of a deal, logging its failure rather than raising it."""
+        try:
+            await step()
+        except Exception:
+            logger.exception(
+                "%s servicing step %s awaits recovery for %s", self.domain, name, deal.negotiation_id,
+            )
 
     async def read_authorities(self, deal: SellerDeal) -> None:
         """Read the payment and dispute authorities of a committed deal.

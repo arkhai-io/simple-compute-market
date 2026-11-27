@@ -175,7 +175,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.30.0"
+version = "0.31.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -251,9 +251,9 @@ requires-dist = [
     { name = "arkhai-kit-config", specifier = ">=0.6.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.5.1" },
     { name = "arkhai-kit-deal-lifecycle", specifier = ">=0.5.0" },
-    { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.2.0" },
-    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-deal-servicing", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-deal-lifecycle-client", specifier = ">=0.2.1" },
+    { name = "arkhai-kit-deal-lifecycle-contracts", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-deal-servicing", specifier = ">=0.5.0" },
     { name = "arkhai-kit-delivery", specifier = "==0.3.0" },
     { name = "arkhai-kit-delivery-apprise", specifier = "==0.2.0" },
     { name = "arkhai-kit-identity", specifier = "==0.5.0" },
@@ -597,7 +597,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-injected-time" },
@@ -606,24 +606,24 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_client-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_client-0.2.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-lifecycle-contracts"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_lifecycle_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_lifecycle_contracts-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-deal-servicing"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-deal-lifecycle" },
@@ -633,7 +633,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_deal_servicing-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_deal_servicing-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]

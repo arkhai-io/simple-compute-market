@@ -262,13 +262,14 @@ class Harness(SimpleNamespace):
 
 async def _harness(
     tmp_path, *, deposit=False, actions=("emit_event",), authority=None, disputes=None,
-    mediation_transport=None, payments=None, physical=None,
+    mediation_transport=None, payments=None, physical=None, start=None,
 ):
     """``authority`` replaces the Agreement's dispute authority, ``disputes`` is
     the storefront's dispute configuration document, ``mediation_transport``
-    the network under every mediation client, and ``physical`` builds the end
+    the network under every mediation client, ``physical`` builds the end
     service's physical end from the database and the harness's delivery, the
-    delivery itself by default."""
+    delivery itself by default, and ``start`` is the Agreement's start, as
+    ``_seed`` takes it."""
     delivery = Delivery()
     domain = replace(
         build_vm_storefront_domain(),
@@ -279,7 +280,7 @@ async def _harness(
     db = SQLiteClient(str(tmp_path / "storefront.db"), registry=registry)
     payments = payments or FakePaymentsClient()
     stage = PaymentSellerStage(_config(), client_for_owner=payments)
-    data = await _seed(db, stage, deposit=deposit, authority=authority)
+    data = await _seed(db, stage, deposit=deposit, authority=authority, start=start)
     coordinator = VmPaymentsCoordinator(domain=domain, db=db, stage=stage)
     lifecycle = VmDealLifecycle(
         db, SELLER, coordinator, RegistryDisputePolicy.from_document(disputes or {}),

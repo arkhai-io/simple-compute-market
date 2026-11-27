@@ -12,7 +12,7 @@ one kit-owned order" and "The seller half lists deals". Touches `kit/deal-servic
 `kit/deal-lifecycle-contracts`, `kit/deal-lifecycle-client`, and the two compute
 storefronts' integration tests.
 
-- [ ] 1.1 In `kit/deal-servicing/src/market_deal_servicing/servicing.py`, make
+- [x] 1.1 In `kit/deal-servicing/src/market_deal_servicing/servicing.py`, make
   `ServicingCycle.cycle` drive `EndService.drive_physical` for every deal on the page,
   each in its own error isolation, before `discover` and the per-deal steps, which keep
   today's order; update the module and method docstrings to the new order (D7). Verify
@@ -23,14 +23,33 @@ storefronts' integration tests.
   deals' steps; a failing physical end in the leading pass skips no other deal's (the
   delta's scenarios "A recorded end waits behind no authority read" and "An end a deal's
   own read discovers is torn down after its steps").
-- [ ] 1.2 In `kit/deal-lifecycle-contracts/src/market_deal_lifecycle_contracts/models.py`,
+  Done: `ServicingCycle.cycle` drives every page deal's `drive_physical` first, through
+  the same per-step isolation (`_step`), logged as `physical end`. Library integration,
+  `test_servicing_order.py`: passed (9). New: `test_a_recorded_end_waits_behind_no_authority_read`
+  (every payment, dispute and respondent read hangs; the later deal's end is dispatched,
+  then discovery's listing starts), `test_an_end_a_deal_s_own_read_discovers_is_torn_down_after_its_steps`,
+  `test_a_failed_physical_end_in_the_leading_pass_skips_no_other_deal_s`. Three existing
+  cases now count the leading pass (three physical ends per deal with a pending end, not
+  two). `change-workflow run test-before` at `acede8734`: the ordering cases and the three
+  recounted ones fail; the own-read case passes there, as it should — it pins the
+  unchanged per-deal order.
+- [x] 1.2 In `kit/deal-lifecycle-contracts/src/market_deal_lifecycle_contracts/models.py`,
   add `filing_unanswered` to `EndingCode` and its text, "A filing of the deal's own has
   no answer from the dispute authority.", to `ENDING_TEXT` (D11). Confirm
   `kit/deal-lifecycle-client` interprets no code itself and renders reasons through
   `DealSummary.ending_reasons`. Verify with the contracts' unit tests: every
   `EndingCode` has its text, and a `DealSummary` listing `filing_unanswered` validates
   only while `ending`.
-- [ ] 1.3 In `kit/deal-servicing/src/market_deal_servicing/seller.py`, have
+  Done; `kit/deal-lifecycle-client` names no code in its source and renders through
+  `DealSummary.ending_reasons`. Unit, contracts: passed (60). New:
+  `test_an_unanswered_filing_is_listed_only_while_ending` and a served page listing
+  `filing_unanswered` read back exactly (`test_shipped_reads.py`); the existing
+  `test_every_ending_code_has_text` holds the new code to its text. Client unit suite: passed (5). Versions: contracts 0.4.0
+  (the incompatible wire step); `deal-servicing` 0.5.0 and client 0.2.1 requiring
+  contracts `>=0.4.0`; both storefronts 0.31.0 requiring `deal-servicing>=0.5.0`, the
+  contracts `>=0.4.0` and the client `>=0.2.1`, the VM storefront's pin on the
+  bare-metal storefront moved to 0.31.0.
+- [x] 1.3 In `kit/deal-servicing/src/market_deal_servicing/seller.py`, have
   `_outstanding` name `filing_unanswered` for any `delivery_end` filing intent whose
   outcome is neither accepted nor rejected — unsent, waiting for the Agreement's start,
   pending or unknown — reading the journal's filing intents, in `_list` and in
@@ -40,20 +59,73 @@ storefronts' integration tests.
   lost", a filing of unknown outcome, an accepted filing whose case is closed listed
   `ended`, a rejected filing still repair required, and an unserviceable deal with an
   unanswered filing still reported.
-- [ ] 1.4 Prove both through each storefront's typed lifecycle client, at application
+  Done: `_outstanding` takes the deal's `FilingProgress` list (`_filings`, every journaled
+  `filing` intent, which the journal admits only as the deal's own `delivery_end`) and
+  names `filing_unanswered` for any outcome neither accepted nor rejected; `_list`
+  reads the filings once for both the code and the summary. Library integration,
+  `test_watch_and_seller.py`: passed (17). New: the filing waiting for the Agreement's
+  start (the dispatcher's unjournaled wait; ended once accepted and its case closed),
+  the lost answer resolved under its key (then `case_open`, then `ended`), a filing the
+  authority holds `pending`, a rejected filing still repair required, and an
+  unserviceable deal kept in the report until its filing is answered. test-before at
+  `acede8734`: the four `filing_unanswered` cases fail; the rejected case passes there.
+- [x] 1.4 Prove both through each storefront's typed lifecycle client, at application
   integration: in the VM storefront (`domains/vms/storefront/tests/integration/test_lifecycle_cycle.py`
   and `test_lifecycle_ends.py`) and the bare-metal storefront
   (`domains/bare_metal/storefront/tests/integration/test_servicing_composition.py` and
   `test_lifecycle_ends.py`), a deal ended before its Agreement's start is listed
   `ending` with `filing_unanswered`, and a deal with a recorded end is torn down by a
   cycle whose authorities do not answer before any read times out.
-- [ ] 1.5 Verify the section: `make -C kit/deal-servicing test`,
+  Done, application integration: each outcome is read through the seller's typed
+  `SellerLifecycleClient` over the storefront's routes. The deal is ended through the
+  composed seller half's `record_operator_end`, as the storefronts' existing cycle cases
+  do. VM, in `test_lifecycle_cycle.py` (not `test_lifecycle_ends.py`, whose harness has
+  no dispute credential); its harness mounts no administrator cycle route, so the cycle
+  is stepped on the composed `VmDealLifecycle`, as the module's other cases step it:
+  `test_a_recorded_end_is_torn_down_before_any_authority_read` (payments double
+  `unavailable`, a mediation transport answering nothing; the termination is dispatched
+  before any payments read or mediation request, both attempted after, and the typed read
+  shows `tearing_down`) and
+  `test_a_deal_ended_before_its_agreement_s_start_is_ending_with_its_filing_unanswered`,
+  for which `_harness` in `test_payment_settlement.py` gained `start`, passed to `_seed`.
+  Bare metal, in `test_lifecycle_dispatch.py` (not `test_servicing_composition.py` or
+  `test_lifecycle_ends.py`, since its `harness`, `_mediation` and `step` helpers live
+  there), each cycle stepped through the typed admin client: the same teardown case, and
+  `test_a_deal_whose_filing_is_unanswered_is_listed_ending` — differs from the plan: the
+  bare-metal harness fixes the Agreement's start at acceptance, so its storefront shows a
+  filing whose answer never came (`["case_unobserved", "filing_unanswered"]`, outcome
+  `unknown`), and the before-start case is the kit's and the VM storefront's. The
+  existing physical-failure cases in both storefronts count three physical ends.
+  test-before is no evidence here: run against `acede8734` with
+  `TEST_BEFORE_DIST=dist-ci-kits`, the VM storefront resolved the checkout's
+  `deal-servicing` 0.5.0 wheel under the base's `>=0.4.0`, so only the `start` seam's
+  absence failed; the kit's test-before shows the behaviour is new.
+- [x] 1.5 Verify the section: `make -C kit/deal-servicing test`,
   `make -C kit/deal-lifecycle-contracts test`, `make -C kit/deal-lifecycle-client test`,
   both storefronts' integration suites, and `change-workflow run pre-commit
   converge-ongoing-compute-leases` passing. End-to-end: none of the existing markers
   asserts `filing_unanswered` or the pass order; the rate rows of sections 5 and 6
   exercise both once deployed (`e2e_vm_rate_servicing`, `e2e_vm_rate_dispute`,
   `e2e_bare_metal_rate_servicing`, `e2e_bare_metal_rate_dispute`).
+  Done: `kit/deal-servicing` passed (144), contracts (60), client (5), the VM storefront
+  (663) and the bare-metal storefront (699), and `change-workflow run pre-commit`, whose
+  only failure is the expected citation of
+  `docs/attachments/converge-ongoing-compute-leases/live-verification.md`, which section 7
+  creates. End-to-end scenarios confirmed as planned: none today; the rate rows of
+  sections 5 and 6 exercise both once deployed.
+
+  Handoff:
+  - The relock after the contracts' bump touched every lockfile resolving
+    `arkhai-kit-deal-lifecycle-contracts`; `make dist-ci-kits` then `make dist-domains`
+    rebuild the wheels the storefronts' suites install (the VM storefront pins the
+    bare-metal storefront exactly).
+  - `change-workflow run test-before` cannot show a storefront test failing before a kit
+    change while the checkout's `.dist` holds the newer kit wheel: the base's lower bound
+    resolves it. Show it at the kit, as here.
+  - The bare-metal `harness` fixes the Agreement's start at acceptance; a case needing a
+    later start goes through `recurring_world(clock=...)` or the VM harness's `start`.
+  - Pre-commit validates a fixed tree: an edit during its run, `tasks.md` included,
+    aborts the evidence run.
 
 ## 2. A revised `delivery_end` filed at once
 
