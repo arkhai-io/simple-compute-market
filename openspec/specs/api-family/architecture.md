@@ -140,8 +140,9 @@ reads every domain-specific choice from the bundle:
 - **Schema.** `selling` owns the storefront's migration chain
   (`arkhai_api_selling.migrations`): core storefront's baseline, the
   settlement runtime's, and the family's own tables under the domain's table
-  prefix. A storefront root builds the chain from its prefix alone, named for
-  itself and its migration command, which applies it before the application
+  prefix. A storefront root builds the chain from constants alone — its prefix,
+  its baseline identifier, and its floor — named for itself and its migration
+  command, which applies it before the application
   starts; startup only checks the database against it, and no client or store
   issues DDL when opened.
 

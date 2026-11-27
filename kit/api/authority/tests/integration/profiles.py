@@ -1,9 +1,9 @@
-from market_schema_migrations import Floor
 """Test profiles, labels, and chain; nothing here names a deployed domain's values."""
 
 from arkhai_api.labels import IssuanceLabel
 from arkhai_api_authority import AuthorityConfig, CapacityProfile, authority_chain
 from market_resource_pools_contracts import BACKED
+from market_schema_migrations import Floor
 
 LABEL = IssuanceLabel("example")
 PROFILE = CapacityProfile(

@@ -6,8 +6,6 @@ under it shows the library reads only what the bundle's projection returns.
 
 from __future__ import annotations
 
-from market_schema_migrations import Floor
-
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +16,7 @@ from datetime import datetime, timezone
 from arkhai_api.issuance import accepted_terms_digest
 from arkhai_api.labels import IssuanceLabel
 from arkhai_api.purchase import provision_terms_model
+from market_schema_migrations import Floor
 from market_core import (
     MARKET_DOMAIN_CONTRACT_VERSION,
     DomainCapability,

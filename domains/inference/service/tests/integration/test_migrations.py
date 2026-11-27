@@ -11,7 +11,6 @@ through its entry point with the service's own settings loader.
 
 from __future__ import annotations
 
-from market_schema_migrations import Floor
 
 import importlib
 import sqlite3
@@ -26,6 +25,7 @@ from inference_service import migrate as migrate_command
 from inference_service.migrate import CHAIN
 
 from tests.integration.signed_service import unload_service_modules
+from market_schema_migrations import Floor
 
 COMMAND = "inference-service-migrate"
 

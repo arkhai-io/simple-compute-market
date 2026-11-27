@@ -6,8 +6,6 @@ share no test code.
 
 from __future__ import annotations
 
-from market_schema_migrations import Floor
-
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +21,7 @@ from arkhai_api_selling.contributions import (
 from arkhai_api_selling.issuance import settlement_evidence
 from arkhai_api_selling.migrations import storefront_chain
 from arkhai_api_selling.persistence import StorefrontSQLiteClient
+from market_schema_migrations import Floor
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer

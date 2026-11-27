@@ -1,7 +1,8 @@
 """The authority's migration chain, its command, and the startup check.
 
-The chain begins at its baselines and adopts no database: a fresh database is
-migrated, and every non-empty database it did not build is refused unchanged.
+The chain begins at its baselines and, under the example root's floor of
+``0.0.0``, adopts no database: a fresh database is migrated, and every
+non-empty database it did not build is refused unchanged.
 A service root's startup only checks, refusing any database not exactly at the
 chain with a message naming the root's migration command.
 

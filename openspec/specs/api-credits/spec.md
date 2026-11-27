@@ -266,8 +266,9 @@ prefixes and settings keys, and its service's distribution name, image, entry
 point, and version response — MUST each be held to a recorded baseline. Its
 service and storefront databases MUST be built by the family libraries'
 migration chains through `apicredits-service-migrate` and
-`apicredits-storefront-migrate`, and a database those chains did not build MUST
-be refused. The retirement of the
+`apicredits-storefront-migrate`, which adopt a database marketplace 0.3.0 ran
+on, and any other non-empty database those chains did not build MUST be
+refused. The retirement of the
 `arkhai-apicredits-middleware` Python distribution is a package and import
 break, not a behaviour change, and every repository consumer of it MUST import
 the gate library instead.
@@ -283,7 +284,7 @@ the gate library instead.
 #### Scenario: A database the chain did not build
 
 - **WHEN** a migrate command or an application startup meets a non-empty
-  database its chain did not build
+  database its chain did not build and marketplace 0.3.0 did not run on
 - **THEN** it is refused as unsupported, naming the command, and nothing is
   applied
 

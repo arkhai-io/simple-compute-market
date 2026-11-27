@@ -675,8 +675,8 @@ Each stateful service's migration command, and the phase it runs in, are
 | absent | no file, or no table but an empty ledger |
 
 The command refuses an ahead or unsupported database and applies nothing. Each
-in-house service's chain declares its floor, marketplace 0.3.0 for every one, and
-begins at baselines reproducing that release's schema. The API-credit service's
+in-house service's chain declares its floor, marketplace 0.3.0 for every service
+a release has shipped, and begins at baselines reproducing that release's schema. The API-credit service's
 baselines differ from it by one index, which a later migration creates (below).
 The command adopts a database marketplace 0.3.0 ran on, whatever else it records.
 Such a database records every migration ID that release's chain recorded and none
@@ -728,8 +728,8 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
 - The API-credit service then creates the site ledger's `uq_capacity_buckets_host_id`
   (`20261126_001_capacity_bucket_host_index`). Its v0.3.0 release left the index out,
   though the table's `UNIQUE (host_id)` already enforced the same rule. `kit/site`
-  exports the migration outside its `MIGRATIONS`, and only the API-credit chain
-  composes it. It drops the index first where present, so a fresh database ends
+  exports the migration outside its `MIGRATIONS`, and only the `api` family
+  authority's chain composes it, so the inference service runs it too. It drops the index first where present, so a fresh database ends
   unchanged.
 - Compute provisioning rewrites every host's `ssh` connection stored at version 1
   to version 2 with the same public fields and ciphertext
