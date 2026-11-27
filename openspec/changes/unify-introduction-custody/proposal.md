@@ -122,8 +122,8 @@ This change builds one custody layer with both sets, and composes it into the st
 - D9: the exact retry of a failed start to `introduction-delivery`; the rest of delivery is
   unchanged, and `introduction-delivery` already states it.
 - D10: the kit and its capability to `openspec/specs/README.md`, `introduction-custody`'s
-  companion, `contact-exchange-settlement`, and `docs/development/ARCHITECTURE.md`, "Kit
-  areas".
+  companion, `contact-exchange-settlement`, `docs/development/ARCHITECTURE.md`, "Kit
+  areas", and `docs/guidance/repository/published-packages.md`'s table of packages.
 - D11: the schema in both dialects and the Core store to `introduction-custody`'s companion.
 - D12: Tink, reached through the keyed-encryption component, to `introduction-custody`'s
   companion and `docs/guidance/repository/production-code.md`, "Libraries".
@@ -155,7 +155,7 @@ This change builds one custody layer with both sets, and composes it into the st
 - D27: early end on the storefronts to `contact-exchange-settlement`.
 - D28: credential-capable introduction routes to `contact-exchange-settlement`; the rule that
   a response re-derivable from a record protected from modification is not recorded for
-  exact retry to a file under `docs/guidance/repository/`; the narrowed replay gap to
+  exact retry to a new file in `docs/guidance/repository/`, `exact-retry-records.md`; the narrowed replay gap to
   `docs/development/ROADMAP.md`, Goal 6.
 - D29: the standalone keyed-encryption component to the new `keyset-aead` specification and
   companion, `tools/README.md`, "Standalone infrastructure components",

@@ -131,7 +131,12 @@ dispatch claim, and completion stays the buyer's, by a start of its own.
 ### D10 — A mechanism-neutral kit and its own capability
 
 Custody is a new kit, `kit/introduction-custody`: kit layer, empty scope, foundation area,
-with a package allowlist of `arkhai-keyset-aead` (D29) and `sqlalchemy`. Its requirements are a new capability, `introduction-custody`,
+with a package allowlist of `arkhai-keyset-aead` (D29), `arkhai-injected-time`, through which
+it reads the process time source for `revealed_at`, retention and its workers (D13, D22), as
+the injected-time capability requires of every production read, and `sqlalchemy`. Its
+distribution is `arkhai-kit-introduction-custody`, imported as `market_introduction_custody`,
+named as `kit/contact-exchange`'s `arkhai-kit-contact-exchange` and `market_contact_exchange`
+are. Its requirements are a new capability, `introduction-custody`,
 stated for any host. `contact-exchange-settlement` keeps settlement by introduction, and its
 custody requirements reduce to the storefront holding its introductions in custody. Each
 requirement sits with the party that enforces it, and `buyer-compute-rfqs` will cite custody
@@ -698,7 +703,7 @@ databases. The contact-exchange lane scenarios keep passing, with early end adde
 | D19 | the `introduction-custody` capability's configuration guidance, created at closeout; `openspec/specs/contact-exchange-settlement/configuration.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | D10, D15, D27, D28 | `openspec/specs/contact-exchange-settlement/spec.md` |
 | D9, D28 | `openspec/specs/introduction-delivery/spec.md` |
-| D10 | `openspec/specs/README.md`; `docs/development/ARCHITECTURE.md`, "Kit areas" |
+| D10 | `openspec/specs/README.md`; `docs/development/ARCHITECTURE.md`, "Kit areas"; `docs/guidance/repository/published-packages.md`, its table of packages |
 | D12 | `docs/guidance/repository/production-code.md`, "Libraries" |
 | D14 | `docs/guidance/engineering/persistence.md`, an integrity rule over encrypted data, with an example |
 | D6, D7, D14, D15, D18, D22 | `docs/operator-handbook.md` |
@@ -706,6 +711,6 @@ databases. The contact-exchange lane scenarios keep passing, with early end adde
 | D17 | `docs/development/ARCHITECTURE.md`, "Operator lifecycle controls" |
 | D20 | `openspec/specs/introduction-delivery/architecture.md` |
 | D26, D28 | `docs/development/ROADMAP.md`, Goals 6 and 9 |
-| D28 | `docs/guidance/repository/`, a rule on what a route records for exact retry |
+| D28 | `docs/guidance/repository/`, a new file, `exact-retry-records.md`, stating what a route records for exact retry, its tags from that layer's tag table |
 | D29 | the `keyset-aead` capability's specification and architecture companion, created at closeout; `tools/README.md`, "Standalone infrastructure components"; `docs/guidance/repository/package-layers.md`; `docs/guidance/repository/published-packages.md`; `docs/operator-handbook.md` |
 | D30 | `openspec/changes/README.md`, `harden-shared-relays`' row; `kit/config/src/market_config/secret_at_rest.py`'s docstring |
