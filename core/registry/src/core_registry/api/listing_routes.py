@@ -11,16 +11,16 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from core_registry.api.api_key_auth import require_read_access, require_write_access
-from core_registry.api.filter_eval import FilterParamError, build_criteria, evaluate_all
+from core_registry.filter_eval import FilterParamError, build_criteria, evaluate_all
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
 from core_registry.api.validate_routes import validate_listing_publication
+from core_registry.api.market_auth import registry_authority_signer
 from core_registry.api.publisher_auth import (
     authenticate_publisher_request,
     cached_response,
     canonical_query_body,
     normalize_if_match,
     complete_authenticated_request,
-    registry_authority_signer,
     retained_request_evidence,
     signed_response,
 )

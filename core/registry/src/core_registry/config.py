@@ -1,5 +1,7 @@
 from collections.abc import Mapping
 
+from market_core.rfq import RfqReference
+from market_identity import TrustedIdentitySet
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -76,6 +78,33 @@ class Settings(BaseSettings):
     registry_descriptor_recommended_dispute_authorities: list[dict] = Field(
         default_factory=list,
         validation_alias="REGISTRY_DESCRIPTOR_RECOMMENDED_DISPUTE_AUTHORITIES",
+    )
+
+    registry_rfq_authorities: dict[RfqReference, TrustedIdentitySet] = Field(
+        default_factory=dict,
+        validation_alias="REGISTRY_RFQ_AUTHORITIES",
+    )
+    registry_rfq_spec_path: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_RFQ_SPEC_PATH",
+    )
+    registry_rfq_replay_keys_file: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_RFQ_REPLAY_KEYS_FILE",
+    )
+    registry_rfq_contact_keys_file: str | None = Field(
+        default=None,
+        validation_alias="REGISTRY_RFQ_CONTACT_KEYS_FILE",
+    )
+    registry_rfq_contact_window_seconds: int = Field(
+        default=30 * 24 * 60 * 60,
+        gt=0,
+        le=2**31 - 1,
+        validation_alias="REGISTRY_RFQ_CONTACT_WINDOW_SECONDS",
+    )
+    registry_rfq_redact_restored_contacts: bool = Field(
+        default=False,
+        validation_alias="REGISTRY_RFQ_REDACT_RESTORED_CONTACTS",
     )
 
     # The filter specification this registry serves; unset, the packaged

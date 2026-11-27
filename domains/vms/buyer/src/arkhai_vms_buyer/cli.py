@@ -10,6 +10,8 @@ import typer
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms.domain_runtime import market_domain
 from core_buyer.cli import build_app
+from arkhai_compute.rfq import validate_filters, validate_requirements, validate_response_quantity
+from market_core.rfq import RfqInputContract
 from market_core import (
     BUYER_IDENTITY_INJECTION_CONTRACT,
     DomainCapability,
@@ -127,6 +129,9 @@ def _buyer_market_domain() -> MarketDomainContract:
             build_provision_terms=make_vm_provision_terms,
             select_policy=configured_buyer_policy,
             decode_result=base.codecs.result,
+            rfq_inputs=(RfqInputContract(
+                "compute", validate_requirements, validate_filters, validate_response_quantity,
+            ),),
         ),
     )
 

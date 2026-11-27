@@ -32,6 +32,7 @@ from core_buyer.orchestrator import (
 from core_buyer.buyer_config import resolve_fresh_buyer_identity
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.plugins import discover_domains
+from core_buyer.rfq_cli import build_rfq_app
 from core_buyer.time_source import (
     TimeConfigurationError,
     announcement,
@@ -669,6 +670,8 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
     _register_domain_commands(app, domains)
 
     claimed = _registered_names(app)
+    if "rfq" not in claimed:
+        app.add_typer(build_rfq_app(domains), name="rfq")
     if "listing" not in claimed:
         app.add_typer(
             _build_generic_listing_app(),

@@ -143,7 +143,7 @@ PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE",
 # reads nothing from the checkout that the e2e-tests image does not hold, since
 # it runs from that image inside the cluster.
 HELM_SCENARIOS = ("contracts", "e2e_alkahest_escrow_codecs",
-                  "e2e_alkahest_trusted_oracle")
+                  "e2e_alkahest_trusted_oracle", "e2e_buyer_rfq_discovery", "e2e_buyer_rfq_introductions")
 NOT_SERVED = ("the default charts do not serve it: no settlement mechanism, and not "
               "every service the pipeline's compose stacks run")
 # The e2e-tests chart's scenario test pod, which runs the selected scenarios.

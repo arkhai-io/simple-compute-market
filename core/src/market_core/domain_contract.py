@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
 
+from .rfq import RfqInputContract
 from .settlement import SettlementStageTable
 
 
@@ -108,6 +109,7 @@ class ImmutableBuyerCapability:
     build_provision_terms: DomainCallable
     select_policy: DomainCallable
     decode_result: DomainCallable
+    rfq_inputs: tuple[RfqInputContract, ...] = ()
 
 
 @runtime_checkable

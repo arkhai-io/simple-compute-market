@@ -179,7 +179,11 @@ registry_admin_key="$(key "$DEV_ACCOUNT_REGISTRY_ADMIN")"
 cat >"$work/config-admin.env" <<EOF
 REGISTRY_ADMIN_API_KEY=$registry_admin_key
 EOF
-apply arkhai-registry-runtime "config-admin.env=$work/config-admin.env"
+registry_fixture_dir="$(dirname -- "${BASH_SOURCE[0]}")/../../dev-env/registry"
+sed -n '/^REGISTRY_RFQ_AUTHORITIES=/p' "$registry_fixture_dir/config-rfq-auth.env" >>"$work/config-admin.env"
+apply arkhai-registry-runtime "config-admin.env=$work/config-admin.env" \
+    "rfq-replay-keys.json=$registry_fixture_dir/rfq-replay-keys.json" \
+    "rfq-contact-keys.json=$registry_fixture_dir/rfq-contact-keys.json"
 echo "  arkhai-registry-runtime: config-admin.env, REGISTRY_ADMIN_API_KEY, Anvil account $DEV_ACCOUNT_REGISTRY_ADMIN"
 credential arkhai-bob-identity "$DEV_ACCOUNT_BOB"
 credential arkhai-provisioning-identity "$DEV_ACCOUNT_PROVISIONING"

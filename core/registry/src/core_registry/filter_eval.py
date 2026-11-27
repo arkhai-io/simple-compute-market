@@ -1,9 +1,9 @@
-"""Filter evaluator for GET /listings.
+"""Evaluate declared filters for registry listings and RFQ discovery.
 
-Drives off the registry's filter-spec — every accepted query-param name
-is a declared filter, every filter is `(path, op, value_type, on_missing,
-alias_kind?)`.  The evaluator is generic over the spec: drop a new filter
-in YAML, ?new_filter=... works without code changes.
+Listing query parameters are declared by its filter specification. Each
+declaration gives the path, operator, value type, missing-value policy and
+optional URL alias. RFQ search builds criteria from its configured schema and
+uses the same document-path comparison.
 
 Set-theoretic op model (closed set):
 
@@ -17,7 +17,7 @@ Array projections in the path (``$.foo[*].bar``) get array-projection
 semantics for free: "at least one element matches."  Scalar paths
 collapse to a singleton resolution set.
 
-Two URL surfaces, both honoured per request:
+The listing API accepts both URL surfaces in the same request:
 
 * **URL sugar** (single-value query params) maps to the set form via
   the filter's ``alias_kind``:
@@ -63,7 +63,7 @@ from jsonpath_ng.ext import parse as _jsonpath_parse
 from market_core.schemas import settlement_option_asset, settlement_option_lifecycle
 from market_deal_lifecycle.projections import LIFECYCLE_QUERY_FIELDS, project_terms
 
-from core_registry.api.filter_spec import FilterDecl, FilterSpec
+from core_registry.filter_models import FilterDecl, FilterSpec
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ class _Range:
 
 @dataclass(frozen=True)
 class Criterion:
-    """One parsed filter constraint, ready to evaluate against a listing."""
+    """One parsed filter constraint over a registry document."""
 
     name: str
     path_expr: Any  # parsed jsonpath-ng expression
@@ -291,21 +291,30 @@ def _build_criterion(
                 op="exists", exists_target=wants,
             )
 
-    # URL-sugar fallback — only valid for filters with a single-value
-    # surface (in / range with alias_kind).  not_in / exists must use
-    # raw set-form on the wire; reject single-value usage with a hint.
+    # URL sugar is defined for membership and one-sided range filters.
+    if decl.op in ("in", "range"):
+        return scalar_criterion(decl, _coerce_scalar(raw, decl.value_type, decl.name), on_missing)
+    if decl.op in ("not_in", "exists"):
+        raise FilterParamError(
+            f"{decl.name}: {decl.op} filter must be invoked via set-form "
+            f"(e.g. {decl.op}:[...] / exists:true) — single-value URL form is ambiguous"
+        )
+    raise FilterParamError(f"{decl.name}: unsupported op {decl.op!r}")
+
+
+def scalar_criterion(decl: FilterDecl, value: Any, on_missing: str) -> Criterion:
+    """Apply an already validated scalar without interpreting URL query syntax."""
+    parsed = _get_parsed_path(decl.path)
     if decl.op == "in":
-        coerced = _coerce_scalar(raw, decl.value_type, decl.name)
         return Criterion(
             name=decl.name, path_expr=parsed, on_missing=on_missing,
-            op="in", value_type=decl.value_type, values=(coerced,),
+            op="in", value_type=decl.value_type, values=(value,),
         )
     if decl.op == "range":
-        coerced = _coerce_scalar(raw, decl.value_type, decl.name)
         if decl.alias_kind == "lower_bound":
-            rng = _Range(min=coerced, max=None, min_inclusive=True, max_inclusive=True)
+            rng = _Range(min=value, max=None, min_inclusive=True, max_inclusive=True)
         elif decl.alias_kind == "upper_bound":
-            rng = _Range(min=None, max=coerced, min_inclusive=True, max_inclusive=True)
+            rng = _Range(min=None, max=value, min_inclusive=True, max_inclusive=True)
         else:
             raise FilterParamError(
                 f"{decl.name}: range filter with no alias_kind needs raw set-form "
@@ -314,11 +323,6 @@ def _build_criterion(
         return Criterion(
             name=decl.name, path_expr=parsed, on_missing=on_missing,
             op="range", value_type=decl.value_type, range_=rng,
-        )
-    if decl.op in ("not_in", "exists"):
-        raise FilterParamError(
-            f"{decl.name}: {decl.op} filter must be invoked via set-form "
-            f"(e.g. {decl.op}:[...] / exists:true) — single-value URL form is ambiguous"
         )
     raise FilterParamError(f"{decl.name}: unsupported op {decl.op!r}")
 
@@ -428,7 +432,11 @@ def _resolve(listing: dict[str, Any], crit: Criterion) -> list[Any]:
             if value is not None:
                 values.append(value)
         return values
-    return [m.value for m in crit.path_expr.find(listing) if m.value is not None]
+    return _path_values(listing, crit)
+
+
+def _path_values(document: dict[str, Any], crit: Criterion) -> list[Any]:
+    return [match.value for match in crit.path_expr.find(document) if match.value is not None]
 
 
 def _coerce_resolved_decimal(value: Any) -> Decimal | None:
@@ -451,8 +459,15 @@ def evaluate(listing: dict[str, Any], crit: Criterion) -> bool:
     Resolution semantics: empty path-resolution → on_missing decides
     (fail = reject, pass = ignore-this-criterion).
     """
-    resolved = _resolve(listing, crit)
+    return _match_values(_resolve(listing, crit), crit)
 
+
+def evaluate_path(document: dict[str, Any], crit: Criterion) -> bool:
+    """Compare a document's declared path without listing settlement rules."""
+    return _match_values(_path_values(document, crit), crit)
+
+
+def _match_values(resolved: list[Any], crit: Criterion) -> bool:
     if not resolved:
         return crit.on_missing == "pass"
 

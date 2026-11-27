@@ -1,0 +1,194 @@
+{
+  "fields": {
+    "offered_quantity": "offered_node_count",
+    "prose_fields": [
+      "description"
+    ],
+    "quantity": "node_count",
+    "respond_by": "respond_by",
+    "set_fields": [
+      "regions"
+    ],
+    "start_earliest": "start_earliest",
+    "start_latest": "start_latest"
+  },
+  "filters": [
+    {
+      "name": "gpu_model",
+      "op": "in",
+      "path": "$.shape.gpu_model",
+      "value_type": "string"
+    },
+    {
+      "alias_kind": "lower_bound",
+      "name": "min_node_count",
+      "op": "range",
+      "path": "$.node_count",
+      "value_type": "integer"
+    },
+    {
+      "name": "region",
+      "op": "in",
+      "path": "$.regions[*]",
+      "value_type": "string"
+    }
+  ],
+  "kind": "compute",
+  "requirements": {
+    "additionalProperties": false,
+    "properties": {
+      "description": {
+        "maxLength": 4000,
+        "type": "string"
+      },
+      "metadata": {
+        "additionalProperties": false,
+        "maxProperties": 50,
+        "patternProperties": {
+          "^[A-Za-z0-9_.-]{1,40}$": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "propertyNames": {
+          "not": {
+            "pattern": "[^A-Za-z0-9_.-]"
+          }
+        },
+        "type": "object"
+      },
+      "node_count": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "regions": {
+        "items": {
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "respond_by": {
+        "format": "date-time",
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$",
+        "type": "string"
+      },
+      "shape": {
+        "additionalProperties": false,
+        "dependentRequired": {
+          "gpu_count": [
+            "gpu_model"
+          ],
+          "gpu_model": [
+            "gpu_count"
+          ]
+        },
+        "minProperties": 1,
+        "properties": {
+          "disk_gb": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "gpu_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "gpu_model": {
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "ram_gb": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "vcpu_count": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "start_earliest": {
+        "format": "date",
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+        "type": "string"
+      },
+      "start_latest": {
+        "format": "date",
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+        "type": "string"
+      },
+      "term": {
+        "additionalProperties": false,
+        "properties": {
+          "unit": {
+            "enum": [
+              "day",
+              "month"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unit",
+          "value"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "node_count",
+      "regions",
+      "respond_by",
+      "shape",
+      "start_earliest",
+      "start_latest",
+      "term"
+    ],
+    "type": "object"
+  },
+  "response_quantity": {
+    "additionalProperties": false,
+    "properties": {
+      "offered_node_count": {
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "search": {
+    "additionalProperties": false,
+    "properties": {
+      "gpu_model": {
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "min_node_count": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "region": {
+        "pattern": "\\S",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "version": 1
+}

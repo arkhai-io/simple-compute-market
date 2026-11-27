@@ -33,12 +33,12 @@ from market_schema_migrations import (
 )
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from core_registry import migrate
 from core_registry.config import settings
 from core_registry.db.models import Publisher, PublisherIdentity
-from core_registry.main import app, lifespan
+from core_registry.main import create_app
 from core_registry.db.migrations import (
     FLOOR_REVISION,
     alembic_config,
@@ -50,7 +50,10 @@ from core_registry.db.migrations import (
 
 FLOOR = Path(__file__).resolve().parents[1] / "fixtures" / "v0_3_0_floor"
 BASELINE = "v0_3_0_baseline"
-HEAD = "20261106_001_registry_retained_publications"
+RETAINED_PUBLICATIONS = "20261106_001_registry_retained_publications"
+RFQ_RECEIPTS = "20261122_001_rfq_receipts"
+RFQ_REQUESTS = "20261122_002_rfq_requests"
+HEAD = "20261122_003_rfq_contacts"
 
 
 def _url(path: Path) -> str:
@@ -158,12 +161,12 @@ def test_a_v0_3_0_database_is_adopted_keeping_its_rows(tmp_path: Path) -> None:
 
     report = migrate_database(_url(database))
 
-    assert report.adopted and report.applied == (HEAD,)
+    assert report.adopted and report.applied == (RETAINED_PUBLICATIONS, RFQ_RECEIPTS, RFQ_REQUESTS, HEAD)
     assert _revisions(database) == [HEAD]
     assert check_database(_url(database)).compatible
     fresh = tmp_path / "fresh.db"
     fresh_report = migrate_database(_url(fresh))
-    assert fresh_report.applied == (BASELINE, HEAD)
+    assert fresh_report.applied == (BASELINE, RETAINED_PUBLICATIONS, RFQ_RECEIPTS, RFQ_REQUESTS, HEAD)
     assert _snapshot(database) == _snapshot(fresh)
     connection = sqlite3.connect(database)
     try:
@@ -267,20 +270,22 @@ def test_the_startup_check_refuses_every_state_but_compatible(tmp_path: Path) ->
 async def test_the_application_refuses_to_start_on_an_unmigrated_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The application's lifespan checks its database before anything else and
-    refuses, creating nothing, when the command has not run.
-
-    The lifespan is entered directly, its settings object's database URL
-    replaced as this suite's conftest replaces the registry's authority; the
-    application serves no request here."""
+    """Startup checks the database the application would serve without creating it."""
     database = tmp_path / "missing" / "registry.db"
-    monkeypatch.setattr(settings, "database_url", _url(database))
-    with pytest.raises(IncompatibleDatabase) as refused:
-        async with lifespan(app):
-            raise AssertionError("the registry started on an unmigrated database")
-    assert refused.value.result.state is CheckState.ABSENT
-    assert "`registry-migrate`" in str(refused.value)
-    assert not database.parent.exists()
+    migrated = tmp_path / "migrated.db"
+    migrate_database(_url(migrated))
+    monkeypatch.setattr(settings, "database_url", _url(migrated))
+    engine = create_engine(_url(database))
+    try:
+        app = create_app(sessionmaker(engine, autoflush=False))
+        with pytest.raises(IncompatibleDatabase) as refused:
+            async with app.router.lifespan_context(app):
+                pytest.fail("the registry started on an unmigrated database")
+        assert refused.value.result.state is CheckState.ABSENT
+        assert "`registry-migrate`" in str(refused.value)
+        assert not database.parent.exists()
+    finally:
+        engine.dispose()
 
 
 def _refusal(path: Path) -> IncompatibleDatabase:

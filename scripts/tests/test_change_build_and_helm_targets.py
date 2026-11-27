@@ -653,7 +653,8 @@ def test_topology_secrets_holds_every_credential_the_helm_lane_time_parties_name
     assert all(_dotted(secret, path) for path in named), named
     profile = local["registry"]["secretProfile"]
     admin_env = (stored / profile["secretName"] / f"config-{profile['profile']}.env").read_text()
-    assert admin_env == f"REGISTRY_ADMIN_API_KEY={secret['registry']['admin_key']}\n"
+    admin_lines = [line for line in admin_env.splitlines() if line.startswith("REGISTRY_ADMIN_API_KEY=")]
+    assert admin_lines == [f"REGISTRY_ADMIN_API_KEY={secret['registry']['admin_key']}"]
 
 
 def test_topology_secrets_leaves_a_credential_stating_no_ca_bundle_without_one(

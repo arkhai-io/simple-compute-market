@@ -9,6 +9,7 @@ license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "arkhai-compute>=0.4.0",
     # 0.18.0 first carries the operator event wire models.
     "arkhai-compute-provisioning-contracts>=0.18.0",
     # 0.13.0 first lists the provisioning service's operator events.
@@ -42,7 +43,7 @@ dependencies = [
     # overrides through the kit's typed client.
     "arkhai-kit-pool-overrides>=0.2.0",
     "arkhai-kit-config",
-    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-core-registry-client>=0.14.0",
     "arkhai-kit-alkahest>=0.11.0",
     "arkhai-kit-site-client>=0.9.0",
 	"arkhai-vms-storefront>=0.16.0",
@@ -57,7 +58,7 @@ dependencies = [
     # The `market` app the in-process watchdog cases run through its own entry
     # (tests/e2e/roles/helpers/in_process_buyer.py); 0.8.0 first paces the
     # settlement wait on its caller's clock.
-    "arkhai-core-buyer>=0.8.0",
+    "arkhai-core-buyer>=0.9.0",
     # The buyer's `market` CLI, run as a subprocess by the buyer-machine
     # e2e (tests/e2e/roles/buyer_cli.py). Installed so the binary is on
     # PATH inside arkhai:e2e-tests when the suite runs in-network.
@@ -65,7 +66,7 @@ dependencies = [
     # resolved from .dist alongside the other internal wheels. 0.13.0 first
     # runs every wait of `buy` on its wait clock, which the in-process
     # watchdog cases step.
-    "arkhai-vms-buyer>=0.13.0",
+    "arkhai-vms-buyer>=0.14.0",
     # The runner the in-process watchdog cases invoke the `market` app with.
     "typer>=0.12.0",
     # The API-credits schema plugin, discovered by the same `market`
@@ -78,7 +79,7 @@ dependencies = [
     "arkhai-kit-policy>=0.4.0",
     # The settlement option and its schema, which the buyer-purchase stages
     # and the VM listing helper read from a listing.
-    "arkhai-core>=0.5.0",
+    "arkhai-core>=0.7.0",
     # The dispute credential model a buyer's configuration is read with, the
     # buyer's end-delivery progress its end prints, and the lifecycle
     # outcomes both carry.
@@ -158,6 +159,8 @@ markers = [
     "e2e_buy: One-shot `market buy` (discovery-driven) lifecycle from the buyer machine, against the live storefront",
     "e2e_compute_dynamic_listings: Compute dynamic listing lifecycle from admin reserve through release callbacks",
     "e2e_listing_shapes: A pool's stated listing shape publishes every declared quantity and is discoverable by a typed memory query; a shape stating no GPUs publishes, filters, and settles",
+    "e2e_buyer_rfq_introductions: Complete contact introduction through the buyer CLI and account authority",
+    "e2e_buyer_rfq_discovery: Authenticated buyer RFQ creation, typed discovery and isolation from supply",
     "e2e_pool_declared_modes: Deployed site-authority rejection of an undeclared offering mode before reservation",
     "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "e2e_credits_deal: Full API-credits deal driven by `market credits buy` — discover, negotiate a new key, settle, consume to 402, top up the existing key, consume again, then set lane time an hour forward and consume the rest one credit per call; blocked after the top-up on a wall-time run",

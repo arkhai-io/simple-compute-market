@@ -12,9 +12,9 @@ and reports it active with a VM access delivery.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
+import injected_time
 from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentScheduleResponse,
@@ -115,7 +115,7 @@ class DeliverySite:
         if row["state"] != "leased":
             raise SiteCapacityClientError(f"reservation is {row['state']}", status_code=409)
         if row["activated_at_utc"] is None:
-            row["activated_at_utc"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            row["activated_at_utc"] = injected_time.now_datetime().isoformat()
         return self._answer("activate", row)
 
 

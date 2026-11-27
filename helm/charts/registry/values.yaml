@@ -53,6 +53,9 @@ service:
 config:
   # Select exactly one filter specification packaged in the registry image.
   filterSpecPath: "/app/filter-spec.yaml"
+  # Select a packaged RFQ schema when this registry serves requests for quotes.
+  rfqSpecPath: ""
+  # Optional rfqContactWindowSeconds overrides the 30-day default for new introductions.
   # SQLite path resolves against the persistence mount below by default.
   # Override with an external DSN (e.g. Postgres) when moving off SQLite.
   databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
@@ -64,6 +67,16 @@ config:
   # discovery, gated publishing). See core/registry/src/core_registry/config.py.
   requireReadApiKey: false
   requireWriteApiKey: false
+
+# Optional digest keyring. RFQ retry records retain keyed digests of their inputs.
+rfqReplayKeysSecret:
+  name: ""
+  key: rfq-replay-keys.json
+
+# Optional encryption keyring for RFQ contact payloads.
+rfqContactKeysSecret:
+  name: ""
+  key: rfq-contact-keys.json
 
 # Secret settings, such as the bootstrap API key (REGISTRY_BOOTSTRAP_API_KEY,
 # seeding one write-scoped operator key when the api_keys table is empty at

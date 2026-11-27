@@ -1,0 +1,69 @@
+{
+  "requirements": {
+    "base": {
+      "shape": {"gpu_model": "B300", "gpu_count": 8},
+      "node_count": 100,
+      "regions": ["region-one", "region-two"],
+      "start_earliest": "2027-01-01",
+      "start_latest": "2027-01-31",
+      "term": {"value": 6, "unit": "month"},
+      "respond_by": "2026-12-15T18:00:00Z"
+    },
+    "cases": {
+      "six months": [true, {}],
+      "scalar metadata": [true, {"metadata": {"budget.usd": "USD 20 per node-hour, negotiable", "negotiable": true, "numeric": 20.5}}],
+      "one day": [true, {"term": {"value": 1, "unit": "day"}}],
+      "cpu only": [true, {"shape": {"vcpu_count": 16, "ram_gb": 64}}],
+      "equal window bounds": [true, {"start_latest": "2027-01-01"}],
+      "timezone offset": [true, {"respond_by": "2026-12-15T17:00:00.123456-01:00"}],
+      "empty shape": [false, {"shape": {}}],
+      "blank gpu model": [false, {"shape": {"gpu_model": "  ", "gpu_count": 8}}],
+      "unpaired gpu model": [false, {"shape": {"gpu_model": "B300"}}],
+      "unpaired gpu count": [false, {"shape": {"gpu_count": 8}}],
+      "unknown dimension": [false, {"shape": {"unknown": 16}}],
+      "quantity type": [false, {"shape": {"vcpu_count": 16.0}}],
+      "shape count is positive": [false, {"shape": {"ram_gb": 0}}],
+      "node count is integral": [false, {"node_count": 100.0}],
+      "node count is not a flag": [false, {"node_count": true}],
+      "node count is positive": [false, {"node_count": 0}],
+      "regions are required": [false, {"regions": []}],
+      "region cannot be blank": [false, {"regions": ["  "]}],
+      "region cannot be empty": [false, {"regions": [""]}],
+      "term unit is defined": [false, {"term": {"value": 6, "unit": "week"}}],
+      "term value is integral": [false, {"term": {"value": 1.0, "unit": "day"}}],
+      "invalid calendar date": [false, {"start_latest": "2027-02-31"}],
+      "inverted window": [false, {"start_latest": "2026-12-31"}],
+      "invalid instant": [false, {"respond_by": "2027-02-31T00:00:00Z"}],
+      "missing timezone": [false, {"respond_by": "2026-12-15T18:00:00"}],
+      "date instead of deadline": [false, {"respond_by": "2026-12-15"}],
+      "outside UTC calendar": [false, {"respond_by": "0001-01-01T00:00:00+01:00"}],
+      "nested metadata": [false, {"metadata": {"budget": {"usd": 20}}}],
+      "null metadata entry": [false, {"metadata": {"budget": null}}],
+      "metadata key character": [false, {"metadata": {"target budget": 20}}],
+      "metadata key newline": [false, {"metadata": {"budget\n": 20}}],
+      "metadata key length": [false, {"metadata": {"01234567890123456789012345678901234567890": 1}}],
+      "private data has separate fields": [false, {"contact": {"email": "buyer@example.com"}}]
+    }
+  },
+  "search": {
+    "base": {},
+    "cases": {
+      "no predicates": [true, {}],
+      "typed predicates": [true, {"gpu_model": "B300", "min_node_count": 100, "region": "region-two"}],
+      "literal model name": [true, {"gpu_model": "in:[B300]"}],
+      "integral minimum": [false, {"min_node_count": 100.0}],
+      "no string coercion": [false, {"min_node_count": "100"}],
+      "no unknown filter": [false, {"start_earliest": "2027-01-01"}]
+    }
+  },
+  "response_quantity": {
+    "base": {},
+    "cases": {
+      "unspecified": [true, {}],
+      "partial": [true, {"offered_node_count": 50}],
+      "positive": [false, {"offered_node_count": 0}],
+      "integral": [false, {"offered_node_count": 50.0}],
+      "null is not absence": [false, {"offered_node_count": null}]
+    }
+  }
+}

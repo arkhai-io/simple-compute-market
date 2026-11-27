@@ -23,13 +23,12 @@ from jsonschema.exceptions import ValidationError
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
 from core_registry.api.validate_model import ValidatePublishRequest, ValidatePublishResponse
 from core_registry.api.api_key_auth import require_read_access
+from core_registry.api.market_auth import registry_authority_signer, wire_body
 from core_registry.api.publisher_auth import (
     authenticate_publisher_request,
     cached_response,
     complete_authenticated_request,
-    registry_authority_signer,
     signed_response,
-    wire_body,
 )
 from core_registry.db.database import get_db
 from sqlalchemy.orm import Session

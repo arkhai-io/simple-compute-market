@@ -128,6 +128,12 @@ provisioning:
   persistence:
     retainOnUninstall: false
 registry:
+  config:
+    rfqSpecPath: /app/rfq-schema.json
+  rfqReplayKeysSecret:
+    name: arkhai-registry-runtime
+  rfqContactKeysSecret:
+    name: arkhai-registry-runtime
   persistence:
     retainOnUninstall: false
   # The mediation lane double's identity, params and advertisement

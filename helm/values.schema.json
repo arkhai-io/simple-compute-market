@@ -243,9 +243,34 @@
               "type": "string",
               "pattern": "^/\\S+\\.ya?ml$"
             },
+            "rfqSpecPath": {
+              "type": "string",
+              "pattern": "^(/\\S+\\.json)?$"
+            },
+            "rfqContactWindowSeconds": {
+              "type": ["integer", "null"],
+              "minimum": 1,
+              "maximum": 2147483647
+            },
             "rootPath": {
               "type": "string"
             }
+          }
+        },
+        "rfqContactKeysSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
+          }
+        },
+        "rfqReplayKeysSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string"},
+            "key": {"type": "string", "minLength": 1}
           }
         },
         "secretProfile": {

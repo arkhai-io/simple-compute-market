@@ -538,7 +538,9 @@ def test_the_overlay_names_the_changes_images_and_the_scenarios(tmp_path: Path) 
     # The image the scenario pod runs.
     assert images["e2e-tests"]["integrationTests"]["tag"] == "e2e-tests-pilot"
     assert scenarios == {"e2e-tests": {"scenarios": {
-        "markers": "contracts or e2e_alkahest_escrow_codecs or e2e_alkahest_trusted_oracle"}}}
+        "markers": (
+            "contracts or e2e_alkahest_escrow_codecs or e2e_alkahest_trusted_oracle or e2e_buyer_rfq_discovery or e2e_buyer_rfq_introductions"
+        )}}}
 
 
 def test_no_namespace_but_the_changes_is_scaled_deleted_or_deployed(tmp_path: Path) -> None:
@@ -1227,7 +1229,7 @@ def test_all_scenarios_runs_every_pipeline_scenario_and_the_served_list(
     assert scenarios["e2e-tests"]["scenarios"]["markers"] == (
         "e2e_deal or multi_registry or e2e_listing_shapes or e2e_bare_metal_publication or "
         "e2e_credits_deal or contracts or e2e_alkahest_escrow_codecs or "
-        "e2e_alkahest_trusted_oracle")
+        "e2e_alkahest_trusted_oracle or e2e_buyer_rfq_discovery or e2e_buyer_rfq_introductions")
 
 
 # --- the capacity figure and memory quantities ----------------------------------

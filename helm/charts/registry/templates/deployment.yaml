@@ -10,6 +10,8 @@
 {{- end -}}
 {{- end -}}
 {{- $secretProfile := .Values.secretProfile | default dict -}}
+{{- $rfqKeys := .Values.rfqReplayKeysSecret | default dict -}}
+{{- $contactKeys := .Values.rfqContactKeysSecret | default dict -}}
 {{- if and .Values.config.requireReadApiKey (not .Values.descriptor.accessAcquisitionPointer) -}}
 {{- fail "key-gated registry descriptor requires an access acquisition pointer" -}}
 {{- end -}}
@@ -83,6 +85,16 @@ spec:
               mountPath: {{ include "registry.credentialFile" . | dir }}
               readOnly: true
             {{- include "registry.profileMounts" . | nindent 12 }}
+            {{- if $rfqKeys.name }}
+            - name: rfq-replay-keys
+              mountPath: {{ include "registry.rfqReplayKeyFile" . | dir }}
+              readOnly: true
+            {{- end }}
+            {{- if $contactKeys.name }}
+            - name: rfq-contact-keys
+              mountPath: {{ include "registry.rfqContactKeyFile" . | dir }}
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
@@ -120,6 +132,22 @@ spec:
             items:
               - key: {{ required "registry identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
                 path: {{ include "registry.credentialFile" . | base }}
+        {{- if $rfqKeys.name }}
+        - name: rfq-replay-keys
+          secret:
+            secretName: {{ $rfqKeys.name | quote }}
+            items:
+              - key: {{ required "registry RFQ replay key Secret key is required" $rfqKeys.key | quote }}
+                path: {{ include "registry.rfqReplayKeyFile" . | base }}
+        {{- end }}
+        {{- if $contactKeys.name }}
+        - name: rfq-contact-keys
+          secret:
+            secretName: {{ $contactKeys.name | quote }}
+            items:
+              - key: {{ required "registry RFQ contact key Secret key is required" $contactKeys.key | quote }}
+                path: {{ include "registry.rfqContactKeyFile" . | base }}
+        {{- end }}
         - name: config
           configMap:
             name: {{ include "registry.configMapName" . | quote }}

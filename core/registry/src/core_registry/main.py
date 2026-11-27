@@ -1,23 +1,35 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 import injected_time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from market_core.registry_descriptor import RegistryPrincipal
+from market_core.rfq import RfqAudience
 from market_identity import Identity, create_signer
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 from core_registry.api.admin_routes import make_time_router
 from core_registry.api.routes import router
+from core_registry.api.market_auth import registry_authority_signer
 from core_registry.api.publisher_auth import (
     complete_authenticated_error,
-    registry_authority_signer,
     signed_response,
 )
+from core_registry.api.rfq_auth import RfqTrust
+from core_registry.rfq_spec import load_rfq_spec
 from core_registry.config import settings
+from core_registry.db.database import SessionLocal
 from core_registry.db.migrations import require_compatible_database
 from core_registry.api.filter_spec import get_loaded_spec
 from core_registry.registry_descriptor import build_registry_descriptor
+from core_registry.rfq_contact_retention import RfqContactRetention, prepare_rfq_contact_access
+from core_registry.rfq_replay import RfqReplayKeys
 
 # Configure logging
 logging.basicConfig(
@@ -55,12 +67,23 @@ async def lifespan(app: FastAPI):
     publish via ``api/utils.py::ensure_publisher_for_identity``; there is
     no background indexer or chain probe.
     """
+    sessions = getattr(app.state, "database_sessions", None)
+    database_url = settings.database_url
+    if sessions is None:
+        sessions = SessionLocal
+    else:
+        bind = sessions.kw.get("bind")
+        if not isinstance(bind, Engine):
+            raise RuntimeError("the registry needs a session factory bound to a database engine")
+        database_url = bind.url.render_as_string(hide_password=False)
     logger.info("Starting listing registry service...")
     announce_time_source(injected_time.installed())
 
+    app.state.rfq_spec = load_rfq_spec(settings.registry_rfq_spec_path)
+
     # Before anything opens the database: the application issues no DDL, and
     # serves only a database `registry-migrate` brought to its script head.
-    require_compatible_database(settings.database_url)
+    require_compatible_database(database_url)
     if not (
         settings.registry_authority_id
         and settings.registry_authority_scheme
@@ -85,6 +108,17 @@ async def lifespan(app: FastAPI):
             "registry authority credential does not match configured principal"
         )
     app.state.registry_authority_signer = registry_signer
+    app.state.rfq_trust = None
+    app.state.rfq_replay_keys = None
+    if settings.registry_rfq_authorities and settings.registry_rfq_replay_keys_file:
+        app.state.rfq_trust = RfqTrust(
+            RfqAudience(
+                name=settings.registry_authority_id,
+                principal=RegistryPrincipal.model_validate(expected_registry.model_dump(mode="json")),
+            ),
+            settings.registry_rfq_authorities,
+        )
+        app.state.rfq_replay_keys = RfqReplayKeys.load(settings.registry_rfq_replay_keys_file)
     app.state.registry_descriptor = build_registry_descriptor(
         base_url=settings.registry_descriptor_base_url,
         display_name=settings.registry_descriptor_display_name,
@@ -106,10 +140,9 @@ async def lifespan(app: FastAPI):
     # restart with the same env var is a no-op once the row exists.
     if settings.bootstrap_api_key:
         from core_registry.api.api_key_auth import _hash_key
-        from core_registry.db.database import SessionLocal
         from core_registry.db.models import ApiKey
 
-        with SessionLocal() as session:
+        with sessions() as session:
             if session.query(ApiKey).count() == 0:
                 # Write scope: the bootstrap key is the operator's own
                 # full-access credential (write implies read).
@@ -128,24 +161,29 @@ async def lifespan(app: FastAPI):
                     "[BOOTSTRAP] api_keys table not empty; bootstrap key ignored"
                 )
 
+    contacts_enabled = app.state.rfq_spec is not None and app.state.rfq_trust is not None
+    app.state.rfq_contact_window = timedelta(seconds=settings.registry_rfq_contact_window_seconds)
+    app.state.rfq_contact_keys = await asyncio.to_thread(
+        prepare_rfq_contact_access,
+        sessions,
+        key_file=settings.registry_rfq_contact_keys_file if contacts_enabled else None,
+        redact_restore=settings.registry_rfq_redact_restored_contacts,
+    )
+    # Retained payloads still expire when an operator disables RFQ admission.
+    contact_retention = RfqContactRetention(sessions)
+    app.state.rfq_contact_retention = contact_retention
+    retention = asyncio.create_task(contact_retention.run())
+
     logger.info(f"Listing registry server ready on {settings.host}:{settings.port}")
-
-    yield
-
-    logger.info("Shutting down...")
-    logger.info("Shutdown complete")
-
-
-# Create FastAPI app
-app = FastAPI(
-    title="Listing Registry",
-    version="0.2.0",
-    lifespan=lifespan,
-    root_path=settings.root_path,
-)
+    try:
+        yield
+    finally:
+        logger.info("Shutting down...")
+        contact_retention.stop()
+        await retention
+        logger.info("Shutdown complete")
 
 
-@app.exception_handler(HTTPException)
 async def authenticated_http_error(request: Request, error: HTTPException):
     authenticated = getattr(
         request.state,
@@ -172,45 +210,37 @@ async def authenticated_http_error(request: Request, error: HTTPException):
     )
 
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Register routes
-app.include_router(router)
-
-# The time-setting route, mounted only while the source installed above is
-# injected: a wall-time registry serves no such route, and its time is changed
-# only by reconfiguring and restarting it.
-if injected_time.TimeRouteService(injected_time.installed()).settable:
-    app.include_router(make_time_router())
-
-
-def _custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    from fastapi.openapi.utils import get_openapi
-
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        routes=app.routes,
+def create_app(sessions: sessionmaker[Session] = SessionLocal) -> FastAPI:
+    app = FastAPI(
+        title="Listing Registry", version="0.2.0", lifespan=lifespan, root_path=settings.root_path,
     )
-    # Inject gateway path prefix as the OpenAPI server URL so Swagger UI
-    # generates correct curl examples. The FastAPI app root_path above drives
-    # the docs page's OpenAPI URL; this servers block drives "try it out".
-    if settings.root_path:
-        schema["servers"] = [{"url": settings.root_path}]
-    app.openapi_schema = schema
-    return schema
+    app.state.database_sessions = sessions
+    app.add_exception_handler(HTTPException, authenticated_http_error)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.include_router(router)
+    if injected_time.TimeRouteService(injected_time.installed()).settable:
+        app.include_router(make_time_router())
+
+    def custom_openapi():
+        if app.openapi_schema is None:
+            schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+            # The schema server URL tells Swagger where the gateway mounts this app.
+            if app.root_path:
+                schema["servers"] = [{"url": app.root_path}]
+            app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
+    return app
 
 
-app.openapi = _custom_openapi
+app = create_app()
 
 
 if __name__ == "__main__":

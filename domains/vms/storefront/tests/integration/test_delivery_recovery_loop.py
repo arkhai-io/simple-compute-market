@@ -18,9 +18,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
+import injected_time
 from arkhai_vms import make_vm_provision_terms
 from market_arkhai_payments import PaymentSellerStage, PaymentSettlementData
 
@@ -77,8 +77,7 @@ async def _waiting_deal(world, settled, offset: list[int]) -> tuple[str, list[st
 
     ``offset`` is then set to zero, bringing the deal to its start, and the
     composition's seller stages are recorded, so the returned list holds the
-    re-checks the step makes. The site stamps activation in wall time, so the
-    start is never after it.
+    re-checks the step makes.
     """
     listing = await _published(world)
     reply = await world.app.buyer.negotiate_new(
@@ -117,10 +116,10 @@ async def _waiting_deal(world, settled, offset: list[int]) -> tuple[str, list[st
 
 
 def _offset_clock(offset: list[int]):
-    return lambda: int(time.time()) + offset[0]
+    return lambda: injected_time.now() + offset[0]
 
 
-async def test_a_deal_waiting_for_its_start_is_claimed_re_checked_and_driven_at_its_start(tmp_path):
+async def test_a_deal_waiting_for_its_start_is_claimed_re_checked_and_driven_at_its_start(tmp_path, injected_source):
     offset = [-3600]
     async with recurring_world(tmp_path) as world, settlement(world, clock=_offset_clock(offset)) as settled:
         await world.app.client.admin_pause_lifecycle_loops()
@@ -148,14 +147,14 @@ async def test_a_deal_waiting_for_its_start_is_claimed_re_checked_and_driven_at_
     assert activated_at is not None
 
 
-async def test_a_deal_another_worker_holds_is_skipped(tmp_path):
+async def test_a_deal_another_worker_holds_is_skipped(tmp_path, injected_source):
     offset = [-3600]
     async with recurring_world(tmp_path) as world, settlement(world, clock=_offset_clock(offset)) as settled:
         await world.app.client.admin_pause_lifecycle_loops()
         negotiation_id, rechecks = await _waiting_deal(world, settled, offset)
         assert await world.app.db.claim_vm_delivery(
             negotiation_id=negotiation_id, owner="another-worker",
-            lease_until=(datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+            lease_until=(injected_time.now_datetime() + timedelta(minutes=10)).isoformat(),
         )
 
         report = await world.app.client.admin_run_lifecycle_cycle("delivery-recovery")
@@ -168,7 +167,7 @@ async def test_a_deal_another_worker_holds_is_skipped(tmp_path):
     assert row["status"] == "provisioning"
 
 
-async def test_a_deal_whose_evidence_fails_its_re_check_is_not_driven(tmp_path, caplog):
+async def test_a_deal_whose_evidence_fails_its_re_check_is_not_driven(tmp_path, caplog, injected_source):
     offset = [-3600]
     async with recurring_world(tmp_path) as world, settlement(world, clock=_offset_clock(offset)) as settled:
         await world.app.client.admin_pause_lifecycle_loops()
