@@ -126,3 +126,42 @@ recorded and an exact retry runs the route again.
   raises an unexpected error
 - **THEN** the caller receives a signed 500 its typed client verifies, and the error is
   logged by the service
+
+## ADDED Requirements
+
+### Requirement: Provisioning operations are recognisable when repeated
+
+A relay create MUST name its `relay_id`, and a repeat under a recorded ID MUST be
+refused without creating a relay. A grant-key activation MUST name the staged key it
+activates, and MUST be refused, activating nothing, when that key is not the one
+staged. Host capacity and diagnostics reads MUST key the job they submit by the
+request, as the VM job routes do, so a repeat answers the job the first submitted. A
+principal rotation whose nonce is already recorded with the same intent MUST be
+answered with the applied rotation before the active-principal and intent-expiry
+checks. A fulfillment scheduling request whose reservation already holds an assignment
+MUST be answered with it before the pool's delivery is checked.
+
+#### Scenario: A relay create is retried after the relay moved
+
+- **WHEN** a relay create applies, its acknowledgement is lost, an operator then
+  changes the relay's endpoint, and the create's exact retry arrives
+- **THEN** the service refuses the retry under the recorded relay ID and creates no
+  second relay
+
+#### Scenario: An activation is retried after a later staging
+
+- **WHEN** an activation of staged key K1 applies, its acknowledgement is lost, the
+  operator stages key K2, and the activation's exact retry arrives
+- **THEN** K2 stays staged and is not activated
+
+#### Scenario: A provisioning rotation is retried after its intent expired
+
+- **WHEN** a provisioning principal rotation applies, its acknowledgement is lost,
+  and its exact retry arrives after the intent's expiry
+- **THEN** the service answers the applied rotation and does not refuse the retry
+
+#### Scenario: A host capacity check is retried
+
+- **WHEN** a host capacity check's exact retry arrives after the first submitted its
+  job
+- **THEN** the service answers that job and submits no second one

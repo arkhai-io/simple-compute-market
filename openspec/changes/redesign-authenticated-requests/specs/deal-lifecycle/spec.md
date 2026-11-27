@@ -46,3 +46,20 @@ Each party MUST capture its commitment envelopes through an injected envelope-ca
 
 - **WHEN** a storefront answers a buyer's `negotiate_new` that its admission core authenticated
 - **THEN** its evidence store holds the buyer request's record and exact body as the admission handed them over, and no header
+
+## ADDED Requirements
+
+### Requirement: A lifecycle submit answers a recorded operation first
+
+A seller's lifecycle submit whose `operation_key` is already recorded for its
+negotiation with the same request MUST be answered from that record before the
+Agreement authority's credential availability or any other check governing a new
+submission is evaluated.
+
+#### Scenario: A dispute submit is retried after its credential was removed
+
+- **WHEN** a seller's dispute submit applies, its acknowledgement is lost, the
+  Agreement authority's credential is then removed, and the submit's exact retry
+  arrives
+- **THEN** the storefront answers the recorded submission, and does not reject the
+  retry as needing repair

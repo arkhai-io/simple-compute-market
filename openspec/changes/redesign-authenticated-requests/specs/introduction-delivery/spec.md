@@ -17,7 +17,10 @@ An introduction start MUST be declared `RERUN`, so its response body, which hold
 counterparty's contact, is never recorded for replay. An exact replay of a start whose
 completion failed MUST complete the reveal as a new start does, dispatching the seller's
 side once through the same claim. The failed start's answer MUST say that starting the
-introduction again completes it.
+introduction again completes it. A start whose introduction already holds a record with
+the same buyer payload MUST be answered from that record before the seller's contact is
+resolved from configuration, so a later change to the configured contact does not turn
+an applied start's replay into a refusal.
 
 An introduction whose contact payloads have been deleted MUST NOT be delivered: an
 introduction start that finds the payloads already deleted MUST NOT deliver, and an
@@ -27,6 +30,11 @@ one, so once the payloads are gone there is nothing it may send. A start that co
 the reveal from payloads it read before the deletion committed preceded the deletion, and
 the one dispatch it claims belongs to it even if the deletion commits before that dispatch
 is scheduled.
+
+#### Scenario: An applied start is replayed after the seller's contact changed
+
+- **WHEN** an introduction start completes its reveal and loses its answer, the operator then changes the seller's configured contact, and the start's exact replay arrives
+- **THEN** the replay is answered from the stored reveal, dispatches nothing, and is not refused for the changed contact
 
 #### Scenario: The reveal request is retried
 

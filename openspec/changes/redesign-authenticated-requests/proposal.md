@@ -11,7 +11,8 @@ and none of them ever removes any of it:
   response body, durably and indefinitely;
 - the site middleware's default store keeps reservations in memory for the life of
   the process, so a replay across a restart is accepted;
-- the deal-lifecycle routes keep no reservation at all.
+- the deal-lifecycle routes keep a hash row per request in deal-servicing's
+  `servicing_operations`, beside their domain operation keys, and never delete it.
 
 Two consequences follow, and neither is local to one route.
 
@@ -110,8 +111,20 @@ transaction the attempt still holds, and
 - **One cutover.** Version 3 replaces version 2 in the release that introduces it; the
   three 0.4.0 replay tables are dropped and the SQLite space reclaimed by the migrate
   command (D9). Version 2 stays readable as an evidence format (D12).
-- **Two small domain fixes:** `idempotency_key` is required on credits consume, and an
+- **Small domain fixes:** `idempotency_key` is required on credits consume, and an
   exact replay of an introduction start whose completion failed completes it (D6).
+- **The complete route table.** Every route of every authority is declared from one
+  table mapped against the code (D6, D39). A `RERUN` route recognising an applied
+  request by a record answers it as applied before any check governing a new request,
+  and one recognising it only by state answers from current state (D30); the routes
+  that checked first are reordered — principal and identity rotations, the heartbeat,
+  consume, the introduction start, the three settles, the lifecycle submit and
+  fulfillment scheduling (D36). Where a wire change makes a repeat recognisable the
+  cutover carries it: a capacity reserve requires its `placement_key`, a release names
+  its reservation, a grant-key activation names its key, relay create requires its ID,
+  and the host job reads are keyed by request (D32–D35, D40). A `RECORDED` route needs
+  a read showing whether its write applied only where the write is not itself
+  idempotent (D31). The deal-lifecycle transport rows are deleted (D37).
 - **Corrections that fall out of the move:** the deal-lifecycle routes reserve request
   IDs and stop signing refusals over an invented identity; the VM callback middleware's
   refusals are signed (D3, D15).
@@ -135,21 +148,29 @@ None.
   retention and the 410; secrets never recorded; signed refusals; version 2 as an
   evidence format; every request covering `@query`; a public operation answered signed.
 - `physical-provisioning`: exact retry per declaration; a failure after authentication
-  recorded only on a recorded route.
+  recorded only on a recorded route; `relay_id` required, a grant-key activation naming
+  its key, the host job reads keyed by request, and the principal rotation and
+  fulfillment scheduling answering an applied request first.
+- `site-capacity`: every reserve carries a required `placement_key`; a release names its
+  reservation.
 - `registry-discovery`: durable replay reservation per declaration; seller publication
   evidence as `publication` and `updates`, each a request record and its body; the
   registry's authentication under version 3; the descriptor a public read answered
   signed; the filter-spec ETag a query parameter; an applied rotation or retirement
   answering its exact retry first.
 - `deal-lifecycle`: the end-delivery acknowledgement under version 3; commitment
-  envelopes kept and captured as signed records with their exact bodies.
+  envelopes kept and captured as signed records with their exact bodies; a lifecycle
+  submit's recorded operation key answered as applied.
+- `settlement-servicing`: an accepted heartbeat's exact retry answered as recorded.
 - `storefront-publication`: version 3 authorization and exact retry per declaration.
-- `introduction-delivery`: an exact replay of a failed start completes it; signed
-  deliveries bind their endpoint.
+- `introduction-delivery`: an exact replay of a failed start completes it, and an
+  applied start is answered before its seller contact is resolved; signed deliveries
+  bind their endpoint.
 - `compute-provisioning-contract`: a resent capacity-released notification is re-run.
-- `api-credits`: `idempotency_key` required on consume.
+- `api-credits`: `idempotency_key` required on consume, its duplicate answered before
+  the key's status.
 - `deployment-state`: the migrate command reclaims space; the replay table belongs to
-  `kit/authenticated-requests`.
+  `kit/authenticated-requests`; the deal-lifecycle transport rows are deleted.
 
 ## Non-Goals
 
@@ -158,7 +179,8 @@ None.
 - The storefront role middleware set, its administrator route contracts and how the
   shell applies them, which `kit-owned-storefront-auth-and-persistence` keeps.
 - The identity-lifecycle remainder, which `complete-service-identity-lifecycle` owns.
-- Making the non-convergent mutations idempotent in their domains.
+- Making the non-convergent mutations idempotent in their domains, beyond the keys
+  D32–D35 and D40 add; negotiation and listing creation keep recorded outcomes.
 
 ## Dependencies and Acceptance Boundary
 
@@ -205,13 +227,14 @@ takes an incompatible minor bump and every dependent's bound moves (D17).
 - [x] Existing subsystem specifications — `marketplace-identity`,
       `physical-provisioning`, `registry-discovery`, `storefront-publication`,
       `introduction-delivery`, `compute-provisioning-contract`, `api-credits`,
-      `deployment-state`, `deal-lifecycle`
+      `deployment-state`, `deal-lifecycle`, `site-capacity`, `settlement-servicing`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
 Engineering guidance, shared across repositories, gains a messaging file and a
 `messaging` topic tag, and the route contract in
-`docs/guidance/engineering/implementation.md` gains the exact-retry declaration.
+`docs/guidance/engineering/implementation.md` gains the exact-retry declaration and a
+section on idempotent operations (D30).
 
 ### Knowledge to promote
 
@@ -293,3 +316,31 @@ Engineering guidance, shared across repositories, gains a messaging file and a
 - D28: no permanent destination — it applies D2's and D21's rule, which the
   `marketplace-identity` spec records, and the routes' declarations are the record.
 - D29: no permanent destination — the cadence is the plan's, not current behaviour.
+- D30 recognising an applied request before judging it again: the engineering principle,
+  opening "An operation can be idempotent and safe to repeat when one of the following
+  holds: there is no side effect, the side effect itself is idempotent, or the service
+  can recognise a repeat and handle the repeat safely", with recognition before
+  re-judging and the record-or-state rule beneath it, to a new section "Idempotent
+  operations" in `docs/guidance/engineering/implementation.md`; the replay-specific
+  part, exact retries and keeping a first outcome, to `marketplace-identity` spec and
+  its `architecture.md`.
+- D31 a read only where the write is not itself idempotent: `marketplace-identity`
+  spec and `architecture.md`.
+- D32 the required placement key: `site-capacity` spec, "Reservation lifecycle" and
+  "Reserve replay is keyed by the deal's placement". The owner's principle that this
+  cutover may change the wire to help idempotency or retention is not promoted: it is
+  this design's alone.
+- D33 the routes the first table missed, and the activation naming its key:
+  `physical-provisioning` spec; the declarations themselves are the record of the rest.
+- D34 the job routes keyed by request: `physical-provisioning` spec.
+- D35 release by reservation: `site-capacity` spec, "Idempotent release recording".
+- D36 the routes answering an applied request first: `marketplace-identity`,
+  `physical-provisioning`, `api-credits`, `introduction-delivery`, `deal-lifecycle` and
+  `settlement-servicing` specs.
+- D37 the transport rows deleted: `deployment-state` spec.
+- D38 a secret re-read or superseded: `marketplace-identity` spec, "A secret is never
+  recorded for replay".
+- D39: no permanent destination — each authority's route contracts carry its
+  declarations, and the completeness tests hold them.
+- D40 relay create and the splitter interrupt keyed: `physical-provisioning` spec; the
+  interrupt's declaration is the record.

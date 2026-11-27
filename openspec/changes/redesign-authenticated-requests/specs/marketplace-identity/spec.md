@@ -180,7 +180,7 @@ A party that keeps, as evidence, a version 3 signed request bound to an authorit
 
 ### Requirement: Each route declares how an exact retry is resolved
 
-Every authenticated route MUST declare its exact-retry resolution in its route contract: `RERUN`, under which an exact retry runs the handler again and no response body is recorded; or `RECORDED`, under which the outcome is kept for the authority's retention and an exact retry is answered with it. An authority MUST refuse to start, naming the route, when any route in its application carries neither a declaration, nor an explicit mark that it is unauthenticated, nor the mark of a public operation, whether the authority authenticates in middleware or inside its routes; a time-setting operation the authority signs MUST carry a declaration, not the mark. A concurrent exact retry while the first attempt holds its lease MUST be refused as in progress whatever the route declares. On a `RERUN` route one attempt MAY reclaim an expired lease. A `RECORDED` request MUST NOT be dispatched more than once. While its handler runs, the authority MUST renew the attempt's lease until the handler returns or raises, so that while its replay store can be written the lease ends only when the attempt has ended; a lease that ends while its handler still runs, its store refusing every renewal for the whole lease period, MUST be logged as an error naming the request. An exact retry that finds no recorded outcome after the first attempt's lease has ended MUST first conclude the attempt by a conditional write in the replay store, one that takes the store's write lock and keeps the attempt able to record its outcome, and only then MUST be answered with a signed 409 whose body code is `exact_retry_outcome_unknown`, so that, where the replay store is on the authority's own SQLite database, the answer never precedes the end of a transaction the attempt holds on that database — a database with finer locks, PostgreSQL among them, gives the concluding write no such order, and this requirement promises none there; a caller so answered MUST learn what applied by reading current state before sending a replacement write under a new request ID. A handler serving an exact retry under `RERUN` MUST be told it is a retry. A route MUST be `RERUN` only where its domain recognises the retry as already applied, so that a re-run after any later write changes nothing and its answer tells the caller what happened; an absolute setter or a delete MUST NOT be `RERUN`. Each `RERUN` mutation MUST be proven by a test that dispatches a request, then a later write to the same resource, then the request's exact retry, and finds the later write intact.
+Every authenticated route MUST declare its exact-retry resolution in its route contract: `RERUN`, under which an exact retry runs the handler again and no response body is recorded; or `RECORDED`, under which the outcome is kept for the authority's retention and an exact retry is answered with it. An authority MUST refuse to start, naming the route, when any route in its application carries neither a declaration, nor an explicit mark that it is unauthenticated, nor the mark of a public operation, whether the authority authenticates in middleware or inside its routes; a time-setting operation the authority signs MUST carry a declaration, not the mark. A concurrent exact retry while the first attempt holds its lease MUST be refused as in progress whatever the route declares. On a `RERUN` route one attempt MAY reclaim an expired lease. A `RECORDED` request MUST NOT be dispatched more than once. While its handler runs, the authority MUST renew the attempt's lease until the handler returns or raises, so that while its replay store can be written the lease ends only when the attempt has ended; a lease that ends while its handler still runs, its store refusing every renewal for the whole lease period, MUST be logged as an error naming the request. An exact retry that finds no recorded outcome after the first attempt's lease has ended MUST first conclude the attempt by a conditional write in the replay store, one that takes the store's write lock and keeps the attempt able to record its outcome, and only then MUST be answered with a signed 409 whose body code is `exact_retry_outcome_unknown`, so that, where the replay store is on the authority's own SQLite database, the answer never precedes the end of a transaction the attempt holds on that database — a database with finer locks, PostgreSQL among them, gives the concluding write no such order, and this requirement promises none there; a caller so answered, where its write is not itself idempotent — a create keyed by nothing, a relative write, a round that moves a thread on — MUST learn what applied by reading current state before sending a replacement write under a new request ID, and where its write is an absolute setter, a toggle, a delete by name or an import MAY send its intended value again under a new request ID without reading. Every `RECORDED` route whose write is not itself idempotent MUST have a read, an operator's counting, that shows whether the write applied, except the buyer's `negotiate_new` and `negotiate_continue`, whose absence of one is accepted. A handler serving an exact retry under `RERUN` MUST be told it is a retry. A route MUST be `RERUN` only where its domain recognises the retry as already applied, so that a re-run after any later write changes nothing and its answer tells the caller what happened; an absolute setter or a delete MUST NOT be `RERUN`. A `RERUN` route whose domain recognises a repeat by a record the first request left — a stored key, a nonce's audit, a stored heartbeat, a settlement's job, an introduction's record — MUST answer it as applied, from that record, before any check that governs only whether a new request may apply, such as an expiry, a body timestamp's freshness, configuration, credential availability or another system's state; a repeat recognised only by the state it produced MUST be answered as a first request would be answered in the current state. Each `RERUN` mutation MUST be proven by a test that dispatches a request, then a later write to the same resource, then the request's exact retry, and finds the later write intact.
 
 #### Scenario: A read is retried exactly
 
@@ -192,6 +192,21 @@ Every authenticated route MUST declare its exact-retry resolution in its route c
 
 - **WHEN** a caller repeats an exact credits consume carrying its idempotency key after losing its acknowledgement
 - **THEN** the handler runs again, the balance is charged once, and the answer is the consume's outcome
+
+#### Scenario: An applied rotation is retried after its proofs expired
+
+- **WHEN** a storefront administrator's identity rotation applies, its acknowledgement is lost, and its exact retry arrives after the rotation's proofs have expired
+- **THEN** the storefront answers the applied rotation's status, as it would have answered the first attempt, and does not refuse the retry for the expired proofs
+
+#### Scenario: A repeat recognised by state follows a later write
+
+- **WHEN** a site commit applies, its acknowledgement is lost, the reservation is then released, and the commit's exact retry arrives
+- **THEN** the site answers as it answers any commit of a released reservation, and the reservation stays released
+
+#### Scenario: An absolute setter's outcome is unknown
+
+- **WHEN** an operator's relay disable is answered `exact_retry_outcome_unknown`
+- **THEN** the operator may send the disable again under a new request ID without first reading the relay, and the relay ends disabled whether or not the first attempt applied
 
 #### Scenario: A non-convergent mutation is retried exactly
 
@@ -307,12 +322,17 @@ On a `RERUN` route a request whose reservation has expired MUST be dispatched as
 
 ### Requirement: A secret is never recorded for replay
 
-A response carrying a secret — access material, an API-key secret, a password, a private or staged key, or a token — MUST NOT be recorded as a replay outcome. Its route MUST be `RERUN`, and only where running again supersedes the secret the lost answer held; an authority MUST NOT serve a secret-bearing route whose secret a re-run cannot supersede. A secret carried only in the request MUST NOT be recorded either, and does not constrain the route's declaration: the replay state holds the request's hash, never its body.
+A response carrying a secret — access material, an API-key secret, a password, a private or staged key, or a token — MUST NOT be recorded as a replay outcome. Its route MUST be `RERUN`, and only where running again answers the secret again or supersedes the secret the lost answer held; an authority MUST NOT serve a secret-bearing route whose secret a re-run can neither answer again nor supersede. A secret carried only in the request MUST NOT be recorded either, and does not constrain the route's declaration: the replay state holds the request's hash, never its body.
 
 #### Scenario: A relay token rotation is retried after a later rotation
 
 - **WHEN** an operator rotates a relay's token to one value and loses the acknowledgement, rotates it again to another, and the first rotation's exact retry arrives within the retention
 - **THEN** the provisioning service answers the first rotation's recorded outcome, a relay view holding no token, and the relay keeps the later token
+
+#### Scenario: A settlement answer carrying credentials is lost
+
+- **WHEN** a buyer repeats an exact API-credits `settle` whose answer carried its API key and was lost
+- **THEN** the storefront runs the settle again, answers the key from its settlement, and holds no key in the replay store
 
 #### Scenario: An issuance answer is lost
 

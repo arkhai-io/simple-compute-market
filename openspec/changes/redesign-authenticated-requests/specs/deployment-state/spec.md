@@ -21,6 +21,18 @@ by such a migration, or for the registry by an Alembic revision.
 - **WHEN** the migration command runs with `--check` against that database
 - **THEN** it lists the pending migration and neither drops nor compacts anything
 
+### Requirement: The deal-lifecycle transport rows are deleted on upgrade
+
+The deal-lifecycle routes MUST NOT keep a reservation of their own beside the admission
+core's. A migration in deal-servicing's chain MUST delete the `_lifecycle_transport`
+rows earlier releases wrote into `servicing_operations`, declared as freeing space, and
+MUST leave every other row and every lifecycle evidence item in place.
+
+#### Scenario: A storefront upgrades with lifecycle transport rows
+
+- **WHEN** a storefront database holding `_lifecycle_transport` rows from marketplace 0.4.0 is migrated
+- **THEN** those rows are gone, the deal's operation rows and lifecycle evidence remain, and the SQLite file is compacted after the chain applies
+
 ### Requirement: The authenticated-request replay table belongs to its kit
 
 The authenticated-request replay table MUST be created by migrations the

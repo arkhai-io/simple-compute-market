@@ -17,7 +17,7 @@ compatibility and migration statement below is measured against it.
 
 ## Findings
 
-### Seven arrangements, three durable stores, none bounded
+### Seven arrangements, four durable stores, none bounded
 
 | Authority | Where verification, reservation, retry resolution and signing live | Replay state |
 |---|---|---|
@@ -27,7 +27,7 @@ compatibility and migration statement below is measured against it.
 | Registry | `core/registry/src/core_registry/api/publisher_auth.py`, called from each route | `publisher_replay_reservations` |
 | Provisioning service | `ProvisioningAuthMiddleware`, `SqlAlchemyProvisioningReplayStore` (`provisioning/compute/service/src/compute_provisioning_service/middleware/auth.py`) | `provisioning_replay_reservations` |
 | API-credits service, through the site kit | `SiteAuthMiddleware`, `InMemoryReplayStore` (`kit/site/src/market_site/auth.py`) | process memory |
-| Deal-lifecycle routes | `kit/deal-servicing/src/market_deal_servicing/routes.py` (`dispatch`, `_authenticate`) | none |
+| Deal-lifecycle routes | `kit/deal-servicing/src/market_deal_servicing/routes.py` (`dispatch`, `_authenticate`) | a hash row per request in deal-servicing's `servicing_operations` |
 
 The three durable tables each hold a reservation, the request hash, a lease, and the
 full response status and body; provisioning's also holds an empty-body flag, the
@@ -40,11 +40,14 @@ too little space on its 1 GiB volume for the pre-upgrade backup.
 
 The site kit's in-memory store backs one deployed service, the API-credits service;
 the site the provisioning service hosts sits behind provisioning's durable store.
-The deal-lifecycle routes reserve no request ID at all and rely on domain operation
-keys, contrary to `marketplace-identity`'s "the receiving authority MUST reserve
-`(principal, request_id)` before dispatch", and sign a refusal for a request with no
-request ID against the literal `"unauthenticated"`, which the same requirement
-forbids.
+The deal-lifecycle routes keep a reservation of their own beside their domain
+operation keys: a row per principal and request ID, holding the request's hash, in
+deal-servicing's `servicing_operations` under the pseudo-negotiation
+`_lifecycle_transport` (`routes.py`, `EndSession.check_and_record`). It refuses changed
+reuse, runs an identical request again, and is never deleted, a fourth unbounded store,
+of hashes only. The routes sign a refusal for a request with no request ID against the
+literal `"unauthenticated"`, which `marketplace-identity`'s "the receiving authority
+MUST reserve `(principal, request_id)` before dispatch" forbids.
 
 ### What a stored body holds, and who reads it
 
@@ -55,6 +58,12 @@ routes, whose outcome is recorded without access material and which run again on
 exact retry (`unify-compute-delivery-path`, in 0.4.0). The site kit's
 `SiteRouteContract.exact_retry_safe` declares the opposite default: every route may
 re-run unless it says otherwise, and only `credits_key_adjust` says otherwise.
+Beyond reads, secrets and contacts are recorded too: the API-credits storefront's
+`settle` and `settle_status` answer the buyer's API-key secret
+(`tenant_credentials.secret`) and record it verbatim; the VM and bare-metal storefronts
+record each introduction start and read with the counterparty's contact, bare metal
+replaying it even after the payloads were deleted; and the provisioning service records
+its credential reads, `GET jobs/{id}/credentials` and `GET fulfillment/{id}/result`.
 
 `core_buyer` mints a fresh request ID per call; settlement reuses one only within a
 process; no reference caller keeps an ID across a restart. The client contract still
@@ -231,7 +240,7 @@ The component's interface, walked through every caller:
   handler run again), `answered` (a recorded outcome or a refusal, already signed,
   `exact_retry_outcome_unknown` among them, D7), or `in progress`;
 - an `exact_retry` flag on the admission, for handlers that re-run but must know it is
-  a retry (VM settle's `refuse_after_end`, the credential reads);
+  a retry (VM `settle_status`'s `refuse_after_end`, the credential reads);
 - a signed-outcome hook that hands the caller the request's and the signed
   response's records with their bodies, for evidence capture, and the request's record
   and body on the admission itself (D23) (bare metal's `EvidenceSession.capture`, VM's
@@ -393,7 +402,10 @@ request's exact retry re-signed, through the real admission core and application
 asserting that the domain state after the retry equals the state before it (the replay
 table excluded) — the retry undoes nothing the later write did — and that the retry's
 answer is the route's current answer. The interleaved write is what tests D6's
-criterion (16 F3); a retry straight after its request proves only idempotence. A completeness test per authority fails when a `RERUN`
+criterion (16 F3); a retry straight after its request proves only idempotence. Where a
+route recognises an applied request before a check that time, configuration or another
+system's state can later fail (D30, D36), its case gains a variant whose retry follows
+that change, as D27's follows the intent's expiry. A completeness test per authority fails when a `RERUN`
 operation has no case. Test level: integration, the lowest at which the real handler
 and database exist (`docs/guidance/engineering/test-levels.md`).
 
@@ -414,15 +426,17 @@ does not commute with a later write, so a delayed retry, or one from another cli
 under the same principal, would re-assert an older value over a newer one. Everything
 else is `RECORDED`, whose outcome answers the retry within the retention and whose
 signed 410 answers it after (D8); the replay layer remembers what the domain cannot
-recognise.
+recognise. What a `RERUN` route's answer must say is D30's rule: a repeat its domain
+recognises by a record is answered as applied before any check governing a new request,
+and one recognised only by state is answered as a first request would be now.
 
 A secret in the request is never recorded under either declaration: the replay store
 keeps only the request's hash and, on a `RECORDED` route, the response. Only a secret
 in the response constrains the declaration. A response carrying a secret is never
-`RECORDED`: its route is `RERUN` where the re-run supersedes the lost answer (credits
-issuance rotates an unused key's secret), and a route whose secret a re-run cannot
-supersede is not admitted until a design gives it a mode with its whole lifecycle
-(D5). The plan's route check applies this distinction to every route it classifies.
+`RECORDED`: its route is `RERUN` where a re-run answers the secret again or supersedes
+it — a credential read re-reads it, credits issuance rotates an unused key's secret —
+and a route that can do neither is not admitted until a design gives it a mode with its
+whole lifecycle (D5, D38). The table names each secret-bearing route.
 
 *Design review 27, F4:* D6 first listed relay `token` rotation, relay
 `grant-keys/stage` and VM `reset-password` beside issuance as secret-bearing `RERUN`
@@ -442,8 +456,8 @@ chose the reviewer's first alternative over domain guards recognising an older r
 which would need durable domain changes for the same effect, and over refusing later
 rotations while an earlier request may still retry, which blocks normal operator work.
 
-The plan checks every authenticated route on every authority against this criterion
-and names its declaration; the table below is the set known at design.
+The table at the end of this decision is complete: every route of every authority,
+mapped against the code when section 7 stopped on the first table's omissions (D39).
 
 *Design review 16, F3:* D6 first made the absolute setters `RERUN` on the ground that
 an exact retry re-asserts what the same caller asked for, bounding the harm to a caller
@@ -468,28 +482,122 @@ already mints one), and `introduction-delivery` changes so that an exact replay 
 start whose completion failed completes it, as a new start does; seller dispatch stays
 once-only through its claim.
 
-The `RECORDED` set:
+The complete table. Health, the OpenAPI pages and the public listing reads are
+unauthenticated on every authority and outside it, as is the registry's API-key
+`/admin/time`. "Several transactions" names a `RECORDED` route whose handler writes in
+more than one transaction, D7's third residual case; no `RECORDED` handler holds a
+write transaction across a call to another service. "Read" names, for a `RECORDED`
+route whose write is not itself idempotent, the read that shows whether it applied
+(D31).
 
-| Authority | Routes |
-|---|---|
-| VM, bare-metal and API-credits storefronts | `negotiate_new`, `negotiate_continue`, `admin_advance_negotiation`, `admin_force_accept_negotiation`, `admin_reserve_capacity`, `admin_release_reservations`, `admin_run_lifecycle_cycle`, `admin_refresh_site_projections`; trading and listing pause and resume |
-| VM storefront | `refund_listing`, `arbitrate_listing` |
-| API-credits storefront | `publish-from-quota` |
-| Registry | listing publish, update and delete |
-| Provisioning service | `POST relays`, relay `token` rotation and relay `grant-keys/stage`; host and pool upserts and deletes; the VM-domain job routes but `reset-password`; the `check-leases`, convergence `run-cycle` and `advance-cycle` routes |
-| API-credits service | `credits_key_adjust` |
+**Registry** (section 6, as built):
 
-Every other authenticated route on every authority is `RERUN`, reads included. None of
-the `RECORDED` responses carries a contact or a secret. The absolute setters and
-deletes are `RECORDED`: their bodies are small, and 24 hours of them is bounded, where
-the growth this change removes was not.
+| Declaration | Routes | Basis |
+|---|---|---|
+| `RECORDED` | `listing.publish`, `listing.update`, `listing.delete` | absolute setters and a delete by ID; one transaction each |
+| `RERUN` | `publisher.identity.rotate`, `publisher.identity.retire` | keyed by the rotation's nonce, an applied one answered first (D27) |
+| `RERUN` | `listing.list`, `listing.get`, `listing.validate`, `filter.get`, `health.read`, `system.stats.read`, `publisher.list`, `publisher.get`, `publisher.identity.rotation.read` | reads and a dry run |
+| public | `registry.descriptor.read` | D24 |
+
+**Provisioning service** (its own routes, the VM and bare-metal routes it mounts, and
+its mock-profile routes):
+
+| Declaration | Routes | Basis |
+|---|---|---|
+| `RECORDED` | `provisioning_relay_update`, `provisioning_relay_enable`, `provisioning_relay_disable`, `provisioning_relay_rotate_token`, `provisioning_relay_grant_key_stage` | absolute setters and toggles; staging replaces any staged key (27 F4); one transaction each |
+| `RECORDED` | `provisioning_host_update`, `provisioning_host_enable`, `provisioning_host_disable`, `provisioning_host_key_capture`, `provisioning_hosts_import`, `provisioning_host_definitions_import` | absolute setters, toggles and upserts; capture re-pins with or without `replace`; an exact retry of the multipart import resends identical bytes; one transaction each |
+| `RECORDED` | `provisioning_pool_replace`, `provisioning_pool_update`, `provisioning_pool_disable` (`DELETE`, a soft disable), `provisioning_pools_import` | absolute setters and a reconciling import; one transaction each |
+| `RECORDED` | `provisioning_check_leases`, `provisioning_fulfillment_convergence` (`run-cycle`), `provisioning_fulfillment_convergence_advance` | a cycle acts on whatever is due when it runs; several transactions, the provider and storefront calls outside them; convergent, so sending again is harmless |
+| `RECORDED` | `provisioning_fulfillment_convergence_pause`, `_resume`, `provisioning_lease_watchdog_pause`, `_resume` | toggles in process memory |
+| `RECORDED` | `provisioning_lease_retry_release` | `release_failed` can recur, so a retry is not recognised; several transactions; read: the lease's state |
+| `RECORDED` | `provisioning_test_rule_add`, `_rule_delete`, `_rule_resume` and their `/test/bare-metal` copies (mock profile only) | a rule added without an ID is new, with one replaced; a delete or resume by name acts on a rule re-added since; in memory; read: the rule list |
+| `RERUN` | `provisioning_relay_create` | `relay_id` required (D40); a repeat answers 409 under it |
+| `RERUN` | `provisioning_relay_grant_key_activate` | names the staged key's ID it activates (D33); a repeat answers the key's current state |
+| `RERUN` | `provisioning_host_create`, `provisioning_pool_create` | a repeat under the caller's name answers 409 and writes nothing; hosts are never deleted and a pool `DELETE` only disables (D33) |
+| `RERUN` | `provisioning_host_capacity`, `provisioning_host_diagnostics` | keyed by `_request_operation_id` (D34) |
+| `RERUN` | `provisioning_vm_create`, `_list`, `_start`, `_shutdown`, `_reboot`, `_destroy`, `_undefine`, `_monitor`, `_reset_password` | keyed by `_request_operation_id`; `JobEngine.submit` answers the existing job (D34) |
+| `RERUN` | `provisioning_job_cancel_admin` | keyed by the job; cancelled is terminal |
+| `RERUN` | `provisioning_lease_terminate`, `provisioning_lease_release_oversight`, `provisioning_lease_force_release` | keyed by the lease; after a later write, the current answer (D30) |
+| `RERUN` | `provisioning_fulfillment_schedule` | keyed by the reservation, its existing assignment answered before the pool's delivery check (D36) |
+| `RERUN` | `provisioning_fulfillment_begin`, `provisioning_fulfillment_teardown` | keyed by the fulfillment request and its state |
+| `RERUN` | `provisioning_identity_rotate` | keyed by the nonce, the audit answered first (D36) |
+| `RERUN` | `provisioning_system_time` | moves only forward; a repeat after a later set answers the current instant's 409 (D30) |
+| `RERUN` | `provisioning_pools_validate`, `provisioning_test_job_evaluate`, `provisioning_host_connectivity` | dry runs and a probe |
+| `RERUN` | `provisioning_job_credentials_admin`, `provisioning_fulfillment_result` | reads answering credentials, no body recorded (D38) |
+| `RERUN` | `provisioning_system_health`, `_status`, `_version`, `provisioning_jobs_list`, `provisioning_job_status`, `provisioning_job_logs`, `provisioning_hosts_list`, `provisioning_host_get`, `provisioning_host_definitions_export`, `provisioning_relays_list`, `provisioning_relay_get`, `provisioning_relay_leases`, `provisioning_pools_list`, `provisioning_pools_export`, `provisioning_pool_get`, `provisioning_lease_list`, `provisioning_lease_get`, `provisioning_fulfillment_status`, `provisioning_test_jobs_summary`, `_drain`, `provisioning_test_job_wait`, `provisioning_test_rules_list` | reads |
+
+**The hosted site** (`kit/site`'s contracts, served by the provisioning service and the
+API-credits service; the definitions import by provisioning alone):
+
+| Declaration | Routes | Basis |
+|---|---|---|
+| `RECORDED` | `capacity_resource_put`, `provisioning_capacity_definitions_import` | absolute replace and upsert; one transaction each, the import's under the ledger lock over the whole document |
+| `RERUN` | `capacity_reserve` | `placement_key` required (D32); a repeat answers the recorded reservation in its current state |
+| `RERUN` | `capacity_release` | `capacity_reservation_id` required (D35); a repeat answers the released reservation |
+| `RERUN` | `capacity_commit`, `capacity_activate_lease`, `capacity_truncate_lease` | keyed by the reservation and monotonic; after a release, the current answer (D30) |
+| `RERUN` | `capacity_probe`, `capacity_resources_list`, `capacity_resource_pools_version`, `capacity_resource_pools_get`, `capacity_buckets_version`, `capacity_buckets_get`, `capacity_snapshot`, `capacity_reservations_list`, `capacity_reservation_get`, `capacity_events` | a dry run and reads |
+
+**API-credits service:**
+
+| Declaration | Routes | Basis |
+|---|---|---|
+| `RECORDED` | `credits_key_adjust` | a relative delta; one transaction; read: the key's grants and balance |
+| `RERUN` | `credits_key_consume`, `credits_key_consume_batch` | `idempotency_key` required; a duplicate answered before the key's status (D36) |
+| `RERUN` | `credits_issue` | keyed by fulfillment and request digest; a re-run supersedes an unused key's secret (D38) |
+| `RERUN` | `credits_key_revoke` | monotonic |
+| `RERUN` | `credits_system_time` | as provisioning's |
+| `RERUN` | `credits_key_verify`, `credits_issuance_get`, `credits_key_grants_list`, `credits_key_usage_list`, `credits_keys_list`, `credits_key_get`, `credits_system_status` | reads |
+
+**Storefronts** (VM, bare metal, API credits; a row names the storefronts that serve
+it):
+
+| Declaration | Routes | Storefronts | Basis |
+|---|---|---|---|
+| `RECORDED` | `negotiate_new` | all | a new thread keyed by nothing; several transactions; read: none for the buyer, accepted (D31) |
+| `RECORDED` | `negotiate_continue`, `admin_force_accept_negotiation` | all | a round moves the thread on; several transactions; read: the administrator's negotiation read |
+| `RECORDED` | `admin_advance_negotiation` | VM, API credits | as above |
+| `RECORDED` | `admin_run_lifecycle_cycle` | all | a cycle acts on whatever is due; several transactions; convergent |
+| `RECORDED` | `admin_pause`, `admin_resume`, `admin_pause_lifecycle_loops`, `admin_resume_lifecycle_loops` | all | toggles in process memory |
+| `RECORDED` | `admin_pause_listing`, `admin_resume_listing` | all | absolute setters; resume republishes after its commit |
+| `RECORDED` | `close_listing` | VM, bare metal | a resume reopens a seller close; several transactions |
+| `RECORDED` | `admin_put_pool_override`, `admin_delete_pool_override` | VM, bare metal | absolute replace and a delete by address; one transaction |
+| `RECORDED` | `admin_reserve_capacity` | VM, bare metal | the site keys it by the route's own request ID (D32); read: the VM's stage event, the site's reservation list |
+| `RECORDED` | `admin_delete_introduction_payloads` | VM, bare metal | a call that found no reveal lets a delayed retry redact a later one |
+| `RECORDED` | `admin_release_reservations`, `admin_refresh_site_projections` | VM | releases every hold held then; refreshes a cache; convergent |
+| `RECORDED` | `create_listing` | VM | a server-made listing ID; several transactions; read: the listings |
+| `RECORDED` | `refund_listing`, `arbitrate_listing`, `claim_listing`, `reclaim_listing` | VM | an unkeyed transfer, arbitration of every pending fulfillment, unconditional status writes; read: the listing's status and stage events |
+| `RECORDED` | `publish-from-quota` | API credits | a server-made listing ID; read: the listings |
+| `RERUN` | `close_listing` | API credits | a seller close is terminal there |
+| `RERUN` | `settle` | all | keyed by escrow and negotiation, an existing settlement answered before the chain, mechanism, escrow and terms checks (D36); credential-bearing on VM and API credits (D38) |
+| `RERUN` | `settle_status` | all | read; credential-bearing on VM and API credits (D38) |
+| `RERUN` | `refund_settlement` | all | keyed by negotiation; a refunded deal is answered first |
+| `RERUN` | `bare_metal_fulfillment_status`, `bare_metal_fulfillment_access`, `bare_metal_fulfillment_result` | bare metal | reads; access credential-bearing (D38) |
+| `RERUN` | `admin_interrupt_deal` | VM, bare metal | keyed by `operation_key`, the VM's splitter branch included (D40) |
+| `RERUN` | `fulfillment_capacity_released`, `lease_ended` | VM, bare metal | name the reservation; terminal and keyed by the site's event |
+| `RERUN` | `deal_heartbeat` | VM | a stored heartbeat of the same deal, principals and send time answered before the skew and "newer" checks (D36) |
+| `RERUN` | `introduction_start` | VM, bare metal | keyed by the obligation, an existing record with the same buyer payload answered before seller contact resolution (D36); no body, contact-bearing (D38) |
+| `RERUN` | `introduction_read` | VM, bare metal | read; contact-bearing (D38) |
+| `RERUN` | `admin_rotate_identity`, `admin_retire_identity` | VM, bare metal | keyed by the nonce, an applied rotation or retirement answered first (D36) |
+| `RERUN` | `admin_time` | all | as provisioning's |
+| `RERUN` | `lifecycle_submit`, `lifecycle_peer` | VM, bare metal | keyed by `operation_key`, a recorded one answered before credential availability (D36); the end receipt by its row |
+| `RERUN` | `admin_evaluate_negotiation`, `admin_verify_settlement`, `admin_evaluate_settlement` | VM, bare metal | dry runs |
+| `RERUN` | `admin_dry_run_lifecycle_cycle` | all | preview |
+| `RERUN` | `admin_system_status`, `admin_system_events`, `admin_list_negotiations`, `admin_get_negotiation`, `admin_settle_wait` | all | reads |
+| `RERUN` | `admin_identity_status`, `admin_get_pool_override`, `admin_list_pool_overrides`, `lifecycle_list`, `lifecycle_seller_read`, `lifecycle_buyer_read` | VM, bare metal | reads |
+| `RERUN` | lease-ready evidence | bare metal | read |
+
+None of the `RECORDED` responses carries a contact or a secret. The absolute setters
+and deletes are `RECORDED`: their bodies are small, and 24 hours of them is bounded,
+where the growth this change removes was not.
 
 Rejected: `RERUN` only where the answer is identical, which keeps bodies whose re-run
 answer already tells the caller what happened; `RERUN` for every idempotent route,
 absolute setters included, which lets a delayed retry clobber a later write (16 F3);
 ordering writes by the signed origin, which is deterministic but not causal; making
-every unsafe route idempotent in its domain now, which pulls negotiation, relays,
-refund, admin reserve and every setter into designs of their own; recording the
+the remaining unsafe routes idempotent in their domains now — negotiation, listing
+creation, refund and every setter — which pulls each into a design of its own (D32,
+D33 and D40 key only the routes whose domain already holds the field or needs one
+field more); recording the
 successful introduction start's body; recording consume, the highest-volume route;
 giving `credits_key_adjust` an idempotency key now.
 
@@ -622,9 +730,13 @@ adjust's commit and before its outcome is recorded, whose exact retry is answere
 running past its lease is renewed, its exact retry refused as in progress and then
 answered with the recorded outcome; and a third, that a write raising after it commits
 is answered with a recorded 500 whose exact retry dispatches nothing, the balance
-adjusted once. Where a `RECORDED` route's
-caller could not learn by reading whether its write applied, that route would need the
-unit of work; the plan's route check names any such route.
+adjusted once. A caller told the outcome is unknown needs to learn by reading
+whether its write applied only where the write is not itself idempotent — a create
+keyed by nothing, a relative write, a round that moves a thread on; for an absolute
+setter, a toggle, a delete by name or an import, sending its intended value again under
+a new request ID is correct either way (D31). Such a route with no read, an operator's
+included, would need the unit of work; D6's table names each such route's read, and
+the buyer's negotiation routes, which have none, are accepted there.
 
 The origin rule depends on the route's kind. On a `RERUN` route the origin decides only
 when the row is pruned; a re-signed retry that finds no row is dispatched, which its
@@ -851,6 +963,26 @@ remain.
   covered by `@query` (D25); the descriptor a public read whose signed answer the
   bootstrap verifies (D24); the filter-spec ETag a query parameter (D26); an applied
   rotation or retirement answering its exact retry first (D27).
+- `marketplace-identity`: a `RERUN` repeat recognised by a record answered as applied
+  before any check governing a new request, one recognised by state answered from
+  current state (D30); a read needed only where the write is not itself idempotent
+  (D31); a secret-bearing route re-reading or superseding its secret (D38); the
+  storefronts' identity rotation and retirement answering an applied request first
+  (D36).
+- `site-capacity`: `placement_key` a required field of every reserve, and release
+  naming its reservation (D32, D35).
+- `physical-provisioning`: `relay_id` required, a grant-key activation naming its
+  staged key, the host job routes keyed by request, the principal rotation and
+  fulfillment scheduling answering an applied request first (D33, D34, D36, D40).
+- `api-credits`: a consume's duplicate key answered before the key's status (D36).
+- `introduction-delivery`: a start's existing record answered before seller contact
+  resolution (D36).
+- `deal-lifecycle`: a lifecycle submit's recorded operation key answered before
+  credential availability (D36).
+- `settlement-servicing`: an accepted heartbeat's exact retry answered as recorded
+  before its skew and newness checks (D36).
+- `deployment-state`: the deal-lifecycle transport rows deleted by a space-freeing
+  migration (D37).
 - `registry-discovery`: seller publication evidence as `publication` and `updates`,
   each the body bytes and the seller's request record (D21).
 - `deal-lifecycle`: the end-delivery acknowledgement signed under version 3; each
@@ -867,13 +999,14 @@ remain.
 - `introduction-delivery`: an exact replay of a failed start completes it; signed
   deliveries bind their endpoint.
 - `compute-provisioning-contract`: a resent capacity-released notification is re-run.
-- `api-credits`: `idempotency_key` required on consume.
+- `api-credits`: `idempotency_key` required on consume and consume-batch.
 - `deployment-state`: the migrate command's `VACUUM`, and the replay table owned by
   `kit/authenticated-requests`.
 
 `settlement-servicing`'s identical-retry scenario concerns the payments service's own
-replay, and `vm-storefront-fulfillment`'s settle-status retry already reads as a
-re-run; neither changes.
+replay and does not change; its signed heartbeat requirement does (D36).
+`vm-storefront-fulfillment`'s settle-status retry already reads as a re-run and does not
+change.
 
 ### D15 — The VM callback middleware's refusals are signed
 
@@ -962,21 +1095,23 @@ D26–D28 in its first session:
   whose query was altered after signing refused, and a public read answered signed and
   verified through the builder's binding among them; reviewed before the cutover
   depends on it.
-- **Round 4, the cutover, in three sessions.** Session 1: the registry, with
-  `publication` and `updates` and their column rename (D21), the public descriptor
-  read and the bootstrap client (D24), the filter-spec ETag as a query parameter
-  (D26), the rotation and retirement retries answered first (D27), the provisioning
-  service, the site kit and the API-credits service, and deal-servicing, with its
-  lifecycle evidence and the end-delivery receipt as records (D23), with their typed
-  clients, route declarations and double-dispatch cases, adjust's crash-boundary, renewed-lease and post-commit 500 cases (D7), the relay rotation and staging interleaved-write cases (D6), the table drops, the consume key
-  and the retention and sweep-interval settings. Session 2: the three storefronts, with their declarations and
-  cases, their evidence captured as records (D23), the introduction change, and the VM
-  callback's signed refusals. Session 3: the buyers' clients and the buyer store
-  capturing records, the VM buyer's pricing verification of version 3 and stored
-  version 2 publications and of its negotiation evidence (D22), a typed client's time advance beyond the skew (D8), the signed-delivery binding (D10a), the end-to-end lanes, and the
-  documentation closeout promotes. Reviewed, then closeout.
+- **Round 4, the cutover: one review round, in as many sessions as the implementer
+  needs.** The plan maps its sections onto sessions; as it stands, section 7 (the
+  provisioning service, its hosted site, the site kit and the API-credits service),
+  section 9 (the deal-lifecycle routes), sections 10–14 (the core storefront, the three
+  storefronts and the introduction start), then sections 15–16 (buyers, signed
+  deliveries, the end of version 2 signing, and the end-to-end proof); the registry,
+  section 6, is done. Each authority's section declares its routes from D6's table
+  and carries D36's reorders for its authority; the reserve and release wire change
+  (D32, D35) lands in section 7 with every caller of `kit/site-client`, since that
+  client moves there. Reviewed once, then closeout. Section 7 is the largest, and runs
+  in a fresh session or with compaction at the implementer's recommendation.
 
 The cutover is atomic (D9), so round 4 lands whole before any end-to-end lane passes.
+
+*Section 7's return:* round 4 first named three sessions with fixed contents. The owner
+chose one review round in as many sessions as the implementer needs, the plan mapping
+its sections onto them.
 
 *Section 6's return:* the first cadence had two rounds, the cutover in round 2. Section
 6 stopped before its first task on finding that the cutover left the retained evidence
@@ -1290,7 +1425,8 @@ nothing the public rotation read does not serve. Each route's double-dispatch ca
 (D5) sends its retry after the intent's expiry and after a later write.
 
 Rejected: making both `RECORDED`, which keeps bodies for a domain that recognises the
-retry; leaving the order, which fails D6's criterion.
+retry; leaving the order, which fails D6's criterion. D30 states this rule for every
+authority, and D36 lists the routes elsewhere it reorders.
 
 ### D28 — Singleton and collection reads carry no `Market-Resource`
 
@@ -1314,6 +1450,240 @@ Rejected, as at section 6's first return: folding the amendments into the cutove
 first session, which would have a profile change first reviewed beside five
 authorities' cutover; placing each piece in the section that first needs it, which
 splits one profile change across its consumers.
+
+### D30 — A `RERUN` route recognises an applied request before judging it again
+
+Section 7 stopped at its first task because D6's table omitted routes its criterion
+made `RECORDED`. Mapping every route showed that the criterion's second half — a
+`RERUN` route's answer tells a caller who lost its acknowledgement what happened — had
+been checked only for the registry (D27), and failed on about twenty routes in two
+ways: a check that no later write caused (an intent's expiry, a body timestamp's
+freshness, configuration, credential availability, another system's state) refused a
+repeat before the domain recognised it; or a later write had moved the object on and
+the repeat was answered with its current state.
+
+The rule follows from how the domain recognises the repeat:
+
+- **Recognised by a record the first request left** — a stored key, a nonce's audit, a
+  stored heartbeat, a settlement's job, an introduction's record — the repeat is
+  answered as applied, from that record, before any check that governs only whether a
+  new request may apply, whatever has happened since.
+- **Recognised only by the state it produced**, which a later write can replace — a
+  reservation committed or released, a lease ended, an instant reached — the repeat is
+  answered as a first request would be answered now; the caller learns the current
+  state, which is what it must act on, and the effect half of D6 guarantees the repeat
+  undid nothing. This is the double-dispatch harness's "the retry's answer is the
+  route's current answer" (D5), and the read scenario's "answers the current state".
+- **Not recognisable** by either: the route is `RECORDED`, or is made recognisable
+  (D32, D33, D40).
+
+The engineering form of this, independent of replay, opens from idempotency: an
+operation can be idempotent and safe to repeat when it has no side effect, when its
+side effect is itself idempotent, or when the service can recognise a repeat and
+handle the repeat safely; a recognised repeat is recognised before it is judged again,
+and the record-or-state distinction above says how it is answered. The replay-specific
+part — exact retries, keeping a first outcome, the double-dispatch proof — stays
+repository guidance, since replay has arisen only here.
+
+Rejected: answering every repeat as applied even after later writes, which makes every
+domain remember per request what it applied, the replay layer rebuilt in each; making
+every route that fails the strict reading `RECORDED`, impossible for the settles, whose
+answers carry credentials (D6), and a reversal of D27; dropping the answer half, which
+reverses D27 and tells callers that did everything right that they failed.
+
+### D31 — A `RECORDED` route needs a read only where its write is not itself idempotent
+
+D7 asked each `RECORDED` route to let a caller told `exact_retry_outcome_unknown`, or
+answered a recorded 500, learn by reading whether its write applied. That read matters
+only where sending the write again under a new request ID could apply it twice: a
+create keyed by nothing, a relative write, a round that moves a thread on. An absolute
+setter, a toggle, a delete by name or an import is a write whose side effect is itself
+idempotent (D30), so sending the intended value again is correct whether or not the
+first attempt applied, and needs no read. An operator's read counts. D6's table names
+each read.
+
+The buyer's `negotiate_new` and `negotiate_continue` have none: negotiation reads are
+the administrator's, and the buyer's lifecycle read exists only after acceptance. This
+is accepted. A buyer told the outcome is unknown opens a fresh negotiation; an orphan
+thread is inert, and a duplicate capacity hold placed by a round-0 acceptance lapses
+at its expiry. It arises only after a crash or an outage of a whole lease, since a live
+attempt renews its lease (D7).
+
+Rejected: a read for every `RECORDED` route, which adds reads for relay token rotation,
+convergence pause state, payload deletion, fleet release and bare metal's reservations
+that protect nothing; a buyer negotiation read on all three storefronts, a new route,
+contract and client operation each, for an inert orphan; a unit of work for
+negotiation, rejected under 27 F1; dropping the requirement, which stops checking
+future creates.
+
+### D32 — A capacity reserve requires its placement key
+
+The site's reserve is recognised only by `deal_ref.placement_key`; by escrow alone a
+repeat after a release reserves fresh capacity, and with neither it reserves twice.
+The version 3 reserve request carries `placement_key` as a required top-level field,
+naming one placement, and `deal_ref` returns to bookkeeping the site records and never
+interprets:
+
+```json
+{
+  "placement_key": "neg-0c91:hold",
+  "claim": {"offering_mode": "api_credits", "units": 500, "resource_id": "quota-eu-1"},
+  "deal_ref": {"listing_id": "lst-7f3a", "negotiation_id": "neg-0c91"},
+  "ttl_seconds": 900
+}
+```
+
+A repeat under a recorded key answers the recorded reservation in its current state;
+one changing the claim, pool, site, offering mode or lease window is refused with
+nothing written. `capacity_reserve` is `RERUN`. The ledger's recognition by escrow
+alone and its adoption of an unkeyed row go; the ledger already stores the key as its
+own column.
+
+Every caller, through this: the VM negotiation hold and compute delivery's hold replay
+and settlement reserve move their `{nid}:hold` and `{nid}:settlement` keys from
+`deal_ref` to the field; the API-credits storefront's quota hold sends `{nid}:hold`;
+the administrator reserve route sends `admin:<request_id>`, its own admitted request's
+ID, so `kit/capacity-publication`'s `CapacityAdminRouteService.reserve` gains a
+placement-key argument the VM and bare-metal routes take from their admission's request
+record (D23); `CapacityRuntime.reserve`, `CapacityEffects.reserve`,
+`AggregateCapacityClient.reserve` and `SiteCapacityClient.reserve` gain the parameter;
+the API-credits service's in-process `_commit_quota` passes `{fulfillment_id}:issuance`.
+
+Within this cutover the wire may change wherever that helps idempotency or retention
+(an owner's principle recorded for this design only): the site client mints a fresh
+request ID per call, so a caller's own retry is a new request that only a domain key
+recognises, beyond the retention too.
+
+Rejected: requiring the key inside `deal_ref`, a required field hidden in a map
+documented as opaque; `RECORDED` with the wire unchanged, which keeps each deal's
+reserve body and leaves a caller's retries under new IDs unrecognised.
+
+### D33 — The routes D6's first table missed
+
+By D6's criterion the setters, toggles, imports and deletes by name the first table
+omitted are `RECORDED`: on provisioning, relay `PATCH`, `enable` and `disable`; host
+`PUT`, `enable`, `disable`, `host-keys/capture` (with or without `replace`), the host
+import and definitions import; pool `PUT`, `PATCH`, `DELETE` and import; the
+convergence and lease-watchdog pause and resume; `retry-release`; the mock rule routes;
+on the hosted site, `PUT capacity/resources/{id}` and the definitions import; on the
+storefronts, the lifecycle-loop pause and resume, the pool-override `PUT` and `DELETE`,
+the VM and bare-metal `close_listing`, VM `claim_listing` and `reclaim_listing`, and
+`admin_delete_introduction_payloads`.
+
+Two become `RERUN` instead. A grant-key activation names the staged key's ID it
+activates, a required field taken from the stage route's answer, so a repeat after a
+later staging cannot activate a key the operator has not added to the relay's plugin,
+and is answered with that key's current state. Host and pool create answer a repeat
+409 under the caller's name and write nothing; hosts are never deleted and a pool
+`DELETE` only disables, so they are recognised by state (D30). API credits'
+`close_listing` stays `RERUN`: a seller close there is terminal.
+
+Rejected: `RECORDED` for activation with the wire unchanged, which leaves it activating
+whatever key is staged; `RECORDED` for host and pool create, which keeps bodies for
+repeats the domain already refuses.
+
+### D34 — The VM job routes and the host job reads are keyed by request
+
+All nine VM job routes, not only `reset-password`, derive their job's operation ID from
+the request (`_request_operation_id`), and `JobEngine.submit` answers a repeat with the
+existing job, so they are `RERUN`. Host `capacity` and `diagnostics`, GETs that submit
+a job with no operation ID, pass `_request_operation_id` as `vms_controller.py` does
+and are `RERUN`. Rejected: D6's first table's `RECORDED` for the VM job routes, which
+records bodies for repeats the domain recognises; `RECORDED` for the two GETs.
+
+### D35 — A capacity release names its reservation
+
+The version 3 release request requires `capacity_reservation_id`, and
+`capacity_release` is `RERUN`: a repeat by ID answers the released reservation. The
+escrow form, which releases whatever reservation the escrow holds when it runs, goes;
+no caller sends it. The API-credits storefront's fulfillment service, which falls back
+to it with no escrow and so releases nothing, skips the call when it holds no
+reservation ID. Rejected: `RECORDED`, keeping a form nobody uses.
+
+### D36 — Where an applied request is answered first
+
+Under D30, these routes answer a repeat their record recognises before the checks that
+govern a new request:
+
+- provisioning's principal rotation (`principal_authority.py:rotate`): the nonce's
+  audit, before the active-principal and intent-expiry checks;
+- provisioning's fulfillment scheduling (`schedule_resource`): the reservation's
+  existing assignment, before the pool's delivery check;
+- the storefronts' identity rotation (`identity_authority.py:apply_rotation`): the
+  nonce, before proof expiry and the overlap bound; and retirement
+  (`complete_rotation`): "already retired", before "replacement still primary";
+- the deal heartbeat (`core_storefront/heartbeats.py:record_heartbeat`): a stored
+  heartbeat of the same deal, principals and send time, answered as recorded, before
+  the skew and "newer" checks;
+- credits consume (`keys_service.py:consume`): the duplicate idempotency key, before
+  the key's status;
+- the introduction start (`introduction_routes.py:start`): an existing record with the
+  same buyer payload, before the seller contact is resolved from configuration;
+- the lifecycle submit (`seller.py:submit`): a recorded `operation_key`, before
+  credential availability;
+- settle: the VM Alkahest stage's existing coordinator job before its chain and
+  mechanism checks, API credits' existing progress before `verify_escrow_against_plan`,
+  and bare metal's status checks before `physical_terms`.
+
+Each route's double-dispatch case gains a variant whose repeat follows the precondition
+that moved (D5). A repeat signed by a principal that has since left the trusted set is
+refused at admission, as for the registry under D27; on the storefronts the identity
+status read tells that caller what applied, and on provisioning, which has no read of
+its trusted principals, an operator does.
+
+Rejected: recording the settle and dispute reorders as a gap, each with a read that
+tells its caller meanwhile, which leaves callers that did everything right told they
+failed.
+
+### D37 — The deal-lifecycle transport rows go
+
+The deal-lifecycle routes stop writing their `_lifecycle_transport` rows in
+`servicing_operations`, since the admission core's reservation replaces them, and a
+migration in deal-servicing's chain deletes the rows written, declared as freeing
+space, as D9 does for the 0.4.0 replay tables: under the cutover no version 2 retry can
+arrive, and the rows are replay state, not evidence. The `lifecycle-request:` and
+`lifecycle-response:` evidence items are untouched. Rejected: leaving the rows, a
+fourth unbounded store frozen at its size; writing them beside the core's reservation.
+
+### D38 — A secret-bearing route re-reads or supersedes its secret
+
+A response carrying a secret is `RERUN` where a re-run answers the secret again or
+supersedes it, and records no body: the credential reads — VM and API-credits `settle`
+and `settle_status`, bare metal's fulfillment access, provisioning's job credentials
+and fulfillment result — re-read theirs; credits issuance supersedes an unused key's
+secret; the introductions re-read the counterparty's contact. D6 first said only
+"supersedes", which describes issuance alone. API credits' `settle` and `settle_status`
+join the routes that record no body; they had no stripped-body declaration and recorded
+the buyer's API key.
+
+### D39 — D6's table is complete
+
+D6's table lists every route of every authority by its declaration and basis, the
+registry as section 6 built it, mapped against the code at section 7's return, with each
+`RECORDED` route's read where D31 asks for one, each `RECORDED` route writing in more
+than one transaction, and D36's reorders. Each section declares its routes from it and
+checks its declarations against it; a route the table does not list, found at
+implementation, still stops its section as a design question. A shared row names only
+the storefronts that serve it: `admin_release_reservations` and
+`admin_refresh_site_projections` are the VM storefront's, and bare metal has no
+`admin_advance_negotiation`. The lifecycle-loop `pause` and `resume` paths precede the
+lifecycle router's `/api/v1/admin/lifecycle/{negotiation_id}`, which matches them too.
+
+### D40 — Creates keyed by nothing are keyed where their domain already holds the field
+
+Relay create requires `relay_id`, whose column and uniqueness exist, so a repeat after
+a later `PATCH` moved the endpoint is refused 409 under its ID rather than creating a
+second relay; it is `RERUN`. The VM interrupt's splitter-escrow branch goes through the
+same `operation_key` as the hosted branch, so it is `RERUN` like bare metal's.
+`negotiate_new`, `publish-from-quota` and VM `create_listing` stay `RECORDED`.
+
+Rejected: keying every create now — a buyer-chosen negotiation key in
+`kit/negotiation-runtime` and its three storefronts and the buyer clients, a
+seller-chosen listing key in two listing services — which would close D31's accepted
+gap and drop the busiest recorded body, but pulls negotiation and listing persistence
+into a change already large; it would be its own change, depending on this one. Keeping
+relay create and the splitter interrupt `RECORDED`, which leaves one recognisable only
+by the replay layer and the other with two behaviours under one operation name.
 
 ## Open Questions
 
