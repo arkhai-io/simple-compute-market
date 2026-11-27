@@ -1,18 +1,39 @@
-"""In-process registry integration fixtures with canonical marketplace signers."""
+"""In-process registry integration fixtures with canonical marketplace signers.
+
+Each test runs the registry's served application over its own database, built by
+the registry's migration chain, with the admission core's replay store bound to
+it through an engine of its own, as startup binds it.
+"""
 
 from __future__ import annotations
-import time
+
+import json
 import uuid
+from pathlib import Path
 
 import httpx
+import injected_time
 import pytest
 import pytest_asyncio
+from market_authenticated_requests.sqlalchemy_support import sqlalchemy_replay_store
 from market_core import RegistryDescriptor
-from market_identity import Ed25519Signer, Eip191Signer, TrustedIdentitySet
+from market_identity import (
+    Ed25519Signer,
+    Eip191Signer,
+    MarketRequest,
+    TrustedIdentitySet,
+    build_public_request,
+    sign_market_request,
+)
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-from registry_client import RegistryClient
+from registry_client import RegistryClient, request_route
+from core_registry.api import admission
+from core_registry.api.descriptor_routes import DESCRIPTOR_OPERATION
 from core_registry.db.database import get_db
-from core_registry.main import app
+from core_registry.db.migrations import migrate_database
+from core_registry.main import api, app
 
 MAKER_SECRET = bytes.fromhex(
     "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
@@ -23,6 +44,7 @@ TAKER_SECRET = bytes.fromhex(
 ED25519_SECRET = bytes(range(32))
 MAKER_ADDRESS = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
 TAKER_ADDRESS = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+DESCRIPTOR_PATH = "/.well-known/arkhai/registry-descriptor.json"
 
 
 @pytest.fixture
@@ -40,11 +62,43 @@ def ed25519_signer() -> Ed25519Signer:
     return Ed25519Signer(ED25519_SECRET)
 
 
+@pytest.fixture
+def registry_database(tmp_path: Path) -> str:
+    """The URL of a database the registry's migration chain built."""
+
+    url = f"sqlite:///{tmp_path / 'served-registry.db'}"
+    migrate_database(url)
+    return url
+
+
+@pytest.fixture
+def db_engine(registry_database: str):
+    engine = create_engine(registry_database, connect_args={"check_same_thread": False})
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db_sessions(db_engine):
+    return sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+
+
+@pytest.fixture
+def db_session(db_sessions):
+    """A session for a test's own setup and inspection; each request the
+    application serves opens and closes its own, as in production."""
+
+    session = db_sessions()
+    yield session
+    session.close()
+
+
 @pytest.fixture(autouse=True)
-def registry_authority(monkeypatch):
+def registry_authority(monkeypatch, registry_database: str):
     signer = Ed25519Signer(bytes(range(1, 33)))
-    app.state.registry_authority_signer = signer
-    app.state.registry_descriptor = RegistryDescriptor.model_validate(
+    replay_engine = create_engine(registry_database)
+    admission.bind(signer=signer, store=sqlalchemy_replay_store(replay_engine))
+    api.state.registry_descriptor = RegistryDescriptor.model_validate(
         {
             "access": {"posture": "public"},
             "authority": {
@@ -62,140 +116,88 @@ def registry_authority(monkeypatch):
         "test-registry",
     )
     yield signer
-    del app.state.registry_authority_signer
-    del app.state.registry_descriptor
+    del api.state.registry_descriptor
+    replay_engine.dispose()
 
 
 @pytest.fixture(autouse=True)
-def sign_raw_marketplace_requests(monkeypatch, registry_authority, db_session):
-    from market_identity import (
-        EMPTY_BODY,
-        RequestEnvelope,
-        canonical_body_hash,
-        sign_request,
-    )
+def serve_requests_from_the_test_database(db_sessions):
+    def override_get_db():
+        session = db_sessions()
+        try:
+            yield session
+        finally:
+            session.close()
 
-    caller = Ed25519Signer(bytes(range(32)))
+    api.dependency_overrides[get_db] = override_get_db
+    yield
+    api.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def sign_raw_marketplace_requests(monkeypatch, registry_authority):
+    """Sign a test's raw request as a seller would, under the version 3 profile.
+
+    A request already carrying a request identity -- one the typed client signed,
+    or a test's own -- is sent as it is, and so is one marked ``X-Test-Unsigned``.
+    The descriptor read is sent as its public operation.
+    """
+
+    caller = Ed25519Signer(ED25519_SECRET)
+    audience = TrustedIdentitySet(identities=(registry_authority.identity,))
     original = httpx.AsyncClient.request
-
-    def context(method: str, path: str):
-        parts = [part for part in path.split("/") if part]
-        if path == "/filter-spec":
-            return "filter.get", "filter-spec"
-        if path == "/.well-known/arkhai/registry-descriptor.json":
-            return "registry.descriptor.read", "registry-descriptor"
-        if path == "/api/v1/listings/validate-publish":
-            return "listing.validate", "listings"
-        if path == "/api/v1/system/health":
-            return "health.read", "health"
-        if path == "/api/v1/system/stats":
-            return "system.stats.read", "system"
-        if parts[:1] == ["listings"]:
-            if len(parts) == 1:
-                return (
-                    "listing.publish" if method == "POST" else "listing.list",
-                    "listings",
-                )
-            return {
-                "GET": ("listing.get", parts[1]),
-                "PUT": ("listing.update", parts[1]),
-                "DELETE": ("listing.delete", parts[1]),
-            }.get(method)
-        if parts[:1] == ["publishers"]:
-            if len(parts) == 1:
-                return "publisher.list", "publishers"
-            if len(parts) == 2:
-                return "publisher.get", parts[1]
-            if parts[2] == "identity-rotations":
-                if len(parts) == 3:
-                    return "publisher.identity.rotate", parts[1]
-                if len(parts) == 4:
-                    return "publisher.identity.rotation.read", f"{parts[1]}:{parts[3]}"
-                if len(parts) == 5 and parts[4] == "retire":
-                    return "publisher.identity.retire", f"{parts[1]}:{parts[3]}"
-        return None
 
     async def signed_request(client, method, url, **kwargs):
         method = method.upper()
-        headers = dict(kwargs.get("headers") or {})
-        if headers.pop("X-Test-Unsigned", None):
-            kwargs["headers"] = headers
-            return await original(client, method, url, **kwargs)
-        if "X-Market-Signature" in headers:
-            return await original(client, method, url, **kwargs)
-        route = context(method, httpx.URL(url).path)
-        if route is None:
-            return await original(client, method, url, **kwargs)
-        operation, resource = route
-        if method == "GET":
-            body = {
-                "query": sorted(
-                    [
-                        list(item)
-                        for item in httpx.QueryParams(
-                            kwargs.get("params") or {}
-                        ).multi_items()
-                    ]
-                )
-            }
-            if_match = httpx.Headers(headers).get("If-Match")
-            if if_match is not None:
-                body["if_match"] = (
-                    if_match.strip().removeprefix("W/").strip().strip('"')
-                )
+        headers = dict(kwargs.pop("headers", None) or {})
+        if headers.pop("X-Test-Unsigned", None) or "Market-Request-ID" in headers:
+            return await original(client, method, url, headers=headers, **kwargs)
+        for unused in ("data", "files"):
+            if kwargs.get(unused) is not None:
+                raise AssertionError(f"a raw registry request carries no {unused}")
+            kwargs.pop(unused, None)
+        target = httpx.URL(str(url), params=kwargs.pop("params", None))
+        if target.path == DESCRIPTOR_PATH and method == "GET":
+            headers.update(build_public_request(method="GET", operation=DESCRIPTOR_OPERATION).headers)
+            return await original(client, method, str(target), headers=headers, **kwargs)
+        try:
+            operation, resource = request_route(method, target.path)
+        except (KeyError, ValueError):
+            return await original(client, method, str(target), headers=headers, **kwargs)
+        document = kwargs.pop("json", None)
+        content = kwargs.pop("content", None)
+        if document is not None:
+            body = json.dumps(document, separators=(",", ":")).encode()
+            headers["Content-Type"] = "application/json"
         else:
-            body = kwargs.get("json", EMPTY_BODY)
-        authenticated = sign_request(
+            body = content or b""
+        now = injected_time.now()
+        signed = sign_market_request(
             signer=caller,
-            envelope=RequestEnvelope(
-                role="seller",
-                principal=caller.identity,
+            request=MarketRequest(
                 method=method,
+                role="seller",
                 operation=operation,
                 resource=resource,
                 request_id=uuid.uuid4().hex,
-                timestamp=int(time.time()),
-                body_hash=canonical_body_hash(body),
+                origin=now,
             ),
+            body=body,
+            created=now,
+            query="?" + target.query.decode() if target.query else "",
+            audience=audience,
         )
-        headers.update(
-            {
-                "X-Market-Signature-Version": authenticated.protocol,
-                "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
-                "X-Market-Identity-Identifier": authenticated.principal.identifier,
-                "X-Market-Role": authenticated.role,
-                "X-Market-Request-ID": authenticated.request_id,
-                "X-Market-Timestamp": str(authenticated.timestamp),
-                "X-Market-Signature": authenticated.proof.value,
-            }
-        )
-        kwargs["headers"] = headers
-        return await original(client, method, url, **kwargs)
+        headers.update(signed.headers)
+        return await original(client, method, str(target), headers=headers, content=body, **kwargs)
 
-    from core_registry.db.database import get_db
-
-    def override_get_db():
-        yield db_session
-
-    app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr(httpx.AsyncClient, "request", signed_request)
-    yield
-    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest_asyncio.fixture
 async def registry_client(
-    db_session,
     maker_signer,
     registry_authority,
 ) -> RegistryClient:
-    def _override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = _override_get_db
     async with RegistryClient(
         "http://test",
         transport=httpx.ASGITransport(app=app),
@@ -207,7 +209,6 @@ async def registry_client(
         registry_authority="test-registry",
     ) as client:
         yield client
-    app.dependency_overrides.clear()
 
 
 def _make_publisher(db_session, signer, storefront_url: str):

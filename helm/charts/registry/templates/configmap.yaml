@@ -32,6 +32,17 @@
 {{- $lines = append $lines (include "registry.envLine" (list "ROOT_PATH" ($config.rootPath | default ""))) -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_REQUIRE_READ_API_KEY" ($config.requireReadApiKey | default false))) -}}
 {{- $lines = append $lines (include "registry.envLine" (list "REGISTRY_REQUIRE_WRITE_API_KEY" ($config.requireWriteApiKey | default false))) -}}
+{{- /* How long recorded outcomes answer exact retries, and how often expired
+  replay rows are swept, in seconds; each unset leaves the registry's default
+  of a day, and each stated renders as stated, for the registry to refuse a
+  value that is not a positive integer. */}}
+{{- $authenticated := $config.authenticatedRequests | default dict -}}
+{{- if hasKey $authenticated "recordedOutcomeRetentionSeconds" -}}
+{{- $lines = append $lines (include "registry.envLine" (list "AUTHENTICATED_REQUESTS__RECORDED_OUTCOME_RETENTION_SECONDS" $authenticated.recordedOutcomeRetentionSeconds)) -}}
+{{- end -}}
+{{- if hasKey $authenticated "replayPruneIntervalSeconds" -}}
+{{- $lines = append $lines (include "registry.envLine" (list "AUTHENTICATED_REQUESTS__REPLAY_PRUNE_INTERVAL_SECONDS" $authenticated.replayPruneIntervalSeconds)) -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

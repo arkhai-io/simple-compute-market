@@ -1,56 +1,75 @@
-"""Body-bound EIP-191 and Ed25519 registry mutation coverage."""
+"""Body-bound EIP-191 and Ed25519 registry mutation coverage, and how the
+registry's admission resolves a replay, an exact retry, and a request no route
+serves or that states another operation.
+
+Application integration: the running registry through the typed client; raw
+requests only on rejection paths the typed client cannot construct, each signed
+by ``kit/identity``'s profile over the exact bytes it carries.
+"""
 
 from __future__ import annotations
 
-import time
-from datetime import datetime, timedelta
-import uuid
+import json
 
 import httpx
+import injected_time
 import pytest
 
+from market_authenticated_requests import REPLAY_TABLE, ROUTE_FAILURE_DETAIL
 from market_identity import (
-    RequestEnvelope,
+    MarketRequest,
+    RequestBinding,
     TrustedIdentitySet,
-    canonical_body_hash,
-    sign_request,
+    sign_market_request,
+    verify_market_response,
 )
-from registry_client import RegistryClient, RegistryClientError
+from registry_client import RegistryClient, RegistryClientError, sign_registry_request
 from registry_client.models import ListingRequest, UpdateListingRequest
+from sqlalchemy import text
 from core_registry.main import app
 
 pytestmark = pytest.mark.asyncio
 
 
-def _signed_headers(
-    *,
-    signer,
-    method: str,
-    operation: str,
-    resource: str,
-    body,
-) -> dict[str, str]:
-    envelope = RequestEnvelope(
+def _signed(signer, registry, method: str, path: str, document: dict | None = None):
+    """A raw request the typed client would sign: its target, headers and the
+    exact body bytes its signature covers."""
+
+    body = b"" if document is None else json.dumps(document, separators=(",", ":")).encode()
+    signed = sign_registry_request(
+        signer=signer,
         role="seller",
-        principal=signer.identity,
         method=method,
-        operation=operation,
-        resource=resource,
-        request_id=uuid.uuid4().hex,
-        timestamp=int(time.time()),
-        body_hash=canonical_body_hash(body),
+        path=path,
+        body=body,
+        audience=TrustedIdentitySet(identities=(registry.identity,)),
     )
-    authenticated = sign_request(signer=signer, envelope=envelope)
-    return {
-        "Content-Type": "application/json",
-        "X-Market-Signature-Version": authenticated.protocol,
-        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
-        "X-Market-Identity-Identifier": authenticated.principal.identifier,
-        "X-Market-Role": authenticated.role,
-        "X-Market-Request-ID": authenticated.request_id,
-        "X-Market-Timestamp": str(authenticated.timestamp),
-        "X-Market-Signature": authenticated.proof.value,
-    }
+    return signed, body
+
+
+def _raw() -> httpx.AsyncClient:
+    return httpx.AsyncClient(base_url="http://test", transport=httpx.ASGITransport(app=app))
+
+
+def _signed_by(response: httpx.Response, binding: RequestBinding, registry) -> bool:
+    return verify_market_response(
+        status=response.status_code,
+        headers=response.headers,
+        body=response.content,
+        request=binding,
+        expected_principals=TrustedIdentitySet(identities=(registry.identity,)),
+        now=injected_time.now(),
+        max_skew=300,
+    ).verified
+
+
+def _replay_rows(db_session) -> list[tuple]:
+    return [
+        tuple(row)
+        for row in db_session.execute(
+            text(f"SELECT request_id, resolution, outcome_status FROM {REPLAY_TABLE} ORDER BY request_id")
+        )
+    ]
 
 
 def _listing(listing_id: str, *, region: str = "us") -> ListingRequest:
@@ -121,39 +140,20 @@ async def test_eip191_publisher_remains_supported(registry_client, maker_signer)
 async def test_the_publish_route_refuses_a_retired_listing_shape(
     registry_client,
     ed25519_signer,
+    registry_authority,
 ):
-    """The mutation boundary, which nothing covered.
-
-    The dry run has always had an opinion about the listing shape; `POST
-    /listings` had none. It stored `body.get("listing_resource", {})`
-    verbatim, so a correctly signed publisher could be told `valid=false` by
-    the dry run and publish successfully anyway -- the permanent requirement
-    that a registry MUST NOT accept a second spelling was unenforced where it
-    mattered.
-
-    Raw HTTP because the typed client cannot construct a retired key, and
-    signed properly because the point is that a *legitimate* publisher is
-    refused on shape rather than on authentication. A 401 here would mean the
-    test proved nothing.
-    """
+    """The mutation boundary: a correctly signed publisher is refused on its
+    listing's shape, not on its authentication. Raw HTTP because the typed
+    client cannot construct a retired key; a 401 here would prove nothing."""
     body = _listing("retired-at-publish").to_dict()
     body["listing_resource"] = {
         "gpu_model": "H200",
         "region": "us-west",
         "virtualization_type": "vm",
     }
-    headers = _signed_headers(
-        signer=ed25519_signer,
-        method="POST",
-        operation="listing.publish",
-        resource="listings",
-        body=body,
-    )
-    async with httpx.AsyncClient(
-        base_url="http://test",
-        transport=httpx.ASGITransport(app=app),
-    ) as raw:
-        response = await raw.post("/listings", json=body, headers=headers)
+    signed, content = _signed(ed25519_signer, registry_authority, "POST", "/listings", body)
+    async with _raw() as raw:
+        response = await raw.post(signed.target, content=content, headers=signed.headers)
 
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
@@ -164,22 +164,14 @@ async def test_the_publish_route_refuses_a_retired_listing_shape(
 async def test_the_publish_route_refuses_the_retired_shape_key(
     registry_client,
     ed25519_signer,
+    registry_authority,
 ):
     """`offer_resource` at the top level, same boundary."""
     body = _listing("retired-shape-at-publish").to_dict()
     body["offer_resource"] = body["listing_resource"]
-    headers = _signed_headers(
-        signer=ed25519_signer,
-        method="POST",
-        operation="listing.publish",
-        resource="listings",
-        body=body,
-    )
-    async with httpx.AsyncClient(
-        base_url="http://test",
-        transport=httpx.ASGITransport(app=app),
-    ) as raw:
-        response = await raw.post("/listings", json=body, headers=headers)
+    signed, content = _signed(ed25519_signer, registry_authority, "POST", "/listings", body)
+    async with _raw() as raw:
+        response = await raw.post(signed.target, content=content, headers=signed.headers)
 
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["retired_fields"] == ["offer_resource"]
@@ -188,68 +180,71 @@ async def test_the_publish_route_refuses_the_retired_shape_key(
 async def test_body_mutation_after_signing_is_rejected(
     registry_client,
     ed25519_signer,
+    registry_authority,
+    db_session,
 ):
+    """Rejection path: a body changed after signing, which the typed client
+    never sends; refused signed, before anything is written."""
     original = _listing("mutated-listing").to_dict()
-    headers = _signed_headers(
-        signer=ed25519_signer,
-        method="POST",
-        operation="listing.publish",
-        resource="listings",
-        body=original,
-    )
+    signed, _ = _signed(ed25519_signer, registry_authority, "POST", "/listings", original)
     mutated = {**original, "listing_resource": {"gpu_model": "H200", "region": "eu"}}
-    async with httpx.AsyncClient(
-        base_url="http://test",
-        transport=httpx.ASGITransport(app=app),
-    ) as raw:
+    async with _raw() as raw:
         response = await raw.post(
-            "/listings",
-            json=mutated,
-            headers=headers,
+            signed.target, content=json.dumps(mutated, separators=(",", ":")).encode(), headers=signed.headers
         )
     assert response.status_code == 401
-    assert response.json()["detail"] == "invalid_proof"
+    assert _signed_by(response, signed.binding, registry_authority)
+    assert db_session.execute(text("SELECT COUNT(*) FROM listings")).scalar() == 0
 
 
-async def test_exact_request_replay_returns_recorded_outcome_once(
+async def test_an_exact_retry_of_a_publication_is_answered_with_its_recorded_outcome(
     registry_client,
     db_session,
 ):
-    request_id = "same-request"
-    timestamp = int(time.time())
-    first = await registry_client.publish_listing(
-        _listing("replay-listing"),
-        request_id=request_id,
-        timestamp=timestamp,
-    )
-    second = await registry_client.publish_listing(
-        _listing("replay-listing"),
-        request_id=request_id,
-        timestamp=timestamp,
-    )
+    first = await registry_client.publish_listing(_listing("replay-listing"), request_id="same-request", origin=injected_time.now())
+    origin = injected_time.now()
+    second = await registry_client.publish_listing(_listing("replay-listing"), request_id="same-request", origin=origin)
+
     assert second == first
-
-    from core_registry.db.models import Listing, PublisherReplayReservation
-
-    assert db_session.query(Listing).count() == 1
-    assert db_session.query(PublisherReplayReservation).count() == 1
+    assert db_session.execute(text("SELECT COUNT(*) FROM listings")).scalar() == 1
+    assert _replay_rows(db_session) == [("same-request", "recorded", 201)]
 
 
-async def test_changed_reuse_of_request_id_is_rejected(
-    registry_client,
-):
-    request_id = "changed-request"
-    timestamp = int(time.time())
-    await registry_client.publish_listing(
-        _listing("changed-a", region="us"),
-        request_id=request_id,
-        timestamp=timestamp,
-    )
+async def test_a_delayed_publication_retry_after_a_later_update_keeps_the_update(registry_client, db_session):
+    """registry-discovery "Completed publication is retried": the retry is
+    answered with the publication's recorded outcome and runs nothing, so the
+    update made since stands."""
+    origin = injected_time.now()
+    published = await registry_client.publish_listing(_listing("later-update"), request_id="publish-1", origin=origin)
+    await registry_client.update_listing("later-update", UpdateListingRequest(updates={"status": "closed"}))
+
+    retried = await registry_client.publish_listing(_listing("later-update"), request_id="publish-1", origin=origin)
+
+    assert retried == published
+    assert (await registry_client.get_listing("later-update")).status == "closed"
+
+
+async def test_a_deletion_retried_after_a_republication_keeps_the_republished_listing(registry_client, db_session):
+    """registry-discovery "A deletion is retried after the listing was
+    republished"."""
+    await registry_client.publish_listing(_listing("republished"))
+    origin = injected_time.now()
+    await registry_client.delete_listing("republished", request_id="delete-1", origin=origin)
+    await registry_client.publish_listing(_listing("republished", region="eu"))
+
+    await registry_client.delete_listing("republished", request_id="delete-1", origin=origin)
+
+    republished = await registry_client.get_listing("republished")
+    assert republished.listing_resource["region"] == "eu"
+    assert ("delete-1", "recorded", 204) in _replay_rows(db_session)
+
+
+async def test_changed_reuse_of_request_id_is_rejected(registry_client):
+    origin = injected_time.now()
+    await registry_client.publish_listing(_listing("changed-a", region="us"), request_id="changed-request", origin=origin)
     with pytest.raises(RegistryClientError) as exc_info:
         await registry_client.publish_listing(
-            _listing("changed-b", region="eu"),
-            request_id=request_id,
-            timestamp=timestamp,
+            _listing("changed-b", region="eu"), request_id="changed-request", origin=origin
         )
     assert exc_info.value.status_code == 409
 
@@ -278,121 +273,125 @@ async def test_cross_scheme_owner_cannot_mutate_listing(
     assert exc_info.value.status_code == 403
 
 
-async def test_legacy_query_signature_cannot_delete(
-    registry_client,
-):
+async def test_an_unsigned_request_cannot_delete(registry_client):
+    """Rejection path: a request carrying no request identity is answered
+    unsigned, as no identity may be invented to sign it."""
     await registry_client.publish_listing(_listing("legacy-delete"))
-    async with httpx.AsyncClient(
-        base_url="http://test",
-        transport=httpx.ASGITransport(app=app),
-    ) as raw:
+    async with _raw() as raw:
         response = await raw.delete(
             "/listings/legacy-delete",
-            params={"signature": "0x" + "00" * 65, "timestamp": int(time.time())},
+            params={"signature": "0x" + "00" * 65},
             headers={"X-Test-Unsigned": "1"},
         )
-    assert response.status_code == 401
+    assert response.status_code == 400
+    assert "Signature" not in response.headers
     assert (await registry_client.get_listing("legacy-delete")).id == "legacy-delete"
 
 
-async def test_version_one_header_is_rejected(
-    registry_client,
-    maker_signer,
-):
-    body = _listing("old-version").to_dict()
-    headers = _signed_headers(
-        signer=maker_signer,
-        method="POST",
-        operation="listing.publish",
-        resource="listings",
-        body=body,
-    )
-    headers["X-Market-Signature-Version"] = "arkhai.market-request-signature.v1"
-    async with httpx.AsyncClient(
-        base_url="http://test",
-        transport=httpx.ASGITransport(app=app),
-    ) as raw:
-        response = await raw.post("/listings", json=body, headers=headers)
-    assert response.status_code == 401
-    assert response.json()["detail"] == "unsupported_version"
+async def test_a_version_2_request_is_refused_unsigned(registry_client):
+    """Rejection path: a version 2 request carries none of the version 3
+    fields, so its refusal is unsigned."""
+    async with _raw() as raw:
+        response = await raw.post(
+            "/listings",
+            json=_listing("old-version").to_dict(),
+            headers={
+                "X-Test-Unsigned": "1",
+                "X-Market-Signature-Version": "arkhai.market-request-signature.v2",
+                "X-Market-Request-ID": "v2-request",
+            },
+        )
+    assert response.status_code == 400
+    assert "Signature" not in response.headers
 
 
-async def test_deterministic_four_xx_is_cached_for_exact_retry(
-    registry_client,
-    db_session,
-):
-    request_id = "cached-not-found"
-    timestamp = int(time.time())
+async def test_a_refused_update_is_recorded_for_its_exact_retry(registry_client, db_session):
     outcomes = []
+    origin = injected_time.now()
     for _ in range(2):
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.update_listing(
                 "missing-listing",
                 UpdateListingRequest(updates={"status": "closed"}),
-                request_id=request_id,
-                timestamp=timestamp,
+                request_id="cached-not-found",
+                origin=origin,
             )
         outcomes.append((exc_info.value.status_code, exc_info.value.body))
     assert outcomes[0] == outcomes[1]
     assert outcomes[0][0] == 404
-
-    from core_registry.db.models import PublisherReplayReservation
-
-    replay = (
-        db_session.query(PublisherReplayReservation)
-        .filter_by(request_id=request_id)
-        .one()
-    )
-    assert replay.completed_at is not None
-    assert replay.response_status == 404
+    assert _replay_rows(db_session) == [("cached-not-found", "recorded", 404)]
 
 
-async def test_active_lease_blocks_then_expired_lease_resumes(
+async def test_a_publication_raising_after_admission_is_a_recorded_signed_500(
     registry_client,
     db_session,
     monkeypatch,
 ):
+    """A recorded route that raises is answered with a signed 500 whose effect
+    is unknown, recorded, so its exact retry is answered the same and never
+    dispatched again."""
     from core_registry.api import listing_routes
-    from core_registry.db.models import PublisherReplayReservation
 
-    original = listing_routes.ensure_publisher_for_identity
+    dispatches = []
 
     def crash(*_args, **_kwargs):
-        raise RuntimeError("simulated worker crash")
+        dispatches.append("publish")
+        raise RuntimeError("simulated failure after admission")
 
     monkeypatch.setattr(listing_routes, "ensure_publisher_for_identity", crash)
-    request_id = "lease-restart"
-    timestamp = int(time.time())
-    with pytest.raises(RuntimeError, match="simulated worker crash"):
-        await registry_client.publish_listing(
-            _listing("lease-listing"),
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-    with pytest.raises(RegistryClientError) as exc_info:
-        await registry_client.publish_listing(
-            _listing("lease-listing"),
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-    assert exc_info.value.status_code == 409
-    assert "request_in_progress" in exc_info.value.body
+    origin = injected_time.now()
+    answers = []
+    for _ in range(2):
+        with pytest.raises(RegistryClientError) as exc_info:
+            await registry_client.publish_listing(_listing("crashed"), request_id="crash", origin=origin)
+        answers.append((exc_info.value.status_code, json.loads(exc_info.value.body)))
 
-    replay = (
-        db_session.query(PublisherReplayReservation)
-        .filter_by(request_id=request_id)
-        .one()
+    assert answers == [(500, {"detail": ROUTE_FAILURE_DETAIL})] * 2
+    assert dispatches == ["publish"]
+    assert _replay_rows(db_session) == [("crash", "recorded", 500)]
+
+
+async def test_a_path_no_route_serves_is_answered_signed(registry_authority, maker_signer):
+    """Rejection path: the typed client has no method for an unknown path, so
+    the signed request names an operation the registry does not serve, and the
+    404 is signed over it."""
+    now = injected_time.now()
+    request = MarketRequest(
+        method="GET", role="seller", operation="listing.search", request_id="unserved", origin=now
     )
-    replay.lease_expires_at = datetime.utcnow() - timedelta(seconds=1)
-    db_session.commit()
-    monkeypatch.setattr(
-        listing_routes,
-        "ensure_publisher_for_identity",
-        original,
+    signed = sign_market_request(
+        signer=maker_signer, request=request, body=b"", created=now,
+        audience=TrustedIdentitySet(identities=(registry_authority.identity,)),
     )
-    resumed = await registry_client.publish_listing(
-        _listing("lease-listing"),
-        request_id=request_id,
-        timestamp=timestamp,
+    async with _raw() as raw:
+        response = await raw.get("/listingz", headers=signed.headers)
+
+    assert response.status_code == 404
+    assert _signed_by(response, request.binding, registry_authority)
+
+
+async def test_a_publication_stating_a_resource_is_an_operation_mismatch(
+    registry_authority, maker_signer, db_session
+):
+    """Rejection path: publication has no target, so a request naming one is
+    refused before dispatch; the typed client never names one."""
+    body = json.dumps(_listing("stated-resource").to_dict(), separators=(",", ":")).encode()
+    now = injected_time.now()
+    request = MarketRequest(
+        method="POST", role="seller", operation="listing.publish", resource="listings",
+        request_id="stated-resource", origin=now,
     )
-    assert resumed["listing_id"] == "lease-listing"
+    signed = sign_market_request(
+        signer=maker_signer, request=request, body=body, created=now,
+        audience=TrustedIdentitySet(identities=(registry_authority.identity,)),
+    )
+    async with _raw() as raw:
+        response = await raw.post(
+            "/listings", content=body, headers={**signed.headers, "Content-Type": "application/json"}
+        )
+
+    assert response.status_code == 400
+    # Signed over the route's own operation, which binds no resource.
+    bound = RequestBinding(method="POST", operation="listing.publish", request_id="stated-resource")
+    assert _signed_by(response, bound, registry_authority)
+    assert db_session.execute(text("SELECT COUNT(*) FROM listings")).scalar() == 0

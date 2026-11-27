@@ -14,7 +14,6 @@ import pytest
 
 from registry_client import ListingRequest
 from core_registry.main import app
-from tests.integration.test_validate_publish import _ValidationAuth
 
 pytestmark = pytest.mark.asyncio
 
@@ -99,7 +98,6 @@ class TestRetiredSpellingsAreRejected:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
-            auth=_ValidationAuth(),
         ) as raw:
             return await raw.post(
                 "/api/v1/listings/validate-publish", json=body

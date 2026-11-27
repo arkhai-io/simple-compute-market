@@ -26,7 +26,7 @@ from starlette.routing import Match
 from core_registry.api.admin_routes import make_time_router
 from core_registry.config import settings
 from core_registry.db.models import Listing
-from core_registry.main import app
+from core_registry.main import api
 
 T = 1794822300
 ADMIN_KEY = "admin-token"  # A development fixture; never a deployment's key.
@@ -35,8 +35,8 @@ ADMIN_KEY = "admin-token"  # A development fixture; never a deployment's key.
 def _mount_time_route() -> None:
     """Mount the time route on the suite's app once, as an injected registry does."""
     scope = {"type": "http", "path": "/admin/time", "method": "POST", "root_path": ""}
-    if not any(route.matches(scope)[0] is Match.FULL for route in app.routes):
-        app.include_router(make_time_router())
+    if not any(route.matches(scope)[0] is Match.FULL for route in api.routes):
+        api.include_router(make_time_router())
 
 
 @pytest.fixture(autouse=True)
@@ -150,7 +150,7 @@ def test_the_composition_mounts_the_time_route_only_under_injected_time(source, 
             sys.executable,
             "-c",
             "import core_registry.main as m; "
-            "print(any(getattr(r, 'path', None) == '/admin/time' for r in m.app.routes))",
+            "print(any(getattr(r, 'path', None) == '/admin/time' for r in m.api.routes))",
         ],
         env={**os.environ, "TIME_SOURCE": source},
         capture_output=True,

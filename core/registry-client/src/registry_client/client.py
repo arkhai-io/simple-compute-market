@@ -1,30 +1,41 @@
-"""Synchronous and asynchronous HTTP clients for the registry API."""
+"""Synchronous and asynchronous HTTP clients for the registry API.
+
+Every request is signed under the version 3 profile, naming the configured
+registries as its audience, and every answer is verified against the request it
+answers and those registries before it is read (:mod:`registry_client.auth`).
+The descriptor read is a public operation: its request carries only a request
+identity, and its answer is verified against the configured registries, or, by a
+client bootstrapping a registry from its URL, against the principals the
+descriptor itself names.
+"""
 
 from __future__ import annotations
 
+import json
+import urllib.parse
 import uuid
 from typing import Any, Optional, cast
 
 import httpx
 import injected_time
 from market_identity import (
-    EMPTY_BODY,
-    AuthenticatedRequest,
     Identity,
+    RequestBinding,
     RotationIntent,
     Signer,
     TrustedIdentitySet,
+    build_public_request,
     sign_rotation,
 )
 from market_core import RegistryDescriptor
 
 from registry_client.auth import (
-    REQUEST_ID_HEADER,
-    TIMESTAMP_HEADER,
+    DESCRIPTOR_OPERATION,
+    DESCRIPTOR_PATH,
     RegistryClientError,
-    authenticate_request,
-    authentication_headers,
-    verify_authenticated_response,
+    SignedRegistryRequest,
+    sign_registry_request,
+    verify_registry_response,
 )
 from registry_client.models import (
     AdminStatusResponse,
@@ -41,6 +52,12 @@ from registry_client.models import (
     ValidatePublishRequest,
     ValidatePublishResponse,
 )
+
+#: The listing read's query parameter naming the filter-spec ETag its filters
+#: were compiled under; the request's signature covers it.
+FILTER_SPEC_ETAG_PARAM = "filter_spec_etag"
+
+Query = list[tuple[str, str]]
 
 
 def _admin_headers(admin_key: str) -> dict[str, str]:
@@ -60,6 +77,14 @@ def _admin_answer(response: httpx.Response) -> Any:
             response.text,
         )
     return response.json()
+
+
+def _json_body(value: Any) -> bytes:
+    return b"" if value is None else json.dumps(value, separators=(",", ":")).encode("utf-8")
+
+
+def _query(params: dict[str, Any]) -> Query:
+    return [(key, str(value)) for key, value in params.items()]
 
 
 class _RegistryClientBase:
@@ -88,231 +113,141 @@ class _RegistryClientBase:
     def _url(self, path: str) -> str:
         return f"{self._base}{path}"
 
-    def _require_signer(self) -> Signer:
-        return self._signer
-
-    def _authenticated_headers(
+    def _sign(
         self,
-        *,
         method: str,
-        operation: str,
-        resource: str,
-        body: Any = EMPTY_BODY,
+        path: str,
+        *,
+        query: Query | None = None,
+        body: bytes = b"",
         request_id: str | None = None,
-        timestamp: int | None = None,
-    ) -> dict[str, str]:
-        authenticated = authenticate_request(
-            signer=self._require_signer(),
+        origin: int | None = None,
+    ) -> SignedRegistryRequest:
+        return sign_registry_request(
+            signer=self._signer,
             role=self._caller_role,
             method=method,
-            operation=operation,
-            resource=resource,
+            path=path,
             body=body,
+            audience=self._expected_registries,
+            query=query or (),
             request_id=request_id,
-            timestamp=timestamp,
+            origin=origin,
         )
-        return authentication_headers(authenticated)
 
-    @staticmethod
-    def _request_context(method: str, path: str) -> tuple[str, str]:
-        parts = [part for part in path.split("/") if part]
-        if path == "/api/v1/system/health":
-            return "health.read", "health"
-        if path == "/api/v1/system/stats":
-            return "system.stats.read", "system"
-        if path == "/api/v1/listings/validate-publish":
-            return "listing.validate", "listings"
-        if path == "/filter-spec":
-            return "filter.get", "filter-spec"
-        if path == "/.well-known/arkhai/registry-descriptor.json":
-            return "registry.descriptor.read", "registry-descriptor"
-        if parts[:1] == ["listings"]:
-            if len(parts) == 1:
-                return (
-                    "listing.publish" if method.upper() == "POST" else "listing.list",
-                    "listings",
-                )
-            operation = {
-                "GET": "listing.get",
-                "PUT": "listing.update",
-                "DELETE": "listing.delete",
-            }[method.upper()]
-            return operation, parts[1]
-        if parts[:1] == ["publishers"]:
-            if len(parts) == 1:
-                return "publisher.list", "publishers"
-            if len(parts) == 2:
-                return "publisher.get", parts[1]
-            if parts[2] == "identity-rotations":
-                if len(parts) == 3:
-                    return "publisher.identity.rotate", parts[1]
-                if len(parts) == 4:
-                    return "publisher.identity.rotation.read", f"{parts[1]}:{parts[3]}"
-                if len(parts) == 5 and parts[4] == "retire":
-                    return "publisher.identity.retire", f"{parts[1]}:{parts[3]}"
-        raise ValueError(f"unsupported registry route: {method} {path}")
-
-    @staticmethod
-    def _query_body(
-        params: dict | None,
-        headers: dict | None,
-    ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "query": sorted(
-                [list(item) for item in httpx.QueryParams(params or {}).multi_items()]
+    def _answer(
+        self,
+        method: str,
+        response: httpx.Response,
+        binding: RequestBinding,
+        expected: tuple[int, ...],
+        *,
+        expected_registries: TrustedIdentitySet | None = None,
+    ) -> Any:
+        url = str(response.request.url)
+        try:
+            verify_registry_response(
+                status=response.status_code,
+                headers=response.headers,
+                body=response.content,
+                binding=binding,
+                expected_registries=(
+                    self._expected_registries if expected_registries is None else expected_registries
+                ),
             )
-        }
-        if_match = httpx.Headers(headers or {}).get("If-Match")
-        if if_match is not None:
-            body["if_match"] = if_match.strip().removeprefix("W/").strip().strip('"')
-        return body
+        except ValueError as exc:
+            raise RegistryClientError(method, url, 502, str(exc)) from exc
+        if response.status_code not in expected:
+            raise RegistryClientError(method, url, response.status_code, response.text)
+        if response.status_code == 204 or not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise RegistryClientError(method, url, 502, "registry response is not JSON") from exc
 
     @staticmethod
-    def _listings_params(
+    def _listings_query(
         *,
         status: str | None,
         publisher: Identity | None,
         limit: int,
         offset: int,
+        etag: str | None,
         filters: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> Query:
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status is not None:
             params["status"] = status
         if publisher is not None:
             params["publisher_scheme"] = publisher.scheme.value
             params["publisher_identifier"] = publisher.identifier
+        if etag is not None:
+            params[FILTER_SPEC_ETAG_PARAM] = etag.strip().removeprefix("W/").strip().strip('"')
         for key, value in filters.items():
             if value is not None:
                 params[key] = str(value).lower() if isinstance(value, bool) else value
-        return params
+        return _query(params)
 
     @staticmethod
-    def _if_match_headers(etag: str | None) -> dict[str, str] | None:
-        if etag is None:
-            return None
-        normalized = etag if etag.startswith('"') else f'"{etag}"'
-        return {"If-Match": normalized}
+    def _publishers_query(principal: Identity | None, limit: int, offset: int) -> Query:
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if principal is not None:
+            params.update(scheme=principal.scheme.value, identifier=principal.identifier)
+        return _query(params)
 
     @staticmethod
-    def _request_identity_headers(
-        request_id: str | None,
-        timestamp: int | None,
-    ) -> dict[str, str] | None:
-        headers: dict[str, str] = {}
-        if request_id is not None:
-            headers[REQUEST_ID_HEADER] = request_id
-        if timestamp is not None:
-            headers[TIMESTAMP_HEADER] = str(timestamp)
-        return headers or None
+    def _bootstrap_target(base_url: str, *, allow_insecure_http: bool) -> str:
+        """The bootstrapped registry's base URL, refused before any request when
+        its scheme is not ``https`` and the caller has not opted into plain HTTP."""
 
-    @classmethod
-    def _descriptor_bootstrap_request(
-        cls,
-        *,
-        signer: Signer,
-        caller_role: str,
-    ) -> AuthenticatedRequest:
-        if caller_role not in {"buyer", "seller", "service"}:
-            raise ValueError("caller_role must be buyer, seller, or service")
-        return authenticate_request(
-            signer=signer,
-            role=caller_role,
-            method="GET",
-            operation="registry.descriptor.read",
-            resource="registry-descriptor",
-            body=cls._query_body(None, None),
-        )
+        scheme = urllib.parse.urlsplit(base_url).scheme
+        if scheme != "https" and not (scheme == "http" and allow_insecure_http):
+            raise ValueError(
+                f"a registry is bootstrapped over https, not {scheme or 'no scheme'}; "
+                "pass allow_insecure_http=True only for a local or test registry"
+            )
+        return base_url.rstrip("/")
 
     @staticmethod
-    def _verify_bootstrap_descriptor(
-        *,
-        response: httpx.Response,
-        request: AuthenticatedRequest,
-        url: str,
-    ) -> RegistryDescriptor:
+    def _bootstrapped_descriptor(response: httpx.Response, binding: RequestBinding, base_url: str) -> RegistryDescriptor:
+        """The descriptor a bootstrap read, once its answer verifies against the
+        principals it names, bound to the bootstrap's own request, and it names
+        the URL it was read from as its base URL."""
+
+        url = f"{base_url}{DESCRIPTOR_PATH}"
         if response.status_code != 200:
             raise RegistryClientError("GET", url, response.status_code, response.text)
         try:
             descriptor = RegistryDescriptor.model_validate(response.json())
         except ValueError as exc:
-            raise RegistryClientError(
-                "GET",
-                url,
-                502,
-                "registry descriptor is not canonical JSON",
-            ) from exc
-        expected_registries = TrustedIdentitySet(
+            raise RegistryClientError("GET", url, 502, "registry descriptor is not canonical JSON") from exc
+        principals = TrustedIdentitySet(
             identities=tuple(
                 Identity.model_validate(principal.model_dump(mode="json"))
                 for principal in descriptor.authority.principals
             )
         )
         try:
-            verify_authenticated_response(
-                headers=response.headers,
-                expected_registries=expected_registries,
-                request=request,
+            verify_registry_response(
                 status=response.status_code,
-                body=descriptor.to_wire(),
+                headers=response.headers,
+                body=response.content,
+                binding=binding,
+                expected_registries=principals,
             )
         except ValueError as exc:
             raise RegistryClientError("GET", url, 502, str(exc)) from exc
+        if descriptor.base_url.rstrip("/") != base_url:
+            raise RegistryClientError(
+                "GET",
+                url,
+                502,
+                f"registry descriptor names base URL {descriptor.base_url}, not {base_url}",
+            )
         return descriptor
 
-    def _publish_listing_request(
-        self,
-        listing: ListingRequest,
-        *,
-        request_id: str | None,
-        timestamp: int | None,
-    ) -> tuple[dict[str, Any], dict[str, str]]:
-        body = listing.to_dict()
-        headers = self._authenticated_headers(
-            method="POST",
-            operation="listing.publish",
-            resource="listings",
-            body=body,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-        return body, headers
-
-    def _update_listing_request(
-        self,
-        listing_id: str,
-        request: UpdateListingRequest,
-        *,
-        request_id: str | None,
-        timestamp: int | None,
-    ) -> tuple[dict[str, Any], dict[str, str]]:
-        body = request.to_dict()
-        headers = self._authenticated_headers(
-            method="PUT",
-            operation="listing.update",
-            resource=listing_id,
-            body=body,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-        return body, headers
-
-    def _delete_listing_headers(
-        self,
-        listing_id: str,
-        *,
-        request_id: str | None,
-        timestamp: int | None,
-    ) -> dict[str, str]:
-        return self._authenticated_headers(
-            method="DELETE",
-            operation="listing.delete",
-            resource=listing_id,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-
-    def _rotation_request(
+    def _rotation_body(
         self,
         publisher_id: int,
         replacement_signer: Signer,
@@ -320,88 +255,26 @@ class _RegistryClientBase:
         nonce: str | None,
         overlap_seconds: int,
         expires_at: int | None,
-        request_id: str | None,
-        timestamp: int | None,
-    ) -> tuple[dict[str, Any], dict[str, str]]:
-        current_signer = self._require_signer()
-        rotation_nonce = nonce or uuid.uuid4().hex
+    ) -> dict[str, Any]:
         intent = RotationIntent(
-            current=current_signer.identity,
+            current=self._signer.identity,
             replacement=replacement_signer.identity,
             subject=f"publisher:{publisher_id}",
             authority=self._registry_authority,
-            nonce=rotation_nonce,
+            nonce=nonce or uuid.uuid4().hex,
             overlap_seconds=overlap_seconds,
-            expires_at=(
-                expires_at if expires_at is not None else injected_time.now() + 300
-            ),
+            expires_at=(expires_at if expires_at is not None else injected_time.now() + 300),
         )
         rotation = sign_rotation(
-            current_signer=current_signer,
+            current_signer=self._signer,
             replacement_signer=replacement_signer,
             intent=intent,
         )
-        body = rotation.model_dump(mode="json")
-        headers = self._authenticated_headers(
-            method="POST",
-            operation="publisher.identity.rotate",
-            resource=str(publisher_id),
-            body=body,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-        return body, headers
-
-    def _retirement_headers(
-        self,
-        publisher_id: int,
-        nonce: str,
-        *,
-        request_id: str | None,
-        timestamp: int | None,
-    ) -> dict[str, str]:
-        return self._authenticated_headers(
-            method="POST",
-            operation="publisher.identity.retire",
-            resource=f"{publisher_id}:{nonce}",
-            request_id=request_id,
-            timestamp=timestamp,
-        )
+        return rotation.model_dump(mode="json")
 
     @staticmethod
-    def _raise_for_status(
-        method: str,
-        url: str,
-        status: int,
-        text: str,
-        expected: tuple[int, ...],
-    ) -> None:
-        if status not in expected:
-            raise RegistryClientError(method, url, status, text)
-
-    @staticmethod
-    def _parse_health(data: dict) -> HealthResponse:
-        return HealthResponse.from_dict(data)
-
-    @staticmethod
-    def _parse_publisher(data: dict) -> Publisher:
-        return Publisher.from_dict(data)
-
-    @staticmethod
-    def _parse_publisher_list(data: Any) -> PublisherListResponse:
-        return PublisherListResponse.from_raw(data)
-
-    @staticmethod
-    def _parse_listing_list(data: Any) -> ListingListResponse:
-        return ListingListResponse.from_raw(data)
-
-    @staticmethod
-    def _parse_listing(data: dict) -> ListingSummary:
-        return ListingSummary.from_dict(data)
-
-    @staticmethod
-    def _parse_system_stats(data: dict) -> SystemStatsResponse:
-        return SystemStatsResponse.from_dict(data)
+    def _parse_listing(data: Any) -> ListingSummary:
+        return ListingSummary.from_dict(data.get("listing", data) if isinstance(data, dict) else data)
 
 
 class RegistryClient(_RegistryClientBase):
@@ -451,98 +324,52 @@ class RegistryClient(_RegistryClientBase):
         cls,
         base_url: str,
         *,
-        signer: Signer,
-        caller_role: str,
+        allow_insecure_http: bool = False,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> RegistryDescriptor:
-        """Read a descriptor and verify possession of its advertised key."""
+        """Read a registry's descriptor knowing no registry principal, and verify
+        that whoever answered holds a key the descriptor names.
 
-        path = "/.well-known/arkhai/registry-descriptor.json"
-        request = cls._descriptor_bootstrap_request(
-            signer=signer,
-            caller_role=caller_role,
-        )
+        The request is the descriptor's public operation, under a fresh request
+        ID, so its signed answer binds this request and no replay of an older
+        one. The URL must be ``https``, whose certificate checking proves the
+        host, unless ``allow_insecure_http`` opts into plain HTTP for a local or
+        test registry; a URL of any other scheme is refused before any request
+        is sent. A descriptor naming another base URL than ``base_url`` is
+        refused. The proof establishes possession of the key, not a third
+        party's endorsement of the operator or the URL.
+        """
+
+        target = cls._bootstrap_target(base_url, allow_insecure_http=allow_insecure_http)
+        public = build_public_request(method="GET", operation=DESCRIPTOR_OPERATION)
         async with httpx.AsyncClient(
-            base_url=base_url.rstrip("/"),
+            base_url=target,
             timeout=timeout,
             transport=transport,
             headers={"Accept": "application/json"},
         ) as client:
-            response = await client.get(
-                path,
-                headers=authentication_headers(request),
-            )
-        return cls._verify_bootstrap_descriptor(
-            response=response,
-            request=request,
-            url=f"{base_url.rstrip('/')}{path}",
-        )
+            response = await client.get(DESCRIPTOR_PATH, headers=public.headers)
+        return cls._bootstrapped_descriptor(response, public.binding, target)
 
-    async def _request(
+    async def _send(
         self,
         method: str,
         path: str,
         *,
-        params: dict | None = None,
+        query: Query | None = None,
         json: Any = None,
-        headers: dict | None = None,
+        request_id: str | None = None,
+        origin: int | None = None,
         expected: tuple[int, ...] = (200, 201),
     ) -> Any:
-        url = self._url(path)
-        operation, resource = self._request_context(method, path)
-        request_headers = dict(headers or {})
-        request_body = (
-            self._query_body(params, request_headers)
-            if method.upper() == "GET"
-            else (json if json is not None else EMPTY_BODY)
-        )
-        timestamp = request_headers.get(TIMESTAMP_HEADER)
-        authenticated = authenticate_request(
-            signer=self._signer,
-            role=self._caller_role,
-            method=method,
-            operation=operation,
-            resource=resource,
-            body=request_body,
-            request_id=request_headers.get(REQUEST_ID_HEADER),
-            timestamp=int(timestamp) if timestamp is not None else None,
-        )
-        request_headers.update(authentication_headers(authenticated))
-        response = await self._client.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            headers=request_headers,
-        )
-        empty_response = response.status_code == 204 or not response.content
-        if empty_response:
-            response_body = EMPTY_BODY
-        else:
-            try:
-                response_body = response.json()
-            except ValueError as exc:
-                raise RegistryClientError(
-                    method, url, 502, "registry response is not canonical JSON"
-                ) from exc
-        try:
-            verify_authenticated_response(
-                headers=response.headers,
-                expected_registries=self._expected_registries,
-                request=authenticated,
-                status=response.status_code,
-                body=response_body,
-            )
-        except ValueError as exc:
-            raise RegistryClientError(method, url, 502, str(exc)) from exc
-        self._raise_for_status(
-            method, url, response.status_code, response.text, expected
-        )
-        return None if empty_response else response_body
+        body = _json_body(json)
+        signed = self._sign(method, path, query=query, body=body, request_id=request_id, origin=origin)
+        response = await self._client.request(method, signed.target, content=body, headers=signed.headers)
+        return self._answer(method, response, signed.binding, expected)
 
     async def get_health(self) -> HealthResponse:
-        return self._parse_health(await self._request("GET", "/api/v1/system/health"))
+        return HealthResponse.from_dict(await self._send("GET", "/api/v1/system/health"))
 
     async def get_admin_status(self, *, admin_key: str) -> AdminStatusResponse:
         """GET /admin/status with the administrator key: the registry's time source."""
@@ -566,9 +393,7 @@ class RegistryClient(_RegistryClientBase):
         return TimeSettingResponse.from_dict(_admin_answer(response))
 
     async def get_system_stats(self) -> SystemStatsResponse:
-        return self._parse_system_stats(
-            await self._request("GET", "/api/v1/system/stats")
-        )
+        return SystemStatsResponse.from_dict(await self._send("GET", "/api/v1/system/stats"))
 
     async def list_publishers(
         self,
@@ -577,40 +402,31 @@ class RegistryClient(_RegistryClientBase):
         limit: int = 50,
         offset: int = 0,
     ) -> PublisherListResponse:
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-        if principal is not None:
-            params.update(
-                scheme=principal.scheme.value,
-                identifier=principal.identifier,
-            )
-        return self._parse_publisher_list(
-            await self._request("GET", "/publishers", params=params)
+        return PublisherListResponse.from_raw(
+            await self._send("GET", "/publishers", query=self._publishers_query(principal, limit, offset))
         )
 
     async def get_publisher(self, publisher_id: int) -> Publisher:
-        return self._parse_publisher(
-            await self._request("GET", f"/publishers/{publisher_id}")
-        )
+        return Publisher.from_dict(await self._send("GET", f"/publishers/{publisher_id}"))
 
     async def publish_listing(
         self,
         listing: ListingRequest,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        body, headers = self._publish_listing_request(
-            listing,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
+        """Publish ``listing``. An exact retry of a publication whose answer was
+        lost passes the ``request_id`` and ``origin`` of the first attempt, and
+        is answered with its recorded outcome."""
         return cast(
             dict[str, Any],
-            await self._request(
+            await self._send(
                 "POST",
                 "/listings",
-                json=body,
-                headers=headers,
+                json=listing.to_dict(),
+                request_id=request_id,
+                origin=origin,
                 expected=(201,),
             ),
         )
@@ -619,7 +435,7 @@ class RegistryClient(_RegistryClientBase):
         self,
         request: ValidatePublishRequest,
     ) -> ValidatePublishResponse:
-        data = await self._request(
+        data = await self._send(
             "POST",
             "/api/v1/listings/validate-publish",
             json=request.to_dict(),
@@ -628,21 +444,14 @@ class RegistryClient(_RegistryClientBase):
         return ValidatePublishResponse.from_dict(data)
 
     async def get_filter_spec(self) -> FilterSpecResponse:
-        return FilterSpecResponse.from_dict(await self._request("GET", "/filter-spec"))
+        return FilterSpecResponse.from_dict(await self._send("GET", "/filter-spec"))
 
-    async def get_registry_descriptor(
-        self,
-        *,
-        request_id: str | None = None,
-        timestamp: int | None = None,
-    ) -> RegistryDescriptor:
-        return RegistryDescriptor.model_validate(
-            await self._request(
-                "GET",
-                "/.well-known/arkhai/registry-descriptor.json",
-                headers=self._request_identity_headers(request_id, timestamp),
-            )
-        )
+    async def get_registry_descriptor(self) -> RegistryDescriptor:
+        """The registry's descriptor, read as its public operation and verified
+        against the configured registries."""
+        public = build_public_request(method="GET", operation=DESCRIPTOR_OPERATION)
+        response = await self._client.get(DESCRIPTOR_PATH, headers=public.headers)
+        return RegistryDescriptor.model_validate(self._answer("GET", response, public.binding, (200,)))
 
     async def list_listings(
         self,
@@ -654,21 +463,18 @@ class RegistryClient(_RegistryClientBase):
         etag: str | None = None,
         **filters: Any,
     ) -> ListingListResponse:
-        params = self._listings_params(
+        """List listings. ``etag`` is the filter-spec ETag the filters were
+        compiled under, sent as the ``filter_spec_etag`` query parameter; the
+        registry answers a stale one with 412."""
+        query = self._listings_query(
             status=status,
             publisher=publisher,
             limit=limit,
             offset=offset,
+            etag=etag,
             filters=filters,
         )
-        return self._parse_listing_list(
-            await self._request(
-                "GET",
-                "/listings",
-                params=params,
-                headers=self._if_match_headers(etag),
-            )
-        )
+        return ListingListResponse.from_raw(await self._send("GET", "/listings", query=query))
 
     async def list_listings_for_publisher(
         self,
@@ -686,10 +492,7 @@ class RegistryClient(_RegistryClientBase):
         )
 
     async def get_listing(self, listing_id: str) -> ListingSummary:
-        data = await self._request("GET", f"/listings/{listing_id}")
-        return self._parse_listing(
-            data.get("listing", data) if isinstance(data, dict) else data
-        )
+        return self._parse_listing(await self._send("GET", f"/listings/{listing_id}"))
 
     async def update_listing(
         self,
@@ -697,21 +500,16 @@ class RegistryClient(_RegistryClientBase):
         request: UpdateListingRequest,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        body, headers = self._update_listing_request(
-            listing_id,
-            request,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
         return cast(
             dict[str, Any],
-            await self._request(
+            await self._send(
                 "PUT",
                 f"/listings/{listing_id}",
-                json=body,
-                headers=headers,
+                json=request.to_dict(),
+                request_id=request_id,
+                origin=origin,
             ),
         )
 
@@ -720,17 +518,13 @@ class RegistryClient(_RegistryClientBase):
         listing_id: str,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> None:
-        headers = self._delete_listing_headers(
-            listing_id,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-        await self._request(
+        await self._send(
             "DELETE",
             f"/listings/{listing_id}",
-            headers=headers,
+            request_id=request_id,
+            origin=origin,
             expected=(204,),
         )
 
@@ -743,24 +537,28 @@ class RegistryClient(_RegistryClientBase):
         overlap_seconds: int = 300,
         expires_at: int | None = None,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        body, headers = self._rotation_request(
+        """Rotate the publisher to ``replacement_signer``'s principal.
+
+        Both schemes sign deterministically, so an exact retry passes the first
+        attempt's ``nonce`` and ``expires_at``, which make the same signed
+        intent, with its ``request_id`` and ``origin``."""
+        rotation = self._rotation_body(
             publisher_id,
             replacement_signer,
             nonce=nonce,
             overlap_seconds=overlap_seconds,
             expires_at=expires_at,
-            request_id=request_id,
-            timestamp=timestamp,
         )
         return cast(
             dict[str, Any],
-            await self._request(
+            await self._send(
                 "POST",
                 f"/publishers/{publisher_id}/identity-rotations",
-                json=body,
-                headers=headers,
+                json=rotation,
+                request_id=request_id,
+                origin=origin,
             ),
         )
 
@@ -771,10 +569,7 @@ class RegistryClient(_RegistryClientBase):
     ) -> dict[str, Any]:
         return cast(
             dict[str, Any],
-            await self._request(
-                "GET",
-                f"/publishers/{publisher_id}/identity-rotations/{nonce}",
-            ),
+            await self._send("GET", f"/publishers/{publisher_id}/identity-rotations/{nonce}"),
         )
 
     async def retire_publisher_identity(
@@ -783,20 +578,15 @@ class RegistryClient(_RegistryClientBase):
         nonce: str,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        headers = self._retirement_headers(
-            publisher_id,
-            nonce,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
         return cast(
             dict[str, Any],
-            await self._request(
+            await self._send(
                 "POST",
                 f"/publishers/{publisher_id}/identity-rotations/{nonce}/retire",
-                headers=headers,
+                request_id=request_id,
+                origin=origin,
             ),
         )
 
@@ -848,115 +638,76 @@ class SyncRegistryClient(_RegistryClientBase):
         cls,
         base_url: str,
         *,
-        signer: Signer,
-        caller_role: str,
+        allow_insecure_http: bool = False,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
     ) -> RegistryDescriptor:
-        """Read a descriptor and verify possession of its advertised key."""
+        """Read a registry's descriptor knowing no registry principal, and verify
+        that whoever answered holds a key the descriptor names.
 
-        path = "/.well-known/arkhai/registry-descriptor.json"
-        request = cls._descriptor_bootstrap_request(
-            signer=signer,
-            caller_role=caller_role,
-        )
+        The request is the descriptor's public operation, under a fresh request
+        ID, so its signed answer binds this request and no replay of an older
+        one. The URL must be ``https``, whose certificate checking proves the
+        host, unless ``allow_insecure_http`` opts into plain HTTP for a local or
+        test registry; a URL of any other scheme is refused before any request
+        is sent. A descriptor naming another base URL than ``base_url`` is
+        refused. The proof establishes possession of the key, not a third
+        party's endorsement of the operator or the URL.
+        """
+
+        target = cls._bootstrap_target(base_url, allow_insecure_http=allow_insecure_http)
+        public = build_public_request(method="GET", operation=DESCRIPTOR_OPERATION)
         with httpx.Client(
-            base_url=base_url.rstrip("/"),
+            base_url=target,
             timeout=timeout,
             transport=transport,
             headers={"Accept": "application/json"},
         ) as client:
-            response = client.get(
-                path,
-                headers=authentication_headers(request),
-            )
-        return cls._verify_bootstrap_descriptor(
-            response=response,
-            request=request,
-            url=f"{base_url.rstrip('/')}{path}",
-        )
+            response = client.get(DESCRIPTOR_PATH, headers=public.headers)
+        return cls._bootstrapped_descriptor(response, public.binding, target)
 
-    def _request(
+    def _send(
         self,
         method: str,
         path: str,
         *,
-        params: dict | None = None,
+        query: Query | None = None,
         json: Any = None,
-        headers: dict | None = None,
+        request_id: str | None = None,
+        origin: int | None = None,
         expected: tuple[int, ...] = (200, 201),
     ) -> Any:
-        url = self._url(path)
-        operation, resource = self._request_context(method, path)
-        request_headers = dict(headers or {})
-        request_body = (
-            self._query_body(params, request_headers)
-            if method.upper() == "GET"
-            else (json if json is not None else EMPTY_BODY)
-        )
-        timestamp = request_headers.get(TIMESTAMP_HEADER)
-        authenticated = authenticate_request(
-            signer=self._signer,
-            role=self._caller_role,
-            method=method,
-            operation=operation,
-            resource=resource,
-            body=request_body,
-            request_id=request_headers.get(REQUEST_ID_HEADER),
-            timestamp=int(timestamp) if timestamp is not None else None,
-        )
-        request_headers.update(authentication_headers(authenticated))
-        response = self._client.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            headers=request_headers,
-        )
-        empty_response = response.status_code == 204 or not response.content
-        if empty_response:
-            response_body = EMPTY_BODY
-        else:
-            try:
-                response_body = response.json()
-            except ValueError as exc:
-                raise RegistryClientError(
-                    method, url, 502, "registry response is not canonical JSON"
-                ) from exc
-        try:
-            verify_authenticated_response(
-                headers=response.headers,
-                expected_registries=self._expected_registries,
-                request=authenticated,
-                status=response.status_code,
-                body=response_body,
-            )
-        except ValueError as exc:
-            raise RegistryClientError(method, url, 502, str(exc)) from exc
-        self._raise_for_status(
-            method, url, response.status_code, response.text, expected
-        )
-        return None if empty_response else response_body
+        body = _json_body(json)
+        signed = self._sign(method, path, query=query, body=body, request_id=request_id, origin=origin)
+        response = self._client.request(method, signed.target, content=body, headers=signed.headers)
+        return self._answer(method, response, signed.binding, expected)
 
     def get_health(self) -> HealthResponse:
-        return self._parse_health(self._request("GET", "/api/v1/system/health"))
+        return HealthResponse.from_dict(self._send("GET", "/api/v1/system/health"))
 
     def get_admin_status(self, *, admin_key: str) -> AdminStatusResponse:
-        """See ``RegistryClient.get_admin_status``."""
+        """GET /admin/status with the administrator key: the registry's time source."""
         response = self._client.get(
             self._url("/admin/status"), headers=_admin_headers(admin_key)
         )
         return AdminStatusResponse.from_dict(_admin_answer(response))
 
     def set_time(self, now: int, *, admin_key: str) -> TimeSettingResponse:
-        """See ``RegistryClient.set_time``."""
+        """POST /admin/time with the administrator key: set an injected registry
+        to ``now``, in Unix seconds, sent as given.
+
+        The registry refuses anything but an integer instant (422
+        ``invalid_time``) and an instant earlier than its own (409
+        ``time_moves_forward``), raised as :class:`RegistryClientError`; a
+        wall-time registry serves no such route (404).
+        """
         response = self._client.post(
             self._url("/admin/time"), json={"now": now}, headers=_admin_headers(admin_key)
         )
         return TimeSettingResponse.from_dict(_admin_answer(response))
 
     def get_system_stats(self) -> SystemStatsResponse:
-        return self._parse_system_stats(self._request("GET", "/api/v1/system/stats"))
+        return SystemStatsResponse.from_dict(self._send("GET", "/api/v1/system/stats"))
 
     def list_publishers(
         self,
@@ -965,40 +716,31 @@ class SyncRegistryClient(_RegistryClientBase):
         limit: int = 50,
         offset: int = 0,
     ) -> PublisherListResponse:
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-        if principal is not None:
-            params.update(
-                scheme=principal.scheme.value,
-                identifier=principal.identifier,
-            )
-        return self._parse_publisher_list(
-            self._request("GET", "/publishers", params=params)
+        return PublisherListResponse.from_raw(
+            self._send("GET", "/publishers", query=self._publishers_query(principal, limit, offset))
         )
 
     def get_publisher(self, publisher_id: int) -> Publisher:
-        return self._parse_publisher(
-            self._request("GET", f"/publishers/{publisher_id}")
-        )
+        return Publisher.from_dict(self._send("GET", f"/publishers/{publisher_id}"))
 
     def publish_listing(
         self,
         listing: ListingRequest,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        body, headers = self._publish_listing_request(
-            listing,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
+        """Publish ``listing``. An exact retry of a publication whose answer was
+        lost passes the ``request_id`` and ``origin`` of the first attempt, and
+        is answered with its recorded outcome."""
         return cast(
             dict[str, Any],
-            self._request(
+            self._send(
                 "POST",
                 "/listings",
-                json=body,
-                headers=headers,
+                json=listing.to_dict(),
+                request_id=request_id,
+                origin=origin,
                 expected=(201,),
             ),
         )
@@ -1007,7 +749,7 @@ class SyncRegistryClient(_RegistryClientBase):
         self,
         request: ValidatePublishRequest,
     ) -> ValidatePublishResponse:
-        data = self._request(
+        data = self._send(
             "POST",
             "/api/v1/listings/validate-publish",
             json=request.to_dict(),
@@ -1016,21 +758,14 @@ class SyncRegistryClient(_RegistryClientBase):
         return ValidatePublishResponse.from_dict(data)
 
     def get_filter_spec(self) -> FilterSpecResponse:
-        return FilterSpecResponse.from_dict(self._request("GET", "/filter-spec"))
+        return FilterSpecResponse.from_dict(self._send("GET", "/filter-spec"))
 
-    def get_registry_descriptor(
-        self,
-        *,
-        request_id: str | None = None,
-        timestamp: int | None = None,
-    ) -> RegistryDescriptor:
-        return RegistryDescriptor.model_validate(
-            self._request(
-                "GET",
-                "/.well-known/arkhai/registry-descriptor.json",
-                headers=self._request_identity_headers(request_id, timestamp),
-            )
-        )
+    def get_registry_descriptor(self) -> RegistryDescriptor:
+        """The registry's descriptor, read as its public operation and verified
+        against the configured registries."""
+        public = build_public_request(method="GET", operation=DESCRIPTOR_OPERATION)
+        response = self._client.get(DESCRIPTOR_PATH, headers=public.headers)
+        return RegistryDescriptor.model_validate(self._answer("GET", response, public.binding, (200,)))
 
     def list_listings(
         self,
@@ -1042,21 +777,18 @@ class SyncRegistryClient(_RegistryClientBase):
         etag: str | None = None,
         **filters: Any,
     ) -> ListingListResponse:
-        params = self._listings_params(
+        """List listings. ``etag`` is the filter-spec ETag the filters were
+        compiled under, sent as the ``filter_spec_etag`` query parameter; the
+        registry answers a stale one with 412."""
+        query = self._listings_query(
             status=status,
             publisher=publisher,
             limit=limit,
             offset=offset,
+            etag=etag,
             filters=filters,
         )
-        return self._parse_listing_list(
-            self._request(
-                "GET",
-                "/listings",
-                params=params,
-                headers=self._if_match_headers(etag),
-            )
-        )
+        return ListingListResponse.from_raw(self._send("GET", "/listings", query=query))
 
     def list_listings_for_publisher(
         self,
@@ -1074,10 +806,7 @@ class SyncRegistryClient(_RegistryClientBase):
         )
 
     def get_listing(self, listing_id: str) -> ListingSummary:
-        data = self._request("GET", f"/listings/{listing_id}")
-        return self._parse_listing(
-            data.get("listing", data) if isinstance(data, dict) else data
-        )
+        return self._parse_listing(self._send("GET", f"/listings/{listing_id}"))
 
     def update_listing(
         self,
@@ -1085,21 +814,16 @@ class SyncRegistryClient(_RegistryClientBase):
         request: UpdateListingRequest,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        body, headers = self._update_listing_request(
-            listing_id,
-            request,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
         return cast(
             dict[str, Any],
-            self._request(
+            self._send(
                 "PUT",
                 f"/listings/{listing_id}",
-                json=body,
-                headers=headers,
+                json=request.to_dict(),
+                request_id=request_id,
+                origin=origin,
             ),
         )
 
@@ -1108,17 +832,13 @@ class SyncRegistryClient(_RegistryClientBase):
         listing_id: str,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> None:
-        headers = self._delete_listing_headers(
-            listing_id,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
-        self._request(
+        self._send(
             "DELETE",
             f"/listings/{listing_id}",
-            headers=headers,
+            request_id=request_id,
+            origin=origin,
             expected=(204,),
         )
 
@@ -1131,24 +851,28 @@ class SyncRegistryClient(_RegistryClientBase):
         overlap_seconds: int = 300,
         expires_at: int | None = None,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        body, headers = self._rotation_request(
+        """Rotate the publisher to ``replacement_signer``'s principal.
+
+        Both schemes sign deterministically, so an exact retry passes the first
+        attempt's ``nonce`` and ``expires_at``, which make the same signed
+        intent, with its ``request_id`` and ``origin``."""
+        rotation = self._rotation_body(
             publisher_id,
             replacement_signer,
             nonce=nonce,
             overlap_seconds=overlap_seconds,
             expires_at=expires_at,
-            request_id=request_id,
-            timestamp=timestamp,
         )
         return cast(
             dict[str, Any],
-            self._request(
+            self._send(
                 "POST",
                 f"/publishers/{publisher_id}/identity-rotations",
-                json=body,
-                headers=headers,
+                json=rotation,
+                request_id=request_id,
+                origin=origin,
             ),
         )
 
@@ -1159,10 +883,7 @@ class SyncRegistryClient(_RegistryClientBase):
     ) -> dict[str, Any]:
         return cast(
             dict[str, Any],
-            self._request(
-                "GET",
-                f"/publishers/{publisher_id}/identity-rotations/{nonce}",
-            ),
+            self._send("GET", f"/publishers/{publisher_id}/identity-rotations/{nonce}"),
         )
 
     def retire_publisher_identity(
@@ -1171,19 +892,14 @@ class SyncRegistryClient(_RegistryClientBase):
         nonce: str,
         *,
         request_id: str | None = None,
-        timestamp: int | None = None,
+        origin: int | None = None,
     ) -> dict[str, Any]:
-        headers = self._retirement_headers(
-            publisher_id,
-            nonce,
-            request_id=request_id,
-            timestamp=timestamp,
-        )
         return cast(
             dict[str, Any],
-            self._request(
+            self._send(
                 "POST",
                 f"/publishers/{publisher_id}/identity-rotations/{nonce}/retire",
-                headers=headers,
+                request_id=request_id,
+                origin=origin,
             ),
         )

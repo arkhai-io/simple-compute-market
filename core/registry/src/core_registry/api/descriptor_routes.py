@@ -1,22 +1,23 @@
-"""Authority-authenticated registry self-description route."""
+"""The registry's self-description, a public operation answered signed.
+
+The descriptor is a trust bootstrap: a client adding a registry by its URL knows
+no registry principal, so its request carries only a request identity, and the
+registry answers it with a version 3 response signed over that identity, which
+the client verifies against the principals the descriptor names. The read needs
+no read key, whatever the registry's read gate.
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request
+from market_authenticated_requests import PublicAdmission, PublicAdmitted
 from market_core import RegistryDescriptor
-from sqlalchemy.orm import Session
 
-from core_registry.api.publisher_auth import (
-    authenticate_publisher_request,
-    cached_response,
-    canonical_query_body,
-    complete_authenticated_request,
-    registry_authority_signer,
-    signed_response,
-)
-from core_registry.db.database import get_db
+from core_registry.api.admission import registry_core
 
 router = APIRouter(tags=["registry-descriptor"])
+
+DESCRIPTOR_OPERATION = "registry.descriptor.read"
 
 
 @router.get(
@@ -25,35 +26,9 @@ router = APIRouter(tags=["registry-descriptor"])
 )
 async def get_registry_descriptor(
     request: Request,
-    db: Session = Depends(get_db),
-) -> Response:
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="registry.descriptor.read",
-        resource="registry-descriptor",
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
+    admitted: PublicAdmitted = Depends(PublicAdmission(registry_core, operation=DESCRIPTOR_OPERATION)),
+) -> dict:
     descriptor = getattr(request.app.state, "registry_descriptor", None)
     if not isinstance(descriptor, RegistryDescriptor):
         raise HTTPException(status_code=503, detail="Registry descriptor unavailable")
-    body = descriptor.to_wire()
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=body,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=body,
-    )
+    return descriptor.to_wire()

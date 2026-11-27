@@ -245,8 +245,15 @@ class ListingSummary:
 
     ``storefront_url`` is where a buyer negotiates: the URL the seller signed
     into the listing's publication, or, for a listing served without seller
-    publication evidence (``publisher_publication`` null), the publisher
-    record's URL.
+    publication evidence (``publication`` null), the publisher record's URL.
+
+    ``publication`` is the seller's signed publication as the registry kept it:
+    its exact body as ``body_base64`` and the record of the seller's signed
+    request as ``request``, which ``market_identity.verify_request_evidence``
+    verifies with the listing's ``publisher_principals``; a publication the
+    registry kept under version 2 holds its version 2 envelope there instead.
+    ``updates`` maps each field a signed update changed to that update, in the
+    same form.
     """
 
     id: str | int | None = None
@@ -261,11 +268,15 @@ class ListingSummary:
     max_duration_seconds: int | None = None
     created_at: str | int | None = None
     updated_at: str | int | None = None
+    publication: dict[str, Any] | None = None
+    updates: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ListingSummary":
         known = {
+            "publication",
+            "updates",
             "listing_id",
             "publisher_id",
             "publisher_principals",
@@ -309,6 +320,8 @@ class ListingSummary:
             or d.get("maxDurationSeconds"),
             created_at=d.get("created_at") or d.get("createdAt"),
             updated_at=d.get("updated_at"),
+            publication=d.get("publication"),
+            updates=d.get("updates") or {},
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -328,6 +341,8 @@ class ListingSummary:
                 "accepted_escrows": self.accepted_escrows,
                 "settlement_options": self.settlement_options,
                 "demands": self.demands,
+                "publication": self.publication,
+                "updates": self.updates,
                 "max_duration_seconds": self.max_duration_seconds,
                 "status": self.status,
                 "created_at": self.created_at,

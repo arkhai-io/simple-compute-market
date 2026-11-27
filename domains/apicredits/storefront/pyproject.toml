@@ -8,7 +8,7 @@ dependencies = [
     "arkhai-kit-arkhai-mediation>=0.1.0",
     "arkhai-core>=0.4.0",
     "arkhai-apicredits-domain>=0.8.0",
-    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-core-registry-client>=0.14.0",
     "arkhai-core-storefront>=0.18.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-capacity-publication==0.12.2",

@@ -1,7 +1,7 @@
 """Dry-run validation routes for the registry service.
 
 POST /api/v1/listings/validate-publish
-    Authenticates a canonical v2 marketplace request, then checks whether
+    Admits a signed marketplace request, then checks whether
     a listing payload would be structurally accepted by POST /listings without
     writing listing or publisher state. Used by composition smoke tests before
     a storefront attempts publication.
@@ -13,24 +13,21 @@ GET /filter-spec and the publication route uses at admission.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
+from market_authenticated_requests import Admitted, RouteAdmission
+from market_identity import ExactRetry
+
+from core_registry.api.admission import READ_ROLES, registry_core
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
 from core_registry.api.validate_model import ValidatePublishRequest, ValidatePublishResponse
 from core_registry.api.api_key_auth import require_read_access
-from core_registry.api.publisher_auth import (
-    authenticate_publisher_request,
-    cached_response,
-    complete_authenticated_request,
-    registry_authority_signer,
-    signed_response,
-    wire_body,
-)
 from core_registry.db.database import get_db
 from sqlalchemy.orm import Session
 
@@ -96,9 +93,14 @@ def reject_retired_listing_shape(body: Any) -> None:
         )
 
 
+#: Names a listing read lays over the seller's published document, so a
+#: publication carrying one would be overwritten by registry metadata or
+#: evidence on read: ``publication`` and ``updates`` are the seller evidence,
+#: and a reader of a record a consumer retained takes ``publisher_publication``
+#: and ``publisher_updates`` for that evidence too.
 RESERVED_LISTING_FIELDS = frozenset({
     "publisher_id", "publisher_principals", "created_at", "updated_at",
-    "publisher_publication", "publisher_updates",
+    "publication", "updates", "publisher_publication", "publisher_updates",
 })
 
 
@@ -175,45 +177,26 @@ def _format_path(err: ValidationError) -> str:
 )
 async def validate_publish(
     request: Request,
-    body: ValidatePublishRequest,
+    admitted: Admitted = Depends(
+        RouteAdmission(registry_core, operation="listing.validate", roles=READ_ROLES, exact_retry=ExactRetry.RERUN)
+    ),
+    body: ValidatePublishRequest = Body(...),
     db: Session = Depends(get_db),
 ):
-    # Both authentication and validation use the caller's complete document;
-    # materializing model defaults would change the signed/admitted content.
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="POST",
-        operation="listing.validate",
-        resource="listings",
-        body=wire_body(await request.body()),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
+    # Validation reads the caller's complete document as it sent it;
+    # materializing model defaults would change what was admitted.
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
-    candidate = wire_body(await request.body())
-    errors = listing_validation_errors(candidate)
-
-    response_body = ValidatePublishResponse(
+    errors = listing_validation_errors(_wire_document(admitted.body))
+    return ValidatePublishResponse(
         valid=not errors,
         listing_id=body.listing_id,
         accepted_escrows_count=len(body.accepted_escrows),
         settlement_options_count=len(body.settlement_options),
         errors=errors,
     ).model_dump(mode="json")
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
+
+
+def _wire_document(raw: bytes) -> Any:
+    """The body as the caller sent it, which the model has already parsed."""
+
+    return json.loads(raw)

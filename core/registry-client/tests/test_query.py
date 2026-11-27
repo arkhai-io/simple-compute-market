@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import urllib.parse
 
-from unittest.mock import AsyncMock, Mock
-
+import httpx
+import injected_time
 import pytest
-
 from market_core import QueryValidationError
+from market_identity import RequestBinding, TrustedIdentitySet
+from market_identity.fixtures.messages import build_signed_response, development_authority, development_signer
 from registry_client import (
     FilterSpecResponse,
     FilterVocabularyError,
@@ -17,6 +20,9 @@ from registry_client import (
     compile_resource_query,
     resource_query_descriptors,
 )
+
+
+_AUTHORITY = development_authority()
 
 
 def _spec(*, etag: str = "spec-7") -> FilterSpecResponse:
@@ -209,69 +215,77 @@ def test_missing_etag_fails_before_query_compilation() -> None:
         )
 
 
+def _signed_registry(seen: list[httpx.Request], answers: list[tuple[int, dict]]) -> httpx.MockTransport:
+    """A registry answering each request in turn, signed over the request
+    identity it states, as the registry signs every answer."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        status, body = answers.pop(0)
+        binding = RequestBinding(
+            method=request.method,
+            operation=request.headers["Market-Operation"],
+            resource=request.headers.get("Market-Resource"),
+            request_id=request.headers["Market-Request-ID"],
+        )
+        signed = build_signed_response(
+            signer=_AUTHORITY, request=binding, status=status,
+            body=json.dumps(body).encode(), created=injected_time.now(),
+        )
+        return httpx.Response(signed.status, headers=signed.headers, content=signed.body)
+
+    return httpx.MockTransport(handler)
+
+
+def _answers() -> list[tuple[int, dict]]:
+    return [
+        (200, {"version": 4, "etag": "rotated-from-this", "filters": _spec().filters}),
+        (412, {"detail": {"error": "filter-spec etag mismatch", "current_etag": "rotated-to-this"}}),
+    ]
+
+
+def _client_arguments(transport) -> dict:
+    return {
+        "signer": development_signer(),
+        "caller_role": "buyer",
+        "expected_registries": TrustedIdentitySet(identities=(_AUTHORITY.identity,)),
+        "registry_authority": "test-registry",
+        "transport": transport,
+    }
+
+
+def _assert_etag_query(request: httpx.Request) -> None:
+    query = urllib.parse.parse_qs(request.url.query.decode())
+    assert query["filter_spec_etag"] == ["rotated-from-this"]
+    assert query["ram_gb_min"] == ["64"]
+    assert "If-Match" not in request.headers
+
+
 def test_async_client_binds_compiled_params_to_etag_and_surfaces_412() -> None:
+    seen: list[httpx.Request] = []
+
     async def run() -> None:
-        client = object.__new__(RegistryClient)
-        request = AsyncMock(
-            side_effect=[
-                {
-                    "version": 4,
-                    "etag": "rotated-from-this",
-                    "filters": _spec().filters,
-                },
-                RegistryClientError(
-                    "GET", "https://registry.example/listings", 412, "rotated"
-                ),
-            ]
-        )
-        client._request = request
-
-        spec = await client.get_filter_spec()
-        compiled = compile_resource_query(
-            "ram_gb>=64",
-            filter_spec=spec,
-            registry_url="https://registry.example",
-        )
-        with pytest.raises(RegistryClientError) as caught:
-            await client.list_listings(etag=compiled.etag, **compiled.as_params())
-
+        async with RegistryClient("https://registry.example", **_client_arguments(_signed_registry(seen, _answers()))) as client:
+            spec = await client.get_filter_spec()
+            compiled = compile_resource_query("ram_gb>=64", filter_spec=spec, registry_url="https://registry.example")
+            with pytest.raises(RegistryClientError) as caught:
+                await client.list_listings(etag=compiled.etag, **compiled.as_params())
         assert caught.value.status_code == 412
-        assert request.await_args.kwargs["headers"] == {
-            "If-Match": '"rotated-from-this"'
-        }
-        assert request.await_args.kwargs["params"]["ram_gb_min"] == "64"
 
     asyncio.run(run())
+    _assert_etag_query(seen[1])
 
 
 def test_sync_client_binds_compiled_params_to_etag_and_surfaces_412() -> None:
-    client = object.__new__(SyncRegistryClient)
-    request = Mock(
-        side_effect=[
-            {
-                "version": 4,
-                "etag": "rotated-from-this",
-                "filters": _spec().filters,
-            },
-            RegistryClientError(
-                "GET", "https://registry.example/listings", 412, "rotated"
-            ),
-        ]
-    )
-    client._request = request
-
-    spec = client.get_filter_spec()
-    compiled = compile_resource_query(
-        "ram_gb>=64",
-        filter_spec=spec,
-        registry_url="https://registry.example",
-    )
-    with pytest.raises(RegistryClientError) as caught:
-        client.list_listings(etag=compiled.etag, **compiled.as_params())
+    seen: list[httpx.Request] = []
+    with SyncRegistryClient("https://registry.example", **_client_arguments(_signed_registry(seen, _answers()))) as client:
+        spec = client.get_filter_spec()
+        compiled = compile_resource_query("ram_gb>=64", filter_spec=spec, registry_url="https://registry.example")
+        with pytest.raises(RegistryClientError) as caught:
+            client.list_listings(etag=compiled.etag, **compiled.as_params())
 
     assert caught.value.status_code == 412
-    assert request.call_args.kwargs["headers"] == {"If-Match": '"rotated-from-this"'}
-    assert request.call_args.kwargs["params"]["ram_gb_min"] == "64"
+    _assert_etag_query(seen[1])
 
 
 def _rate_spec() -> FilterSpecResponse:

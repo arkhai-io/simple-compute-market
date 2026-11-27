@@ -1,120 +1,143 @@
-"""Versioned, body-bound authentication for every registry request and response."""
+"""Signing every registry request and verifying every registry answer.
+
+Every request is signed under ``kit/identity``'s version 3 profile, naming the
+registries the client would accept the answer from as its audience; its query is
+built through the profile's one query encoding, so the client sends exactly the
+query its signature covers. Every answer is verified against the request it
+answers and the configured registry principals. The descriptor read is a public
+operation, whose request carries only a request identity.
+"""
 
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 
 import injected_time
 from market_identity import (
-    EMPTY_BODY,
-    AuthenticatedRequest,
-    Identity,
-    RequestEnvelope,
+    MarketRequest,
+    RequestBinding,
+    RequestRecord,
     Signer,
     TrustedIdentitySet,
     VerificationCode,
-    canonical_body_hash,
-    sign_request,
-    verify_response,
+    encode_query,
+    sign_market_request,
+    verify_market_response,
 )
 
-SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
-IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
-IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
-ROLE_HEADER = "X-Market-Role"
-REQUEST_ID_HEADER = "X-Market-Request-ID"
-TIMESTAMP_HEADER = "X-Market-Timestamp"
-SIGNATURE_HEADER = "X-Market-Signature"
+#: How far a registry's signing time may be from the client's own instant.
+RESPONSE_MAX_SKEW_SECONDS = 300
+
+DESCRIPTOR_PATH = "/.well-known/arkhai/registry-descriptor.json"
+DESCRIPTOR_OPERATION = "registry.descriptor.read"
 
 
-def authenticate_request(
+def request_route(method: str, path: str) -> tuple[str, str | None]:
+    """The operation a registry route binds, and the object it acts on, or
+    ``None`` for an operation with no target: a publication, a collection read,
+    validation, and the singleton reads."""
+
+    parts = [part for part in path.split("/") if part]
+    method = method.upper()
+    if path == "/api/v1/system/health":
+        return "health.read", None
+    if path == "/api/v1/system/stats":
+        return "system.stats.read", None
+    if path == "/api/v1/listings/validate-publish":
+        return "listing.validate", None
+    if path == "/filter-spec":
+        return "filter.get", None
+    if parts[:1] == ["listings"]:
+        if len(parts) == 1:
+            return ("listing.publish" if method == "POST" else "listing.list"), None
+        operation = {"GET": "listing.get", "PUT": "listing.update", "DELETE": "listing.delete"}[method]
+        return operation, parts[1]
+    if parts[:1] == ["publishers"]:
+        if len(parts) == 1:
+            return "publisher.list", None
+        if len(parts) == 2:
+            return "publisher.get", parts[1]
+        if parts[2] == "identity-rotations":
+            if len(parts) == 3:
+                return "publisher.identity.rotate", parts[1]
+            if len(parts) == 4:
+                return "publisher.identity.rotation.read", f"{parts[1]}:{parts[3]}"
+            if len(parts) == 5 and parts[4] == "retire":
+                return "publisher.identity.retire", f"{parts[1]}:{parts[3]}"
+    raise ValueError(f"unsupported registry route: {method} {path}")
+
+
+@dataclass(frozen=True)
+class SignedRegistryRequest:
+    """A request ready to send: its target with the query it signed, its headers,
+    the binding its answer is verified against, and its evidence record."""
+
+    target: str
+    headers: dict[str, str]
+    binding: RequestBinding
+    record: RequestRecord | None
+
+
+def sign_registry_request(
     *,
     signer: Signer,
     role: str,
     method: str,
-    operation: str,
-    resource: str,
-    body: Any = EMPTY_BODY,
+    path: str,
+    body: bytes,
+    audience: TrustedIdentitySet,
+    query: Iterable[tuple[str, str]] = (),
     request_id: str | None = None,
-    timestamp: int | None = None,
-) -> AuthenticatedRequest:
-    """Build and sign one canonical registry request."""
+    origin: int | None = None,
+) -> SignedRegistryRequest:
+    """Sign one registry request under the version 3 profile.
 
-    envelope = RequestEnvelope(
-        role=role,
-        principal=signer.identity,
+    An exact retry passes the ``request_id`` and ``origin`` of the request it
+    repeats; a first attempt passes neither, and its origin is the signing
+    instant.
+    """
+
+    operation, resource = request_route(method, path)
+    now = injected_time.now()
+    suffix = encode_query(query)
+    request = MarketRequest(
         method=method,
+        role=role,
         operation=operation,
         resource=resource,
         request_id=request_id or uuid.uuid4().hex,
-        timestamp=injected_time.now() if timestamp is None else timestamp,
-        body_hash=canonical_body_hash(body),
+        origin=now if origin is None else origin,
     )
-    return sign_request(signer=signer, envelope=envelope)
+    signed = sign_market_request(
+        signer=signer, request=request, body=body, created=now, query=suffix, audience=audience
+    )
+    headers = dict(signed.headers)
+    if body:
+        headers["Content-Type"] = "application/json"
+    return SignedRegistryRequest(target=path + suffix, headers=headers, binding=request.binding, record=signed.record)
 
 
-def authentication_headers(request: AuthenticatedRequest) -> dict[str, str]:
-    """Map an authenticated request to the registry's flat HTTP headers."""
-
-    return {
-        "Content-Type": "application/json",
-        SIGNATURE_VERSION_HEADER: request.protocol,
-        IDENTITY_SCHEME_HEADER: request.principal.scheme.value,
-        IDENTITY_IDENTIFIER_HEADER: request.principal.identifier,
-        ROLE_HEADER: request.role,
-        REQUEST_ID_HEADER: request.request_id,
-        TIMESTAMP_HEADER: str(request.timestamp),
-        SIGNATURE_HEADER: request.proof.value,
-    }
-
-def verify_authenticated_response(
+def verify_registry_response(
     *,
-    headers: Any,
-    expected_registries: TrustedIdentitySet,
-    request: AuthenticatedRequest,
     status: int,
-    body: Any = EMPTY_BODY,
-    now: int | None = None,
+    headers: Mapping[str, str],
+    body: bytes,
+    binding: RequestBinding,
+    expected_registries: TrustedIdentitySet,
 ) -> None:
-    """Verify a registry response against its public authority pin and request."""
-    try:
-        timestamp: int | str = int(headers[TIMESTAMP_HEADER])
-    except (KeyError, TypeError, ValueError):
-        timestamp = headers.get(TIMESTAMP_HEADER, "")
+    """Verify a registry answer against the request it answers and the registry
+    principals expected; raises :class:`ValueError` naming why it failed."""
 
-
-    scheme = headers.get(IDENTITY_SCHEME_HEADER, "")
-    envelope = {
-        "protocol": headers.get(SIGNATURE_VERSION_HEADER, ""),
-        "role": headers.get(ROLE_HEADER, ""),
-        "principal": {
-            "scheme": scheme,
-            "identifier": headers.get(IDENTITY_IDENTIFIER_HEADER, ""),
-        },
-        "method": request.method,
-        "operation": request.operation,
-        "resource": request.resource,
-        "request_id": headers.get(REQUEST_ID_HEADER, ""),
-        "timestamp": timestamp,
-        "status": status,
-        "body_hash": canonical_body_hash(body),
-        "proof": {
-            "scheme": scheme,
-            "value": headers.get(SIGNATURE_HEADER, ""),
-        },
-    }
-    result = verify_response(
-        envelope,
+    result = verify_market_response(
+        status=status,
+        headers=headers,
         body=body,
-        now=injected_time.now() if now is None else now,
-        max_skew=300,
-        expected_role="registry",
-        expected_method=request.method,
-        expected_operation=request.operation,
+        request=binding,
         expected_principals=expected_registries,
-        expected_resource=request.resource,
-        expected_request_id=request.request_id,
+        now=injected_time.now(),
+        max_skew=RESPONSE_MAX_SKEW_SECONDS,
     )
     if result.code != VerificationCode.VERIFIED:
         raise ValueError(f"invalid registry response: {result.code.value}")

@@ -22,6 +22,7 @@ from market_authenticated_requests.core import (
     Answer,
     PublicAdmitted,
     SignedOutcome,
+    Trust,
     Verified,
 )
 from market_authenticated_requests.dependency import PublicAdmission, RouteAdmission
@@ -70,6 +71,7 @@ __all__ = [
     "RouteNotServed",
     "RouteTable",
     "SignedOutcome",
+    "Trust",
     "Unauthenticated",
     "Verified",
     "fixed_resource",

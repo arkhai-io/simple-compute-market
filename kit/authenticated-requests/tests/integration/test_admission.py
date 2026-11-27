@@ -586,3 +586,28 @@ def test_a_query_byte_no_url_may_hold_is_refused_as_malformed(world: World) -> N
         assert caller.verified(response, method="GET", operation="item_read", resource="a")
 
     world.run(scenario)
+
+
+class _AnyVerifiedPrincipal:
+    """An authority's own trust rule, admitting every verified principal, as an
+    authority checking ownership in its routes does."""
+
+    def allows(self, identity: object) -> bool:
+        return True
+
+
+def test_a_trust_rule_admits_a_principal_no_configured_set_lists(
+    tmp_path: Path, form: str, caller_signer: Signer, stranger: Signer
+) -> None:
+    world = make_world(tmp_path, form, caller_signer, trust=lambda role: _AnyVerifiedPrincipal())
+
+    async def scenario(caller: Caller) -> None:
+        answer = await caller.send(
+            "POST", "/items/a/raise", operation="item_raise", resource="a", body={"value": 4}, signer=stranger
+        )
+
+        assert answer.status_code == 200
+        assert caller.verified(answer, method="POST", operation="item_raise", resource="a")
+
+    world.run(scenario)
+    assert world.toy.items() == {"a": 4}

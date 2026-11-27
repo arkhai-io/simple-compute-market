@@ -326,7 +326,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.13.1"
+version = "0.14.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -335,7 +335,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.13.1-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -996,7 +996,7 @@ requires-dist = [
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.11.0" },
     { name = "arkhai-core", specifier = ">=0.6.0" },
-    { name = "arkhai-core-registry-client", specifier = ">=0.13.0" },
+    { name = "arkhai-core-registry-client", specifier = ">=0.14.0" },
     { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.30.0" },
     { name = "arkhai-injected-time", specifier = ">=0.1.0" },

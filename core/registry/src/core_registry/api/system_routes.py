@@ -25,15 +25,11 @@ from core_registry.api.system_model import (
     OrderStatusCounts,
     StatsResponse,
 )
+from market_authenticated_requests import Admitted, RouteAdmission
+from market_identity import ExactRetry
+
+from core_registry.api.admission import READ_ROLES, registry_core
 from core_registry.api.api_key_auth import require_read_access
-from core_registry.api.publisher_auth import (
-    authenticate_publisher_request,
-    cached_response,
-    canonical_query_body,
-    complete_authenticated_request,
-    registry_authority_signer,
-    signed_response,
-)
 from core_registry.db.database import get_db
 from core_registry.db.models import Publisher, Listing, OrderStatusEnum
 
@@ -79,22 +75,12 @@ async def health_check(
 @_system_router.get("/health", response_model=HealthResponse)
 async def authenticated_health_check(
     request: Request,
+    admitted: Admitted = Depends(
+        RouteAdmission(registry_core, operation="health.read", roles=READ_ROLES, exact_retry=ExactRetry.RERUN)
+    ),
     db: Session = Depends(get_db),
 ):
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="health.read",
-        resource="health",
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
     checks: dict[str, str] = {"api": "ok"}
     try:
         db.execute(text("SELECT 1"))
@@ -102,23 +88,9 @@ async def authenticated_health_check(
     except Exception as exc:
         checks["database"] = f"error: {exc}"
     all_ok = all(value == "ok" for value in checks.values())
-    payload = {
-        "status": "ok" if all_ok else "degraded",
-        "checks": checks,
-    }
-    status = 200 if all_ok else 503
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=status,
-        body=payload,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=status,
-        body=payload,
+    return JSONResponse(
+        content={"status": "ok" if all_ok else "degraded", "checks": checks},
+        status_code=200 if all_ok else 503,
     )
 
 
@@ -139,22 +111,12 @@ async def authenticated_health_check(
 )
 def system_stats(
     request: Request,
+    admitted: Admitted = Depends(
+        RouteAdmission(registry_core, operation="system.stats.read", roles=READ_ROLES, exact_retry=ExactRetry.RERUN)
+    ),
     db: Session = Depends(get_db),
 ):
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="system.stats.read",
-        resource="system",
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
     publisher_count: int = db.query(func.count(Publisher.publisher_id)).scalar() or 0
 
     order_counts: dict[str, int] = {s.value: 0 for s in OrderStatusEnum}
@@ -168,24 +130,11 @@ def system_stats(
 
     total_orders = sum(order_counts.values())
 
-    response_body = StatsResponse(
+    return StatsResponse(
         publisher_count=publisher_count,
         order_count=total_orders,
         orders_by_status=OrderStatusCounts(**order_counts),
     ).model_dump(mode="json")
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
 
 
 # ---------------------------------------------------------------------------

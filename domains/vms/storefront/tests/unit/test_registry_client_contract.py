@@ -53,38 +53,27 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
+import injected_time
 from market_identity import (
-    AuthenticatedRequest,
     Ed25519Signer,
-    Identity,
-    ResponseEnvelope,
-    SignatureProof,
+    RequestBinding,
     TrustedIdentitySet,
     VerificationCode,
-    canonical_body_hash,
-    sign_response,
-    verify_request,
+    verify_market_request,
 )
+from market_identity.fixtures.messages import build_signed_response
 
 from registry_client import RegistryClient
 from registry_client.models import ListingRequest
 
 # ---------------------------------------------------------------------------
-# Canonical identity-v2 fixtures
+# Canonical identity-v3 fixtures
 # ---------------------------------------------------------------------------
 
 SELLER_SIGNER = Ed25519Signer(bytes.fromhex("21" * 32))
 REGISTRY_SIGNER = Ed25519Signer(bytes.fromhex("42" * 32))
 REGISTRY_TRUST = TrustedIdentitySet(identities=(REGISTRY_SIGNER.identity,))
 REGISTRY_AUTHORITY = "registry.test"
-
-SIGNATURE_VERSION_HEADER = "X-Market-Signature-Version"
-IDENTITY_SCHEME_HEADER = "X-Market-Identity-Scheme"
-IDENTITY_IDENTIFIER_HEADER = "X-Market-Identity-Identifier"
-ROLE_HEADER = "X-Market-Role"
-REQUEST_ID_HEADER = "X-Market-Request-ID"
-TIMESTAMP_HEADER = "X-Market-Timestamp"
-SIGNATURE_HEADER = "X-Market-Signature"
 
 
 # ---------------------------------------------------------------------------
@@ -98,60 +87,22 @@ def _signed_response(
     status_code: int,
     body: dict[str, Any],
 ) -> httpx.Response:
-    authenticated = sign_response(
-        signer=signer,
-        envelope=ResponseEnvelope(
-            role="registry",
-            principal=signer.identity,
-            method=request.method,
-            operation="listing.publish",
-            resource="listings",
-            request_id=request.headers[REQUEST_ID_HEADER],
-            timestamp=int(request.headers[TIMESTAMP_HEADER]),
-            status=status_code,
-            body_hash=canonical_body_hash(body),
-        ),
-    )
-    headers = {
-        SIGNATURE_VERSION_HEADER: authenticated.protocol,
-        IDENTITY_SCHEME_HEADER: authenticated.principal.scheme.value,
-        IDENTITY_IDENTIFIER_HEADER: authenticated.principal.identifier,
-        ROLE_HEADER: authenticated.role,
-        REQUEST_ID_HEADER: authenticated.request_id,
-        TIMESTAMP_HEADER: str(authenticated.timestamp),
-        SIGNATURE_HEADER: authenticated.proof.value,
-    }
-    return httpx.Response(
-        status_code,
-        json=body,
-        headers=headers,
-        request=request,
-    )
-
-
-def _request_envelope(
-    request: httpx.Request,
-    body: dict[str, Any],
-) -> AuthenticatedRequest:
-    scheme = request.headers[IDENTITY_SCHEME_HEADER]
-    return AuthenticatedRequest(
-        protocol=request.headers[SIGNATURE_VERSION_HEADER],
-        role=request.headers[ROLE_HEADER],
-        principal=Identity(
-            scheme=scheme,
-            identifier=request.headers[IDENTITY_IDENTIFIER_HEADER],
-        ),
+    """The registry's answer, signed over the request identity the request
+    states, as the registry signs every answer naming a request."""
+    binding = RequestBinding(
         method=request.method,
-        operation="listing.publish",
-        resource="listings",
-        request_id=request.headers[REQUEST_ID_HEADER],
-        timestamp=int(request.headers[TIMESTAMP_HEADER]),
-        body_hash=canonical_body_hash(body),
-        proof=SignatureProof(
-            scheme=scheme,
-            value=request.headers[SIGNATURE_HEADER],
-        ),
+        operation=request.headers["Market-Operation"],
+        resource=request.headers.get("Market-Resource"),
+        request_id=request.headers["Market-Request-ID"],
     )
+    signed = build_signed_response(
+        signer=signer,
+        request=binding,
+        status=status_code,
+        body=json.dumps(body).encode(),
+        created=injected_time.now(),
+    )
+    return httpx.Response(status_code, content=signed.body, headers=signed.headers, request=request)
 
 
 class _CapturingTransport(httpx.AsyncBaseTransport):
@@ -171,6 +122,7 @@ class _CapturingTransport(httpx.AsyncBaseTransport):
         self._body = {} if body is None else body
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        await request.aread()
         self.last_request = request
         self.last_response = _signed_response(
             request,
@@ -193,7 +145,7 @@ class _CapturingTransport(httpx.AsyncBaseTransport):
 
 @pytest_asyncio.fixture
 async def capturing_client():
-    """Yield a RegistryClient and transport with both v2 directions signed."""
+    """Yield a RegistryClient and transport with both version 3 directions signed."""
     transport = _CapturingTransport(
         response_signer=REGISTRY_SIGNER,
         status_code=201,
@@ -322,7 +274,7 @@ class TestPublishListingWireFormat:
     This catches:
     - URL path renames (e.g. /agents/{id}/listings → /agents/{id}/orders)
     - Method signature changes (e.g. publish_listing argument reordering)
-    - Auth mechanism changes (v2 envelope absent / wrong header or body binding)
+    - Auth mechanism changes (version 3 signature absent, or not bound to the body)
     - Body field renames that survive ListingRequest construction but fail at
       the wire layer
     """
@@ -344,18 +296,20 @@ class TestPublishListingWireFormat:
             "URL path has changed — update the registry-client wheel or storefront."
         )
 
-    async def test_headers_identify_canonical_ed25519_signer(self, capturing_client):
-        """Authentication headers must carry the seller's canonical identity."""
+    async def test_headers_identify_the_seller_and_address_the_registry(self, capturing_client):
+        """Authentication headers carry the seller's role, an operation with no
+        target, and the registry the seller would accept the answer from."""
         client, transport = capturing_client
         req = ListingRequest(listing_id=uuid.uuid4().hex, listing_resource={}, accepted_escrows=[])
         await client.publish_listing(req)
 
         assert transport.last_request is not None
         headers = transport.last_request.headers
-        assert headers[IDENTITY_SCHEME_HEADER] == "ed25519"
-        assert headers[IDENTITY_SCHEME_HEADER] == SELLER_SIGNER.identity.scheme.value
-        assert headers[IDENTITY_IDENTIFIER_HEADER] == SELLER_SIGNER.identity.identifier
-        assert headers[ROLE_HEADER] == "seller"
+        assert headers["Market-Role"] == "seller"
+        assert headers["Market-Operation"] == "listing.publish"
+        assert "Market-Resource" not in headers
+        assert REGISTRY_SIGNER.identity.identifier in headers["Market-Audience"]
+        assert f'keyid="ed25519:{SELLER_SIGNER.identity.identifier}"' in headers["Signature-Input"]
 
     async def test_body_contains_listing_id(self, capturing_client):
         """Request body must include listing_id."""
@@ -410,60 +364,26 @@ class TestPublishListingWireFormat:
         )
         assert body["max_duration_seconds"] == 7200
 
-    async def test_v2_authentication_envelope_binds_exact_body(self, capturing_client):
-        """Request headers carry a verifiable v2 envelope bound to the exact body."""
+    async def test_the_version_3_signature_binds_the_exact_body(self, capturing_client):
+        """The request verifies under the version 3 profile over the exact body
+        sent, as the seller, and fails over any other body."""
         client, transport = capturing_client
         req = ListingRequest(listing_id=uuid.uuid4().hex, listing_resource={}, accepted_escrows=[])
         await client.publish_listing(req, request_id="request-one")
 
         assert transport.last_request is not None
-        assert transport.last_response is not None
-        body = transport.last_request_body
+        content = transport.last_request.content
         headers = transport.last_request.headers
-        assert headers[SIGNATURE_VERSION_HEADER] == (
-            "arkhai.market-request-signature.v2"
-        )
-        assert headers[REQUEST_ID_HEADER] == "request-one"
-        assert headers[TIMESTAMP_HEADER].isdigit()
-        assert headers[SIGNATURE_HEADER]
-        assert {"scheme", "identifier", "signature", "timestamp"}.isdisjoint(body)
+        assert {"scheme", "identifier", "signature", "timestamp"}.isdisjoint(json.loads(content))
 
-        envelope = _request_envelope(transport.last_request, body)
-        trusted_seller = TrustedIdentitySet(identities=(SELLER_SIGNER.identity,))
-        verified = verify_request(
-            envelope,
-            body=body,
-            now=envelope.timestamp,
-            max_skew=300,
-            expected_role="seller",
-            expected_method="POST",
-            expected_operation="listing.publish",
-            expected_resource="listings",
-            expected_principals=trusted_seller,
-        )
+        verified = verify_market_request(method="POST", headers=headers, body=content)
         assert verified.code == VerificationCode.VERIFIED
+        assert verified.request is not None
+        assert verified.request.principal == SELLER_SIGNER.identity
+        assert verified.request.request_id == "request-one"
+        assert verified.request.addressed_to(REGISTRY_SIGNER.identity)
 
-        tampered = verify_request(
-            envelope,
-            body={**body, "listing_id": "tampered"},
-            now=envelope.timestamp,
-            max_skew=300,
-            expected_role="seller",
-            expected_method="POST",
-            expected_operation="listing.publish",
-            expected_resource="listings",
-            expected_principals=trusted_seller,
+        tampered = verify_market_request(
+            method="POST", headers=headers, body=content.replace(b"{", b'{"listing_id":"tampered",', 1)
         )
-        assert tampered.code == VerificationCode.BODY_HASH_MISMATCH
-
-        response_headers = transport.last_response.headers
-        assert response_headers[SIGNATURE_VERSION_HEADER] == (
-            "arkhai.market-response-signature.v2"
-        )
-        assert response_headers[IDENTITY_SCHEME_HEADER] == (
-            REGISTRY_SIGNER.identity.scheme.value
-        )
-        assert response_headers[IDENTITY_IDENTIFIER_HEADER] == (
-            REGISTRY_SIGNER.identity.identifier
-        )
-        assert response_headers[ROLE_HEADER] == "registry"
+        assert tampered.code != VerificationCode.VERIFIED

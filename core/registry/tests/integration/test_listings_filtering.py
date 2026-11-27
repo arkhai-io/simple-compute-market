@@ -1,11 +1,10 @@
 """Integration tests for spec-driven filtering on GET /listings.
 
-These exercise the JSONPath-driven evaluator + the ETag-gated query
-path that replaced ``matches_resource_filters``.  Uses raw httpx
-through ASGITransport so we can hit the new query syntax (arbitrary
-filter params + If-Match header) without going through the registry-
-client typed surface, which still carries the legacy parameter list
-(client gets bumped in a1b-4).
+These exercise the JSONPath-driven evaluator and the ETag-gated query
+path.  Most use raw httpx
+through ASGITransport so they can send the query syntax (arbitrary filter
+params) directly; the ETag's checks use the typed client, which sends it as
+the signed ``filter_spec_etag`` parameter.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import json
 
 import httpx
 import pytest
+from registry_client import RegistryClientError
 from registry_client.models import ValidatePublishRequest
 
 from core_registry.api.filter_spec import compute_etag, get_loaded_spec
@@ -22,23 +22,9 @@ from core_registry.main import app
 
 
 @pytest.fixture
-def _raw_client(db_session):
-    """httpx.AsyncClient over the FastAPI app, sharing the test DB session."""
-    from core_registry.db.database import get_db
-
-    def _override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = _override_get_db
-    try:
-        yield httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
-        )
-    finally:
-        app.dependency_overrides.clear()
+def _raw_client():
+    """httpx.AsyncClient over the served application, over the test database."""
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
 def _make_listing(db_session, publisher, listing_id: str, **offer_extras) -> Listing:
@@ -153,29 +139,43 @@ async def test_unknown_filter_returns_400(_raw_client, db_session, maker_publish
 
 
 @pytest.mark.asyncio
-async def test_etag_mismatch_returns_412(_raw_client, db_session, maker_publisher):
+async def test_a_stale_filter_spec_etag_is_refused_412_naming_the_current_one(
+    registry_client, db_session, maker_publisher
+):
+    """registry-discovery "Cached filter spec is stale", through the typed
+    client, which sends the ETag as the signed ``filter_spec_etag`` parameter."""
     _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
 
-    async with _raw_client as c:
-        resp = await c.get(
-            "/listings",
-            headers={"If-Match": '"deadbeef"'},
-        )
-    assert resp.status_code == 412
-    body = resp.json()
+    with pytest.raises(RegistryClientError) as stale:
+        await registry_client.list_listings(etag="deadbeef")
+
+    assert stale.value.status_code == 412
     # Current etag returned so the buyer can refresh and retry.
-    assert body["detail"]["current_etag"] == compute_etag(get_loaded_spec())
+    assert json.loads(stale.value.body)["detail"]["current_etag"] == compute_etag(get_loaded_spec())
 
 
 @pytest.mark.asyncio
-async def test_etag_match_passes_through(_raw_client, db_session, maker_publisher):
+async def test_the_current_filter_spec_etag_passes_through(registry_client, db_session, maker_publisher):
     _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
-    current = compute_etag(get_loaded_spec())
+
+    page = await registry_client.list_listings(etag=compute_etag(get_loaded_spec()))
+
+    assert len(page.listings) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_listing_query_sending_the_etag_as_if_match_is_refused_naming_it(
+    _raw_client, db_session, maker_publisher
+):
+    """registry-discovery "A listing query sends the ETag as `If-Match`".
+    Rejection path: the typed client sends the ETag as its query parameter, so
+    the header is sent raw."""
+    _make_listing(db_session, maker_publisher, "x", gpu_model="A100")
 
     async with _raw_client as c:
-        resp = await c.get("/listings", headers={"If-Match": f'"{current}"'})
-    assert resp.status_code == 200
-    assert resp.json()["count"] == 1
+        resp = await c.get("/listings", headers={"If-Match": f'"{compute_etag(get_loaded_spec())}"'})
+
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

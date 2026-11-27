@@ -8,7 +8,9 @@ fixture; a database the release built (``ddl.sql`` at
 ``018_listing_resource_column``) is adopted at the baseline, keeping its rows;
 a database from before the floor, or with tables and no revision, is refused
 as unsupported and an unknown revision as ahead, each left byte for byte as it
-was. The startup check refuses every state but compatible in the shared
+was. A database as the 0.4.0 release leaves it loses its replay table, keeps its
+version 2 seller evidence under the names the listing read serves, and is
+compacted once, a rerun compacting nothing. The startup check refuses every state but compatible in the shared
 message, naming ``registry-migrate``, and creates no file. ``registry-migrate``
 and its ``--check`` run through the entry point with their settings in the
 environment.
@@ -49,7 +51,8 @@ from core_registry.db.migrations import (
 
 FLOOR = Path(__file__).resolve().parents[1] / "fixtures" / "v0_3_0_floor"
 BASELINE = "v0_3_0_baseline"
-HEAD = "20261106_001_registry_retained_publications"
+RETAINED_PUBLICATIONS = "20261106_001_registry_retained_publications"
+HEAD = "20261127_001_registry_replay_table"
 
 
 def _url(path: Path) -> str:
@@ -157,12 +160,12 @@ def test_a_v0_3_0_database_is_adopted_keeping_its_rows(tmp_path: Path) -> None:
 
     report = migrate_database(_url(database))
 
-    assert report.adopted and report.applied == (HEAD,)
+    assert report.adopted and report.applied == (RETAINED_PUBLICATIONS, HEAD)
     assert _revisions(database) == [HEAD]
     assert check_database(_url(database)).compatible
     fresh = tmp_path / "fresh.db"
     fresh_report = migrate_database(_url(fresh))
-    assert fresh_report.applied == (BASELINE, HEAD)
+    assert fresh_report.applied == (BASELINE, RETAINED_PUBLICATIONS, HEAD)
     assert _snapshot(database) == _snapshot(fresh)
     connection = sqlite3.connect(database)
     try:
@@ -170,7 +173,7 @@ def test_a_v0_3_0_database_is_adopted_keeping_its_rows(tmp_path: Path) -> None:
             ("listing-1", 1)
         ]
         assert connection.execute(
-            "SELECT published_document, publisher_publication, publisher_updates FROM listings"
+            "SELECT published_document, publication, updates FROM listings"
         ).fetchall() == [(None, None, None)]
         assert connection.execute("SELECT storefront_url FROM publishers").fetchall() == [
             ("http://storefront.test/",)
@@ -384,3 +387,122 @@ def test_the_command_does_not_load_the_application_settings() -> None:
 def test_the_console_script_entry_point_is_the_command() -> None:
     (script,) = entry_points(group="console_scripts", name="registry-migrate")
     assert script.load() is migrate.main
+
+
+_V2_PUBLICATION = {
+    "body_base64": "eyJsaXN0aW5nX2lkIjoibGlzdGluZy0xIn0=",
+    "request": {
+        "protocol": "arkhai.market-request-signature.v2",
+        "role": "seller",
+        "principal": {"scheme": "ed25519", "identifier": "a" * 43},
+        "method": "POST",
+        "operation": "listing.publish",
+        "resource": "listings",
+        "request_id": "v2-request",
+        "timestamp": 1_790_000_000,
+        "body_hash": "b" * 64,
+        "proof": {"scheme": "ed25519", "value": "c" * 86},
+    },
+}
+
+
+def _0_4_0_database(path: Path, *, replay_rows: int) -> Path:
+    """A database as the 0.4.0 release leaves it, built from the floor fixture's
+    DDL, the real upgrade path: adopted at the baseline, as the command adopts
+    it, and brought to the 0.4.0 revision, its listing given version 2
+    publication and update evidence and ``replay_rows`` reservations, each
+    holding a response body, in ``publisher_replay_reservations``."""
+
+    _floor_database(path, BASELINE)
+    command.upgrade(alembic_config(_url(path)), RETAINED_PUBLICATIONS)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "UPDATE listings SET published_document = '{\"listing_id\": \"listing-1\"}', "
+            "publisher_publication = ?, publisher_updates = ?",
+            (json.dumps(_V2_PUBLICATION), json.dumps({"status": _V2_PUBLICATION})),
+        )
+        connection.executemany(
+            "INSERT INTO publisher_replay_reservations (principal_scheme, principal_identifier, "
+            "request_id, request_hash, response_status, response_body, created_at, completed_at) "
+            "VALUES ('ed25519', ?, ?, ?, 200, ?, '2026-11-01 00:00:00', '2026-11-01 00:00:00')",
+            [
+                ("a" * 43, f"request-{index}", "d" * 64, json.dumps({"items": ["x" * 2_000]}))
+                for index in range(replay_rows)
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return path
+
+
+def _tables(path: Path) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        return {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        connection.close()
+
+
+def test_the_0_4_0_replay_table_is_dropped_its_evidence_renamed_and_the_file_compacted(tmp_path: Path) -> None:
+    database = _0_4_0_database(tmp_path / "registry.db", replay_rows=2_000)
+    before = database.stat().st_size
+
+    report = migrate_database(_url(database))
+
+    assert report.applied == (HEAD,) and report.compacted
+    assert database.stat().st_size < before / 4
+    assert "publisher_replay_reservations" not in _tables(database)
+    assert "authenticated_request_replay" in _tables(database)
+    connection = sqlite3.connect(database)
+    try:
+        publication, updates = connection.execute("SELECT publication, updates FROM listings").fetchone()
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+    finally:
+        connection.close()
+    assert json.loads(publication) == _V2_PUBLICATION
+    assert json.loads(updates) == {"status": _V2_PUBLICATION}
+    fresh = tmp_path / "fresh.db"
+    migrate_database(_url(fresh))
+    assert _snapshot(database) == _snapshot(fresh)
+
+
+def test_a_rerun_after_the_drop_compacts_nothing(tmp_path: Path) -> None:
+    database = _0_4_0_database(tmp_path / "registry.db", replay_rows=10)
+    assert migrate_database(_url(database)).compacted
+    before = database.read_bytes()
+
+    rerun = migrate_database(_url(database))
+
+    assert rerun.applied == () and not rerun.compacted
+    assert database.read_bytes() == before
+
+
+def test_the_check_previews_the_drop_and_changes_nothing(
+    command_database: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """deployment-state "An operator previews the upgrade": the check names the
+    revision that drops the table, drops nothing and compacts nothing."""
+    _0_4_0_database(command_database, replay_rows=10)
+    before = command_database.read_bytes()
+
+    with pytest.raises(SystemExit) as exited:
+        migrate.main(["--check"])
+
+    assert exited.value.code == 1
+    assert HEAD in capsys.readouterr().out
+    assert command_database.read_bytes() == before
+    assert "publisher_replay_reservations" in _tables(command_database)
+
+
+def test_the_command_reports_the_compaction(
+    command_database: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    _0_4_0_database(command_database, replay_rows=10)
+
+    with caplog.at_level("INFO"):
+        migrate.main([])
+
+    assert "compacted the database" in caplog.text
+    assert _revisions(command_database) == [HEAD]

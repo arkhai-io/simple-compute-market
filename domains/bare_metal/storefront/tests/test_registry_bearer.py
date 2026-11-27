@@ -29,7 +29,7 @@ from storefront_configuration import REGISTRY, SELLER
 
 #: Development-only token; it authorizes nothing anywhere.
 TOKEN = "dev-only-registry-token-not-a-secret"
-SIGNATURE = "X-Market-Signature"
+SIGNATURE = "Signature"
 
 TRUST = RegistryAuthorityTrust(
     authority="registry",

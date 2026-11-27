@@ -1,15 +1,18 @@
 # Listing Registry
 
 FastAPI service that stores published marketplace listings and serves
-them through a filter-spec-driven discovery API. Publishers authenticate
-mutations with the body-bound marketplace signature version 2 contract.
+them through a filter-spec-driven discovery API. Every request is signed under
+the marketplace's version 3 request profile and admitted through the admission
+core (`kit/authenticated-requests`), which reserves it, resolves an exact retry
+as its route declares, and signs every answer.
 Stable publisher rows and listings are owned through canonical
 `{scheme, identifier}` principal bindings.
 
 ## Features
 
 - `GET /listings` with filter-spec-driven discovery (filters declared
-  in `filter-spec.yaml`; ETag-gated invalidation).
+  in `filter-spec.yaml`; a stale `filter_spec_etag` query parameter is
+  refused with 412).
 - `POST /listings` lazily creates a stable publisher on first verified
   publication.
 - Ed25519 and EIP-191 principals use the same signer-injected wire contract.
@@ -98,14 +101,22 @@ read gate. If reads require an API key,
 `REGISTRY_DESCRIPTOR_ACCESS_ACQUISITION_POINTER` is also required; public
 registries reject that setting.
 
-Authenticated buyers, sellers, and services can bootstrap from only a URL and
-their own signer with `RegistryClient.bootstrap_registry_descriptor()`. That
-method verifies the response against the principals carried in the descriptor
-before returning it. A normally constructed, externally pinned client uses
-`get_registry_descriptor()` instead. The endpoint does not require the registry
-read key, so a caller can discover the acquisition pointer first. Its signed
-response proves possession of the registry signing credential; it is not
-third-party endorsement of the operator or URL.
+The descriptor read is a public operation: its request carries only a request
+identity, and the registry answers it signed over that identity. Any client can
+bootstrap from only an `https` URL with
+`RegistryClient.bootstrap_registry_descriptor()`, which verifies the response
+against the principals carried in the descriptor, and refuses a descriptor naming
+another base URL, before returning it; `allow_insecure_http=True` admits a plain
+`http` URL for a local or test registry. A normally constructed, externally
+pinned client uses `get_registry_descriptor()` instead. The endpoint does not
+require the registry read key, so a caller can discover the acquisition pointer
+first. Its signed response proves possession of the registry signing credential;
+it is not third-party endorsement of the operator or URL.
+
+Recorded outcomes answer an exact retry of a publication, update or deletion for
+`AUTHENTICATED_REQUESTS__RECORDED_OUTCOME_RETENTION_SECONDS` (a day when unset),
+and expired replay rows are swept every
+`AUTHENTICATED_REQUESTS__REPLAY_PRUNE_INTERVAL_SECONDS` (a day when unset).
 
 ## Database
 
@@ -120,7 +131,9 @@ baseline and upgrades to the script head, reading only `DATABASE_URL` and
 the database's state and the revisions that differ without changing anything.
 The registry refuses to start on a database the command has not brought to its
 script head, and refuses a database from before v0.3.0 or one with tables but no
-recorded revision as unsupported, to be replaced by a fresh one. The chart runs
+recorded revision as unsupported, to be replaced by a fresh one. A revision that
+drops a table marks the database owed a compaction, and on SQLite the command runs
+`VACUUM` after the upgrade, outside any transaction. The chart runs
 the command as an init container and Compose before the application; locally,
 `make migrate`.
 
@@ -131,13 +144,14 @@ endpoints:
 
 - `GET /health`
 - `GET /publishers` / `GET /publishers/{publisher_id}`
-- `POST /listings` (marketplace signature version 2)
+- `POST /listings` (recorded: an exact retry is answered with its outcome)
 - `GET /listings` (filter-spec-driven discovery)
-- `PUT /listings/{listing_id}` (marketplace signature version 2)
-- `DELETE /listings/{listing_id}` (marketplace signature version 2)
+- `PUT /listings/{listing_id}` (recorded)
+- `DELETE /listings/{listing_id}` (recorded)
 - `POST /publishers/{publisher_id}/identity-rotations`
 - `POST /publishers/{publisher_id}/identity-rotations/{nonce}/retire`
 - `GET /filter-spec` (returns the active filter spec + ETag)
+- `GET /.well-known/arkhai/registry-descriptor.json` (a public operation, answered signed)
 - `GET /.well-known/arkhai/registry-descriptor.json` (signed self-description)
 - `POST /admin/api-keys` (admin)
 - `GET /api/v1/system/config`

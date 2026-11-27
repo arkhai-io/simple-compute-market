@@ -10,14 +10,21 @@ which a listing stating no GPU fails. The loader's structural validation
 
 from __future__ import annotations
 
+import textwrap
+from pathlib import Path
+
 import httpx
 import pytest
-from registry_client import ListingRequest
+from market_identity import TrustedIdentitySet
+from registry_client import ListingRequest, RegistryClient, RegistryClientError, compile_resource_query
+
+from core_registry.api import filter_spec as fs_mod
+from core_registry.config import Settings
+from core_registry.main import app
 
 
 @pytest.mark.asyncio
 async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None:
-    from core_registry.main import app
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -97,7 +104,6 @@ async def test_gpu_filters_exclude_a_listing_stating_no_gpu(registry_client) -> 
 
 @pytest.mark.asyncio
 async def test_filter_spec_etag_stable_across_requests(registry_client) -> None:
-    from core_registry.main import app
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -106,3 +112,120 @@ async def test_filter_spec_etag_stable_across_requests(registry_client) -> None:
         r2 = await raw.get("/filter-spec")
     assert r1.headers["etag"] == r2.headers["etag"]
     assert r1.json()["etag"] == r2.json()["etag"]
+
+
+@pytest.fixture
+def served_spec(tmp_path: Path):
+    """Serve a specification the test writes, restoring the configured one after."""
+
+    def serve(body: str) -> None:
+        path = tmp_path / "spec.yaml"
+        path.write_text(textwrap.dedent(body).strip() + "\n")
+        fs_mod.reset_cache(Settings(_env_file=None, REGISTRY_FILTER_SPEC_PATH=str(path)))
+
+    yield serve
+    fs_mod.reset_cache()
+
+
+@pytest.mark.asyncio
+async def test_the_etag_header_mirrors_the_served_spec_s_etag(registry_client, served_spec) -> None:
+
+    served_spec(
+        """
+        version: 1
+        listing_shape:
+          type: object
+        filters:
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
+        """
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as raw:
+        response = await raw.get("/filter-spec")
+    spec = await registry_client.get_filter_spec()
+
+    body = response.json()
+    assert response.headers["etag"].strip('"') == body["etag"] == spec.etag
+    assert body["version"] == 1
+    assert body["filters"][0]["name"] == "region"
+    assert "schema" not in body  # spec declares none → key absent
+
+
+@pytest.mark.asyncio
+async def test_the_endpoint_serves_the_spec_s_schema_identity(registry_client, served_spec) -> None:
+    served_spec(
+        """
+        version: 1
+        schema:
+          id: tokens.api
+          version: 2
+        listing_shape:
+          type: object
+        filters:
+          - {name: region, path: $.listing_resource.region, op: in, value_type: string}
+        """
+    )
+
+    spec = await registry_client.get_filter_spec()
+
+    assert (spec.schema_id, spec.schema_version) == ("tokens.api", 2)
+
+
+_SPEC_V1 = """
+    version: 1
+    listing_shape:
+      type: object
+    filters:
+      - {name: region, path: $.listing_resource.region, op: in, value_type: string, on_missing: fail}
+    """
+
+
+@pytest.mark.asyncio
+async def test_a_query_compiled_under_a_replaced_spec_is_refused_412(registry_client, served_spec) -> None:
+    """registry-discovery "Filter specification changes during query
+    construction": the compiled query carries the ETag it was compiled under,
+    which the registry refuses once it serves another specification."""
+
+    served_spec(_SPEC_V1)
+    compiled = compile_resource_query(
+        "region=us-west", filter_spec=await registry_client.get_filter_spec(), registry_url="http://test"
+    )
+    served_spec(_SPEC_V1.replace("version: 1", "version: 2"))
+
+    with pytest.raises(RegistryClientError) as stale:
+        await registry_client.list_listings(etag=compiled.etag, **compiled.as_params())
+
+    assert stale.value.status_code == 412
+
+
+@pytest.mark.asyncio
+async def test_a_listing_read_whose_query_an_intermediary_changed_is_refused(
+    maker_signer, registry_authority
+) -> None:
+    """A transport rewriting the signed query, as an intermediary could: the
+    registry verifies the query it received, so the read is refused as an
+    invalid proof, signed, and runs nothing."""
+
+    registry = httpx.ASGITransport(app=app)
+    seen: list[str] = []
+
+    class _Rewriting(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            rewritten = request.url.copy_with(query=request.url.query.replace(b"limit=50", b"limit=200"))
+            seen.append(rewritten.query.decode())
+            forwarded = httpx.Request(request.method, rewritten, headers=request.headers, content=request.content)
+            return await registry.handle_async_request(forwarded)
+
+    async with RegistryClient(
+        "http://test",
+        transport=_Rewriting(),
+        signer=maker_signer,
+        caller_role="buyer",
+        expected_registries=TrustedIdentitySet(identities=(registry_authority.identity,)),
+        registry_authority="test-registry",
+    ) as client:
+        with pytest.raises(RegistryClientError) as refused:
+            await client.list_listings()
+
+    assert refused.value.status_code == 401
+    assert "Invalid request proof" in refused.value.body
+    assert "limit=200" in seen[0]

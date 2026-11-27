@@ -1,4 +1,11 @@
-"""Publisher discovery and principal-lifecycle routes."""
+"""Publisher discovery and principal-lifecycle routes.
+
+Every route re-runs an exact retry. Rotation and retirement are keyed by the
+rotation's nonce, so a retry after any later write finds the rotation it applied
+and changes nothing; each answers that rotation before the checks that govern
+applying a new intent, so a caller who lost its acknowledgement learns what
+happened however late its retry arrives.
+"""
 
 from __future__ import annotations
 
@@ -8,21 +15,15 @@ from typing import Optional
 
 import injected_time
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
-from market_identity import Identity, RotationRequest, canonical_rotation_bytes, verify_rotation
+from market_authenticated_requests import Admitted, RouteAdmission, path_resource
+from market_identity import ExactRetry, Identity, RotationRequest, canonical_rotation_bytes, verify_rotation
 from pydantic import ValidationError
 from sqlalchemy import desc, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from core_registry.api.admission import READ_ROLES, WRITE_ROLES, registry_core
 from core_registry.api.api_key_auth import require_read_access, require_write_access
-from core_registry.api.publisher_auth import (
-    authenticate_publisher_request,
-    cached_response,
-    canonical_query_body,
-    complete_authenticated_request,
-    registry_authority_signer,
-    signed_response,
-)
 from core_registry.api.utils import (
     find_identity_binding,
     find_publisher_by_id,
@@ -44,6 +45,12 @@ router = APIRouter()
 _MAX_ROTATION_OVERLAP_SECONDS = 86_400
 
 
+def _rotation_resource(path_params: dict[str, str], body: bytes) -> str:
+    """A rotation's identifier: its publisher and its nonce."""
+
+    return f"{path_params['publisher_id']}:{path_params['nonce']}"
+
+
 @router.get("/publishers")
 async def list_publishers(
     request: Request,
@@ -51,24 +58,13 @@ async def list_publishers(
     scheme: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    admitted: Admitted = Depends(
+        RouteAdmission(registry_core, operation="publisher.list", roles=READ_ROLES, exact_retry=ExactRetry.RERUN)
+    ),
     db: Session = Depends(get_db),
 ):
     """List stable publishers or resolve one exact canonical principal."""
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="publisher.list",
-        resource="publishers",
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
-
 
     if (identifier is None) != (scheme is None):
         raise HTTPException(
@@ -92,59 +88,29 @@ async def list_publishers(
             .all()
         )
         items = [publisher_to_dict(publisher) for publisher in publishers]
-    response_body = {"items": items, "count": len(items)}
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
+    return {"items": items, "count": len(items)}
 
 
 @router.get("/publishers/{publisher_id}")
 async def get_publisher(
     request: Request,
     publisher_id: int = Path(..., description="Stable publisher id"),
+    admitted: Admitted = Depends(
+        RouteAdmission(
+            registry_core,
+            operation="publisher.get",
+            roles=READ_ROLES,
+            exact_retry=ExactRetry.RERUN,
+            resource=path_resource("publisher_id"),
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="publisher.get",
-        resource=str(publisher_id),
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
     publisher = find_publisher_by_id(db, publisher_id)
     if publisher is None:
         raise HTTPException(status_code=404, detail="Publisher not found")
-    response_body = publisher_to_dict(publisher)
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
+    return publisher_to_dict(publisher)
 
 
 def _rotation_to_dict(rotation: PublisherIdentityRotation) -> dict:
@@ -187,28 +153,25 @@ def _rotation_to_dict(rotation: PublisherIdentityRotation) -> dict:
 async def rotate_publisher_identity(
     request: Request,
     publisher_id: int = Path(..., description="Stable publisher id"),
+    admitted: Admitted = Depends(
+        RouteAdmission(
+            registry_core,
+            operation="publisher.identity.rotate",
+            roles=WRITE_ROLES,
+            exact_retry=ExactRetry.RERUN,
+            resource=path_resource("publisher_id"),
+        )
+    ),
     body: dict = Body(..., description="Two-proof rotation request"),
     db: Session = Depends(get_db),
 ):
     """Idempotently promote a replacement principal with bounded overlap."""
 
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="POST",
-        operation="publisher.identity.rotate",
-        resource=str(publisher_id),
-        body=body,
-    )
     require_write_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
     if db.get_bind().dialect.name == "sqlite":
-        # SQLite ignores SELECT ... FOR UPDATE. End the replay lookup's read
-        # transaction, then serialize the ownership transition before reading
-        # the current primary.
+        # SQLite ignores SELECT ... FOR UPDATE. End the read transaction the
+        # access check opened, then serialize the ownership transition before
+        # reading the current primary.
         db.commit()
         db.execute(text("BEGIN IMMEDIATE"))
     publisher = (
@@ -225,7 +188,7 @@ async def rotate_publisher_identity(
         raise HTTPException(status_code=400, detail="Malformed rotation request") from exc
 
     intent = rotation_request.intent
-    if authenticated.principal != intent.current:
+    if admitted.request.principal != intent.current:
         raise HTTPException(
             status_code=403,
             detail="Rotation caller is not current principal",
@@ -241,15 +204,12 @@ async def rotate_publisher_identity(
             status_code=400,
             detail="Rotation authority or subject mismatch",
         )
-    if intent.overlap_seconds > _MAX_ROTATION_OVERLAP_SECONDS:
-        raise HTTPException(status_code=400, detail="Rotation overlap exceeds registry bound")
-    verification = verify_rotation(
-        rotation_request,
-        now=injected_time.now(),
-    )
-    if not verification.verified:
-        raise HTTPException(status_code=401, detail="Invalid or expired rotation proofs")
 
+    # An applied intent is answered before the checks that govern applying one --
+    # its proofs' expiry, the caller's primary status, an active overlap -- so its
+    # exact retry, however late and after whatever later rotation, learns what
+    # applied. Only the principal the intent names as current reaches here, and
+    # only the very intent the registry verified matches its hash.
     intent_hash = hashlib.sha256(canonical_rotation_bytes(intent)).hexdigest()
     existing = (
         db.query(PublisherIdentityRotation)
@@ -262,20 +222,17 @@ async def rotate_publisher_identity(
     if existing is not None:
         if existing.intent_hash != intent_hash:
             raise HTTPException(status_code=409, detail="Rotation nonce intent mismatch")
-        response_body = _rotation_to_dict(existing)
-        complete_authenticated_request(
-            authenticated=authenticated,
-            db=db,
-            status=200,
-            body=response_body,
-        )
-        db.commit()
-        return signed_response(
-            authenticated=authenticated,
-            signer=signer,
-            status=200,
-            body=response_body,
-        )
+        return _rotation_to_dict(existing)
+
+    if intent.overlap_seconds > _MAX_ROTATION_OVERLAP_SECONDS:
+        raise HTTPException(status_code=400, detail="Rotation overlap exceeds registry bound")
+    verification = verify_rotation(
+        rotation_request,
+        now=injected_time.now(),
+    )
+    if not verification.verified:
+        raise HTTPException(status_code=401, detail="Invalid or expired rotation proofs")
+
     active_primaries = [
         binding
         for binding in publisher.identities
@@ -356,19 +313,8 @@ async def rotate_publisher_identity(
             detail="Publisher rotation conflicts with an existing binding",
         ) from exc
     response_body = _rotation_to_dict(rotation)
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
     db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
+    return response_body
 
 
 @router.get(
@@ -378,22 +324,18 @@ async def get_publisher_rotation(
     request: Request,
     publisher_id: int = Path(...),
     nonce: str = Path(...),
+    admitted: Admitted = Depends(
+        RouteAdmission(
+            registry_core,
+            operation="publisher.identity.rotation.read",
+            roles=READ_ROLES,
+            exact_retry=ExactRetry.RERUN,
+            resource=_rotation_resource,
+        )
+    ),
     db: Session = Depends(get_db),
 ):
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="publisher.identity.rotation.read",
-        resource=f"{publisher_id}:{nonce}",
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
     rotation = (
         db.query(PublisherIdentityRotation)
         .filter(
@@ -404,20 +346,7 @@ async def get_publisher_rotation(
     )
     if rotation is None:
         raise HTTPException(status_code=404, detail="Publisher rotation not found")
-    response_body = _rotation_to_dict(rotation)
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
-    db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
+    return _rotation_to_dict(rotation)
 
 
 @router.post(
@@ -427,23 +356,20 @@ async def retire_publisher_identity(
     request: Request,
     publisher_id: int = Path(...),
     nonce: str = Path(...),
+    admitted: Admitted = Depends(
+        RouteAdmission(
+            registry_core,
+            operation="publisher.identity.retire",
+            roles=WRITE_ROLES,
+            exact_retry=ExactRetry.RERUN,
+            resource=_rotation_resource,
+        )
+    ),
     db: Session = Depends(get_db),
 ):
     """Retire the overlap principal after the replacement acknowledges authority."""
 
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="POST",
-        operation="publisher.identity.retire",
-        resource=f"{publisher_id}:{nonce}",
-    )
     require_write_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
-
     rotation = (
         db.query(PublisherIdentityRotation)
         .filter(
@@ -458,40 +384,32 @@ async def retire_publisher_identity(
         scheme=rotation.replacement_scheme,
         identifier=rotation.replacement_identifier,
     )
-    if authenticated.principal != replacement:
+    if admitted.request.principal != replacement:
         raise HTTPException(status_code=403, detail="Only replacement principal may retire")
+    # A retired rotation is answered as it stands, before the primary check that
+    # governs retiring one, so a retirement's exact retry after the replacement
+    # rotated again learns that it applied.
+    if rotation.status == "retired":
+        return _rotation_to_dict(rotation)
     publisher = rotation.publisher
     if not publisher_accepts_identity(publisher, replacement, primary_only=True):
         raise HTTPException(status_code=403, detail="Replacement principal is not primary")
 
-    if rotation.status != "retired":
-        current = find_identity_binding(
-            db,
-            Identity(
-                scheme=rotation.current_scheme,
-                identifier=rotation.current_identifier,
-            ),
-        )
-        if current is None or current.publisher_id != publisher_id:
-            raise HTTPException(status_code=409, detail="Rotation current binding is incomplete")
-        now = utcnow()
-        current.status = "retired"
-        current.active_until = now
-        current.retired_at = now
-        rotation.status = "retired"
-        rotation.retired_at = now
-
+    current = find_identity_binding(
+        db,
+        Identity(
+            scheme=rotation.current_scheme,
+            identifier=rotation.current_identifier,
+        ),
+    )
+    if current is None or current.publisher_id != publisher_id:
+        raise HTTPException(status_code=409, detail="Rotation current binding is incomplete")
+    now = utcnow()
+    current.status = "retired"
+    current.active_until = now
+    current.retired_at = now
+    rotation.status = "retired"
+    rotation.retired_at = now
     response_body = _rotation_to_dict(rotation)
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=response_body,
-    )
     db.commit()
-    return signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=response_body,
-    )
+    return response_body

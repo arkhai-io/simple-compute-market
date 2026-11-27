@@ -21,7 +21,7 @@ dependencies = [
     "arkhai-kit-contact-exchange==0.5.2",
     "arkhai-compute-provisioning-client>=0.7.0",
     "arkhai-core>=0.6.0",
-    "arkhai-core-registry-client>=0.13.0",
+    "arkhai-core-registry-client>=0.14.0",
     "arkhai-core-storefront>=0.18.0",
     "arkhai-core-storefront-client>=0.25.0",
     "arkhai-kit-alkahest>=0.14.0",

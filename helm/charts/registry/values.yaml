@@ -64,6 +64,12 @@ config:
   # discovery, gated publishing). See core/registry/src/core_registry/config.py.
   requireReadApiKey: false
   requireWriteApiKey: false
+  # How long a recorded outcome answers its request's exact retry, and how
+  # often expired replay rows are swept, in seconds; each a positive integer,
+  # a day when unset.
+  # authenticatedRequests:
+  #   recordedOutcomeRetentionSeconds: 86400
+  #   replayPruneIntervalSeconds: 86400
 
 # Secret settings, such as the bootstrap API key (REGISTRY_BOOTSTRAP_API_KEY,
 # seeding one write-scoped operator key when the api_keys table is empty at

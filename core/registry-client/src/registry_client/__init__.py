@@ -8,12 +8,14 @@ Two clients with identical method signatures:
 Both accept a ``transport=`` kwarg for in-process test injection.
 """
 
-from registry_client.client import RegistryClient, SyncRegistryClient
+from registry_client.client import FILTER_SPEC_ETAG_PARAM, RegistryClient, SyncRegistryClient
 from market_core import RegistryDescriptor
 from registry_client.auth import (
     RegistryClientError,
-    authenticate_request,
-    authentication_headers,
+    SignedRegistryRequest,
+    request_route,
+    sign_registry_request,
+    verify_registry_response,
 )
 from registry_client.models import (
     AdminStatusResponse,
@@ -44,8 +46,11 @@ __all__ = [
     "SyncRegistryClient",
     "RegistryClientError",
     "RegistryDescriptor",
-    "authenticate_request",
-    "authentication_headers",
+    "FILTER_SPEC_ETAG_PARAM",
+    "SignedRegistryRequest",
+    "request_route",
+    "sign_registry_request",
+    "verify_registry_response",
     "AdminStatusResponse",
     "FilterSpecResponse",
     "HealthResponse",

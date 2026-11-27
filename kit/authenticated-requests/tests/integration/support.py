@@ -55,6 +55,7 @@ from market_authenticated_requests import (
     RouteBinding,
     RouteNotServed,
     SignedOutcome,
+    Trust,
     Unauthenticated,
     install,
     path_resource,
@@ -437,7 +438,7 @@ def make_core(
     wrap_store: Any = lambda store: store,
     store_kind: str = "sqlite3",
     busy_timeout: float = 5.0,
-    trust: Callable[[str], TrustedIdentitySet] | None = None,
+    trust: Callable[[str], Trust] | None = None,
 ) -> AdmissionCore:
     trusted = {
         "seller": TrustedIdentitySet(identities=(caller.identity,)),
@@ -506,7 +507,7 @@ def make_world(
     wrap_store: Callable[[Any], Any] = lambda store: store,
     store_kind: str = "sqlite3",
     busy_timeout: float = 5.0,
-    trust: Callable[[str], TrustedIdentitySet] | None = None,
+    trust: Callable[[str], Trust] | None = None,
 ) -> World:
     """The toy in ``form`` over a replay store of ``store_kind``; a test meeting a
     held write lock passes ``busy_timeout=0``."""

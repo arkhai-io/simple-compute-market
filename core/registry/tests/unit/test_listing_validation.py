@@ -48,12 +48,14 @@ def test_a_complete_listing_has_no_errors() -> None:
     assert listing_validation_errors(_listing()) == []
 
 
-def test_the_reserved_names_are_exactly_the_registry_owned_response_fields() -> None:
+def test_the_reserved_names_are_the_registry_owned_response_fields_and_the_evidence_s_old_names() -> None:
     assert RESERVED_LISTING_FIELDS == {
         "publisher_id",
         "publisher_principals",
         "created_at",
         "updated_at",
+        "publication",
+        "updates",
         "publisher_publication",
         "publisher_updates",
     }

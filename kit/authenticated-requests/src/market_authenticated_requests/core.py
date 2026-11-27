@@ -34,16 +34,16 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import injected_time
 from market_identity import (
     ExactRetry,
+    Identity,
     RequestBinding,
     RequestRecord,
     ResponseRecord,
     Signer,
-    TrustedIdentitySet,
     VerificationCode,
     VerifiedRequest,
     is_public_request,
@@ -166,12 +166,23 @@ class PublicAdmitted:
     binding: RequestBinding
 
 
+class Trust(Protocol):
+    """Whom an authority trusts in one role: a configured principal set, such as
+    a :class:`market_identity.TrustedIdentitySet`, or an authority's own rule,
+    such as one admitting every verified principal and checking ownership in its
+    routes."""
+
+    def allows(self, identity: Identity) -> bool:
+        """Whether a request verified as signed by ``identity`` is trusted."""
+        ...
+
+
 class AdmissionCore:
     """Admits an authority's requests and signs its answers.
 
     ``signer`` gives the authority's signing identity, whose principal a
-    request's audience must list. ``trust`` gives the principals trusted in a
-    role. ``store`` is the replay store bound to the authority's own database.
+    request's audience must list. ``trust`` gives whom it trusts in a role.
+    ``store`` is the replay store bound to the authority's own database.
     ``time_setting_operation`` names the operation that sets the time under
     injected time: while the installed source is settable, its request is
     exempt from both freshness bounds, every other check kept. ``clock`` is the
@@ -184,7 +195,7 @@ class AdmissionCore:
         self,
         *,
         signer: Callable[[], Signer],
-        trust: Callable[[str], TrustedIdentitySet],
+        trust: Callable[[str], Trust],
         store: ReplayStore,
         settings: AuthenticatedRequestsSettings | None = None,
         max_skew_seconds: int = DEFAULT_MAX_SKEW_SECONDS,

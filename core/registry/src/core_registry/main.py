@@ -3,17 +3,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import injected_time
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from market_authenticated_requests import Unauthenticated, install
+from market_authenticated_requests.sqlalchemy_support import sqlalchemy_replay_store
 from market_identity import Identity, create_signer
+from sqlalchemy import create_engine
+from core_registry.api import admission
 from core_registry.api.admin_routes import make_time_router
 from core_registry.api.routes import router
-from core_registry.api.publisher_auth import (
-    complete_authenticated_error,
-    registry_authority_signer,
-    signed_response,
-)
 from core_registry.config import settings
 from core_registry.db.migrations import require_compatible_database
 from core_registry.api.filter_spec import get_loaded_spec
@@ -84,7 +82,13 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             "registry authority credential does not match configured principal"
         )
-    app.state.registry_authority_signer = registry_signer
+    # The replay store's own engine on the registry's database: the
+    # application's SQLite engine shares one connection between its sessions,
+    # and a replay step's transaction must not interleave with a request's.
+    admission.bind(
+        signer=registry_signer,
+        store=sqlalchemy_replay_store(create_engine(settings.database_url)),
+    )
     app.state.registry_descriptor = build_registry_descriptor(
         base_url=settings.registry_descriptor_base_url,
         display_name=settings.registry_descriptor_display_name,
@@ -130,14 +134,15 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Listing registry server ready on {settings.host}:{settings.port}")
 
-    yield
+    async with admission.registry_core.sweeping():
+        yield
 
     logger.info("Shutting down...")
     logger.info("Shutdown complete")
 
 
-# Create FastAPI app
-app = FastAPI(
+# Create FastAPI app; ``app``, below, is the application the admission core wraps.
+api = FastAPI(
     title="Listing Registry",
     version="0.2.0",
     lifespan=lifespan,
@@ -145,35 +150,8 @@ app = FastAPI(
 )
 
 
-@app.exception_handler(HTTPException)
-async def authenticated_http_error(request: Request, error: HTTPException):
-    authenticated = getattr(
-        request.state,
-        "authenticated_registry_request",
-        None,
-    )
-    if authenticated is None:
-        return JSONResponse(
-            status_code=error.status_code,
-            content={"detail": error.detail},
-            headers=error.headers,
-        )
-    db = request.state.authenticated_registry_db
-    complete_authenticated_error(
-        authenticated=authenticated,
-        db=db,
-        error=error,
-    )
-    return signed_response(
-        authenticated=authenticated,
-        signer=registry_authority_signer(request),
-        status=error.status_code,
-        body={"detail": error.detail},
-    )
-
-
 # Add CORS middleware
-app.add_middleware(
+api.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -182,35 +160,52 @@ app.add_middleware(
 )
 
 # Register routes
-app.include_router(router)
+api.include_router(router)
 
 # The time-setting route, mounted only while the source installed above is
 # injected: a wall-time registry serves no such route, and its time is changed
 # only by reconfiguring and restarting it.
 if injected_time.TimeRouteService(injected_time.installed()).settable:
-    app.include_router(make_time_router())
+    api.include_router(make_time_router())
 
 
 def _custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
+    if api.openapi_schema:
+        return api.openapi_schema
     from fastapi.openapi.utils import get_openapi
 
     schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        routes=app.routes,
+        title=api.title,
+        version=api.version,
+        routes=api.routes,
     )
     # Inject gateway path prefix as the OpenAPI server URL so Swagger UI
     # generates correct curl examples. The FastAPI app root_path above drives
     # the docs page's OpenAPI URL; this servers block drives "try it out".
     if settings.root_path:
         schema["servers"] = [{"url": settings.root_path}]
-    app.openapi_schema = schema
+    api.openapi_schema = schema
     return schema
 
 
-app.openapi = _custom_openapi
+api.openapi = _custom_openapi
+
+# Every signed route admits its requests through the admission core, which signs
+# every answer naming a request, a path no route serves included, and refuses to
+# start over a route that neither admits through it nor is marked here. Health,
+# the OpenAPI document and the administrator routes, which take the shared
+# administrator key rather than a signature, are served unauthenticated.
+app = install(
+    api,
+    admission.registry_core,
+    unauthenticated=Unauthenticated.of(
+        "/health",
+        "/admin/api-keys",
+        "/admin/api-keys/{key_id}",
+        "/admin/status",
+        "/admin/time",
+    ),
+)
 
 
 if __name__ == "__main__":

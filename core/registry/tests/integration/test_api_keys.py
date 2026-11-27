@@ -8,36 +8,24 @@ the ``settings.require_read_api_key`` / ``require_write_api_key``
 toggles per test so each gate's on-vs-off branches are exercised.
 """
 from __future__ import annotations
-import time
 import uuid
 
 import httpx
 import pytest
 import pytest_asyncio
-from market_identity import (
-    Ed25519Signer,
-    RequestEnvelope,
-    canonical_body_hash,
-    sign_request,
-)
 from core_registry.config import settings
-from core_registry.db.database import get_db
 from core_registry.main import app
 
 
 @pytest_asyncio.fixture
-async def raw_client(db_session):
+async def raw_client():
     """A bare httpx.AsyncClient against the registry app — no
     RegistryClient wrapper. Used to send custom Authorization headers
     that the typed client doesn't surface."""
-    def _override_get_db():
-        yield db_session
-    app.dependency_overrides[get_db] = _override_get_db
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test",
     ) as c:
         yield c
-    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -138,37 +126,14 @@ class TestApiKeyLifecycle:
 # ---------------------------------------------------------------------------
 
 async def _probe_read(raw_client, headers=None):
-    signer = Ed25519Signer(bytes(range(32)))
-    body = {"query": []}
-    envelope = RequestEnvelope(
-        role="buyer",
-        principal=signer.identity,
-        method="GET",
-        operation="listing.list",
-        resource="listings",
-        request_id=uuid.uuid4().hex,
-        timestamp=int(time.time()),
-        body_hash=canonical_body_hash(body),
-    )
-    authenticated = sign_request(signer=signer, envelope=envelope)
-    request_headers = {
-        "X-Market-Signature-Version": authenticated.protocol,
-        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
-        "X-Market-Identity-Identifier": authenticated.principal.identifier,
-        "X-Market-Role": authenticated.role,
-        "X-Market-Request-ID": authenticated.request_id,
-        "X-Market-Timestamp": str(authenticated.timestamp),
-        "X-Market-Signature": authenticated.proof.value,
-    }
-    request_headers.update(headers or {})
-    return await raw_client.get("/listings", headers=request_headers)
+    # The suite's fixture signs the raw request as a seller under version 3.
+    return await raw_client.get("/listings", headers=dict(headers or {}))
 
 
 # A valid signed publication isolates the bearer-token gate from publisher
 # authentication. A blocked key fails before dispatch; an accepted key reaches
 # the route and creates the listing.
 async def _probe_write(raw_client, headers=None):
-    signer = Ed25519Signer(bytes(range(32)))
     body = {
         "listing_id": f"gate-probe-{uuid.uuid4().hex}",
         "storefront_url": "http://gate-probe/",
@@ -181,32 +146,7 @@ async def _probe_write(raw_client, headers=None):
         "demands": [],
         "max_duration_seconds": None,
     }
-    envelope = RequestEnvelope(
-        role="seller",
-        principal=signer.identity,
-        method="POST",
-        operation="listing.publish",
-        resource="listings",
-        request_id=uuid.uuid4().hex,
-        timestamp=int(time.time()),
-        body_hash=canonical_body_hash(body),
-    )
-    authenticated = sign_request(signer=signer, envelope=envelope)
-    request_headers = {
-        "X-Market-Signature-Version": authenticated.protocol,
-        "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
-        "X-Market-Identity-Identifier": authenticated.principal.identifier,
-        "X-Market-Role": authenticated.role,
-        "X-Market-Request-ID": authenticated.request_id,
-        "X-Market-Timestamp": str(authenticated.timestamp),
-        "X-Market-Signature": authenticated.proof.value,
-    }
-    request_headers.update(headers or {})
-    return await raw_client.post(
-        "/listings",
-        json=body,
-        headers=request_headers,
-    )
+    return await raw_client.post("/listings", json=body, headers=dict(headers or {}))
 
 
 class _GateBase:

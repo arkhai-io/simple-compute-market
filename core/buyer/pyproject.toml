@@ -26,7 +26,7 @@ dependencies = [
   # Canonical principals, signer injection, and v2 request/response proofs.
   "arkhai-kit-identity==0.6.0",
   # Signed registry discovery with pinned authority responses.
-  "arkhai-core-registry-client==0.13.1",
+  "arkhai-core-registry-client==0.14.0",
   # The process time source every instant the buyer signs, stamps or compares reads.
   "arkhai-injected-time>=0.1.0",
 ]

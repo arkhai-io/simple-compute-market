@@ -9,7 +9,7 @@ dependencies = [
     "arkhai-compute>=0.3.0",
     "arkhai-core>=0.6.0",
     "arkhai-core-buyer==0.8.1",
-    "arkhai-core-registry-client==0.13.1",
+    "arkhai-core-registry-client==0.14.0",
     "arkhai-injected-time>=0.1.0",
     "arkhai-kit-alkahest>=0.9.0",
     "arkhai-kit-contact-exchange==0.5.2",

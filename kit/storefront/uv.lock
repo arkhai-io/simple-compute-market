@@ -149,7 +149,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.13.1"
+version = "0.14.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -158,7 +158,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.13.1-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.14.0-py3-none-any.whl" },
 ]
 
 [[package]]

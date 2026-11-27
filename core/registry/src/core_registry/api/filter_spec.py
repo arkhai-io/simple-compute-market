@@ -14,8 +14,9 @@ carries two things:
 
 The endpoint returns the spec verbatim plus an ``etag`` (sha256 over
 canonical-JSON-encoded ``{version, listing_shape, filters}``).  Buyers
-cache by URL+etag and send ``If-Match: <etag>`` on every query; a spec
-rotation surfaces as 412 instead of a silent shape change.
+cache by URL+etag and send it as the ``filter_spec_etag`` query parameter of
+every query, which the request's signature covers; a spec rotation surfaces as
+412 instead of a silent shape change.
 """
 
 from __future__ import annotations
@@ -29,18 +30,14 @@ from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
+from market_authenticated_requests import Admitted, RouteAdmission
+from market_identity import ExactRetry
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from core_registry.api.admission import READ_ROLES, registry_core
 from core_registry.api.api_key_auth import require_read_access
-from core_registry.api.publisher_auth import (
-    authenticate_publisher_request,
-    cached_response,
-    canonical_query_body,
-    complete_authenticated_request,
-    registry_authority_signer,
-    signed_response,
-)
 from core_registry.config import Settings
 from core_registry.config import settings as process_settings
 from core_registry.db.database import get_db
@@ -295,42 +292,18 @@ def _spec_body(spec: FilterSpec) -> dict[str, Any]:
         "Returns the JSON Schema for publishable listings and the filter set "
         "the registry honours at GET /listings.  The `etag` is a stable hash of "
         "{version, listing_shape, filters}; buyers should cache by URL+etag and "
-        "send `If-Match: <etag>` on every /listings query so a spec rotation "
+        "send it as the `filter_spec_etag` query parameter of every /listings "
+        "query, which the request's signature covers, so a spec rotation "
         "surfaces as 412 Precondition Failed instead of a silent shape change."
     ),
 )
 async def get_filter_spec(
     request: Request,
+    admitted: Admitted = Depends(
+        RouteAdmission(registry_core, operation="filter.get", roles=READ_ROLES, exact_retry=ExactRetry.RERUN)
+    ),
     db: Session = Depends(get_db),
 ) -> Response:
-    authenticated = authenticate_publisher_request(
-        request=request,
-        db=db,
-        method="GET",
-        operation="filter.get",
-        resource="filter-spec",
-        body=canonical_query_body(request),
-        allowed_roles=frozenset({"buyer", "seller", "service"}),
-    )
     require_read_access(request, db)
-    signer = registry_authority_signer(request)
-    replay = cached_response(authenticated, signer=signer)
-    if replay is not None:
-        return replay
-    spec = get_loaded_spec()
-    body = _spec_body(spec)
-    complete_authenticated_request(
-        authenticated=authenticated,
-        db=db,
-        status=200,
-        body=body,
-    )
-    db.commit()
-    response = signed_response(
-        authenticated=authenticated,
-        signer=signer,
-        status=200,
-        body=body,
-    )
-    response.headers["ETag"] = f'"{body["etag"]}"'
-    return response
+    body = _spec_body(get_loaded_spec())
+    return JSONResponse(content=body, headers={"ETag": f'"{body["etag"]}"'})

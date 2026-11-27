@@ -23,6 +23,13 @@ Alembic upgrades only from a revision its script holds, and the floor revision
 is not among them, so adoption rewrites the floor revision to the baseline in
 one transaction, without running the baseline, before upgrading. The check opens the database
 read-only and creates no file; only the migration command writes.
+
+A revision that drops a table frees space SQLite keeps in its file, so on SQLite
+it records in the database header's ``user_version`` that a compaction is owed,
+in its own transaction, as ``market_schema_migrations`` records it for the other
+services' chains; once the upgrade is done the command runs ``VACUUM``, outside
+any transaction, and clears the mark. A ``VACUUM`` that fails leaves the mark, so
+the next run compacts, and a rerun with nothing owed compacts nothing.
 See openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history.
 """
 
@@ -40,6 +47,7 @@ from alembic.script import ScriptDirectory
 from market_schema_migrations import (
     CheckResult,
     CheckState,
+    CompactionFailed,
     MigrateReport,
     MigrationFailed,
     MigrationRefused,
@@ -303,4 +311,27 @@ def migrate_database(database_url: str) -> MigrateReport:
                     ) from exc
     finally:
         engine.dispose()
-    return MigrateReport(adopted=plan.adopt, applied=plan.pending)
+    return MigrateReport(
+        adopted=plan.adopt, applied=plan.pending, compacted=_compact_if_owed(database_url)
+    )
+
+
+def _compact_if_owed(database_url: str) -> bool:
+    """``VACUUM`` a SQLite database a revision marked as owed a compaction."""
+
+    path = _sqlite_file(database_url)
+    if path is None:
+        return False
+    connection = sqlite3.connect(path, isolation_level=None)
+    try:
+        if not connection.execute("PRAGMA user_version").fetchone()[0]:
+            return False
+        try:
+            connection.execute("VACUUM")
+            connection.execute("PRAGMA user_version = 0")
+        except sqlite3.Error as exc:
+            raise CompactionFailed(service=SERVICE, command=COMMAND, cause=exc) from exc
+    finally:
+        connection.close()
+    logger.info("Compacted %s's database", SERVICE)
+    return True

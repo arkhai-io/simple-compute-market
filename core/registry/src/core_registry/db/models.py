@@ -98,37 +98,6 @@ class PublisherIdentity(Base):
     )
 
 
-class PublisherReplayReservation(Base):
-    """A durable principal-scoped request reservation and cached outcome."""
-
-    __tablename__ = "publisher_replay_reservations"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    principal_scheme = Column(String, nullable=False)
-    principal_identifier = Column(String, nullable=False)
-    request_id = Column(String, nullable=False)
-    request_hash = Column(String, nullable=False)
-    response_status = Column(Integer, nullable=True)
-    response_body = Column(JSON, nullable=True)
-    lease_owner = Column(String, nullable=True)
-    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(
-        DateTime(timezone=True), nullable=False, default=utcnow
-    )
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "principal_scheme",
-            "principal_identifier",
-            "request_id",
-            name="uq_publisher_replay_principal_request",
-        ),
-        Index("idx_publisher_replay_created_at", "created_at"),
-        Index("idx_publisher_replay_lease_expires_at", "lease_expires_at"),
-    )
-
-
 class PublisherIdentityRotation(Base):
     """Idempotent two-proof transition between publisher principals."""
 
@@ -182,10 +151,13 @@ class Listing(Base):
         ForeignKey("publishers.publisher_id", ondelete="CASCADE"),
         nullable=False,
     )
-    # The document and seller evidence share the publication transaction.
+    # The document and seller evidence share the publication transaction:
+    # ``publication`` is the seller's signed publication, and ``updates`` maps
+    # each field a signed update changed to that update, each as the body bytes
+    # and the record of the seller's signed request.
     published_document = Column(JSON, nullable=True)
-    publisher_publication = Column(JSON, nullable=True)
-    publisher_updates = Column(JSON, nullable=True)
+    publication = Column(JSON, nullable=True)
+    updates = Column(JSON, nullable=True)
     listing_resource = Column(
         JSON, nullable=False
     )  # registry-specific shape (e.g. ComputeResource)

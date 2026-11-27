@@ -41,7 +41,7 @@ dependencies = [
     # overrides through the kit's typed client.
     "arkhai-kit-pool-overrides>=0.2.0",
     "arkhai-kit-config",
-    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-core-registry-client>=0.14.0",
     "arkhai-kit-alkahest>=0.11.0",
     "arkhai-kit-site-client>=0.9.0",
 	"arkhai-vms-storefront>=0.16.0",

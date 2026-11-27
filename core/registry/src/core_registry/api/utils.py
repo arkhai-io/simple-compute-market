@@ -262,13 +262,13 @@ def order_to_dict(listing: Listing) -> dict[str, Any]:
             "oracle_address": listing.oracle_address,
         }
     document = dict(document)
-    updates = _as_json_obj(listing.publisher_updates, {})
+    updates = _as_json_obj(listing.updates, {})
     if "oracle_address" in updates:
         document["oracle_address"] = listing.oracle_address
     return {
         **document,
-        "publisher_publication": _as_json_obj(listing.publisher_publication, None),
-        "publisher_updates": updates,
+        "publication": _as_json_obj(listing.publication, None),
+        "updates": updates,
         "listing_id": listing.listing_id,
         "publisher_id": listing.publisher_id,
         "publisher_principals": (

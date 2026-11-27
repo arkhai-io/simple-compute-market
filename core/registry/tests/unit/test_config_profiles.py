@@ -139,3 +139,32 @@ def test_a_hex_identifier_is_read_as_a_string(profiles):
     settings = load_settings(_selecting(profiles, "registry"))
 
     assert settings.registry_authority_identifier == IDENTIFIER
+
+
+def test_the_retention_and_sweep_interval_default_to_a_day(profiles):
+    settings = load_settings(_selecting(profiles, ""))
+
+    assert settings.authenticated_requests.recorded_outcome_retention_seconds == 86_400
+    assert settings.authenticated_requests.replay_prune_interval_seconds == 86_400
+
+
+def test_a_profile_states_the_retention_and_sweep_interval(profiles):
+    _profile(
+        profiles, "registry",
+        "AUTHENTICATED_REQUESTS__RECORDED_OUTCOME_RETENTION_SECONDS=3600",
+        "AUTHENTICATED_REQUESTS__REPLAY_PRUNE_INTERVAL_SECONDS=600",
+    )
+
+    settings = load_settings(_selecting(profiles, "registry"))
+
+    assert settings.authenticated_requests.recorded_outcome_retention_seconds == 3_600
+    assert settings.authenticated_requests.replay_prune_interval_seconds == 600
+
+
+@pytest.mark.parametrize("key", ["recorded_outcome_retention_seconds", "replay_prune_interval_seconds"])
+@pytest.mark.parametrize("value", ["0", "-1", "a-day"])
+def test_a_setting_that_is_not_a_positive_integer_is_refused(profiles, key, value):
+    _profile(profiles, "registry", f"AUTHENTICATED_REQUESTS__{key.upper()}={value}")
+
+    with pytest.raises(ValueError, match=key):
+        load_settings(_selecting(profiles, "registry"))

@@ -164,7 +164,8 @@ class TestPublishOrder:
                 },
                 headers={"X-Test-Unsigned": "1"},
             )
-        assert response.status_code == 401
+        assert response.status_code == 400
+        assert response.json()["code"] == "unsupported_protocol"
 
 
 class TestListPublisherListings:

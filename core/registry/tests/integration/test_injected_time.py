@@ -3,9 +3,9 @@
 Application integration: the running registry, in process, driven through the
 canonical `RegistryClient`, with the process source injected; the API key's
 store, which no client route reaches here, through its functions. The client
-signs and checks responses on the wall clock, so the source is set 120 seconds
-behind it: every signed hop stays within the 300-second skew while each stored
-time is told apart from a wall read.
+and the registry share the process source, so every signed hop is at its
+instant, which is set 120 seconds behind the wall clock so that each stored time
+is told apart from a wall read.
 """
 
 from __future__ import annotations
@@ -26,9 +26,10 @@ from core_registry.db.models import (
     Publisher,
     PublisherIdentity,
     PublisherIdentityRotation,
-    PublisherReplayReservation,
 )
+from market_authenticated_requests import REPLAY_TABLE
 from registry_client import ListingRequest
+from sqlalchemy import text
 
 
 @pytest.fixture
@@ -74,7 +75,7 @@ async def test_a_published_listing_holds_the_injected_instant(
     (binding,) = db_session.query(PublisherIdentity).filter_by(
         publisher_id=publisher.publisher_id
     ).all()
-    replays = db_session.query(PublisherReplayReservation).all()
+    replays = db_session.execute(text(f"SELECT origin, expires_at FROM {REPLAY_TABLE}")).all()
     assert (listing.created_at, listing.updated_at) == (
         _naive_utc(published_at),
         _naive_utc(published_at),
@@ -83,9 +84,9 @@ async def test_a_published_listing_holds_the_injected_instant(
         _naive_utc(published_at),
         _naive_utc(published_at),
     )
-    assert {(row.created_at, row.completed_at) for row in replays} == {
-        (_naive_utc(published_at), _naive_utc(published_at))
-    }
+    # The client signs at the source's instant, and a recorded publication's
+    # replay row lasts the default retention and the skew from that origin.
+    assert [tuple(row) for row in replays] == [(published_at, published_at + 86_400 + 300)]
 
     source.set(published_at + 60)
     await registry_client.publish_listing(_listing("injected-1", "eu-central"))

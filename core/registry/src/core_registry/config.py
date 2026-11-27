@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core_registry.settings_source import (
@@ -19,10 +19,26 @@ __all__ = [
 ]
 
 
+class AuthenticatedRequests(BaseModel):
+    """How long the registry's recorded outcomes answer exact retries, and how
+    often its expired replay rows are swept, each in seconds and 24 hours when
+    unset. Stated in a profile env file as
+    ``AUTHENTICATED_REQUESTS__RECORDED_OUTCOME_RETENTION_SECONDS`` and
+    ``AUTHENTICATED_REQUESTS__REPLAY_PRUNE_INTERVAL_SECONDS``; the admission core
+    holds them to its own settings model
+    (``market_authenticated_requests.AuthenticatedRequestsSettings``)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recorded_outcome_retention_seconds: PositiveInt = 86_400
+    replay_prune_interval_seconds: PositiveInt = 86_400
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=DEFAULT_ENV_FILES,
         env_file_encoding="utf-8",
+        env_nested_delimiter="__",
         case_sensitive=False,
         # Tolerate unknown env vars (e.g. stale cross-service entries in
         # shared-env/.env) so the registry boots cleanly.
@@ -127,6 +143,8 @@ class Settings(BaseSettings):
     # for a time the administrator sets through POST /admin/time. The
     # composition root installs it, refusing any other value naming it.
     time_source: str | None = Field(default=None, validation_alias="TIME_SOURCE")
+
+    authenticated_requests: AuthenticatedRequests = Field(default_factory=AuthenticatedRequests)
 
     # Logging
     log_level: str = "info"

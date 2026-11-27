@@ -28,6 +28,7 @@ import sys
 from collections.abc import Sequence
 
 from market_schema_migrations import (
+    CompactionFailed,
     MigrationFailed,
     MigrationRefused,
     describe,
@@ -82,13 +83,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     try:
         report = migrate_database(settings.database_url)
-    except (MigrationRefused, MigrationFailed) as exc:
+    except (MigrationRefused, MigrationFailed, CompactionFailed) as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     logger.info(
-        "Migrations applied successfully (%s%s).",
+        "Migrations applied successfully (%s%s%s).",
         "adopted the v0.3.0 database; " if report.adopted else "",
         ", ".join(report.applied) if report.applied else "none pending",
+        "; compacted the database" if report.compacted else "",
     )
 
 

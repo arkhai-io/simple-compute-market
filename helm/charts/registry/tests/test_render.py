@@ -6,8 +6,10 @@ application's image, with the application's resolver variables and profile
 files, which name the database, over the same data volume at the same path,
 before the application container, which runs the application alone. Both
 instances of the chart render it — the `registry` instance and its
-`api-credits-registry` alias — and a disabled instance renders nothing.
-Standard library only: values are written as JSON, which is YAML.
+`api-credits-registry` alias — and a disabled instance renders nothing. The
+admission core's retention and sweep interval render into the registry's profile
+only where a release states them, and the values schema refuses anything but a
+positive integer. Standard library only: values are written as JSON, which is YAML.
 """
 
 from __future__ import annotations
@@ -164,8 +166,66 @@ def test_each_instance_renders_its_migration_and_a_disabled_one_renders_nothing(
     _assert_migration_first(_deployment(disabled, "registry"), "/var/lib/arkhai-registry")
 
 
+def _profile(manifest: str) -> str:
+    """The ``config-production.env`` the chart's ConfigMap renders."""
+    (configmap,) = [
+        document
+        for document in manifest.split("\n---")
+        if _source(document)[-2:] == ["templates", "configmap.yaml"]
+    ]
+    return configmap.split("config-production.env: |", 1)[1]
+
+
+_RETENTION = "AUTHENTICATED_REQUESTS__RECORDED_OUTCOME_RETENTION_SECONDS"
+_SWEEP = "AUTHENTICATED_REQUESTS__REPLAY_PRUNE_INTERVAL_SECONDS"
+
+
+def test_the_retention_and_sweep_interval_render_only_where_stated() -> None:
+    stated = _profile(
+        _helm_template(
+            "registry-test",
+            CHART,
+            {"config": {"authenticatedRequests": {
+                "recordedOutcomeRetentionSeconds": 3600, "replayPruneIntervalSeconds": 600,
+            }}},
+        )
+    )
+    unstated = _profile(_helm_template("registry-test", CHART, {}))
+
+    assert f"{_RETENTION}='3600'" in stated and f"{_SWEEP}='600'" in stated
+    assert _RETENTION not in unstated and _SWEEP not in unstated
+
+
+def test_a_stated_zero_renders_for_the_registry_to_refuse() -> None:
+    """The chart alone has no schema, so a stated zero reaches the profile, where
+    the registry's settings refuse it, rather than vanishing into the default."""
+    stated = _profile(
+        _helm_template("registry-test", CHART, {"config": {"authenticatedRequests": {"replayPruneIntervalSeconds": 0}}})
+    )
+
+    assert f"{_SWEEP}='0'" in stated
+
+
+def test_a_setting_that_is_not_a_positive_integer_is_refused_by_the_schema() -> None:
+    values = UMBRELLA / "values.yaml"
+    for key in ("recordedOutcomeRetentionSeconds", "replayPruneIntervalSeconds"):
+        for value in (0, "a-day"):
+            with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+                json.dump({"registry": {"config": {"authenticatedRequests": {key: value}}}}, handle)
+                handle.flush()
+                refused = subprocess.run(
+                    ["helm", "template", "umbrella", str(UMBRELLA), "--values", str(values), "--values", handle.name],
+                    check=False, capture_output=True, text=True,
+                )
+            assert refused.returncode != 0
+            assert key in refused.stderr, refused.stderr
+
+
 if __name__ == "__main__":
     test_the_migration_runs_first_from_the_application_image_over_its_database()
     test_the_migration_reads_the_secret_profile_the_application_reads()
     test_each_instance_renders_its_migration_and_a_disabled_one_renders_nothing()
+    test_the_retention_and_sweep_interval_render_only_where_stated()
+    test_a_stated_zero_renders_for_the_registry_to_refuse()
+    test_a_setting_that_is_not_a_positive_integer_is_refused_by_the_schema()
     print("registry chart render checks passed")

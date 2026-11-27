@@ -1642,7 +1642,7 @@ without request authentication". Touches:
 - `kit/authenticated-requests`, where its `trust` becomes a protocol (the notes'
   choices).
 
-- [ ] 6.1 Classify every authenticated registry route against D6's criterion and declare
+- [x] 6.1 Classify every authenticated registry route against D6's criterion and declare
       it, naming whether each operation has a target. Record the table in this task's
       note.
       - Listing publish, update and delete are `RECORDED`.
@@ -1657,7 +1657,40 @@ without request authentication". Touches:
       section: it is a design question, and the change returns to design (D6, D7). The
       table names any `RECORDED` route holding a write transaction near the lease period
       or writing in more than one transaction (the plan's preamble).
-- [ ] 6.2 Authenticate every route through the core's dependency form. Its store is bound
+
+      *Done:* every route is declared in the dependency form, in
+      `core/registry/src/core_registry/api/` beside its handler; the inventory at
+      `install` refuses any route with no declaration or mark, and the registry starts.
+
+      | Operation | Route | Exact retry | Target | Roles |
+      |---|---|---|---|---|
+      | `listing.publish` | `POST /listings` | `RECORDED` | none | seller |
+      | `listing.list` | `GET /listings` | `RERUN` | none | buyer, seller, service |
+      | `listing.get` | `GET /listings/{listing_id}` | `RERUN` | the listing | buyer, seller, service |
+      | `listing.update` | `PUT /listings/{listing_id}` | `RECORDED` | the listing | seller |
+      | `listing.delete` | `DELETE /listings/{listing_id}` | `RECORDED` | the listing | seller |
+      | `listing.validate` | `POST /api/v1/listings/validate-publish` | `RERUN` | none | buyer, seller, service |
+      | `filter.get` | `GET /filter-spec` | `RERUN` | none | buyer, seller, service |
+      | `health.read` | `GET /api/v1/system/health` | `RERUN` | none | buyer, seller, service |
+      | `system.stats.read` | `GET /api/v1/system/stats` | `RERUN` | none | buyer, seller, service |
+      | `publisher.list` | `GET /publishers` | `RERUN` | none | buyer, seller, service |
+      | `publisher.get` | `GET /publishers/{publisher_id}` | `RERUN` | the publisher | buyer, seller, service |
+      | `publisher.identity.rotate` | `POST /publishers/{publisher_id}/identity-rotations` | `RERUN`, keyed by nonce | the publisher | seller |
+      | `publisher.identity.rotation.read` | `GET /publishers/{publisher_id}/identity-rotations/{nonce}` | `RERUN` | `<publisher>:<nonce>` | buyer, seller, service |
+      | `publisher.identity.retire` | `POST …/identity-rotations/{nonce}/retire` | `RERUN`, keyed by nonce | `<publisher>:<nonce>` | seller |
+      | `registry.descriptor.read` | `GET /.well-known/arkhai/registry-descriptor.json` | public | none | none |
+
+      Unauthenticated: `/health`, the OpenAPI document, and the administrator routes
+      (`/admin/api-keys`, `/admin/api-keys/{key_id}`, `/admin/status`, `/admin/time`),
+      which take the shared administrator key, not a signature. Matches D6's table.
+      `listing.validate` writes nothing, so it is a read for D6 and needs no outcome;
+      as a non-GET `RERUN` route it still has a double-dispatch case (6.7). Each
+      `RECORDED` route (publish, update, delete) writes in one transaction, committed
+      once at its end, and holds no write transaction near the 30 s lease: no route
+      calls another service, and a refusal before the commit rolls back with the
+      request's session. Each caller learns by reading whether its write applied
+      (`listing.get`). No difference from the design.
+- [x] 6.2 Authenticate every route through the core's dependency form. Its store is bound
       to the registry's database through the SQLAlchemy store, on an engine of its own
       (the notes' choices). Its trust admits any verified principal, the routes checking
       ownership, so the kit's `trust` parameter becomes a protocol. Remove
@@ -1672,7 +1705,32 @@ without request authentication". Touches:
       - a request stating a resource on publish refused `operation_mismatch`.
 
       Re-run `kit/authenticated-requests`' suite for the trust protocol.
-- [ ] 6.3 Keep publication evidence as records (D21, D23). Publish and update store the
+
+      *Done:* `core_registry/api/admission.py` builds `registry_core` as the routes
+      import; startup binds its signer and a `SqlAlchemyReplayStore` over an engine of
+      its own on the registry's database (`admission.bind`), and the lifespan runs
+      `registry_core.sweeping()`. `main.py` serves `app = install(api, registry_core,
+      unauthenticated=…)`, the FastAPI application being `api`; its unsigned-error
+      handler is gone, so every answer naming a request is signed by the core.
+      `publisher_auth.py` is removed (`git rm`). The kit's `trust` is a `Trust`
+      protocol of `allows` (`kit/authenticated-requests/…/core.py`), and the
+      registry's admits any verified principal. Application integration
+      (`core/registry/tests/integration/test_identity_publish.py`, through the typed
+      client; raw requests only on the rejection paths): a delayed publish retry after
+      a later update answered with the recorded 201, the listing still `closed`; a
+      delete retried after a republication, its recorded 204 row held and the
+      republished listing kept; `/listingz` answered a 404 signed over the operation
+      it stated; a publish stating `Market-Resource` refused 400, signed over the
+      route's operation with no resource, nothing written; plus a recorded refusal
+      (404) and a recorded signed 500 whose retry is not dispatched (the route's
+      collaborator replaced in the module to raise, as the earlier lease test did:
+      the registry's routes inject no collaborator to double). The rejection-path
+      tests assert the status and the signature only, as `integration-tests.md`
+      asks. Library integration in the
+      kit: a trust rule admitting a principal no set lists
+      (`test_admission.py::test_a_trust_rule_admits_a_principal_no_configured_set_lists`).
+      `make -C kit/authenticated-requests test`: 283 passed.
+- [x] 6.3 Keep publication evidence as records (D21, D23). Publish and update store the
       seller's request record and body from the admission as `publication`, and in
       `updates` per changed field. The listing read returns both. A row retained under
       version 2 is returned as stored. `publication`, `updates`, `publisher_publication`
@@ -1687,7 +1745,20 @@ without request authentication". Touches:
       - a seller term named `publication` refused by name;
       - a listing migrated from a 0.4.0 database read with its version 2 evidence intact;
       - an update adding its entry under `updates`, the publication unchanged.
-- [ ] 6.4 Add the Alembic revision, refusing to downgrade, as the evidence columns'
+
+      *Done:* publish and update keep `{"body_base64", "request": <record>}` from the
+      admission (`listing_routes.publication_evidence`), as `publication` and per field
+      in `updates`; `RESERVED_LISTING_FIELDS` holds all four names. Application
+      integration (`test_retained_publications.py`, typed client): the publication's
+      record, its `query` `?`, validated by `validate_request_record` and verified by
+      `verify_request_evidence` with the listing's `publisher_principals`, a forged
+      body refused (`invalid_proof`: the verifier computes the digest from the body,
+      so the proof fails rather than a separate digest check); an update's record
+      naming its listing; each of the four names refused by name at publication; a
+      row whose evidence is a version 2 envelope read as stored (inserted as the
+      migration leaves it, the migration itself proven in 6.4); an update adding its
+      `updates` entry with the publication unchanged (the existing evidence test).
+- [x] 6.4 Add the Alembic revision, refusing to downgrade, as the evidence columns'
       revision does. It creates the replay table from 4.7's DDL, renames the evidence
       columns to `publication` and `updates`, and drops `publisher_replay_reservations`
       (D9, D21). The registry's migrate command runs `VACUUM` on SQLite after an upgrade
@@ -1697,7 +1768,26 @@ without request authentication". Touches:
       - from a database holding the 0.4.0 table with rows and version 2 evidence: the
         file compacted, the evidence carried under the new names;
       - a rerun not compacting.
-- [ ] 6.5 Serve the descriptor as a public read, and rebuild the bootstrap on it (D24,
+
+      *Done:* `alembic/versions/20261127_001_registry_replay_table.py` creates the
+      replay table from `replay_table_statements(dialect)`, renames the two columns
+      with `ALTER TABLE … RENAME COLUMN`, drops `publisher_replay_reservations`, and on
+      SQLite marks the header's `user_version` owed a compaction, as
+      `kit/schema-migrations` marks its chains'; `migrate_database` then runs `VACUUM`
+      outside any transaction and clears the mark (`db/migrations.py`,
+      `_compact_if_owed`); a failing `VACUUM` raises `CompactionFailed` and leaves the
+      mark, which no test here forces (it needs a held lock waiting out SQLite's busy
+      timeout; the kit's engine proves the same order for the other chains);
+      `registry-migrate` logs the compaction. Library integration
+      (`test_migrations.py`): the floor fixture adopted through both later revisions,
+      equal to a fresh chain; a 0.4.0 database, built from the floor fixture's DDL
+      and brought to the 0.4.0 revision, with 2,000 replay rows and version 2
+      evidence, compacted to under a quarter of its size, the evidence carried under
+      the new names, the table gone and the snapshot equal to a fresh chain's; a rerun
+      changing no byte and compacting nothing; `--check` naming the revision and
+      dropping and compacting nothing (deployment-state "An operator previews the
+      upgrade"); the command reporting the compaction. 23 passed.
+- [x] 6.5 Serve the descriptor as a public read, and rebuild the bootstrap on it (D24,
       design review 85 F2). The route carries 5e.2's public mark.
       `bootstrap_registry_descriptor`, async and sync:
       - drops `signer` and `caller_role` and gains `allow_insecure_http`;
@@ -1723,7 +1813,30 @@ without request authentication". Touches:
       Add unit tests: "A bootstrap is given a plain-HTTP URL" refused naming the scheme,
       no request sent (a transport that fails if called); the async and sync signatures
       equal.
-- [ ] 6.6 Sign the registry's query values and move the filter-spec ETag (D25, D26, D28).
+
+      *Done:* `descriptor_routes.py` takes `PublicAdmission(registry_core,
+      operation="registry.descriptor.read")` and reads no key. Both bootstraps drop
+      `signer` and `caller_role`, take `allow_insecure_http`, refuse a scheme other
+      than `https` before sending, send `build_public_request`, verify the answer's
+      binding and signer against the descriptor's principals, and refuse a descriptor
+      whose base URL is not the one bootstrapped from; `get_registry_descriptor()`
+      sends the same request and verifies against the configured registries
+      (`registry_client/client.py`). Application integration
+      (`test_registry_descriptor.py`): the typed read; both bootstraps; a signer
+      outside the descriptor refused, a descriptor naming another base URL refused,
+      and another request's signed answer, replayed by a transport, refused as
+      `invalid_proof` (each through the async client); the descriptor read without
+      the read key a gated registry requires (the read gate set, the filter-spec read
+      refused 401 beside it); a key-less client reading it twice through the typed
+      client, which verifies each answer, the replay table empty; a request carrying
+      signature fields refused 400, signed over its stated identity; a mistyped path
+      and a POST answered 404 and 405 `Allow: GET`, each signed over the stated
+      identity. Unit (`core/registry-client/tests/test_auth.py`): `http` and `ftp`
+      URLs refused naming the scheme through a transport that fails if called (the
+      sync client), `http` by the async one. The signature parity test is a unit test
+      in the registry's suite (`tests/unit/test_client_parity.py`), moved there from
+      the integration tests.
+- [x] 6.6 Sign the registry's query values and move the filter-spec ETag (D25, D26, D28).
       - Remove `canonical_query_body` and the client's `_query_body`. Every read's query
         travels as its query, built through 5d.3's encoding.
       - `listing.list` reads the `filter_spec_etag` parameter, 412 on a stale value, and
@@ -1738,7 +1851,21 @@ without request authentication". Touches:
         construction";
       - a listing read whose query an intermediary changed, by a transport rewriting
         the URL, refused as an invalid proof.
-- [ ] 6.7 Answer an applied rotation or retirement first (D27). Rotation answers an
+
+      *Done:* `canonical_query_body` and `_query_body` are gone; the client builds every
+      query with `encode_query` and sends exactly the signed suffix
+      (`registry_client/auth.py`, `sign_registry_request`). `listing.list` reads
+      `filter_spec_etag` (412 when stale) and refuses `If-Match` with a 400 naming it;
+      the compiler reserves the parameter's name; `core_buyer`'s orchestrator passes
+      the ETag unchanged (`etag=`), so it needed no edit, only its exact client pin.
+      Application integration: a stale ETag refused 412 naming the current one and the
+      current one passing (`test_listings_filtering.py`, typed client); `If-Match`
+      refused naming it (raw, rejection path); a query compiled under a replaced spec
+      refused 412, and a read whose `limit` a rewriting transport changed refused 401
+      (`test_filter_spec.py`). Unit (`core/registry-client/tests/test_query.py`): both
+      clients send `filter_spec_etag`, and no `If-Match`, through a signed mock
+      registry; the ETag tests no longer patch the clients' private `_request`.
+- [x] 6.7 Answer an applied rotation or retirement first (D27). Rotation answers an
       applied intent with the same nonce and intent hash, to the principal it names,
       before its proof-expiry, primary and overlap checks. Retirement answers an already
       retired rotation, to its replacement, before its primary check. Verify by
@@ -1747,7 +1874,25 @@ without request authentication". Touches:
       later rotation", "Rotation is retried"). Each route's double-dispatch case sends
       its retry after the intent's expiry and after a later write, and the completeness
       test covers both.
-- [ ] 6.8 Move `core/registry-client` to version 3 signing and response verification,
+
+      *Done:* rotation answers an existing rotation with the same nonce and intent
+      hash, after the caller is checked as the intent's current principal and before
+      the overlap bound, the proofs' expiry and the primary and overlap checks;
+      retirement answers a retired rotation, to its replacement, before the primary
+      check (`publisher_routes.py`). Application integration
+      (`test_publisher_rotation.py`, typed client, through
+      `request_replay.harness.run_double_dispatch`): a rotation's exact retry after a
+      later rotation and past its intent's expiry, and a retirement's after a later
+      rotation, each changing no table but the replay table and answering what the
+      rotation read answers; the existing idempotent-rotation test ("Rotation is
+      retried"); `listing.validate`'s case; and the completeness test, reading the
+      non-GET `RERUN` routes from the application's route table. An exact retry
+      re-sends the same signed intent by passing the first attempt's nonce and
+      expiry, both schemes signing deterministically. `change-workflow run
+      test-before` on the file: fails at the base at collection, since it imports what
+      the change adds (`RouteAdmission`, `request_replay.harness`); that shows the
+      cases cannot run before the change, not that the reordered checks fail there.
+- [x] 6.8 Move `core/registry-client` to version 3 signing and response verification,
       sending its expected-authority set as the audience, and reading `publication` and
       `updates` in `ListingSummary`. Move the VM storefront's
       `tests/unit/test_registry_client_contract.py` to the version 3 wire. Bump
@@ -1755,16 +1900,58 @@ without request authentication". Touches:
       - the client's unit suite, with its messages from 5a.7's fixture;
       - the contract test;
       - 6.2–6.7's application integration tests.
-- [ ] 6.9 Add the retention and sweep-interval settings to the registry's settings and
+
+      *Done:* `core/registry-client` 0.13.0 → 0.14.0 and `core/registry` 0.6.1 →
+      0.7.0, each one minor step from the merge base (`dev` has since moved the
+      registry to 0.7.0 itself, and `core/buyer` 0.8.1, the bare-metal buyer 0.9.1
+      and `e2e-tests` 0.3.2 for other content too, so the merge bumps each of the
+      four again). `ListingSummary` reads
+      `publication` and `updates` as fields. Retries pass `request_id` and `origin` in
+      place of `timestamp`. Every bound on the client moves to 0.14.0, exact pins in
+      `core/buyer` and the bare-metal buyer, lower bounds in `core/storefront`, the
+      three storefronts and `e2e-tests`; each package was already bumped on the branch.
+      The VM storefront's `test_registry_client_contract.py` signs its mock registry's
+      answers with `build_signed_response` and verifies the request with
+      `verify_market_request`; the bare-metal storefront's `test_registry_bearer.py`
+      looks for `Signature`. Suites: `make test-registry-client` 49 passed (unit, its
+      messages from 5a.7's fixture); the contract test and the multi-registry test, 35
+      passed; `test_registry_bearer.py` 5 passed; 6.2–6.7's application integration
+      tests in `make test-registry`.
+- [x] 6.9 Add the retention and sweep-interval settings to the registry's settings and
       chart values schema. Verify by the registry's configuration tests and its chart
       render test.
-- [ ] 6.10 Verify the section: `make test-registry`, `make test-registry-client`, `make
+
+      *Done:* `Settings.authenticated_requests` (`config.py`), read from a profile env
+      file as `AUTHENTICATED_REQUESTS__RECORDED_OUTCOME_RETENTION_SECONDS` and
+      `…__REPLAY_PRUNE_INTERVAL_SECONDS` (`env_nested_delimiter="__"`), positive
+      integers defaulting to 86400, held to the kit's model by `registry_core`. The
+      chart renders them from `config.authenticatedRequests` only where stated, and the
+      umbrella schema's `registryInstance` refuses anything but a positive integer.
+      Unit (`test_config_profiles.py`): defaults, a profile's values, `0`, `-1` and
+      `a-day` refused naming the key, for each key. Chart render
+      (`helm/charts/registry/tests/test_render.py`, run by `test-render.sh`): the lines
+      render only where stated, a stated `0` renders for the registry to refuse; the
+      schema refuses `0` and `a-day` for each key, naming it. The rendered lines are
+      not parsed with the registry's loader here; the release topology test loads the
+      registry's rendered profile without them. The registry chart is 0.2.0 and the
+      umbrella 0.6.0.
+- [x] 6.10 Verify the section: `make test-registry`, `make test-registry-client`, `make
       -C kit/authenticated-requests test`, the VM storefront's unit suite (via `make
       test-domains`) for its contract test, and `core/buyer`'s suite for the ETag's
       caller.
       End-to-end: `registry`, `multi_registry`, `roles_layer_registry` — evidence once
       section 16 lands. No end-to-end scenario runs the URL bootstrap; none is owed,
       since no deployed role calls it (D24).
+      *Done:* `make test-registry` (unit and application integration, 362 passed);
+      `make test-registry-client` (unit, 49 passed); `make -C kit/authenticated-requests
+      test` (unit and library integration, 283 passed); the VM storefront's contract and
+      multi-registry unit tests (35 passed) and the bare-metal storefront's
+      `test_registry_bearer.py` (5 passed) run focused; `core/buyer`'s suite (190
+      passed). `change-workflow run pre-commit`: passed, its `make validate-local` over
+      the tree running `check-packaging` and `make test` (every suite, the domains'
+      and the chart render tests included), then the repository's checks.
+      End-to-end: confirmed as planned — `registry`, `multi_registry`,
+      `roles_layer_registry`, evidence once section 16 lands; none runs the bootstrap.
 
 Notes (section 6):
 
@@ -1900,6 +2087,58 @@ Notes (section 6):
 - Nothing of section 6 was implemented by this session, and no task is checked.
   Sections 7–9 were not started: a section stopped for a design question ends the
   session's sections.
+- **Implemented (2026-11-27), round 4's first session.** Handoff for the sections
+  after it:
+  - The registry is composed as `api` (the FastAPI application) wrapped by the core
+    as `app`; `uvicorn core_registry.main:app` serves the wrapped one. A test reaching
+    FastAPI's own attributes (`dependency_overrides`, `state`, `routes`) uses `api`,
+    and one sending requests uses `app`. The registry's signer and replay store are
+    bound at startup (`admission.bind`), since the core is built as the routes import
+    and the database is opened only after its compatibility check.
+  - The registry's integration suite runs each test over a database the migration
+    chain built (`registry_database`, a file named `served-registry.db` so it never
+    collides with a test's own `registry.db`), each request on its own session as in
+    production, and binds the replay store to that file. Its autouse fixture signs a
+    test's raw request under version 3 as a seller, over the exact bytes sent, so the
+    raw-call tests kept their shape; a request already carrying a request identity,
+    or marked `X-Test-Unsigned`, passes as it is. New tests use the typed client.
+  - Outside the plan, fixed here: `kit/authenticated-requests`' `dependency.py`
+    postponed its annotations, so FastAPI 0.123, which the registry's lock resolves,
+    read `RouteAdmission.__call__`'s `request: Request` as a query parameter and
+    answered every route 422; the kit's own lock resolves 0.165.0 (beside a 0.162.5
+    entry), which resolves them. The
+    module now evaluates its annotations as it is defined, with the reason in its
+    docstring. Every authority on an older FastAPI meets the same, so sections 7–13
+    should not reintroduce the future import there.
+  - FastAPI closes a request's yield dependencies before the wrapped application
+    returns, so a `RECORDED` route that flushed and then refused has rolled back
+    before the core records its outcome: checked with a 403 after a new publisher's
+    flush, recorded at once (a probe, not kept as a test).
+  - The registry chart is 0.2.0 and the umbrella 0.6.0, for the retention keys.
+  - Still version 2, for later sections: `e2e-tests/tests/e2e/roles/scenarios/vms/
+    conftest.py`'s `signed_listing_read_headers` signs a raw registry read under
+    version 2 (section 15's harness and the end of version 2 signing); the VM buyer's
+    `pricing_record.py` reads `publisher_publication` (section 15). No in-process
+    suite runs either against the registry.
+  - The fresh-context check found, and this section fixed: the registry's bound on
+    `kit/schema-migrations` (now `>=0.2.0`, for `CompactionFailed` and the report's
+    `compacted`); the registry's README still describing version 2; rejection-path
+    tests asserting body fields (now the status and the signature); the key-less
+    descriptor read sent raw (now the typed client); the rotation retry needing the
+    client's private `_rotation_body` (the `body=` parameter is gone: the same nonce
+    and expiry re-sign the same intent); the parity test among the integration tests
+    (now `tests/unit/test_client_parity.py`); the 0.4.0 test database not built from
+    the floor fixture; no test of `--check` on a 0.4.0 database; the chart dropping a
+    stated `0`; the sweep key's refusals untested; a history-worded comment and an
+    unwrapped docstring; and notes claiming more than their tests showed.
+  - Declined from it: the raw ETag-header read in `test_filter_spec.py`, since the
+    typed client exposes no response header and the existing test of the shipped
+    spec reads it the same way; the module-level replacement in the recorded-500
+    test, since the routes inject no collaborator to double and the test it
+    replaces did the same; a test of a failing `VACUUM`, which needs a held lock
+    waiting out SQLite's busy timeout (the kit's engine proves that order for the
+    other chains); parsing the chart's two new lines with the registry's loader in
+    the release topology test, left to whoever next touches that test.
 
 ## 7. The provisioning service and its hosted site on the admission core
 

@@ -8,9 +8,13 @@ whose operation acts on one object names how it derives that object's identifier
 operation's route takes ``Depends(PublicAdmission(core, operation=...))`` instead,
 and receives the request identity its answer is signed over. The route inventory
 finds every route taking either through the framework's own dependency tree.
-"""
 
-from __future__ import annotations
+The module's annotations are evaluated as it is defined, with no postponed
+evaluation: the framework reads a dependency's ``request: Request`` parameter
+from the signature of the instance's ``__call__``, which a framework release that
+does not resolve postponed annotations on an instance would take for a query
+parameter named ``request``.
+"""
 
 from collections.abc import Iterable
 from typing import NoReturn

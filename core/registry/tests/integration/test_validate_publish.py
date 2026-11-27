@@ -10,66 +10,22 @@ rather than renamed alongside it.
 
 from __future__ import annotations
 import json
-import time
-import uuid
 
 import httpx
 import pytest
-from market_identity import (
-    Ed25519Signer,
-    RequestEnvelope,
-    canonical_body_hash,
-    sign_request,
-)
 from registry_client.models import ValidatePublishRequest
 
 from core_registry.main import app
 
 
-class _ValidationAuth(httpx.Auth):
-    def __init__(self) -> None:
-        self.signer = Ed25519Signer(bytes(range(32)))
-
-    def auth_flow(self, request):
-        # Sign the bytes on the wire, as every real client does. Re-serializing
-        # through the request model here would reproduce whatever the server
-        # does to the body, so the pair would agree even when both are wrong --
-        # which is exactly how a defaulted field once broke real callers while
-        # this suite stayed green.
-        body = json.loads(request.content)
-        authenticated = sign_request(
-            signer=self.signer,
-            envelope=RequestEnvelope(
-                role="buyer",
-                principal=self.signer.identity,
-                method="POST",
-                operation="listing.validate",
-                resource="listings",
-                request_id=uuid.uuid4().hex,
-                timestamp=int(time.time()),
-                body_hash=canonical_body_hash(body),
-            ),
-        )
-        request.headers.update(
-            {
-                "X-Market-Signature-Version": authenticated.protocol,
-                "X-Market-Identity-Scheme": authenticated.principal.scheme.value,
-                "X-Market-Identity-Identifier": authenticated.principal.identifier,
-                "X-Market-Role": authenticated.role,
-                "X-Market-Request-ID": authenticated.request_id,
-                "X-Market-Timestamp": str(authenticated.timestamp),
-                "X-Market-Signature": authenticated.proof.value,
-            }
-        )
-        yield request
-
-
 def _client() -> httpx.AsyncClient:
-    """Raw JSON client with canonical buyer authentication."""
+    """A raw JSON client: the suite's fixture signs the exact bytes each request
+    carries, as every real client does, so a body the server re-serialized
+    through its request model would fail verification rather than agree with
+    a test that re-serialized it the same way."""
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
-        auth=_ValidationAuth(),
     )
 
 

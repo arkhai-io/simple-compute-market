@@ -245,6 +245,20 @@
             },
             "rootPath": {
               "type": "string"
+            },
+            "authenticatedRequests": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "recordedOutcomeRetentionSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "replayPruneIntervalSeconds": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           }
         },

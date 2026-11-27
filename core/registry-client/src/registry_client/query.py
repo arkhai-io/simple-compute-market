@@ -18,7 +18,9 @@ from market_core import (
 
 from registry_client.models import FilterSpecResponse
 
-_RESERVED_PARAMETERS = frozenset({"etag", "limit", "offset", "publisher", "status"})
+# Names the client's listing read takes for itself, the filter-spec ETag's query
+# parameter among them: a filter declared under one could not be sent.
+_RESERVED_PARAMETERS = frozenset({"etag", "filter_spec_etag", "limit", "offset", "publisher", "status"})
 
 
 class FilterVocabularyError(ValueError):
