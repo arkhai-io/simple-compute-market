@@ -37,6 +37,7 @@ A change appears exactly once, in its primary home. Where a change serves more t
 | [Roadmap goal — Make capacity exclusivity compensated](#roadmap-goal--make-capacity-exclusivity-compensated) |
 | [Roadmap goal — Make the settlement mechanism a composed choice](#roadmap-goal--make-the-settlement-mechanism-a-composed-choice) |
 | [Roadmap goal — Sell compute by the period until either party stops](#roadmap-goal--sell-compute-by-the-period-until-either-party-stops) |
+| [Roadmap goal — Let buyers request compute and be introduced to sellers who can supply it](#roadmap-goal--let-buyers-request-compute-and-be-introduced-to-sellers-who-can-supply-it) |
 | [Unblocking work — the local end-to-end stack](#unblocking-work--the-local-end-to-end-stack) |
 | [Lesser goal — POOLS capacity and fulfillment foundation](#lesser-goal--pools-capacity-and-fulfillment-foundation) |
 | [Lesser goal — Service-to-service trust and event delivery](#lesser-goal--service-to-service-trust-and-event-delivery) |
@@ -417,6 +418,35 @@ Deliberately outside the goal: postpaid monthly invoicing and on-chain open-ende
 |---|---|
 | VM delivery tests older than `serve-running-rate-deals` drive the re-drive by calling `resume_incomplete_fulfillments_once` directly in `test_vm_delivery_path.py`'s payment rig, a bare app mounting only the settle routes, rather than stepping the `delivery-recovery` loop through the typed admin client, below the application integration `test-placement.md` asks of a service's integration tests: that file's forward-deal, lost-reserve-acknowledgement and settlement-wait cases, and `test_fulfillment_resume_runtime.py`'s four Alkahest recorded-fulfillment cases. The loop's re-drive reaches a test's site through the deal lifecycle's capacity runtime (`test_delivery_recovery_loop.py` steps it in the recurring world); moving them needs an Alkahest deal seeded in that world and, for the settlement wait, the admin settle routes mounted there | `serve-running-rate-deals` section 8, its compliance check; narrowed at round 1's triage (34 O1) |
 | The VM buyer's `buyer_lifecycle()` builds its mediation client inside `_MediationPort` with no transport seam, so no test reads a deal's dispute authority through the composition the buyer's commands use; `test_lifecycle_adoption.py` composes the kit's `BuyerLifecycle` over the port by hand. Giving `buyer_lifecycle()` a mediation transport, as the VM storefront's lifecycle takes `mediation_transport=`, is a production change to the VM buyer | `serve-running-rate-deals` section 9A, its compliance check |
+
+## Roadmap goal — Let buyers request compute and be introduced to sellers who can supply it
+
+```text
+add-buyer-account-login ──────┬──► add-buyer-compute-rfqs ──┬──► search-rfqs-in-the-database
+unify-introduction-custody ───┘                             └──► rotate-registry-account-principals
+add-buyer-account-login ──► deny-banned-buyer-accounts
+```
+
+| Change | Status | Depends on | Notes | Acceptance boundary |
+|---|---|---|---|---|
+| [`add-buyer-account-login`](add-buyer-account-login/) | ready for design | — | Proposed 2026-11-27 by the review of pull request #401. MVP. Its design records six decisions and six open questions. Qualifying against the hosted buyer account service is blocked on that service; repository tests use its double | The buyer CLI logs in through the buyer account service's double and stores the written-back key in a profile; a registry admits writes by each configured mode and refuses expired, foreign or unbound certificates |
+| [`unify-introduction-custody`](unify-introduction-custody/) | ready for design | — | Proposed 2026-11-27 by the review of pull request #401, which found RFQs duplicating contact exchange's custody. MVP. Its design records nine decisions and six open questions; the first is the encryption component the guidance requires | One custody layer holds every introduction's contacts, encrypted, for the storefronts' contact exchange and for the registry; contact-exchange lane scenarios keep passing |
+| [`add-buyer-compute-rfqs`](add-buyer-compute-rfqs/) | in design | `add-buyer-account-login`, `unify-introduction-custody` | MVP. An earlier design was implemented, closed out and archived on `feat/buyer-compute-rfqs` (pull request #401); the review of 2026-11-27 replaced it with this one, and the branch carries this design before it merges. Its code predates the design; the review's findings against it are recorded on the pull request. Its design records eleven decisions and seven open questions | A buyer posts a structured RFQ that two respondents answer, selects both, and each pair reads the other's contact, from the buyer CLI in a lane |
+| [`search-rfqs-in-the-database`](search-rfqs-in-the-database/) | ready for design | `add-buyer-compute-rfqs` | Proposed 2026-11-27. After the MVP. Its first open question is its relation to `index-registry-filters` | RFQ search filters in the database on SQLite and PostgreSQL with results equal to today's; listings and RFQs share region codes |
+| [`rotate-registry-account-principals`](rotate-registry-account-principals/) | ready for design | `add-buyer-compute-rfqs` | Proposed 2026-11-27. After the MVP. Reuses `kit/identity`'s dual-proof rotation, as publisher rotation does | RFQ ownership survives a two-proof rotation of the buyer's key, and principal-owned RFQs move to account subjects |
+| [`deny-banned-buyer-accounts`](deny-banned-buyer-accounts/) | ready for design | `add-buyer-account-login` | Proposed 2026-11-27. After the MVP | A denied account is refused with a valid certificate, under a new key, and with an operator-issued key |
+
+`add-buyer-account-login`, `unify-introduction-custody` and `add-buyer-compute-rfqs` are
+the goal's MVP: a buyer logs in from the CLI, posts an RFQ, and is introduced to the
+respondents it selects. `add-buyer-compute-rfqs`'s design proceeds now; its implementation
+waits for the other two. The other three changes follow the MVP and lift its accepted
+limitations, as the roadmap states.
+
+### Unowned work found by the review of pull request #401
+
+| Item | Status |
+|---|---|
+| Private notes revealed with an RFQ introduction | Unowned — recorded under Goal 9 in the roadmap |
 
 ## Unblocking work — the local end-to-end stack
 
