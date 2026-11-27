@@ -48,8 +48,8 @@ None.
 ## Non-Goals
 
 - Do not merge the compute-family domains into one storefront or one contribution.
-  That is an evolution direction for later goals; this change extracts what every
-  domain duplicates today, API credits included.
+  `unify-vm-and-bare-metal-storefronts` (Goal 3) does that; this change extracts what
+  every domain duplicates today, API credits included.
 - Do not extract the listing lifecycle, fulfillment convergence, authentication
   middleware, or persistence residue — sibling changes own those.
 - Do not change any wire contract; the shared routes serve the same paths, models,
@@ -93,3 +93,10 @@ None.
 - `bare-metal-and-credits-domain-stacks` reduces bare metal's `runtime.py` and
   `server.py` to contribution adapters over the existing shell; this change replaces
   those adapters, and either order works.
+- `unify-vm-and-bare-metal-storefronts` took that reduction from
+  `bare-metal-and-credits-domain-stacks` on 2026-11-27. It makes one compute storefront
+  serve VM and bare metal and deletes bare metal's own routes, runtime and server, and
+  it is recorded as waiting on this change. Whether it lands after this change, before
+  it, or between this change's route set and its executable assembly is settled in
+  that change's design session, not here; landed first, this change composes two
+  storefronts.

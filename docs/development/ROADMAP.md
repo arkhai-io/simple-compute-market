@@ -1,6 +1,6 @@
 # Arkhai Market Stack — Directional Roadmap
 
-> **Purpose:** The goals currently being pursued, and those completed, the value each delivers, what is true today, and which OpenSpec change owns each open gap. This document carries no readiness status, no delivery sequencing, no acceptance criteria, and no implementation tasks — those belong to the changes themselves and to [`openspec/changes/README.md`](../../openspec/changes/README.md).
+> **Purpose:** The goals currently being pursued, and those completed, the value each delivers, what is true today, what completes each goal, and which OpenSpec change owns each open gap. This document carries no readiness status, no delivery sequencing, and no implementation tasks, and a change's own acceptance is the change's — those belong to the changes themselves and to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## How this document relates to the others
 
@@ -14,7 +14,7 @@ Three cross-cutting documents divide the work between them. Each answers a diffe
 
 To find out whether work on a goal is ready, blocked, or deferred, follow the change link and read the active-change index. This document deliberately does not say.
 
-Each goal below carries a present-tense **current state** grounded in the code as it is, and a table of **open gaps** with the change that owns each. When a change completes, its row leaves the table and the result is absorbed into the current-state prose — so this document shows where things stand, not a history of how they got there. Progress is visible in the current-state paragraphs growing and the gap tables shrinking.
+Each goal below carries a present-tense **current state** grounded in the code as it is, a table of **open gaps** with the change that owns each, and, where one is stated, what completes the goal, with anything outside this repository that it waits on. When a change completes, its row leaves the table and the result is absorbed into the current-state prose — so this document shows where things stand, not a history of how they got there. Progress is visible in the current-state paragraphs growing and the gap tables shrinking.
 
 A gap identified without an owning change does not become a standing entry here; an OpenSpec change is opened for it and linked. Where a goal has known work that no change yet owns, the current-state section says so plainly rather than the gap table implying coverage that does not exist.
 
@@ -135,35 +135,51 @@ Buyer-negotiated VM connectivity terms are no longer a gap of this goal. The rel
 
 **Value.** This decouples *how hardware is sold* from *how hardware is partitioned*. Today the listing form factor is a deployment boundary, so a site owner must physically dedicate hosts to VMs rather than bare metal rather than pods. Removing that lets one pool of hardware be offered concurrently as several form factors, priced independently, with the site authority arbitrating exclusivity between them — higher utilization and better price discovery without buying more hardware.
 
-**Current state.** The common storefront shell now discovers installed domain
-contributions, applies explicit public registrations, and freezes an exact
-mode/domain/version registry. VM and bare-metal publication sources can share
-one process. Listings, negotiation threads, and fulfillment contexts carry
-immutable domain, offering-mode, selected-site, and provenance bindings;
-negotiation, settlement, fulfillment, result recovery, and teardown route from
-those records rather than payload guessing, installed order, or a VM default.
-Existing single-domain VM databases enter this schema only through the
-explicit, preview-first, backed-up transactional migration.
+**Current state.** A storefront discovers installed domain contributions, applies the
+operator's explicit registrations, and freezes one registry of offering mode, domain
+identity and contract version. Listings, negotiation threads, and fulfillment contexts
+carry immutable domain, offering-mode, selected-site, and provenance bindings;
+negotiation, settlement, fulfillment, result recovery, and teardown resolve their
+contract from those records, never from a payload, installed order, or a default. All
+three storefronts compose that registry.
 
-Resource Pools already declare exact deliverable offering modes. Capacity
-claims carry that mode through reservation, scheduling, and provider dispatch,
-and accepted records retain it when publication changes. The shared
-storefront-to-site clients pin mapped work to one trusted authority with no
-cross-site fallback. The registry catalogue can now receive the public
-`listing_resource.offering_mode` projected from the frozen binding.
+Resource Pools declare exact deliverable offering modes. Capacity claims carry that
+mode through reservation, scheduling, and provider dispatch, and accepted records
+retain it when publication changes. One provisioning service delivers VMs and whole
+machines side by side, and its site refuses a whole-machine claim on a machine a VM
+slice holds, and the reverse. The storefront-to-site clients pin accepted work to its
+recorded site with no cross-site fallback. A listing publishes its
+`listing_resource.offering_mode` from its binding, and VM and bare-metal listings share
+one registry schema.
 
-Goal 3's shared storefront boundary is therefore implemented and promoted. The
-bare-metal producer has landed too: an installable buyer contribution, a seller
-composition that starts through the shared shell and composes kit publication, a
-compose stack and its own end-to-end lane, and a real-host deal scenario. Complete
-product acceptance still depends on bare metal negotiating through the kit runtime
-rather than its own service, and on the topology proof below; the shell deliberately
-does not fake either.
+Bare metal is a complete domain: an installable buyer contribution, a storefront that
+negotiates through the kit runtime and composes kit publication, a chart and a compose
+stack, an end-to-end lane that runs a mock-provisioned deal on every pipeline run, and
+a real-host deal scenario.
+
+What the goal names is not yet true. No storefront process serves two domains: the VM
+storefront can register the bare-metal contribution beside its own, and then serves VM
+alone and reports the other. Bare metal is sold by a storefront program of its own,
+with its own executable, routes, chart, and database. A provisioning service trusts
+and calls back one storefront, so each storefront runs beside a provisioning service of
+its own, a site's hardware is still dedicated to one form factor by its deployment, and
+the site's cross-mode arbitration is reached only by tests.
+
+One storefront serving several sites is not part of this goal. The storefront's code
+routes each record to its own site and integration tests prove it; no deployment runs
+it, and it is planned as a goal of its own.
 
 | Open gap | Owned by |
 |---|---|
-| The bare-metal contribution serves its own negotiate and listing routes over the kit negotiation runtime, beside the shared shell's routes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) (Goal 4, Section 4a) |
-| One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, execution-dispatch, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| No storefront process serves both compute domains, so no deployment sells one site's hardware as VM slices and as whole machines | [`unify-vm-and-bare-metal-storefronts`](../../openspec/changes/unify-vm-and-bare-metal-storefronts/) |
+| Bare metal is sold by a storefront program of its own, which serves its own negotiate and listing routes over the kit negotiation runtime | [`unify-vm-and-bare-metal-storefronts`](../../openspec/changes/unify-vm-and-bare-metal-storefronts/), which deletes that program: one compute storefront executable serves both domains |
+
+**Done when** a lane shows, on every pipeline run, one storefront process publish a VM
+listing and a bare-metal listing from one site's hardware, complete a deal of each, and
+the site refuse the cross-mode conflict. That scenario is the acceptance of
+`unify-vm-and-bare-metal-storefronts`, which is recorded as waiting for
+[`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/)
+(Goal 4) and settles that order in its own design.
 
 ---
 
@@ -207,7 +223,8 @@ same capacity and publication seams, the shared watchdog and chain factory, and
 selected-site fulfillment, result, and teardown, and has a deployable stack with
 its own end-to-end lane, which runs a mock-provisioned deal stage for stage with
 VM's. It negotiates through the kit negotiation runtime, as VM and API credits do,
-serving its own negotiate and listing routes over it. `kit/policy`,
+serving its own negotiate and listing routes over it from a storefront program of its
+own, which Goal 3's `unify-vm-and-bare-metal-storefronts` removes. `kit/policy`,
 `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
 carry no domain vocabulary.
 
@@ -239,12 +256,11 @@ VMs, bare metal, and API credits compose Arkhai payments and Alkahest as peer se
 
 The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
 
-**Completion test.** Bare metal and API credits each run a full deal through a composed storefront, with no domain-local copy of an extracted concern.
+**Completion test.** API credits and the compute storefront each run a full deal through a composed storefront, with no domain-local copy of an extracted concern.
 
 | Open gap | Owned by |
 |---|---|
 | Production buyers build storefront requests by hand instead of using the storefront's typed client, so the route contract has two independent implementations | [`buyers-use-the-storefront-client`](../../openspec/changes/buyers-use-the-storefront-client/) |
-| The bare-metal storefront serves its own negotiate and listing routes over the kit negotiation runtime rather than the shell's shared routes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
 | The API-credit lane does not hold and step its storefront's loops, and the storefront has no test that runs the production application | [`apicredits-end-to-end-lane`](../../openspec/changes/apicredits-end-to-end-lane/) |
 | Every storefront carries its own route set, executable assembly, and health service | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
@@ -270,9 +286,6 @@ settlement qualification gaps build on these seams rather than reopening them.
 API-credit issuance uses canonical principal ownership, deterministic fulfillment/grant identities, request digests, unknown-outcome retrieval, and a private credential result channel. Arkhai payment receipts gate issuance; Alkahest retains its own condition and collection path.
 
 No domain's capacity declaration carries another domain's dimension name: the dimension the legacy scalar total mirrors is supplied by each composition, and a declaration holds exactly the dimensions it names.
-
----|---|
-| The offering mode falls back implicitly to VM where durable identity is absent, which a growing set of offering modes cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 
@@ -421,7 +434,7 @@ The published rate is one number per listing shape, not a per-dimension structur
 
 This goal is not complete on a queryable listing alone. Its value statement is discovery *and* a trustworthy introduction, so closing it requires a release-qualified business scenario in which unbacked discovery reaches a usable introduction. For VM that scenario runs in the VM end-to-end lane and against a local Helm release: backed and unbacked VM listings are found by one rate-bounded query, and the unbacked one is negotiated, revealed through the buyer CLI, and delivered to both sides. For bare metal, the primary target, it runs in the bare-metal end-to-end lane as `e2e_bare_metal_unbacked_introduction`, on the same introduction stages as VM's: backed and unbacked bare-metal listings are found by one rate-bounded query, a `capacity_backing=unbacked` query returns only the unbacked one, which publishes no host fields and only an introduction option, and it is negotiated, revealed through the buyer CLI, and delivered to both sides, with no fulfillment.
 
-The multi-seller shape this goal requires is in place in both domains: the seller's contact is resolved per listing origin, never from one storefront-wide value, and seller-side delivery is routed per origin. In the topology supported today — one registry with several storefronts, each holding its own site — every storefront reveals its own seller's contact by construction. One storefront serving several seller sites is not supported and is not yet a goal, so the live scenario for that shape is recorded as unowned in the [change index](../../openspec/changes/README.md), and this goal closes without it.
+The multi-seller shape this goal requires is in place in both domains: the seller's contact is resolved per listing origin, never from one storefront-wide value, and seller-side delivery is routed per origin. In the topology supported today — one registry with several storefronts, each holding its own site — every storefront reveals its own seller's contact by construction. One storefront serving several seller sites is handled in code and proven at integration level, but no deployment runs it; it is planned as a roadmap goal of its own, not yet written, so the live scenario for that shape is recorded as unowned in the [change index](../../openspec/changes/README.md), and this goal closes without it.
 
 Finite unbacked listings, and payment settlement over them, are anticipated and unowned. They are the reason backing is modelled as a listing property rather than as a domain: a seller's supply becomes capacity-backed later without a new domain, a new registry, or a migration unwinding a fabricated site. Backing itself is immutable per durable listing — an unbacked listing does not become backed, it closes and a backed one is published in its place — because moving from no admission guarantee to a named authority is a material provenance change a buyer holding a listing reference should not have happen underneath them.
 

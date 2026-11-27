@@ -16,11 +16,6 @@ implementation satisfies the letter of the completion test and none of its value
 
 ## What Changes
 
-- Move bare metal's negotiation and listing routes onto the shared shell, once
-  `bare-metal-mock-provisioned-deal` has composed bare-metal negotiation onto the kit
-  runtime and removed its parallel service and persistence, so the bare-metal
-  storefront is contribution adapters over the shared shell with no domain-local copy
-  of an extracted concern.
 - Verify the bare-metal buyer command's demand, route refusal, strict decoding, and
   teardown requirements.
 - Complete the bare-metal deployable stack: the seller quickstart, render coverage
@@ -67,6 +62,9 @@ None.
   composition onto the kit negotiation runtime (4a.1, 4a.2, and the runtime half of
   4a.3); `bare-metal-mock-provisioned-deal` owns them and supplies the pipeline deal
   evidence.
+- Do not move bare metal's negotiate and listing routes or reduce its runtime and
+  server (4a.3 to 4a.6); `unify-vm-and-bare-metal-storefronts` owns them and deletes
+  them when one compute storefront serves bare metal.
 - Do not add a Kubernetes-pod, inference-token, or model-training domain. This change
   delivers the two named domains; the vision they demonstrate is what makes the next ones
   cheap.
@@ -76,9 +74,7 @@ None.
 
 ## Impact
 
-- Affected code: the bare-metal storefront's `api.py` (negotiation and listing routes)
-  and `runtime.py`, once `bare-metal-mock-provisioned-deal` has put negotiation on the
-  kit runtime; the bare-metal buyer CLI; the API-credits storefront's remaining local
+- Affected code: the bare-metal buyer CLI; the API-credits storefront's remaining local
   implementations; the bare-metal quickstart.
 - Affected tests: the e2e suite gains per-domain deal paths; shared fixtures and helpers
   may need generalizing away from VM assumptions.
@@ -123,13 +119,13 @@ None.
   on every pipeline run, composes bare metal onto the kit negotiation runtime, and owns
   the storefront half of idempotent teardown and restart recovery. The buyer CLI
   requirements (exact demand, route refusal, strict decoding, CLI teardown) moved from
-  it to this change's 4b.6–4b.9 on 2026-10-01; 4a.3–4a.6 follow its composition.
-- `multi-domain-storefront-composition` owns the shared shell; bare metal composing
-  the kit negotiation runtime inside it is this change's Section 4a.
-- `market-platform-compute-40-multi-domain-proof` depends on this change: its
-  two-authority topology needs bare metal on the kit, not merely in the shell.
-- The deployment-shape decision (standalone service or a second contract in a shared
-  process) is deferred; either shape satisfies this change.
+  it to this change's 4b.6–4b.9 on 2026-10-01.
+- `unify-vm-and-bare-metal-storefronts` took tasks 4a.3 to 4a.6 on 2026-11-27. It makes
+  one compute storefront serve VM and bare metal and deletes bare metal's own routes,
+  runtime and server, so they are not moved onto shared routes here. It does not
+  depend on this change.
+- The deployment shape is settled there: bare metal runs as a registration of the one
+  compute storefront. This change's stack and scenarios do not depend on the shape.
 - `bare-metal-buyer-domain` and `market-platform-bare-metal-10-storefront-composition`
   (archived) planned the buyer package and the seller composition this change
   verifies; their disposition records are in their archived headers.
