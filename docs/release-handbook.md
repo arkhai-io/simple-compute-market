@@ -2,17 +2,18 @@
 
 For the owner who releases this repository's packages and artifacts: how a marketplace
 release goes, merging `dev` into `main` and describing the release, loading a release
-candidate, what the deployment does with it, running the lanes on its images, cutting a
-release, deciding a release's migration floor, the
-compatibility paths due to retire, the import package renames consumers meet, and diagnosing a load or a cut that fails. It
-sits beside the [operator handbook](operator-handbook.md), for whoever runs a
-deployment, and the [change workflow handbook](change-workflow-handbook.md), for
-operating the workflow. What a change must satisfy for its packages to release — what a
-release comprises, the published set, their names and dependencies, how a release is
-recorded, and how a version changes — is the repository's guidance:
+candidate, what the deployment does with it, running the lanes on its images, cutting
+a release, deciding a release's migration floor, the compatibility paths due to
+retire, the import package renames consumers meet, and diagnosing a load or a cut that
+fails. It sits beside the [operator handbook](operator-handbook.md), for whoever runs
+a deployment, and the installed change workflow's handbook,
+`arkhai-change-workflow`'s, for operating the workflow. What a change must satisfy for
+its packages to release — what a release comprises, the published set, their names and
+dependencies, how a release is recorded, and how a version changes — is the
+repository's guidance:
 [`published-packages.md`](guidance/repository/published-packages.md) and
-[`package-versions.md`](guidance/repository/package-versions.md). The terms used here —
-release candidate, marketplace release, release component, candidate store — are
+[`package-versions.md`](guidance/repository/package-versions.md). The terms used here
+— release candidate, marketplace release, release component, candidate store — are
 [`ARCHITECTURE.md`, "Terms"](development/ARCHITECTURE.md#terms).
 
 This repository's continuous integration publishes nothing: merging to `dev` or `main`
@@ -79,7 +80,8 @@ The description has these sections, in order:
 - **merge notes**: how `main` was merged into the release branch and any conflict
   resolved.
 
-Work on the repository's own change workflow, guidance and agent tooling is not a user
+Work on how the repository adopts the change workflow, on its guidance, and on agent
+tooling is not a user
 feature; it is mentioned briefly under operations, if at all. Like every description
 here, it is public
 ([`repository-content.md`](guidance/engineering/repository-content.md)): it names
@@ -250,17 +252,24 @@ nothing; most of what it lists is the repository's development fixtures
 ## The migration floor
 
 When a marketplace release is cut, weigh whether it becomes a
-new migration floor: each stateful service's chain begins at baselines
-reproducing the schema of the floor release, adopts a database that release's
-chain built, and refuses an older one
+new migration floor: each stateful service's chain declares the floor release,
+begins at baselines reproducing its schema, adopts a database that release ran on
+whatever earlier releases recorded in it, and refuses an older one, directing it
+through the floor release
 ([`DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup"](development/DEPLOYMENT_AND_CONFIG.md#migrations-at-startup);
 the floor fixtures' rule is
 [`migration-chain-tests.md`](guidance/repository/migration-chain-tests.md)).
-A new floor replaces each chain's baselines and floor IDs with the new release's,
-deletes the migrations it absorbs, regenerates each service's floor fixture from
-the release's published packages as the fixtures' READMEs describe, and leaves
-deployments older than the new floor to start from a fresh database. Moving the
-floor is a decision about which deployments stay upgradeable, so it is made for
+A new floor replaces each chain's baselines and `Floor` with the new release's,
+deletes the migrations it absorbs, and regenerates each service's floor fixture
+from the release's published packages as the fixtures' READMEs describe. A real
+upgraded database is committed beside a fixture only where the floor release kept
+records outside its chain, which no release of the current engine does.
+Deployments older than the new floor upgrade through the floor release first;
+none is left to start from a fresh database. Setting aside the records earlier
+releases wrote is a permanent rule of every floor, so it has no row in
+["Compatibility to retire"](#compatibility-to-retire), and a new floor carries
+nothing forward from the old one. Moving the floor decides which deployments
+upgrade in one step and which go through the floor release, so it is made for
 each release, not by default.
 
 ## Compatibility to retire
@@ -274,9 +283,9 @@ released in` for every row it is the first to carry.
 
 | Compatibility path | First released in | Retires in | What retiring removes | A deployment still holding the old form |
 |---|---|---|---|---|
-| Adoption of hosts registered before host keys were pinned | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
-| Convergence of guests created before guest isolation | — | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
-| Removal of the per-port guest rules hosts were prepared with before the guest policy | — | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
+| Adoption of hosts registered before host keys were pinned | 0.4.0 | 0.3.3, or the second release after the one first carrying it, whichever is later | The `hosts` row's pending-adoption flag; the `accept-new` path of the check before a job's start and of the connectivity check; readiness's list of pending hosts | Such a host is unpinned: its jobs are refused until an operator captures or states its key. Readiness lists pending hosts before then |
+| Convergence of guests created before guest isolation | 0.4.0 | 0.3.3, or the second release after the one first carrying it, whichever is later | The host kit's `arkhai-guest-converge` command and the host-preparation step installing and running it, which set running guests' bridge isolation and filter | A guest it never converged keeps a port that is not isolated until it is torn down. The host kit reports such guests before then |
+| Removal of the per-port guest rules hosts were prepared with before the guest policy | 0.4.0 | 0.3.3, or the second release after the one first carrying it, whichever is later | Host preparation's step deleting the old guest port-22 drops and logs, `ufw allow in on virbr0 from 192.168.122.0/24`, and `vm-network-isolation.service` with its script, and that step's tests | The old rules stay on the host, behind the guest policy's first-position jumps, which decide every guest packet first; an operator may delete them by hand |
 
 ## Import package renames
 

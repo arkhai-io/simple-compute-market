@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
-from market_resource_pools import SiteDeclarations, read_site_declarations
+from market_resource_pools_contracts import SiteDeclarations, read_site_declarations
 from market_resource_pools_contracts.backing import CapacityBacking
 
 

@@ -90,9 +90,9 @@ in it runs a scenario.
   site, and the fulfillment callback binds to one storefront — the provisioning
   service holds a single storefront URL and admin key — so a second seller can
   negotiate and can never fulfil. `domains/vms/storefront/storefront.alice.toml`
-  records this already, and the many-to-many storefront-to-authority axis was
-  removed from `market-platform-compute-40-multi-domain-proof`'s scope
-  deliberately. That constraint is unchanged by this change.
+  records this already, and several storefronts on one site is not supported
+  (`docs/development/ARCHITECTURE.md`, "Production and staging"). That constraint is
+  unchanged by this change.
 - **"Seller service" is reinterpreted as the market a resource is listed on.**
   Approved by product authority 2026-08-13, on the grounds that the
   storefront-to-registry layer is what carries the anti-vendor-lock claim.

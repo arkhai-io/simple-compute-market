@@ -114,6 +114,18 @@ Where the charts differ:
   write JSON syntax into that YAML profile so 0x-prefixed EIP-191
   identifiers remain strings when Dynaconf reads it
   ([`helm.md`, "A hex value stays a string"](../guidance/engineering/helm.md#a-hex-value-stays-a-string)).
+- The provisioning chart passes its `config` through into the service's profile,
+  `config-production.yml`, as given, every section alike: its values schema types the chart's own values and refuses
+  under `config` only the keys the chart derives itself or delivers from a Secret,
+  and retired ones, so a section the service reads deploys through values alone
+  ([`helm.md`, "A chart's values schema types the chart's own values"](../guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)).
+  `Events`, the service's operator events, travels there: its sinks, routes,
+  retention and delivery settings in `config`, and its secret sink settings — an
+  Apprise URL, a webhook URL, an SMTP password — in the
+  `config-provisioning-secrets.yml` profile of the runtime Secret
+  `sshDecryptionKey.secretName` names, which `ACTIVE_PROFILES` loads after
+  `production`. The service, not the chart, validates the section at startup
+  ([`physical-provisioning`'s configuration](../../openspec/specs/physical-provisioning/configuration.md)).
 - A file a setting names by path, rather than a value, reaches the
   provisioning service through the chart's `configFiles` map: each entry's
   content renders verbatim into the ConfigMap and mounts read-only at
@@ -348,7 +360,12 @@ without its token and belongs in the overlay entire. `api_key_env` stays a field
 of the shared payments model, the form a buyer's provider reads, so the storefront
 generators refuse it rather than the model. Untyped sections such as
 `provisioning`, `negotiation`, and `pricing` pass through unchecked, and a
-misspelled key there is ignored by the storefront.
+misspelled key there is ignored by the storefront. A chart passing a service's
+configuration through otherwise carries no schema of it, as the provisioning chart
+carries none; the storefront charts' generated definitions stand in for refusals the
+storefront's loader does not yet make, and moving those refusals into the loader is
+unowned work recorded in the [change index](../../openspec/changes/README.md)
+([`chart-render-tests.md`, "A chart's values schema types the chart's own values"](../guidance/repository/chart-render-tests.md#a-charts-values-schema-types-the-charts-own-values)).
 
 Retired keys have two homes, one per kind. A key of the storefront's own
 configuration that it no longer reads is retired in the storefront's one
@@ -641,21 +658,40 @@ Each stateful service's migration command, and the phase it runs in, are
 | Result | Meaning |
 |---|---|
 | compatible | the database records exactly the chain's migrations |
-| behind | migrations are pending, or a v0.3.0 database awaits adoption |
-| ahead | the database records a migration this image does not list |
-| unsupported | tables the chain did not build, part of the floor, or a database older than v0.3.0 |
+| behind | migrations are pending, or a database the floor release ran on awaits adoption |
+| ahead | the database records the chain's baselines and a migration this image does not list; for the registry, one revision neither in its chain nor in its history up to its floor |
+| unsupported | older than the floor or another service's sharing its history (part of the floor recorded, or a registry revision before its floor), or not this chain's (tables with no ledger, none of the floor recorded, or several registry revisions) |
 | absent | no file, or no table but an empty ledger |
 
 The command refuses an ahead or unsupported database and applies nothing. Each
-in-house service's chain begins at baselines reproducing its v0.3.0 schema; the
-command adopts a database recording every migration ID the v0.3.0 chain
-recorded by recording the baselines in their place, in one transaction and
-without running them, then applies the later migrations. Compute provisioning,
-the VM and bare-metal storefronts, and the registry (at Alembic revision
-`018_listing_resource_column`, adopted as `v0_3_0_baseline`) adopt their v0.3.0
-databases; the API-credit storefront and service have no floor, so any existing
-API-credit database is refused as unsupported. A database from before v0.3.0 is
-refused the same way. Each in-house migration commits with its record, so a
+in-house service's chain declares its floor, marketplace 0.3.0 for every one, and
+begins at baselines reproducing that release's schema. The API-credit service's
+baselines differ from it by one index, which a later migration creates (below).
+The command adopts a database marketplace 0.3.0 ran on, whatever else it records.
+Such a database records every migration ID that release's chain recorded and none
+of the baselines. In one transaction, without running the baselines, the command
+forgets every recorded ID the chain does not list and records the baselines in
+their place, then applies the later migrations. `--check` previews the adoption:
+it names the baselines to be adopted, "replacing the records of marketplace
+0.3.0", the records set aside, and the pending migrations. Every in-house service
+adopts its v0.3.0 databases, including one an earlier release built. That covers
+compute provisioning, the VM, bare-metal and API-credit storefronts, the API-credit
+service, and the registry (at Alembic revision `018_listing_resource_column`,
+adopted as `v0_3_0_baseline`).
+
+A database recording part of the floor is refused, naming marketplace 0.3.0 and
+the migrations it lacks. So is a registry database at an earlier revision. Its
+ledger cannot tell an older database of the service's own from another service's
+sharing its history, so the refusal directs an upgrade through marketplace 0.3.0
+first, once the operator has confirmed the database is the service's. A database
+recording none of the floor's migrations is refused as not the service's. No
+refusal directs a fresh database.
+
+The API-credit pair upgrades in the order its Compose stack enforces. The credits
+storefront `depends_on` the credits service being healthy, and each container runs
+its migration before its application. The service migrates first, and a failed
+service migration leaves the storefront's database untouched
+(`scripts/tests/test_apicredits_compose.py`). Each in-house migration commits with its record, so a
 failure leaves the migrations before it applied and recorded; under Alembic,
 SQLite DDL is not transactional, so a fresh registry database whose migration
 fails partway is unsupported and is replaced by a fresh one. An image rolled back
@@ -674,6 +710,12 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   and its recorded request (`20261106_002_reservation_placement_key`, which
   `kit/site` exports to both chains), with no backfill, since no earlier reserve
   carried a key.
+- The API-credit service then creates the site ledger's `uq_capacity_buckets_host_id`
+  (`20261126_001_capacity_bucket_host_index`). Its v0.3.0 release left the index out,
+  though the table's `UNIQUE (host_id)` already enforced the same rule. `kit/site`
+  exports the migration outside its `MIGRATIONS`, and only the API-credit chain
+  composes it. It drops the index first where present, so a fresh database ends
+  unchanged.
 - Compute provisioning rewrites every host's `ssh` connection stored at version 1
   to version 2 with the same public fields and ciphertext
   (`20261108_001_ssh_connections_version_2`), failing, naming every refused host
@@ -684,6 +726,11 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   every job the earlier engine recorded reads null in both, and is never
   classified as never started, since that engine recorded no start before it
   acted on the host.
+- Compute provisioning then adds a job's structured failure, `ansible_jobs.failure`
+  (`20261126_001_ansible_jobs_failure`), nullable and not backfilled: every job the
+  earlier engine recorded reads null and keeps its failure text in `error`. This
+  and the migration above are the job authority's, which
+  `compute_provisioning.jobs.migrations` exports to the chain.
 - Compute provisioning then adds `hosts.host_key_adoption_pending` and rewrites
   every host's `ssh` connection stored at version 2 to version 3 with the same
   public fields and protected values and no `host_keys`, marking each host it
@@ -692,6 +739,24 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   refuses a row or a row already states `host_keys`. The first check of a marked
   host records the key it presents as its pin
   ([`physical-provisioning`, "The host registry owns the connection"](../../openspec/specs/physical-provisioning/architecture.md#the-host-registry-owns-the-connection)).
+- Compute provisioning then creates its event store, the eventing component's
+  tables and its sequence counter at 0 (`eventing_0001`, the component's schema
+  step for version 1, applied under the step's own name; see
+  [`ARCHITECTURE.md`, "Events"](ARCHITECTURE.md#events)).
+- Compute provisioning then carries its two storefront outboxes into the event
+  store and drops them (`20261126_002_storefront_outboxes_to_event_store`). Every
+  signed report of `lease_end_report_outbox` moves to `lease_end_reports`. Each
+  undelivered report becomes a `site.lease_ended` event under its own event
+  identity, in the order the reports were created, pending to the peer it was
+  signed for with its attempts and last error, that peer's destination parked if
+  the peer had parked its reports. Each undelivered row of
+  `capacity_release_callback_outbox` whose reservation is released becomes a pending
+  `site.capacity_released` delivery to the storefront; one whose reservation was
+  never released was never due and is dropped. Delivered rows need no event. Both
+  storefront consumers are registered past every moved event. An undelivered
+  report naming no recorded lease end, or a callback whose release records no time
+  or lease end, refuses the migration, which then writes nothing. The signed report
+  and the callback keep their wire forms.
 - Each compute storefront creates the tables v0.3.0 created only when a store
   opened — deal servicing's, and the bare-metal lifecycle cursor — with
   `IF NOT EXISTS`, leaving any present as they are
@@ -715,6 +780,15 @@ The migrations after the v0.3.0 baseline, which an adopted database applies:
   bare-metal storefront's `bare_metal_accepted_site_generations`
   (`bare-metal-storefront-0018-drop-accepted-site-generations`). Their rows are
   discarded; inventory is declared at provisioning.
+- The storefronts drop, where present, the tables an earlier release's retired
+  migrations created that nothing reads, discarding their rows. A database holds
+  them only if a release before v0.3.0 built it:
+  - the VM storefront's `derived_compute_listings`, each derived listing's site,
+    pool and resource, which `storefront_listing_bindings` holds
+    (`20261126_001_vm_derived_listings_dropped`);
+  - the bare-metal storefront's `bare_metal_hosted_lifecycle`, each hosted-card
+    deal's binding and its physical, financial, recovery and teardown states, with
+    its indexes and trigger (`bare-metal-storefront-0021-drop-hosted-lifecycle`).
 - The VM storefront adds `vm_delivery_records.activated_at_utc` and renames the
   stored phase `activate` to `ready` (`20261106_001_vm_delivery_activation`); the
   bare-metal storefront adds `bare_metal_fulfillment_lifecycle.activated_at_utc`

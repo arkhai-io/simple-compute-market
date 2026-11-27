@@ -1713,3 +1713,30 @@ class Stage11b_TeardownCompletion:
                  deal_state.teardown_fulfillment_id, deal_state.lease_id,
                  deal_state.settlement_ref, deal_state.reserved_resource_id,
                  reserved_again.capacity_reservation_id)
+
+
+class Stage11c_LeaseEventsRecorded:
+    def test_11c_the_lease_s_operator_events_are_recorded(
+        self, provisioning_client, deal_state: ComputeDealState,
+    ):
+        """The released lease's events, read through the provisioning service's
+        administrator event read: its end, its capacity's release, and the
+        finish of each job bound to it, each recorded with the transition it
+        reports, in sequence order."""
+        require_state(deal_state, "lease_id", "_teardown_job_completed")
+        listed = provisioning_client.list_events(reference=f"lease:{deal_state.lease_id}")
+        kinds = [event.kind for event in listed.events]
+        assert "site.lease_ended" in kinds, kinds
+        assert kinds.count("site.capacity_released") == 1, kinds
+        sequences = [event.sequence for event in listed.events]
+        assert sequences == sorted(sequences), sequences
+        finished = [event for event in listed.events if event.kind == "provisioning.job_finished"]
+        actions = {event.attributes.get("action") for event in finished}
+        assert {"create", "teardown"} <= actions, finished
+        assert all(event.attributes.get("status") == "succeeded" for event in finished), finished
+        released = next(e for e in listed.events if e.kind == "site.capacity_released")
+        assert released.attributes == {
+            "forced": False, "after_release_failure": False, "lease_lifecycle": True,
+        }, released
+        log.info("[11c] Lease %s recorded %s", deal_state.lease_id, ", ".join(kinds))
+

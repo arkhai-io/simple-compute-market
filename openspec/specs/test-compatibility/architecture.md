@@ -45,7 +45,7 @@ Scenario fixtures create the precise resource and policy state they assert, rema
 
 A moved or extracted boundary may require wheel-content checks, typing markers, dependency-direction tests, consumer suites, composition startup, duplicate-registration checks, and retry/idempotency coverage in addition to ordinary unit tests. Which checks apply follows the authority being changed.
 
-For an injected domain boundary, focused tests supply a compatible contract object distinct from the default and assert object identity at application, container, repository, codec, settlement, and fulfillment seams. Invalid type, identity, version, declarations, and hook sets are rejected at the root with stateful collaborators left untouched. Existing HTTP and package suites continue to own observable workflow parity; restart coverage reopens real persisted identifiers and confirms that parameterization adds no schema rewrite.
+For the VM storefront's injected domain boundary, focused tests register a compatible contract object distinct from the default in a one-registration registry and assert that the application, the lifespan's container, the repository, the listing service, and the negotiation runtime resolve the storefront's binding through that registry to that exact object, that the settlement composition refuses a contract its repository's registry does not hold, and that a second application built from another registry cannot start while the first holds the container and inherits none of its state. A contract of the wrong type, identity, or version, or with a missing declaration, an undeclared implementation, or an incomplete codec or hook set, is rejected by the root's validator, which runs before any stateful collaborator is built. The HTTP and package suites own observable workflow behaviour; restart coverage reopens a database holding real persisted identifiers under the same registry and confirms that the identifiers and the schema are unchanged.
 
 Architecture tests inspect production imports and package metadata rather than test monkeypatch patterns. The repository check, `make check-architecture`, holds the layer, scope, and kind rules for every package, including no concrete cross-domain import. Per-package architecture tests hold what it cannot express: one default contract construction site, no lower-layer singleton accessor, which module of a package may import what, and an installed dependency on the lower-layer contract package.
 
@@ -123,9 +123,11 @@ SCM imports no authority service implementation.
 Unit/service suites own same-key retry, lost-response adoption, caller-session
 admission/end races, exact-envelope capture, pinned-authority verification,
 independent cursor floors, respondent answer journals and conservative retention.
-Site/provisioning producer integration tests own atomic event/outbox rollback,
-all ending causes, crash/ack recovery, exact signed push/pull after signer change,
-unsupported-peer parking and explicit resumption. Consumers do not replace that
+Site/provisioning producer integration tests own atomic rollback of the ending
+transition, its event and its signed report, all ending causes, crash/ack
+recovery, exact signed push/pull after signer change, unsupported-peer parking and
+explicit resumption, and the carrying of an earlier release's pending deliveries
+into the event store. Consumers do not replace that
 producer proof with a hand-built report.
 
 Restart recovery of rate deals is proven at application integration

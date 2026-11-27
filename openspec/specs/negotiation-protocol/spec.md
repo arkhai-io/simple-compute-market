@@ -691,7 +691,7 @@ MUST fail closed.
 
 - **WHEN** recovery lacks retained publication proof or the signed acceptance pricing pin
 - **THEN** it fails closed rather than substituting a current listing or a seller-returned snapshot
-- **AND** Agreement.listing_hash keeps its existing database-listing meaning, a known gap recorded in `openspec/changes/README.md`
+- **AND** Agreement.listing_hash keeps its existing database-listing meaning, a known gap
 
 #### Scenario: Retained pricing differs from the signed publication
 

@@ -19,7 +19,13 @@ from .discovery import (
     discover_sink_factories,
     discover_sink_settings_models,
 )
-from .dispatch import DeliveryOutcome, deliver, deliver_async, describe_outcomes
+from .dispatch import (
+    DeliveryOutcome,
+    deliver,
+    deliver_async,
+    deliver_one,
+    describe_outcomes,
+)
 from .events import (
     INTRODUCTION_REVEALED,
     DeliveryEvent,
@@ -27,15 +33,21 @@ from .events import (
     canonical_principal,
     introduction_delivery_event,
 )
-from .seller import SellerIntroductionDelivery, build_seller_introduction_delivery
+from .seller import (
+    INTRODUCTION_SIGNING,
+    SellerIntroductionDelivery,
+    build_seller_introduction_delivery,
+)
 from .sinks import (
     DEFAULT_TIMEOUT_SECONDS,
     SINK_ENTRY_POINT_GROUP,
     ConfiguredSink,
     DeclaredSink,
+    Deliverable,
     DeliveryConfigurationError,
     DeliveryError,
     DeliverySink,
+    SigningAs,
     SinkFactory,
     SinkSettings,
 )
@@ -43,11 +55,13 @@ from .sinks import (
 __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
     "INTRODUCTION_REVEALED",
+    "INTRODUCTION_SIGNING",
     "RESERVED_SECTION_KEYS",
     "SINK_ENTRY_POINT_GROUP",
     "SINK_KEY",
     "ConfiguredSink",
     "DeclaredSink",
+    "Deliverable",
     "DeliveryConfig",
     "DeliveryConfigurationError",
     "DeliveryError",
@@ -58,6 +72,7 @@ __all__ = [
     "DeliverySinkSet",
     "Role",
     "SellerIntroductionDelivery",
+    "SigningAs",
     "SinkFactory",
     "SinkSettings",
     "build_delivery_sinks",
@@ -65,6 +80,7 @@ __all__ = [
     "canonical_principal",
     "deliver",
     "deliver_async",
+    "deliver_one",
     "describe_outcomes",
     "discover_sink_factories",
     "discover_sink_settings_models",

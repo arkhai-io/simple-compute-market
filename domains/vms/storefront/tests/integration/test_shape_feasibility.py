@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from market_resource_pools import ResourcePoolFacts
 from market_resource_pools.db import Base as PoolBase, ResourcePool
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
@@ -51,7 +52,10 @@ def _ledger(*, held: bool) -> CapacityLedgerService:
             db.add(ResourcePool(id=pool_id, label=pool_id, provider="test", enabled=True,
                                 policy_tags=dict(_TAGS)))
     ledger = CapacityLedgerService(
-        sessions, unit_claim_keys=VM_UNIT_CLAIM_KEYS, mirror_dimension=VM_MIRROR_DIMENSION
+        sessions,
+        pool_facts=ResourcePoolFacts(),
+        unit_claim_keys=VM_UNIT_CLAIM_KEYS,
+        mirror_dimension=VM_MIRROR_DIMENSION,
     )
     ledger.register_resource(
         resource_id="a-1", pool_id="gpu-a", host_id="h1",

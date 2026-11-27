@@ -555,7 +555,9 @@ client MUST offer async and sync variants with identical operations over any tra
 that provides authenticated requests, so it depends on no compute-provisioning package. The
 pool authority imports its models from the contracts distribution, and the provisioning
 service that hosts the pool routes assembles the capability's route contracts into its
-table without owning them.
+table without owning them. The reader of a site's projected pool declarations and the
+asking-rate resolution MUST live in the contracts distribution, so a consumer that only
+reads a site's pools installs no pool authority.
 
 #### Scenario: An operator administers pools
 
@@ -567,6 +569,12 @@ table without owning them.
 
 - **WHEN** the compute provisioning contracts distribution is inspected
 - **THEN** it declares no resource-pool model or pool route contract
+
+#### Scenario: A storefront reads a site's pool declarations
+
+- **WHEN** a storefront resolves a site's projected pool declarations and asking rates
+- **THEN** it does so through the contracts distribution, and its runtime dependencies
+  include neither the pool authority nor SQLAlchemy through it
 
 ### Requirement: Capacity backing is interpreted by one delegate
 
@@ -992,6 +1000,35 @@ MUST be refused rather than converted into guessed defaults.
 - **WHEN** a pool hint supplies a malformed or timezone-naive availability date
 - **THEN** validation refuses it with an actionable diagnostic
 
+### Requirement: The pool authority answers the site's pool facts
+
+Resource-pool management SHALL supply a reader satisfying the site authority's pool-facts
+port without importing the site authority. Given the caller's session and a pool
+identifier, it SHALL report whether the pool exists, whether it is enabled, its declared
+deliverable offering modes or that they are unreadable, and whether declarations in the
+pool need a host, resolved from the pool's provider and the host requirement its
+composition supplies. With no host requirement supplied, no pool SHALL need a host; with
+one supplied, a provider it does not name SHALL need one.
+
+#### Scenario: A pool whose provider needs a host
+
+- **GIVEN** a composition supplying a host requirement in which the pool's provider
+  needs a host
+- **WHEN** the site reads the pool's facts
+- **THEN** the pool is reported existing, with its enablement and deliverable modes, and
+  as needing a host
+
+#### Scenario: A composition supplying no host requirement
+
+- **WHEN** a composition supplying no host requirement reads a pool's facts
+- **THEN** the pool is reported as needing no host
+
+#### Scenario: A pool identifier with no stored pool
+
+- **WHEN** the site reads the facts of a pool identifier no stored pool has
+- **THEN** the pool is reported as not existing, not enabled, with unreadable deliverable
+  modes, and as needing a host exactly when a host requirement is supplied
+
 ## Evidence
 
 - Domain-neutral hint keys, typed deliverable-mode resolution and membership, advertisement and backing declaration shape, both cross-tag rules, and the strict resolver including absent-versus-malformed discrimination: `kit/resource-pools-contracts/tests/unit/test_hints.py`.
@@ -1007,7 +1044,8 @@ MUST be refused rather than converted into guessed defaults.
 - A freshly migrated database holding no pool, and the startup check refusing a database behind or ahead of the chain: `provisioning/compute/service/tests/integration/test_database.py`; the API-credit service's `default` pool seeded at startup and never by its migration: `domains/apicredits/service/tests/integration/test_migrations.py` and `test_default_pool.py`.
 - Optional host placement: a host created, imported, or updated with no pool, an explicit `null`, or an empty INI `pool_id=` through the typed clients, an unknown pool refused, and a relay hook refusing an unplacing rolling back the whole import: `provisioning/compute/service/tests/integration/test_hosts_api.py` (`TestHostPlacement`) and `test_host_pool_moves_api.py`; the authority's three inventory states and hook-run unplacing: `provisioning/compute/tests/integration/test_host_authority.py`; INI parsing of a pool, an empty value, and an absent key: `provisioning/compute/ansible/tests/unit/test_inventory.py`; the client sending an explicit `null`: `provisioning/compute/client/tests/unit/test_client.py`.
 - `listing_shapes` hint structure, including constraint mappings and a base shape stated twice with different constraints, validated identically on create, replace, patch, and bulk import: `kit/resource-pools-contracts/tests/unit/test_hints.py` (`TestListingShapesHint`) and `kit/resource-pools/tests/integration/test_resource_pool_service.py`; refused and projected verbatim by the provisioning service: `provisioning/compute/service/tests/integration/test_pools_api.py` and `test_capacity_api.py`.
-- `asking_rates` structure, including the unit-token period and a stated null: `kit/resource-pools-contracts/tests/unit/test_asking_rates.py`; its validation identically on every pool-write surface: `kit/resource-pools/tests/integration/test_resource_pool_service.py`; resolution through the contracts-owned entry check with exact matching, override precedence, and unreadable input: `kit/resource-pools/tests/unit/test_asking_rates.py`.
+- `asking_rates` structure, including the unit-token period and a stated null: `kit/resource-pools-contracts/tests/unit/test_asking_rates.py`; its validation identically on every pool-write surface: `kit/resource-pools/tests/integration/test_resource_pool_service.py`; resolution through the contracts-owned entry check with exact matching, override precedence, and unreadable input: `kit/resource-pools-contracts/tests/unit/test_asking_rate_resolution.py`.
+- The reader of a pool's facts for the site authority — a provider needing a host, no requirement supplied, a provider the requirement does not name, a missing pool with and without a requirement, an unreadable deliverable declaration, and a read seeing the caller's own uncommitted write: `kit/resource-pools/tests/integration/test_pool_facts.py`; its values carrying every member of the site's port: `provisioning/compute/service/tests/unit/test_authority_composition.py`; the authority importing no site authority: `kit/resource-pools/tests/unit/test_import_boundaries.py`. The declaration and asking-rate readers through the contracts package alone: the moved `kit/resource-pools-contracts/tests/unit/test_site_declarations.py` and `test_asking_rate_resolution.py`, and the storefront suites that reach them.
 
 ## Scheduling membership and draining
 

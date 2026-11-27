@@ -23,11 +23,10 @@ import injected_time
 from market_resource_pools import (
     HostRequirement,
     ResourcePoolService,
-    declaration_has_usable_host,
     pool_needs_host,
 )
 from market_resource_pools_contracts import pool_delivers_offering_mode
-from market_site import resource_satisfies_requirement
+from market_site import declaration_has_usable_host, resource_satisfies_requirement
 from market_site.ledger import CapacityLedgerService
 
 from .settlement_repository import SettlementRepository
@@ -84,11 +83,12 @@ class PhysicalSettlementScheduler:
         host_requirement: HostRequirement | None = None,
     ) -> None:
         """``host_requirement`` maps each provider identity to whether its
-        delivery needs a host; see
-        ``market_resource_pools.declaration_has_usable_host``. When supplied, a
-        candidate whose declaration has no usable host — naming none, or
-        naming one absent from the unit of work's report of hosts taking new
-        delivery — is never placed in a pool whose provider needs one.
+        delivery needs a host (``market_resource_pools.pool_needs_host``),
+        applied through ``market_site.declaration_has_usable_host``. When
+        supplied, a candidate whose declaration has no usable host — naming
+        none, or naming one absent from the unit of work's report of hosts
+        taking new delivery — is never placed in a pool whose provider needs
+        one.
         """
         self._pool_service = pool_service
         self._host_requirement = host_requirement
@@ -339,10 +339,9 @@ class PhysicalSettlementScheduler:
             # while the host cannot take it.
             if not declaration_has_usable_host(
                 getattr(payload, "host_id", None),
-                pool.provider,
-                True,
-                self._host_requirement,
-                deliverable,
+                needs_host=pool_needs_host(pool.provider, self._host_requirement),
+                backed=True,
+                deliverable=deliverable,
             ):
                 continue
             if not resource_satisfies_requirement(

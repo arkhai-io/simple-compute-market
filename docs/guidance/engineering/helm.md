@@ -26,6 +26,23 @@ names explicitly. A release that names no source for a secret fails to start, na
 the missing setting. Failing to start is preferable to accidentally deploying public
 test values.
 
+## A chart's values schema types the chart's own values
+
+A chart's values schema types the values the chart itself reads: the images it runs,
+the Secrets, ConfigMaps and volumes it mounts, its ports and probes, the names of the
+files it renders. Those are Kubernetes concerns, which no service sees. Configuration
+the chart passes through to a service is the service's to validate, and the chart's
+schema leaves it untyped: the service refuses at startup what it does not accept — an
+unknown key, a secret in a public file, a setting stated in two spellings — so a
+change to its configuration deploys through values alone, with no new chart release.
+
+A schema generated from a service's configuration models into its chart puts that
+validation in the wrong place: every change to the configuration then needs a
+regenerated schema, a drift test to catch a stale one, and a chart release. Where a
+service does not yet refuse something a chart could catch, the fix is in the service's
+loader, not in the chart. A value the chart reads itself, to derive a mount or a
+setting from it, is the chart's own and is typed like any other.
+
 ## A chart derives a mounted file's path from the mount
 
 Where a chart mounts a file a setting names, such as a CA bundle, and renders that

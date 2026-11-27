@@ -20,8 +20,8 @@ that needs fixing.
 
 The checks of what the change adds read its diff from the merge-base with the
 branch it lands on: `--base` when given, as the hook gives it, else the landing
-branch the change's clone recorded, which `scripts/change-workflow find --json`
-prints as `base`. A change with neither is refused, naming `--base`, since a
+branch the change's clone recorded, which the installed workflow's `change-workflow
+find --json` prints as `base`. A change with neither is refused, naming `--base`, since a
 guessed branch would read another diff.
 
 Usage: `make check-repository CHANGE=<change> [CHANGE_BASE=<branch>]`; `make
@@ -43,6 +43,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # Runs a command in a directory and returns its exit status and merged output.
 Runner = Callable[[Sequence[str], Path], tuple[int, str]]
+# The change of a name in a checkout, as the workflow's `find --json` prints it.
+Finder = Callable[[Path, str], dict[str, object]]
 
 
 def _run(command: Sequence[str], cwd: Path) -> tuple[int, str]:
@@ -68,10 +70,11 @@ def checks(change: str, base: str) -> list[tuple[str, list[str]]]:
 
 
 def run_checks(change: str, *, root: Path = ROOT, runner: Runner = _run,
-               echo: Callable[[str], None] = print, base: str | None = None) -> int:
+               echo: Callable[[str], None] = print, base: str | None = None,
+               find: Finder = found_change) -> int:
     """Run every check, print each failure with its output, and return the exit status."""
     try:
-        found = found_change(root, change)
+        found = find(root, change)
     except WorkflowRefused as exc:
         echo(f"ERROR: {exc}")
         return 1

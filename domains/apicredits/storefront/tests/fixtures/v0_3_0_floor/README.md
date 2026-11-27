@@ -1,18 +1,16 @@
-# The API-credit storefront's v0.3.0 schema
+# The API-credit storefront's v0.3.0 floor
 
 The database the marketplace v0.3.0 release's API-credit storefront database client
 builds on a fresh SQLite file, before any store opens: the schema the storefront's
-baselines reproduce. Unlike the VM and bare-metal storefronts, the API-credit
-storefront adopts no existing database, so `floor_ids.json` records what that release
-recorded without its chain naming them as a floor: every existing database is
-refused.
+chain is supported from, and that its baselines reproduce.
 
 - `schema.json` — the database's `market_schema_migrations.schema_snapshot`: every
   table, column, key, index, trigger, and view, the ledger left out.
 - `floor_ids.json` — the migration IDs its `schema_migrations` records, in the order
-  it recorded them.
-- `ddl.sql` — every object's DDL as SQLite stored it, the ledger's included; the
-  baselines are written from it.
+  it recorded them. A database recording all of them is adopted at the baseline.
+- `ddl.sql` — every object's DDL as SQLite stored it, the ledger's included: what
+  the baselines are written from, and what a v0.3.0 database is built from to prove
+  adoption.
 
 The release's service code is dev `9fffe41e9`. The database was built from the
 release's published wheels rather than from a build of that commit, since a rebuild

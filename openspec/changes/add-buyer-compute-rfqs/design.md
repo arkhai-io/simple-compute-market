@@ -1,129 +1,223 @@
+# Design: add-buyer-compute-rfqs
+
 ## Context
 
-Any signed-in account holder is eligible to respond. Authorized delegates may respond on the account's behalf. A response expresses interest in discussing a buyer's request. It conveys no right to capacity and binds neither party to a deal.
+The registry serves supply: sellers publish listings under their marketplace principal,
+and buyers discover them with the listing filters of the installed filter specification.
+Nothing lets a buyer publish demand.
 
-The registry already authenticates signed requests, enforces separately configured deployment access keys, and verifies ownership of supply listings through publisher bindings. A deployment access key admits traffic to the service. Listing ownership and account identity are distinct concerns. Current registry replay records retain completed response bodies. The existing contact-exchange mechanism discloses contact for an accepted listing-based negotiation and has its own configurable retention policy.
+Buyers already hold a marketplace principal. `add-persistent-buyer-profiles` gives the
+buyer CLI a selected profile whose Ed25519 key is resolved through a credential
+provider, and every buyer role signs version 2 requests with it
+([marketplace identity](../../../docs/development/ARCHITECTURE.md#marketplace-identity)).
+The registry already verifies such requests for listing discovery, and already admits
+writes either openly or by an operator-issued key (`REGISTRY_REQUIRE_WRITE_API_KEY`).
+
+The contact-exchange mechanism already introduces a buyer and a seller after an accepted
+deal: `kit/contact-exchange` persists both contacts, redacts them one-way, sweeps them on
+a retention window disclosed before commitment, and delivers them to each side's own
+sinks ([contact-exchange settlement](../../specs/contact-exchange-settlement/spec.md)).
+
+### Where this design came from
+
+An earlier design of this change was implemented, closed out and archived on
+`feat/buyer-compute-rfqs` (pull request #401). Its review on 2026-11-27 kept its purpose
+and much of its lifecycle — independent introductions, two explicit consents,
+withdrawal, closure ending pending responses, transactional deletion of contacts, partial
+node counts, and anonymous browsing that follows supply visibility — and replaced the
+rest:
+
+- It admitted callers through a delegated account authority: an external service signed
+  every RFQ operation, its namespace and account subject owned the records, and a
+  `can_share_contact` flag it asserted authorized contact sharing. A buyer's key pair
+  already identifies the buyer, so the delegation bought nothing a registry needs, and
+  the flag was a role system without a goal behind it.
+- It stored contacts with a custody stack of its own beside contact exchange's.
+- It accepted free text (a 4,000-character description, free metadata, free region
+  names) that anyone could read on a public registry.
+- It reset every pending consent on any edit, including a deadline change, through
+  terms revisions and a reconfirmation route.
+
+The branch's code predates this design. Whoever implements it may iterate on that code
+or start again; the review's findings against that code are recorded on the pull
+request.
 
 ## Decisions
 
-### D1 — Independent introductions
+Settled with the owner in the review of 2026-11-27.
 
-A buyer can select several respondents to one RFQ. Each introduction is private to the buyer and that respondent. Selecting a response leaves the RFQ open for other responses and selections until the buyer closes it or it expires. This allows the buyer to compare providers or discuss a request that several providers could jointly fill.
+### D1 — Callers sign with their own marketplace principal
 
-### D2 — Two explicit consents
+Every RFQ operation is a version 2 request signed by the caller's own principal and
+verified as the registry verifies its other signed routes. The principal owns the RFQs
+and responses it creates. There is no delegated signer, account namespace or permission
+flag.
 
-When responding, the respondent chooses their contact details and explicitly agrees to share them with this buyer if selected. When selecting that response, the buyer chooses their own contact details and agrees to share them with that respondent. Until selection, neither sees the other’s contact. Selection completes the introduction with no further action from the respondent.
+A changed key cannot carry its RFQs until `rotate-registry-account-principals` lands;
+until then a buyer whose key is compromised closes and reposts. With keys held by the
+buyer account service, a key changes rarely.
 
-### D3 — Withdrawal before selection
+Rejected: a delegated account authority signing for users (see Context). A browser user
+without a key pair is served by the buyer account service holding that user's key, which
+the registry never sees.
 
-A respondent can withdraw their own response while it is pending. Withdrawal ends consent for that response. If withdrawal and selection race, the registry applies only the first successful transition. A buyer working from an older inbox view cannot select a withdrawn response. Withdrawal affects only that response.
+### D2 — RFQ writes are admitted like the registry's other writes
 
-### D4 — Edits and reconfirmation
+Creating an RFQ and responding to one are writes. The registry admits them by its
+configured admission mode — open, an operator-issued key, or an admission certificate
+from a pinned buyer account service issuer — as `add-buyer-account-login` defines. An
+open registry has chosen openness, as it has for listings. Reads by a signed caller need
+only the read gate.
 
-Consent applies to the terms the respondent saw. Changing the requested quantity, location, start window or rental duration supersedes all pending responses. Each respondent must explicitly confirm the updated terms before the buyer can select their response. Changes to commercial terms in descriptions or metadata also require fresh consent. Preserve consent only for edits the registry can establish are cosmetic. An ambiguous wording change requires reconfirmation. The registry must evaluate the terms at selection so a stale inbox or a retry cannot disclose contact using superseded consent.
+Rejected: admitting RFQ writes independently of the registry's write gate, which left an
+operator who had closed publishing with open RFQ posting.
 
-### D5 — Closing and expiry
+### D3 — Open RFQs are browsable where supply is
 
-Closing a request or reaching its response deadline ends every pending response. The registry accepts selection only while the request is open and its deadline is still in the future. A selection completed first establishes the introduction. A later close or deadline preserves that introduction under its own retention policy. An old inbox view or retry cannot turn an expired response into an introduction.
+Where `REGISTRY_REQUIRE_READ_API_KEY` is false, anyone may search open RFQs and read one
+by its identifier without signing. Anonymous results carry the published request and the
+registry's identity and omit party references, responses and contacts. A closed or
+expired RFQ is refused as an unknown one. A supplied proof that fails is refused, never
+read anonymously.
 
-### D6 — Registry custody
+### D4 — An RFQ requests what a listing offers
 
-The running registry service and its operator are trusted to handle contact details. The service encrypts each chosen contact before persistence and keeps the decryption key outside the database. An operator who controls the running service can read contacts. Through the participant API, only the consenting pair can retrieve them after selection.
+Anything a seller can list, a buyer can request. The registry validates an RFQ's shape
+and commercial terms with the same listing schema and filter specification it loads for
+listings, and adds only the demand's own fields: node count, regions, start window, term
+and response deadline. No shape field has a special place; `gpu_model` is one categorical
+attribute among those the listing schema declares. Sellers browse RFQs with the filters
+buyers use on listings.
 
-### D7 — Deletion of pending contact
+Rejected: a separate RFQ schema generated in the compute family, which the earlier design
+used. It drifted from the listing vocabulary at once — a hand-picked subset of the shape,
+and a `gpu_model` the registry accepted as any non-blank string.
 
-Withdrawal, dismissal, explicit closure, supersession and early termination delete the affected contact payloads in the transaction that ends eligibility. A time-based deadline ends access immediately. It takes effect on every request, even when no cleanup has run yet. The registry deletes expired ciphertext from live storage within one hour during healthy operation and clears overdue data before admitting RFQ traffic after downtime. It can retain a contact-free record of the outcome. A retry must not restore deleted data. Cleanup preserves the independent retention policy of each completed introduction. Access checks tied to current time make expiry independent of schedule precision.
+### D5 — No free text is published
 
-### D8 — Open RFQ discovery follows supply visibility
+An RFQ carries no description and no free metadata. Commercial terms are typed, mirroring
+the listing's terms. Regions are codes from an imported standard: ISO 3166-1 alpha-2
+countries and UN M49 macro regions, matched hierarchically, so a request for Europe
+matches supply in `DE`. A respondent's contact is free text, but only the buyer it
+consented to reads it, after the buyer selects it.
 
-Any ordinary authenticated account can discover open RFQs. When `REGISTRY_REQUIRE_READ_API_KEY` is false, the registry advertises public supply discovery and also accepts unsigned open RFQ search and direct lookup by registry-scoped ID. The supply endpoint continues to verify its signed marketplace-principal proof. A service can use that proof to serve supply to a visitor without a user account. Anonymous results contain published requirements and commercial terms, the registry identity and the RFQ ID. They omit party references, private responses and contact details. The buyer sees the full response inbox, and each respondent sees only their own exchange. Private history and mutations require the appropriate verified account authority.
+Free text is not searchable in a way that helps a buyer and seller connect, and on a
+public registry where buyers stake nothing it invites abuse. Private notes revealed with
+the introduction, after both consents, are recorded as unowned work in Goal 9.
 
-### D9 — Partial coverage
+### D6 — Two consents, independent introductions
 
-A response may state how much of the requested compute the respondent could supply, using the quantity unit of the RFQ. For a 100-node request, the buyer may see 40 nodes in one private response and an unspecified quantity in another. Omitting the field leaves the quantity open for discussion. Stating a quantity leaves the original request open and creates no reservation or obligation.
+A respondent submits a chosen contact and consents to share it with this buyer if
+selected. The buyer submits a chosen contact and consents when selecting that response;
+selection completes the introduction with no further step by the respondent. The buyer
+may select several respondents to one RFQ; each introduction is private to its pair, and
+the RFQ stays open until closed or expired. Each contact-sharing request states the
+opaque, RFQ-scoped reference of the party it shares with, and the registry refuses it
+when that is not the current eligible party.
 
-### D10 — Optional commercial details
+A respondent may withdraw a pending response; the buyer may dismiss one; selection and
+withdrawal of one response are mutually exclusive. One response per respondent is
+pending per RFQ. A response may state a node count up to the requested count, which
+reserves nothing.
 
-A buyer can describe any proposed price, deposit or payment schedule in the optional description or flat metadata. For example, “Target USD 20 per node-hour, 30% upfront, remaining balance monthly” states a negotiating position. Visitors who can browse a public RFQ can see those terms. The registry preserves the buyer’s wording or scalar value without assigning billing or settlement semantics. Structured compute requirements remain authoritative for quantity and term.
+### D7 — Contacts live in the shared introduction custody layer
 
-### D11 — Response uniqueness and dismissal
+`unify-introduction-custody` generalizes `kit/contact-exchange` into one custody layer
+for introductions: encrypted storage, one-way redaction, a retention window applied as
+current policy and disclosed before commitment, early end by either participant,
+operator sweep controls, and restore redaction. This change adds the stage before
+selection: a respondent's contact held until selection, and deleted by withdrawal,
+dismissal or closure in the same transaction. Selection turns it into an introduction.
 
-Each respondent account can have one pending response per RFQ revision. Concurrent submissions and retries respect the same limit. The buyer can dismiss a pending response individually. Dismissal ends consent and deletes its contact under the ended-response rule. Other responses remain eligible.
+The registry refuses an `indefinite` retention window by its own policy, since it holds
+contacts as a party to neither side.
 
-### D12 — Bounded retrieval
+Rejected: a registry custody stack of its own, which duplicated contact exchange's
+mechanism with different protection.
 
-The registry operator configures the contact retrieval window in positive whole seconds through the registry profile or its Helm value. It defaults to 30 days. The registry sets each introduction's cutoff at completion using the current setting. A configuration change applies only to new introductions. Either participant can end retrieval early for that pair. At the cutoff, all subsequent reads, including retries, refuse contact disclosure to both participants. Each can keep details already received. Ending one introduction’s retrieval leaves the others on their own schedules.
+### D8 — Only the deadline is editable
 
-### D13 — One RFQ API for people and authorized delegates
+A buyer may move the response deadline of an open RFQ; pending responses keep their
+consent. Any other change is made by closing the RFQ and posting a new one, and closing
+may name the replacement so respondents to the old one find it. A deadline that has
+passed cannot be moved to reopen an RFQ.
 
-The browser, interactive terminal and noninteractive callers use the same RFQ operations. An interactive client previews the exact contact, registry, counterparty and terms before asking for confirmation. A noninteractive client explicitly supplies those values, affirmative consent and the expected record version in its operation. An authorized delegate may initiate RFQ contact sharing for the acting account without a separate human approval for each mutation. The account entry point derives the account from its verified credential and checks current RFQ contact-sharing permission before signing. An ordinary account holder's verified interactive session is eligible to express consent to share that account's submitted RFQ contact. An agent acting for the account needs current delegated authority for the same operation. General account access and a caller-supplied consent flag confer no sharing permission by themselves. The hosted authorization layer owns issuance, revocation and enforcement of the applicable permission. The shared API accepts the service's verified verdict for RFQs only and applies it equally to browser, terminal and direct programmatic calls.
+Rejected: editing any field with terms revisions and a reconfirmation route. A
+reconfirmation was a full new response, so revisions bought only a stable identifier, which
+the replacement reference gives for far less.
 
-### D14 — Implementation cadence
+### D9 — Records are bounded
 
-Use two review rounds with one implementation session per round. The first covers account admission, registry migration, request creation and discovery, and isolation from supply. The second covers the public discovery correction, responses, consent, contact retention and recovery, interactive and noninteractive clients, and the buyer/two-respondent journey. It includes real hosted account qualification before closeout. Reviewing the identity and storage contracts first gives the consent work a stable foundation. A single combined round would defer that feedback until the contact lifecycle was already built.
+The response deadline is at most a configurable horizon from the time it is set. Every
+array and string an RFQ carries is bounded, the registry bounds request bodies, and
+configurable caps limit the open RFQs and the pending responses a principal holds. The
+caps catch runaway agents; admission (D2) is what makes abuse costly. Per-address rate
+limiting is the hosting edge's, not the registry's.
 
-### D15 — Compute vocabulary and descriptive metadata
+### D10 — An operator can take an RFQ down
 
-The registry owns the neutral RFQ envelope, state and access policy. The compute family owns the typed compute request and search filters and generates the declarative validation schema from those models and its existing hardware vocabulary. The installed schema gives the neutral registry the same field rules as the typed clients. For a 100-node request, searchable GPU and quantity fields have typed meanings, and a field such as a negotiable budget carries the buyer's wording. Keep optional flat metadata consistent with seller listing metadata and reuse a shared scalar validator when available. Putting those hardware fields in core would give a neutral service compute-family knowledge. Load the generated schema into the existing registry image, using its declarative listing-schema pattern. A compute-scoped executable could also keep one registry authority, but it would require a separate app composition and Python dependency graph.
+The registry's operator can take an RFQ down. Its shape is this design's open question.
 
-## Engineering design for review
+### D11 — The flow ends at the introduction
 
-### Account admission and key changes
+No price, payment, reservation or provisioning follows from an RFQ or an introduction.
 
-Use a configured account authority that authenticates participants and signs RFQ operations for the registry. The participant’s durable owner is the pair (authority namespace, immutable account subject). The signing principal on this hop represents the authority. Configure the namespace, accepted signer pins and registry audience together. Use the verified registry authority name and exact public principal as the audience. The name alone can be shared by different deployments. Check the current principal before opening replay storage and key logical retries to the durable registry name. Users authenticate to their trusted account entry point. The registry receives an operation-specific proof and never asks users to send a general account credential to a discovered registry.
+## Open Questions
 
-Have the authority use the existing v2 service-signed request and the registry’s pinned v2 response. The authority derives the subject and permitted action from the verified credential on each invocation. Sign the method, operation, resource, request ID, timestamp and canonical body. Every delegated account body includes the subject, namespace, exact target registry and all operation inputs, including the revision and consent details when applicable. The authority constructs these fields server-side and will sign only RFQ operations it admits. The registry compares the audience and pin with its configuration, checks freshness, and enforces record ownership and lifecycle before reading data or dispatching. A listing key, service identity outside the RFQ trust set, self-signed account claim or caller-supplied account ID grants no account RFQ authority. Disable RFQs until RFQ trust and secret configuration is complete. Supply discovery and its existing access keys retain their current policy.
+### Q1 — Which listing terms an RFQ carries
 
-A hosted account client and a CLI using the same account authority therefore own the same RFQs, even after replacing an account API key or marketplace signer. The external authority owns credential issuance, replacement and revocation. There is no participant signing-key enrollment at the registry. The authority signer has its own lifecycle: an operator installs a successor pin for the same namespace, verifies it, permits bounded overlap, and retires the previous pin. Namespaces remain immutable and disjoint. Losing an authority signer never transfers a participant record to another namespace. Market participant rotation rules still apply anywhere an individual market principal actually owns the record.
+D4 mirrors the listing's terms. Which of them a demand states — a target price in the
+listing's rate form, a settlement mechanism, a maximum duration, an SLA, a deposit — and
+how each is typed is open.
 
-### RFQ operations and fields
+### Q2 — How the listing schema validates demand
 
-The registry owns RFQs, responses and introductions in its existing service. A distinct RFQ route family keeps demand out of listing searches and publisher registration. Gate compute RFQs on a configured compute-capable registry. The neutral registry contract carries the kind, envelope and lifecycle data. The compute-scoped contract under `domains/compute` owns typed requirements, filters and response quantity. Generate a versioned RFQ JSON Schema and declarative filter and quantity mappings under `domains/compute/registry/`. The registry image includes this data artifact and compute registry configuration selects it. The neutral registry loads it at startup and checks writes and filters with its existing JSON Schema and declarative filter mechanisms. The mappings select only validated field paths and supported comparison operators. The registry applies generic lifecycle invariants such as deadline, start-window order and an offered quantity bounded by the request using the declared quantity paths. A registry without a configured compute RFQ schema refuses the kind. A malformed configured schema refuses RFQ admission at startup. Test that typed models and deployed validation accept and reject the same cases. The registry's Python lock remains market-neutral.
+Whether the RFQ body embeds a listing-shaped resource validated by the listing schema, or
+the registry derives an RFQ schema from the listing schema at startup, and where the
+demand's own fields are declared, is open. Test cases shared between packages ship in the
+producer's package.
 
-Use POST bodies under `/rfqs` so signed account operations carry the account, audience and input consistently. Apply the registry's public supply posture (`REGISTRY_REQUIRE_READ_API_KEY=false`) to unsigned open search and ID lookup. An anonymous exchange carries the operation's public input and a caller request ID for response correlation. Use the current open-request query, return the summary projection for anonymous detail, and sign the public response in the existing registry context. A client checks the response against its configured registry pin before relying on that identity. Select anonymous admission only when the call supplies no account authorization. Reject malformed or failed account credentials or proofs without falling back. A verified account continues to use RFQ account admission independently of any supply access key. Search takes a bounded page size (default 25, maximum 100), opaque cursor, and optional GPU model, minimum node count and region. Order by creation time and ID and bind the cursor to filters. Verified account detail also serves historical requirements to the owner or a respondent reading their own record. Responses and contacts have separate projections.
+### Q3 — Region codes before listings carry them
 
-An authorized RFQ detail read returns the registry's verified authority and an opaque, stable buyer reference scoped to that RFQ. Authorized response detail and buyer inbox reads return the registry authority and the corresponding respondent reference scoped to that RFQ. Allocate each reference once per account and RFQ, and persist it across credential changes. The account entry point verifies the signed registry response against the configured authority, checks the expected registry audience and passes that provenance to the client. Clients use the registry identity and an optional trusted registry label with the party reference to identify the intended recipient. They omit global account identifiers and contact fields from these projections. Search results need only carry the registry and RFQ routing reference used to get the detail. Contact-sharing writes echo the verified registry and party reference. Resolve the reference in the live RFQ transaction and compare it with the party eligible for that operation.
+Listings name their region as free text today. Whether this change moves listings to the
+same codes, or RFQs carry codes first and `search-rfqs-in-the-database` aligns listings,
+is open. The source of the code lists (a packaged library or vendored data) needs a
+licence check.
 
-| Operation | Caller and effect |
+### Q4 — The takedown
+
+What a takedown does to pending responses and completed introductions, whether the RFQ
+reads as closed or as removed, what reason is recorded, and who may see it.
+
+### Q5 — Retries
+
+Mutations keep principal-scoped replay. Reads of a contact must reauthorize on every
+retry and store no body, as a route declared credential-capable does today. How this sits
+with the envelope and retention `redesign-authenticated-requests` settles is open.
+
+### Q6 — Bounds and caps
+
+The horizon, the field bounds, the body limit, and the default caps.
+
+### Q7 — What the branch's code keeps
+
+Which of the branch's registry modules, migrations, clients, CLI and tests carry forward.
+Its review findings against that code are recorded on pull request #401.
+
+## Verification
+
+Integration tests prove the lifecycle, consents, races, bounds and admission against the
+real registry application, on SQLite and on PostgreSQL in a gate that runs both. A lane
+scenario runs a buyer and two respondents from posting to introduction through the
+buyer CLI.
+
+## Design promotion record
+
+| Accepted decision | Permanent location |
 |---|---|
-| `/create`, `/{id}/edit`, `/{id}/close` | The buyer creates, replaces or closes their request. Mutations carry expected record version after creation. |
-| `/search`, `/{id}/read` | Admitted accounts browse open requirements. Anonymous callers use the same open discovery policy as supply. Search and detail exclude responses and contacts. |
-| `/{id}/respond`, `/{id}/responses/{rid}/reconfirm` | Another account explicitly consents on the current terms revision and submits its chosen contact. Reconfirmation submits fresh contact for the revised terms. |
-| `/{id}/responses/list`, `/{id}/responses/{rid}/read` | The buyer can see all response summaries. A respondent can read only their own. |
-| `/{id}/responses/{rid}/withdraw`, `/dismiss`, `/select` (same response prefix) | The respondent withdraws or the buyer dismisses or selects. Selection includes the buyer’s chosen contact, explicit consent, terms revision and expected response version. It returns an introduction reference. |
-| `/introductions/{iid}/read`, `/introductions/{iid}/end` | Each participant can retrieve the other party’s submitted contact or end retrieval for both. Read checks the current state on every call. |
-
-Expose account operations as JSON POST routes under `/rfqs` at the trusted account entry point for the browser, terminal and other programmatic clients. The entry point accepts the configured session or account credential, derives the account from it and forwards the operation under the existing v2 service proof. Session-authenticated writes use the entry point's normal CSRF protection. A contact-sharing mutation includes a stable request ID, the target registry, the operation and record references, the expected terms revision and relevant write version, the confirmed counterparty reference, the submitted contact and an affirmative consent field. The authority requires contact-sharing permission before signing and the registry verifies the counterparty against the current records. Success returns the same contact-free result to each client, including the response or introduction reference. Missing consent is an invalid action. Missing or revoked permission is refused. An unknown or unauthorized private record gets an indistinguishable refusal. Stale versions or changed reuse produce a conflict. An older account entry point or registry without RFQ support yields an unsupported-feature result. The terminal can prompt and display a preview, or accept complete explicit JSON input for a noninteractive call. The caller supplies the reviewed registry, counterparty, terms revision and record version on the noninteractive path. The client must not refresh these values automatically when they become stale. Both paths expose machine-readable outcomes and preserve the request ID when retrying a lost acknowledgement.
-
-Example requirements, inside the signed body:
-
-```json
-{
-  "shape": {"gpu_model": "B300", "gpu_count": 8},
-  "node_count": 100,
-  "regions": ["example-region"],
-  "start_earliest": "2027-01-01",
-  "start_latest": "2027-01-31",
-  "term": {"value": 6, "unit": "month"},
-  "respond_by": "2026-12-15T18:00:00Z",
-  "metadata": {"budget": "USD 20 per node-hour, negotiable"}
-}
-```
-
-The shape describes one node. Node count and GPU count are positive integers when supplied; node count is required. Validate GPU and other supported shape dimensions against the compute vocabulary. Require at least one region and a non-inverted inclusive ISO calendar-date start window. Express a positive integral term in days or calendar months; six months round-trips as six months and need not be converted to a fixed number of seconds. Parties settle the actual start and end privately. The response deadline is an independent, future UTC instant; creation, edits and all transitions use the registry clock. An optional offered node count is a positive integer in the same unit, at most the requested number for this response. An absent count remains unknown. Description is optional plain text up to 4,000 characters. Optional flat metadata has at most 50 entries, keys of 1–40 ASCII letters, digits, underscores, dots or hyphens, and values of at most 500 characters or a finite number or boolean. Use compatible shared validators when available. Contact is a separate bounded, nonempty string map (up to 16 entries, keys up to 64 characters, nonblank values up to 512); it is never copied into browseable data.
-
-Track a record version for concurrent edits and a terms revision for consent. Compare validated, canonical terms server-side: disregard object-key order, equivalent UTC representations, region-set order and leading/trailing whitespace in descriptive prose. Preserve meaning-bearing text, numbers, punctuation, case and metadata types. Unclassified spelling changes require fresh consent; implementers may add demonstrably equivalent spellings to a tested normalization rule. A change to any remaining substantive field, including budget metadata, supersedes pending responses. Extending a deadline cannot revive an expired RFQ. Distinguish invalid input, absent authentication, unauthorized or unknown private records, stale versions and unavailable contact without echoing sensitive data.
-
-### Persistence, privacy and retry
-
-Use additive tables in the registry migration chain for requests and revisions, responses, introductions, contact payloads and RFQ request receipts. Enforce one pending response per account and revision, one introduction per selected response and one receipt per namespace, subject and request ID in the database. Status, revision, ownership and deadline checks and transitions share a transaction. Use compare-and-set predicates and uniqueness on both SQLite and PostgreSQL. An edit that supersedes pending consent also deletes that revision’s pending contact. Cosmetic edits keep the same terms revision. If selection wins the race, the resulting introduction has an independent cutoff.
-
-Use application-layer authenticated encryption for the bounded contact payload (AES-256-GCM, fresh random nonce for each write). Persist version, key ID, nonce and ciphertext/tag. Bind ciphertext to registry namespace, record ID, party and payload purpose as authenticated associated data; when a pending payload changes purpose, re-encrypt it in the same transaction. Load a dedicated versioned keyring from a mounted secret file, with one current writer and retained readers. Missing required keys fail closed. Re-encrypt retained rows and verify coverage before retiring an old key. Run migration and restore rehearsals using synthetic contacts. A database backup contains ciphertext; deletion from the live service doesn't promise erasure from backups. A restore must reconcile expired records and intervening early terminations before read admission opens; if the latter cannot be reconstructed, redact restored contact payloads before opening.
-
-Withdrawal, dismissal, close, supersession, early termination and selection commit their contact changes with the state transition. Compute deadlines and retrieval cutoffs on reads and writes even if housekeeping is delayed. A restartable, idempotent sweep drains expired pending and completed payloads oldest first in bounded batches. During healthy service it removes ciphertext within one hour of expiry. Track the age of overdue payloads and report sweep failures. Drain overdue payloads before admitting RFQ requests at startup and after undoing an outage or restore reconciliation. End-access deletes both payloads for that pair. A contact read linearizes at its authorized snapshot; once the cutoff passes or early termination commits, a new read, including a retry, cannot disclose. Keep contact out of exception details, request logs, public projections, cached bodies and notifications. Send contact responses with `Cache-Control: no-store`.
-
-Durably bind the verified account request ID before dispatch, even when the operation later fails. Anonymous discovery uses fresh reads and creates no account replay binding. For mutations, save the contact-free outcome (identifiers, state and version) with the mutation in one transaction. Bind the receipt to a keyed digest of the canonical operation inputs using a dedicated secret outside the database; plain hashes of candidate emails allow offline guessing. The stable receipt identity and input digest exclude changing transport proofs and signer key IDs so a legitimate retry survives credential rotation. Store the digest key version so a retry still compares against the original key after rotation. Use the RFQ receipt path directly after signature verification; the listing middleware also stores a body hash and must not run on RFQ operations. Verify current admission and correct caller before serving any receipt. Conflict on changed content under the same operation ID. For reads, bind the request ID to the input fingerprint but reauthorize and render the current result each time; never save a private response or contact response body for replay. Existing listing replay remains byte-for-byte compatible.
-
-### Qualification and review
-
-The SCM deliverable includes the authority-side typed invocation builder and a typed client for the shared account entry point. A synthetic account authority exercises the same contract with the shipped signing and verification code. Qualify the terminal journey through contact exchange on the same operations a browser client calls. Prove permission separation, omitted consent, current counterparty and revision checks, authority pins and audience, independent account namespaces, credential replacement and revocation, and retries across signer changes. Exercise cosmetic and ambiguous edits, concurrent selection and withdrawal, the exact access cutoff even when ciphertext is still present, timed cleanup, and restoration before reopening service. In addition to the synthetic adapter checks, require hosted non-production qualification before the PR. A real hosted session and an authorized programmatic credential must traverse the same account routes with synthetic RFQs and contacts. Demonstrate interactive and noninteractive CLI behavior, successful delegated sharing, and refusal for missing or revoked sharing permission. The RFQ authority applies to the submitted RFQ contact and creates no authority over checkout or settlement.
+| D1–D11 | The new `buyer-compute-rfqs` capability's specification and companion; `openspec/specs/README.md` |
+| D2–D3 | `openspec/specs/registry-discovery/spec.md` |
+| D1, D4 | `docs/development/ARCHITECTURE.md`, a section on buyer RFQs and "Shared vocabulary and identities" |
+| D9 | `docs/development/DEPLOYMENT_AND_CONFIG.md`; `openspec/specs/registry-discovery/configuration.md` |
+| D10 | `docs/operator-handbook.md` |
+| Goal 9 | `docs/development/ROADMAP.md`, Goal 9 |

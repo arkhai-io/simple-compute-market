@@ -1,58 +1,102 @@
+# Add buyer compute RFQs
+
 ## Why
 
-A buyer seeking a block of compute for a particular term can search advertised supply, but cannot publish the requirement so other participants can respond. For example, a buyer might need 100 B300 nodes for six months and welcome introductions to more than one provider.
+A buyer who needs a block of compute for a term can search advertised supply, but cannot
+publish the requirement so that sellers can respond. For example, a buyer may need 100
+eight-GPU nodes for six months and welcome introductions to more than one provider.
+
+An implementation of an earlier design of this change exists on its branch,
+`feat/buyer-compute-rfqs` (pull request #401). Its review on 2026-11-27 replaced that
+design: buyers sign RFQ operations with their own marketplace principal rather than
+through a delegated account authority, contact custody is shared with the
+contact-exchange mechanism rather than duplicated, and the request is structured
+throughout. This proposal and its design state the design the branch must implement
+before it merges. The branch's code predates it.
 
 ## What Changes
 
-- Propose a demand collection in the compute registry. Buyers describe the shape, number of nodes, acceptable region, start window and requested term, and give the request its own response deadline.
-- Let any signed-in account holder respond without a seller role, publisher registration or a listing. A delegate may respond for that account with current RFQ contact-sharing permission. Let the buyer select several respondents independently. Respondents consent to sharing their chosen contact with the buyer when responding. Respondents can withdraw their own pending response before selection. Buyers consent when selecting each response. Only then can that pair see each other’s contact details.
-- Let buyers state proposed price, upfront deposit and terms for the remaining balance in the RFQ description or flat metadata. Readers with access to the open RFQ see the published terms.
-- Allow a respondent to include an optional nonbinding quantity, including partial coverage, for the buyer to review privately.
-- Require fresh consent from pending respondents when the buyer changes the requested compute. Apply the same rule to commercial edits in text or metadata. Only clearly cosmetic changes preserve pending consent.
-- Allow one pending response per respondent per revision. The buyer can dismiss an individual response, ending its consent and deleting its stored contact.
-- End pending eligibility immediately at explicit closure or the response deadline. Delete pending contacts at closure in the same transaction and clear time-expired ciphertext within one hour during healthy operation. Clear overdue data before serving RFQs after downtime. The registry operator can configure the 30-day default retrieval window for new introductions, and either participant can end retrieval for the pair sooner.
-- Encrypt submitted contacts before persistence, with the decryption key held separately from the registry database. The running service is trusted to enforce participant access.
-- Allow anonymous open RFQ search and direct lookup by ID on registries where `REGISTRY_REQUIRE_READ_API_KEY` is off, the existing public supply posture. Require account authentication for mutations and private records. A pinned account authority signs the verified account subject, registry audience, operation and inputs. Ownership survives account credential replacement.
-- Expose the same RFQ operations to browsers, interactive CLI callers and agents. Allow a delegate with current account permission to submit exact contact-sharing inputs and affirmative consent on the account's behalf.
-- Give clients typed operations for discovery, posting, responding and retrieving their own introductions. The existing listing search continues to describe supply.
-- End the marketplace flow at contact handoff. The parties negotiate price, availability and any eventual contract themselves.
+- **A buyer publishes structured compute demand in the registry.** An RFQ states what a
+  seller's listing states — the same shape and terms vocabulary, validated by the
+  listing schema and filter specification the registry already loads — plus the
+  demand's own fields: node count, region codes, start window, term and a response
+  deadline (design D4, D5).
+- **Callers sign RFQ operations with their own marketplace principal**, verified as
+  every other signed registry route verifies its caller. The principal owns its RFQs
+  and responses (D1).
+- **RFQ writes are admitted as the registry's other writes are**: open, by an
+  operator-issued key, or by a buyer account service's admission certificate, through
+  `add-buyer-account-login` (D2).
+- **Any admitted caller other than the buyer may respond**, optionally with a partial
+  node count, without a seller role or listing. A respondent consents to share a chosen
+  contact with the buyer if selected; the buyer consents when selecting. Only then may
+  that pair read each other's contact (D6).
+- **Contacts are held by the shared introduction custody layer**, which
+  `unify-introduction-custody` builds for both this change and contact-exchange
+  settlement. This change adds only the stage before selection: respond, withdraw,
+  dismiss and close (D7).
+- **Only the deadline is editable.** Any other change is close and repost, and closing
+  may name the replacement RFQ (D8).
+- **Records are bounded**: a maximum deadline horizon, bounded field sizes, a request
+  body limit, and configurable caps on open RFQs and pending responses per principal
+  (D9).
+- **An operator can take an RFQ down** (D10).
+- **Open RFQs are browsable without signing in** where the registry's supply discovery
+  is public, without party references, responses or contacts (D3).
+- **No free text is published** on an RFQ (D5).
+- **The marketplace flow ends at the introduction.** The parties arrange any contract
+  themselves.
+
+The engineering detail is open in the design's "Open Questions".
 
 ## Capabilities
 
 ### New Capabilities
 
-- `buyer-compute-rfqs` owns compute requests, responses, consent and access to introductions.
+- `buyer-compute-rfqs`: compute requests, responses, consent, and access to
+  introductions.
 
 ### Modified Capabilities
 
-- `registry-discovery` distinguishes account-scoped RFQ mutation receipts and freshly authorized RFQ reads from listing replay.
-- `marketplace-identity` defines delegated-account replay beside principal-scoped replay.
+- `registry-discovery`: an RFQ route family beside listing discovery, sharing its
+  admission and its listing schema.
+- `contact-exchange-settlement`: the introduction custody layer gains a pre-selection
+  stage used by RFQs (with `unify-introduction-custody`).
 
-## Impact
+## Dependencies and Related Changes
 
-The proposed owner is the registry service. Use an additive registry migration and a separate account-authorized route family. Enable RFQs only with an admitted account authority and contact-protection secrets. Qualify the shared API on a hosted non-production account service with an interactive user and an authorized programmatic delegate, using synthetic RFQs and contacts. The typed client and CLI exercise the same registry contract in repeatable repository tests. Each consuming application owns its presentation. Payment, settlement, allocated inventory and provisioning have no part in it.
+- Depends on `add-buyer-account-login` (admission certificates) and
+  `unify-introduction-custody` (contact custody) for implementation.
+- `search-rfqs-in-the-database` follows it: this change filters RFQs as the registry
+  filters listings today.
+- `rotate-registry-account-principals` follows it: until then a principal owns its RFQs,
+  and a changed key cannot carry them.
+- `deny-banned-buyer-accounts` follows `add-buyer-account-login`.
+- `redesign-authenticated-requests` is redesigning the shared request envelope and
+  replay retention; this change's retry rules follow whatever it settles.
 
 ## Permanent documentation impact
 
-- [x] Repository architecture and existing registry specification
-- [x] New subsystem specification and capability index
-
-At closeout, record the RFQ contract in the new buyer-compute-rfqs capability and its rationale in the accompanying architecture document. Index it in `openspec/specs/README.md`. Record the registry replay exception and account boundary in the registry-discovery capability and its companion. Document the service boundary in `docs/development/ARCHITECTURE.md`, key provisioning and restore admission in `docs/development/DEPLOYMENT_AND_CONFIG.md`, and CLI confirmation in `docs/buyer-quickstart.md`.
+- [x] The repository's architecture document
+- [x] Existing subsystem specification
+- [x] New subsystem specification
+- [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- D1: promote private pairwise introductions to the buyer RFQ capability.
-- D2: document the operations which give consent in the RFQ specification.
-- D3: promote withdrawal and its race with selection to the RFQ lifecycle requirements.
-- D4: promote revision binding and the cosmetic normalization rule to the RFQ specification and companion.
-- D5: promote authoritative close and expiry to the RFQ specification.
-- D6: promote the contact trust boundary, encryption, key rotation and restore admission to RFQ architecture and deployment documentation.
-- D7: promote deadline cleanup and contact-free receipts to the RFQ specification, and the account-scoped replay exception to registry discovery and marketplace identity.
-- D8: promote account admission, authority scope, stable ownership and separation from supply to the registry companion and repository architecture.
-- D9: promote optional, nonbinding partial node counts to the RFQ wire contract.
-- D10: promote free-form commercial terms and their visibility and validation to the RFQ specification.
-- D11: promote uniqueness and individual dismissal to the RFQ specification.
-- D12: promote contact retrieval cutoffs and early termination to the RFQ specification and deployment guide.
-- D13: promote the shared account API, interactive and noninteractive inputs, verified party projections and delegated consent to the RFQ specification and the buyer guide.
-- D14: no permanent destination — this review cadence applies only to delivery of this change.
-- D15: promote the neutral registry and compute-family contract boundary to the RFQ architecture and repository architecture, and generated schema selection to deployment configuration.
+- D1: principal ownership to the new `buyer-compute-rfqs` capability and
+  `docs/development/ARCHITECTURE.md`.
+- D2: write admission to `buyer-compute-rfqs` and `registry-discovery`.
+- D3: public browsing to `buyer-compute-rfqs` and `registry-discovery`.
+- D4: requests mirroring listings to `buyer-compute-rfqs` and `docs/development/ARCHITECTURE.md`.
+- D5: no free text, typed terms and region codes to `buyer-compute-rfqs`.
+- D6: consents and introductions to `buyer-compute-rfqs`.
+- D7: custody through the shared layer to `buyer-compute-rfqs`.
+- D8: deadline-only edits to `buyer-compute-rfqs`.
+- D9: bounds and caps to `buyer-compute-rfqs`, `registry-discovery`'s configuration and
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- D10: takedown to `buyer-compute-rfqs` and `docs/operator-handbook.md`.
+- D11: the flow ending at the introduction to `buyer-compute-rfqs`.
+- The capability is indexed in `openspec/specs/README.md`, and its terms (RFQ, respondent,
+  party reference) go to `docs/development/ARCHITECTURE.md`, "Shared vocabulary and
+  identities".

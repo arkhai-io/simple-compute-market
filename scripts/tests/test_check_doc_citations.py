@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 from pathlib import Path
 
 import pytest
+
+from workflow_stand_in import change as found_as, put_on_path
+
+ACTIVE = found_as("shape-bounds", "openspec/changes/shape-bounds")
+ARCHIVED = found_as("shape-bounds", "openspec/changes/archive/2026-10-14-shape-bounds",
+                  archived=True)
 
 _SPEC = importlib.util.spec_from_file_location(
     "check_doc_citations", Path(__file__).resolve().parents[1] / "check_doc_citations.py"
@@ -16,11 +21,16 @@ checker = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(checker)
 
 
+def _workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, found=ACTIVE,
+              created: tuple[str, ...] = ()) -> None:
+    """The workflow's command, a stand-in outside the test's root, answering that the
+    change is `found`, and that its deltas create `created`."""
+    put_on_path(monkeypatch, tmp_path.parent / f"{tmp_path.name}-workflow", found, created)
+
+
 @pytest.fixture(autouse=True)
-def _checkout(tmp_path: Path) -> None:
-    """Each test's root is a Git repository, where the workflow's command finds a
-    change by name."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+def _active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _workflow(tmp_path, monkeypatch)
 
 
 def _change(root: Path) -> Path:
@@ -50,7 +60,9 @@ def test_repository_view_also_skips_review_records(tmp_path: Path) -> None:
     assert len(found) == 2
 
 
-def test_a_change_is_found_by_name_once_archived(tmp_path: Path) -> None:
+def test_a_change_is_found_by_name_once_archived(tmp_path: Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    _workflow(tmp_path, monkeypatch, ARCHIVED)
     change = _change(tmp_path)
     archived = tmp_path / "openspec/changes/archive/2026-10-14-shape-bounds"
     archived.parent.mkdir()
@@ -69,7 +81,9 @@ def test_an_unknown_change_is_refused(tmp_path: Path) -> None:
         checker.documents(tmp_path, "other")
 
 
-def test_an_archived_change_citing_its_own_unarchived_path_resolves(tmp_path: Path) -> None:
+def test_an_archived_change_citing_its_own_unarchived_path_resolves(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _workflow(tmp_path, monkeypatch, ARCHIVED)
     archived = tmp_path / "openspec/changes/archive/2026-10-14-shape-bounds"
     archived.mkdir(parents=True)
     (archived / "notes.md").write_text("x", "utf-8")
@@ -87,10 +101,10 @@ def test_an_archived_change_citing_its_own_unarchived_path_resolves(tmp_path: Pa
 def test_a_cited_agents_path_must_resolve(tmp_path: Path) -> None:
     change = tmp_path / "openspec/changes/shape-bounds"
     change.mkdir(parents=True)
-    (tmp_path / ".agents").mkdir()
-    (tmp_path / ".agents/change-outcome.schema.json").write_text("{}", "utf-8")
+    (tmp_path / ".agents/evidence").mkdir(parents=True)
+    (tmp_path / ".agents/evidence/local.md").write_text("# Local\n", "utf-8")
     (change / "why.md").write_text(
-        "matches `.agents/change-outcome.schema.json`, not `.agents/gone.json`; "
+        "matches `.agents/evidence/local.md`, not `.agents/gone.json`; "
         "a `.claude/skills/x.md` mirror is not checked\n", "utf-8")
 
     assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
@@ -111,18 +125,14 @@ def test_a_checkouts_local_configuration_need_not_exist(tmp_path: Path) -> None:
         ".agents/other.local.toml", ".agents/workflow.local.template.toml"]
 
 
-def test_a_citation_check_meets_a_specification_the_change_creates(tmp_path: Path) -> None:
-    """CW-368t's scenario: the workflow's `check spec-index --json` lists the
-    specification the change's delta creates, and the citation check, reading it
-    through the command, accepts the citation. Library integration: the engine's
-    command as a process over a temporary repository."""
+def test_a_citation_check_meets_a_specification_the_change_creates(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The workflow's `check spec-index --json` lists the specification the change's
+    delta creates, and the citation check, reading it through the command, accepts
+    the citation; what a delta creates is the workflow's to compute."""
+    _workflow(tmp_path, monkeypatch, created=("openspec/specs/new-flow/spec.md",))
     change = tmp_path / "openspec/changes/shape-bounds"
-    (change / "specs/new-flow").mkdir(parents=True)
-    # An added requirement writes the file, whatever else the delta does.
-    (change / "specs/new-flow/spec.md").write_text(
-        "## ADDED Requirements\n\n### Requirement: The flow starts\n\nIt MUST start.\n"
-        "\n## REMOVED Requirements\n\n### Requirement: The flow idles\n\n**Reason**: gone.\n",
-        "utf-8")
+    change.mkdir(parents=True)
     (change / "why.md").write_text(
         "writes openspec/specs/new-flow/spec.md, not openspec/specs/new-flow/README.md"
         " or openspec/specs/other-flow/spec.md\n",
@@ -136,25 +146,6 @@ def test_a_citation_check_meets_a_specification_the_change_creates(tmp_path: Pat
         cited for _, cited, _ in checker.unresolvable(tmp_path)]
 
 
-@pytest.mark.parametrize("delta", [
-    "",
-    "## ADDED Requirements\n",
-    "## REMOVED Requirements\n\n### Requirement: The flow starts\n\n**Reason**: gone.\n",
-    "## MODIFIED Requirements\n\n### Requirement: The flow starts\n\nIt MUST start.\n",
-    "## RENAMED Requirements\n\n- FROM: `### Requirement: The flow starts`\n"
-    "- TO: `### Requirement: The flow begins`\n",
-], ids=["empty", "empty-added", "removed-only", "modified-only", "renamed-only"])
-def test_a_spec_a_delta_adds_nothing_to_must_still_exist(tmp_path: Path, delta: str) -> None:
-    # Only an added requirement can write a capability's missing spec.md.
-    change = tmp_path / "openspec/changes/shape-bounds"
-    (change / "specs/new-flow").mkdir(parents=True)
-    (change / "specs/new-flow/spec.md").write_text(delta, "utf-8")
-    (change / "why.md").write_text("writes openspec/specs/new-flow/spec.md\n", "utf-8")
-
-    assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
-        "openspec/specs/new-flow/spec.md"]
-
-
 def test_an_active_change_citing_its_own_path_must_resolve_as_written(tmp_path: Path) -> None:
     change = tmp_path / "openspec/changes/shape-bounds"
     change.mkdir(parents=True)
@@ -162,3 +153,50 @@ def test_an_active_change_citing_its_own_path_must_resolve_as_written(tmp_path: 
 
     assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
         "openspec/changes/shape-bounds/gone.md"]
+
+
+def _specs(root: Path) -> None:
+    (root / "openspec/changes/open-one").mkdir(parents=True)
+    (root / "openspec/changes/archive/2026-10-01-old-one").mkdir(parents=True)
+    for capability in ("kit", "planning-governance"):
+        (root / "openspec/specs" / capability).mkdir(parents=True)
+
+
+def test_a_specification_naming_a_change_is_reported(tmp_path: Path) -> None:
+    _specs(tmp_path)
+    spec = tmp_path / "openspec/specs/kit/spec.md"
+    spec.write_text("Gap in `open-one`, once `old-one`, see openspec/changes/README.md.\n", "utf-8")
+
+    found = checker.change_references(tmp_path)
+
+    assert sorted(found) == [
+        ("a path under openspec/changes/", "openspec/specs/kit/spec.md"),
+        ("old-one", "openspec/specs/kit/spec.md"),
+        ("open-one", "openspec/specs/kit/spec.md"),
+    ]
+
+
+def test_a_capability_governing_changes_may_name_their_directory(tmp_path: Path) -> None:
+    _specs(tmp_path)
+    (tmp_path / "openspec/specs/planning-governance/spec.md").write_text(
+        "The index is openspec/changes/README.md.\n", "utf-8")
+    (tmp_path / "openspec/specs/kit/spec.md").write_text("A `plain-word` and an anchor.\n", "utf-8")
+
+    assert checker.change_references(tmp_path) == []
+
+
+def test_the_architecture_and_a_handbook_name_no_change_but_may_name_the_directory(tmp_path: Path) -> None:
+    _specs(tmp_path)
+    docs = tmp_path / "docs"
+    (docs / "development").mkdir(parents=True)
+    (docs / "development/ARCHITECTURE.md").write_text(
+        "Transitions live in [`openspec/changes/`](../../openspec/changes/).\n", "utf-8")
+    (docs / "operator-handbook.md").write_text("Once `old-one` did this.\n", "utf-8")
+    (docs / "guidance/engineering").mkdir(parents=True)
+    (docs / "guidance/engineering/rules.md").write_text("See openspec/changes/README.md.\n", "utf-8")
+    (docs / "roadmap-like.md").write_text("`open-one` owns it.\n", "utf-8")
+
+    assert checker.change_references(tmp_path) == [
+        ("a path under openspec/changes/", "docs/guidance/engineering/rules.md"),
+        ("old-one", "docs/operator-handbook.md"),
+    ]

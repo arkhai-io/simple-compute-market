@@ -61,33 +61,6 @@ def test_a_named_package_must_exist(tmp_path):
     assert checker.problems(tmp_path) == ["a: src/pkg is not a package"]
 
 
-WORKFLOW_WHEEL = HATCH + ('\n[tool.hatch.build.targets.wheel]\nbypass-selection = true\n\n'
-                          '[tool.hatch.build.targets.wheel.force-include]\n'
-                          '"../change_workflow" = "change_workflow"\n')
-
-
-def test_the_workflows_wheel_alone_is_admitted_its_remap(tmp_path):
-    # AGENTS.md's exception names one project; the same remap anywhere else is
-    # refused, and the admitted project is still held to the other rules.
-    _project(tmp_path, "scripts/change-workflow-wheel", WORKFLOW_WHEEL, package=None)
-    _project(tmp_path, "scripts/other-wheel", WORKFLOW_WHEEL, package=None)
-
-    assert checker.problems(tmp_path) == [
-        'scripts/other-wheel: the wheel target must be exactly packages = ["src/<package>"] '
-        "(also sets bypass-selection, force-include)"]
-    assert all("AGENTS.md" in row for row in checker.ADMITTED.values())
-
-
-def test_the_admitted_project_is_still_held_to_the_backend_and_uv_rules(tmp_path):
-    _project(tmp_path, "scripts/change-workflow-wheel",
-             '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n'
-             '\n[tool.uv]\nfind-links = ["../.dist"]\n', package=None)
-
-    assert checker.problems(tmp_path) == [
-        "scripts/change-workflow-wheel: declares [tool.uv] find-links",
-        "scripts/change-workflow-wheel: builds with setuptools.build_meta; use hatchling"]
-
-
 def test_force_include_is_refused(tmp_path):
     _project(tmp_path, "a", CONFORMING + 'force-include = { "src/pkg/py.typed" = "pkg/py.typed" }\n')
 

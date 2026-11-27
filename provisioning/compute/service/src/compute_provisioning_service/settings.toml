@@ -78,10 +78,15 @@ retry_scheduler_poll_interval_seconds = 10
 # to start with a negative value.
 teardown_rerun_limit = 3
 
-# Further failure messages that are never retried. The Ansible executor
-# already refuses to retry transport failures (an unreachable host, refused
-# authentication), and each domain's codec its own (a VM that does not exist);
-# substrings listed here are added to those, matched case-insensitively.
+# Further failure messages that are never retried. A job is already not
+# retried for a failure a retry would meet again — among them a refused host
+# key or SSH authentication, a refused configuration, and a playbook failing
+# with no failed task recorded — nor for a class its domain's codec gives a
+# failure a retry cannot fix (a VM that does not exist); an unreachable host, a
+# timeout and a failed task are retried.
+# Each substring listed here is matched, ignoring case, against the deciding
+# failure record's msg, stdout and stderr and against the classified failure
+# message; a failure containing one is not retried, whatever its class.
 additional_non_retryable_errors = []
 
 # Bootstrap admission token for a relay established from the relay definition
@@ -229,3 +234,22 @@ identifier = ""
 [admin_identity]
 scheme = ""
 identifier = ""
+# Operator events: the kinds this service records, delivered to the sinks a
+# deployment's routes select. Sinks are [Events.sinks], shaped as a storefront's
+# [Delivery] (`enabled` names the instances; each [Events.sinks.<name>] names its
+# `sink` and its settings, secret ones in the Secret overlay). Each
+# [Events.routes.<name>] states a `where` SQL condition over the event's
+# envelope fields and its kind's attributes and the `sinks` it selects; a route
+# or sink the service cannot use refuses its start. A sink failing an event is
+# retried until the delivery is `sink_max_age_seconds` old, then abandoned to
+# `finally`: "log", or an enabled sink instance. Retention is in days per table,
+# 0 keeping every row; an event is never pruned while a destination still owes it.
+[Events]
+delivery_interval_seconds = 10
+sink_max_age_seconds = 86400
+finally = "log"
+
+[Events.retention_days]
+events = 30
+deliveries = 30
+lease_end_reports = 0

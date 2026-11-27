@@ -1,206 +1,166 @@
-"""Storefront transport adapter for versioned deal-scoped lifecycle events."""
+"""The storefront peer, and the capacity-released callback delivered to it.
+
+Two consumers of the service's events deliver to the owning storefront: the
+lease-end report consumer (``lease_end_reports``) and the capacity-released
+consumer here. Each sends through a ``StorefrontPeer`` of its own, the
+configured storefront's identity-pinned client, from a worker thread.
+
+The capacity-released consumer delivers each ``site.capacity_released`` event
+of a release the lease lifecycle made, recorded in the transaction of the
+release that freed the capacity, as the signed capacity-released callback,
+retrying with backoff until the storefront acknowledges it or refuses it. A
+refusal — 400, 404 or 409, a reservation the storefront does not hold, say —
+abandons that one callback to the finally sink, and the next follows. A release
+a caller of the site's own release route asks for draws no callback. Its one
+destination is the configured storefront, whichever URL configures it, so a
+pending callback follows the storefront to a new URL; while no URL is
+configured its callbacks stay pending.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import logging
 from typing import Any
 
+import httpx
 import injected_time
+from eventing import AbandonDelivery, Consumer, Envelope, RetryPolicy
 from market_identity import TrustedIdentitySet
-from storefront_client import StorefrontClient, StorefrontClientError
-
-from compute_provisioning_contracts import (
-    LEASE_ENDED_CALLBACK, LifecycleEvent, LeaseEndedEvent, SignedLeaseEndedReport,
-)
-from .lease_end_reports import ReportDelivery
-from sqlalchemy.exc import IntegrityError
+from market_site.events import SITE_CAPACITY_RELEASED
 from sqlalchemy.orm import Session, sessionmaker
+from storefront_client import StorefrontClientError, SyncStorefrontClient
 
-from compute_provisioning_service.db.models import CapacityReleaseCallbackOutbox
-
+from compute_provisioning_service.event_names import (
+    CAPACITY_RELEASED_CONSUMER,
+    CAPACITY_RELEASED_DESTINATION,
+)
 from compute_provisioning_service.identity import ProvisioningIdentityContext
 
-logger = logging.getLogger(__name__)
+
+def storefront_peer_url(settings: Any) -> str:
+    """The configured storefront's base URL, without a trailing slash; empty
+    when none is configured."""
+    return str(getattr(settings, "storefront_url", "") or "").rstrip("/")
 
 
-class StorefrontLifecycleEventSink:
-    """Deliver each event through one identity-pinned storefront client."""
+class StorefrontPeer:
+    """The configured storefront, reached through one identity-pinned client.
+
+    The client signs as this service and pins the storefront's responses to the
+    seller principals the principal authority holds; it is rebuilt when those
+    change. It is synchronous and serves one consumer, whose cycles run one at
+    a time in a worker thread, so no two threads use or rebuild its client
+    together. ``transport`` replaces the network for a test.
+    """
 
     def __init__(
         self,
-        settings: Any,
+        url: str,
         identity: ProvisioningIdentityContext,
         principal_authority: Any,
+        *,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._principal_authority = principal_authority
+        self.url = url
         self._identity = identity
-        self._storefront_url = str(
-            getattr(settings, "storefront_url", "") or ""
-        ).rstrip("/")
-        self._client = None
+        self._principal_authority = principal_authority
+        self._transport = transport
+        self._client: SyncStorefrontClient | None = None
         self._expected_publishers: TrustedIdentitySet | None = None
 
-    async def _storefront(self):
-        if not self._storefront_url:
-            raise RuntimeError("storefront_url is required")
-        expected_publishers = self._principal_authority.active_principals(
-            "seller"
-        )
-        if (
-            self._client is None
-            or self._expected_publishers != expected_publishers
-        ):
-            if self._client is not None:
-                await self._client.close()
-            self._client = StorefrontClient(
-                base_url=self._storefront_url,
+    def client(self) -> SyncStorefrontClient:
+        if not self.url:
+            raise RuntimeError("no storefront is configured: storefront_url is empty")
+        expected_publishers = self._principal_authority.active_principals("seller")
+        if self._client is None or self._expected_publishers != expected_publishers:
+            self.close()
+            self._client = SyncStorefrontClient(
+                base_url=self.url,
                 signer=self._identity.signer,
                 caller_role="service",
                 expected_publishers=expected_publishers,
+                transport=self._transport,
             )
             self._expected_publishers = expected_publishers
         return self._client
 
-    async def close(self) -> None:
+    def close(self) -> None:
         if self._client is not None:
-            await self._client.close()
+            self._client.close()
             self._client = None
 
-    async def deliver_lease_end(self, report: SignedLeaseEndedReport) -> ReportDelivery:
-        event = LeaseEndedEvent.model_validate_json(report.payload)
+
+def capacity_release_request_id(capacity_reservation_id: str, released_at: str) -> str:
+    """The callback's request identity, one per release: an uncertain
+    acknowledgement is retried under it with the same body, which the
+    storefront answers as the request it already took."""
+    release = f"capacity_released:{capacity_reservation_id}:{released_at}"
+    return "capacity-release-" + hashlib.sha256(release.encode("utf-8")).hexdigest()
+
+
+#: The storefront's answers refusing one callback outright: retrying it cannot
+#: succeed.
+REFUSED_CALLBACK_STATUSES = frozenset({400, 404, 409})
+
+
+class CapacityReleasedDestination:
+    """Delivers a ``site.capacity_released`` event as the storefront's signed
+    capacity-released callback. A refusal abandons the callback; any other
+    failure, an unconfigured storefront included, is retried."""
+
+    def __init__(self, peer: StorefrontPeer) -> None:
+        self._peer = peer
+
+    def deliver(self, envelope: Envelope) -> None:
+        details = envelope.details
+        capacity_reservation_id = str(details["capacity_reservation_id"])
+        released_at = str(details["released_at"])
         try:
-            answer = await (await self._storefront()).authenticated_request(
-                "POST", LEASE_ENDED_CALLBACK["path"].format(
-                    capacity_reservation_id=event.capacity_reservation_id,
-                ), role="service", operation=LEASE_ENDED_CALLBACK["operation"],
-                resource=event.capacity_reservation_id, body=report.model_dump(mode="json"),
-                request_id="lease-end-" + hashlib.sha256(event.event_id.encode()).hexdigest(),
-            )
-            return "unsupported" if answer.get("status") == "unsupported" else "delivered"
-        except StorefrontClientError as exc:
-            return "unsupported" if exc.status_code in {404, 405, 501} else "retry"
-        except Exception:
-            logger.exception("Lease-ended report delivery failed for event %s", event.event_id)
-            return "retry"
-
-    async def deliver(self, event: LifecycleEvent) -> bool:
-        request_id = "capacity-release-" + hashlib.sha256(
-            event.event_id.encode("utf-8")
-        ).hexdigest()
-        try:
-            if event.event_kind != "capacity_released":
-                raise ValueError(
-                    f"unsupported storefront lifecycle event {event.event_kind!r}"
-                )
-            await (await self._storefront()).notify_capacity_released(
-                event.capacity_reservation_id,
-                site_id=self._identity.storefront_site_id,
-                released_at=event.payload.get("released_at"),
-                request_id=request_id,
-            )
-            return True
-        except StorefrontClientError as exc:
-            logger.warning(
-                "[LEASE_LIFECYCLE] %s event rejected for reservation %s: %s",
-                event.event_kind,
-                event.capacity_reservation_id,
-                exc,
-            )
-            return False
-        except Exception as exc:
-            logger.warning(
-                "[LEASE_LIFECYCLE] could not deliver %s event for reservation %s: %s",
-                event.event_kind,
-                event.capacity_reservation_id,
-                exc,
-            )
-            return False
-
-
-class SqlAlchemyCapacityReleaseOutbox:
-    """Durable pending/acknowledged callback state across service restarts."""
-
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
-        self._session_factory = session_factory
-
-    def reserve(self, capacity_reservation_id: str) -> None:
-        try:
-            with self._session_factory() as session:
-                session.add(
-                    CapacityReleaseCallbackOutbox(
-                        capacity_reservation_id=capacity_reservation_id
-                    )
-                )
-                session.commit()
-        except IntegrityError:
-            return
-
-    def pending(self) -> tuple[str, ...]:
-        with self._session_factory() as session:
-            rows = (
-                session.query(CapacityReleaseCallbackOutbox)
-                .filter(CapacityReleaseCallbackOutbox.delivered_at.is_(None))
-                .order_by(CapacityReleaseCallbackOutbox.created_at)
-                .all()
-            )
-            return tuple(str(row.capacity_reservation_id) for row in rows)
-
-    def mark_delivered(self, capacity_reservation_id: str) -> None:
-        with self._session_factory() as session:
-            row = session.get(
-                CapacityReleaseCallbackOutbox,
+            self._peer.client().notify_capacity_released(
                 capacity_reservation_id,
+                site_id=str(details["site_id"]),
+                released_at=released_at,
+                request_id=capacity_release_request_id(capacity_reservation_id, released_at),
             )
-            if row is None:
-                raise RuntimeError("capacity release outbox reservation disappeared")
-            row.attempt_count += 1
-            row.last_attempted_at = injected_time.now_datetime()
-            row.delivered_at = row.last_attempted_at
-            row.last_error = None
-            session.commit()
-
-    def record_failure(
-        self,
-        capacity_reservation_id: str,
-        error: str,
-    ) -> None:
-        with self._session_factory() as session:
-            row = session.get(
-                CapacityReleaseCallbackOutbox,
-                capacity_reservation_id,
-            )
-            if row is None:
-                raise RuntimeError("capacity release outbox reservation disappeared")
-            row.attempt_count += 1
-            row.last_attempted_at = injected_time.now_datetime()
-            row.last_error = error
-            session.commit()
+        except StorefrontClientError as exc:
+            if exc.status_code in REFUSED_CALLBACK_STATUSES:
+                raise AbandonDelivery(f"refused: HTTP {exc.status_code}: {exc}") from exc
+            raise
 
 
-async def notify_storefront_capacity_released(
-    settings: Any,
-    reservation: dict[str, Any],
-    *,
-    sink: StorefrontLifecycleEventSink,
-) -> bool:
-    """Translate a release fact into the versioned narrow event-sink contract."""
-    released_at = reservation.get("released_at")
-    offering_mode = reservation.get("offering_mode")
-    if not offering_mode:
-        raise ValueError(
-            "capacity release cannot be published without offering_mode"
+def capacity_released_consumer(
+    session_factory: sessionmaker[Session], peer: StorefrontPeer, *, runner: str
+) -> Consumer:
+    """The capacity-released consumer: each ``site.capacity_released`` event of
+    a lease lifecycle's release to the configured storefront, retried with
+    backoff until acknowledged or refused. Its destination is registered whether
+    or not a storefront URL is configured, so a callback recorded or migrated
+    while none is stays pending until one is."""
+    destinations = {CAPACITY_RELEASED_DESTINATION: CapacityReleasedDestination(peer)}
+
+    def select(envelope: Envelope, candidates: frozenset[str]) -> frozenset[str]:
+        lifecycle = envelope.attributes.get("lease_lifecycle") is True
+        return candidates if envelope.kind == SITE_CAPACITY_RELEASED.name and lifecycle else (
+            frozenset()
         )
-    event = LifecycleEvent(
-        event_id=(
-            f"capacity_released:{reservation['capacity_reservation_id']}:"
-            f"{released_at or reservation.get('updated_at') or 'terminal'}"
-        ),
-        capacity_reservation_id=str(reservation["capacity_reservation_id"]),
-        deal_ref=dict(reservation.get("deal_ref") or {}),
-        offering_mode=str(offering_mode),
-        event_kind="capacity_released",
-        payload={"released_at": released_at},
-        occurred_at=injected_time.now_datetime(),
+
+    return Consumer(
+        CAPACITY_RELEASED_CONSUMER,
+        session_factory=session_factory,
+        destinations=destinations,
+        clock=injected_time.now_datetime,
+        retry=RetryPolicy(max_age=None),
+        select=select,
+        runner=runner,
     )
-    return await sink.deliver(event)
+
+
+__all__ = [
+    "CAPACITY_RELEASED_CONSUMER",
+    "CAPACITY_RELEASED_DESTINATION",
+    "CapacityReleasedDestination",
+    "StorefrontPeer",
+    "capacity_release_request_id",
+    "capacity_released_consumer",
+    "storefront_peer_url",
+]

@@ -5,8 +5,8 @@ mode: teardown is begun or adopted, capacity is freed directly when the
 fulfillment proves nothing was delivered, a create in flight is waited on, and
 a failed create is left for an operator. The ledger carries the production
 release guard, so every direct release here is held to the same proof the
-service applies. Capacity returns in the ledger's local transaction and the
-owning storefront gets a point-to-point capacity-released event.
+service applies. Capacity returns in the ledger's local transaction, and the
+lifecycle then asks for what the release recorded to be delivered.
 Fulfillment convergence is not run: tests set the aggregate's state as
 convergence would leave it.
 """
@@ -15,13 +15,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import injected_time
 import pytest
 from compute_provisioning import JobExecutorTable, TeardownRerunPolicy
 from compute_provisioning.jobs import JobRetryPolicy
-from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.release import (
@@ -33,7 +32,6 @@ from compute_provisioning.release import (
 from compute_provisioning_contracts import LeaseForceRelease
 from injected_time import InjectedTime
 from market_fulfillment import (
-    FulfillmentBase,
     FulfillmentOrchestrator,
     FulfillmentResult,
     ProviderOperationState,
@@ -44,22 +42,20 @@ from market_fulfillment import (
     SettlementRepository,
     SqlAlchemyFulfillmentUnitOfWork,
 )
-from market_identity import Ed25519Signer, TrustedIdentitySet
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolService
-from market_resource_pools.db import Base as PoolsBase
+from market_resource_pools import (
+    DEFAULT_POOL_ID,
+    ResourcePool,
+    ResourcePoolFacts,
+    ResourcePoolService,
+)
 from market_site.authority import LedgerSiteAuthority
-from market_site.db import Base as SiteBase, CapacityReservation, LeaseEndedEvent
+from market_site.db import CapacityReservation, LeaseEndedEvent
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from compute_provisioning_service.db.models import Base
-from compute_provisioning_service.identity import ProvisioningIdentityContext
-from compute_provisioning_service.services.deal_event_sink import (
-    StorefrontLifecycleEventSink,
-    notify_storefront_capacity_released,
-)
+from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.services.fulfillment_convergence import (
     FulfillmentConvergenceWatchdog,
 )
@@ -68,14 +64,6 @@ VM_OFFERING_MODE = "vm"
 BARE_METAL_OFFERING_MODE = "bare_metal"
 _State = SettlementRecordState
 
-_SERVICE_SIGNER = Ed25519Signer(b"\x11" * 32)
-_STOREFRONT_SIGNER = Ed25519Signer(b"\x12" * 32)
-_IDENTITY = ProvisioningIdentityContext(
-    signer=_SERVICE_SIGNER,
-    storefront_principal=_STOREFRONT_SIGNER.identity,
-    admin_principal=Ed25519Signer(b"\x13" * 32).identity,
-    storefront_site_id="default",
-)
 
 
 @pytest.fixture
@@ -85,18 +73,10 @@ def session_factory():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # resource_pools must exist before Base's ansible_pool_configs FK resolves.
-    PoolsBase.metadata.create_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    # Job rows ride the family kit's own metadata: the release guard reads
-    # them for a reservation's dispatch provenance.
-    JobsBase.metadata.create_all(bind=engine)
-    # Site-ledger tables ride market_site's own metadata.
-    SiteBase.metadata.create_all(bind=engine)
-    # Fulfillment aggregate tables — needed by tests exercising VM release,
-    # which now begins durable fulfillment teardown rather than submitting
-    # an Ansible job directly.
-    FulfillmentBase.metadata.create_all(bind=engine)
+    # The service's own chain builds every table: the jobs the release guard
+    # reads for a reservation's dispatch provenance, the site ledger and the
+    # fulfillment aggregate.
+    migrate_database(engine)
     with sessionmaker(bind=engine)() as db, db.begin():
         db.add(
             ResourcePool(
@@ -116,6 +96,7 @@ def session_factory():
 def ledger(session_factory) -> CapacityLedgerService:
     svc = CapacityLedgerService(
         session_factory,
+        pool_facts=ResourcePoolFacts(),
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
         release_guard=FulfillmentReleaseGuard(SettlementRepository()),
@@ -229,16 +210,25 @@ def _job_engine(session_factory) -> JobEngine:
     )
 
 
-def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_overrides):
+class _Deliveries:
+    """Stands in for the event delivery worker: records each reservation's
+    state when the lifecycle asks for its events to be delivered."""
+
+    def __init__(self, ledger: CapacityLedgerService) -> None:
+        self._ledger = ledger
+        self.calls: list[dict[str, str]] = []
+
+    async def __call__(self) -> None:
+        self.calls.append({row["capacity_reservation_id"]: row["state"]
+                           for row in self._ledger.list_reservations()})
+
+
+def _lifecycle(session_factory, ledger, *, fulfillment_service=None, deliveries=None,
+               **settings_overrides):
     """The lifecycle as the service composes it, over these tables."""
     fulfillment_service = fulfillment_service or _fulfillment_service(session_factory)
     teardown_port = FulfillmentServiceTeardownPort(lambda: fulfillment_service)
     settings = _settings(**settings_overrides)
-    principal_authority = MagicMock()
-    principal_authority.active_principals.return_value = TrustedIdentitySet(
-        identities=(_STOREFRONT_SIGNER.identity,)
-    )
-    event_sink = StorefrontLifecycleEventSink(settings, _IDENTITY, principal_authority)
     return LeaseLifecycleService(
         settings=settings,
         site_authority=LedgerSiteAuthority(ledger),
@@ -255,11 +245,7 @@ def _lifecycle(session_factory, ledger, *, fulfillment_service=None, **settings_
             ),
             jobs=_job_engine(session_factory),
         ),
-        capacity_released_notifier=(
-            lambda reservation: notify_storefront_capacity_released(
-                settings, reservation, sink=event_sink
-            )
-        ),
+        deliver_events=deliveries,
     )
 
 
@@ -289,30 +275,24 @@ def _leased(
     return reserved["capacity_reservation_id"]
 
 
-def _storefront():
-    sf = MagicMock()
-    sf.__aenter__ = AsyncMock(return_value=sf)
-    sf.__aexit__ = AsyncMock(return_value=False)
-    sf.notify_capacity_released = AsyncMock(return_value={})
-    return sf
-
-
 def _aggregate_state(session_factory, capacity_reservation_id: str) -> str:
     with session_factory() as db:
         return db.get(SettlementRecord, capacity_reservation_id).state
 
 
 @pytest.mark.asyncio
-async def test_an_expired_lease_is_torn_down_then_released_and_notified(session_factory, ledger):
+async def test_an_expired_lease_is_torn_down_then_released_and_delivered(session_factory, ledger):
     """Submission begins teardown this cycle; once convergence reports the
-    aggregate torn down, the next cycle releases and notifies the storefront."""
+    aggregate torn down, the next cycle releases and asks for the release's
+    events to be delivered, once each cycle that changed the lease."""
     capacity_reservation_id = _leased(ledger)
     _create_active_fulfillment(
         session_factory,
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    svc = _lifecycle(session_factory, ledger)
+    deliveries = _Deliveries(ledger)
+    svc = _lifecycle(session_factory, ledger, deliveries=deliveries)
 
     first = await svc.force_check_leases()
     assert first["checked"] == 1
@@ -323,24 +303,14 @@ async def test_an_expired_lease_is_torn_down_then_released_and_notified(session_
     )
 
     _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
-    sf = _storefront()
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf) as client_cls:
-        summary = await svc.force_check_leases()
+    summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
     assert ledger.snapshot()[0]["available_units"] == 8
-    client_cls.assert_called_once_with(
-        base_url="http://storefront:8001",
-        signer=_SERVICE_SIGNER,
-        caller_role="service",
-        expected_publishers=TrustedIdentitySet(identities=(_STOREFRONT_SIGNER.identity,)),
-    )
-    args, kwargs = sf.notify_capacity_released.await_args
-    assert args == (capacity_reservation_id,)
-    assert kwargs["site_id"] == "default"
-    assert kwargs["request_id"].startswith("capacity-release-")
-    assert "resource_id" not in kwargs
+    assert deliveries.calls == [
+        {capacity_reservation_id: "releasing"}, {capacity_reservation_id: "released"},
+    ]
     events, _ = ledger.events_after(0)
     assert events[-1]["kind"] == "released"
 
@@ -366,21 +336,23 @@ async def test_a_bare_metal_lease_is_released_through_its_fulfillment_as_a_vm_s_
 
 
 @pytest.mark.asyncio
-async def test_release_survives_an_unreachable_storefront(session_factory, ledger):
-    """The local transaction is authoritative; notification is best-effort
-    (the storefront converges through the capacity-event feed)."""
+async def test_release_survives_a_delivery_that_fails(session_factory, ledger):
+    """The local transaction is authoritative; a delivery that fails is the
+    event delivery worker's to retry."""
     capacity_reservation_id = _leased(ledger)
     _create_active_fulfillment(
         session_factory,
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    svc = _lifecycle(session_factory, ledger)
+    async def unreachable() -> None:
+        raise ConnectionError("down")
+
+    svc = _lifecycle(session_factory, ledger, deliveries=unreachable)
     await svc.force_check_leases()
     _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
 
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", side_effect=ConnectionError("down")):
-        summary = await svc.force_check_leases()
+    summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
@@ -389,15 +361,14 @@ async def test_release_survives_an_unreachable_storefront(session_factory, ledge
 @pytest.mark.asyncio
 async def test_a_lease_nothing_was_dispatched_for_is_released_directly(session_factory, ledger):
     capacity_reservation_id = _leased(ledger)
-    svc = _lifecycle(session_factory, ledger)
+    deliveries = _Deliveries(ledger)
+    svc = _lifecycle(session_factory, ledger, deliveries=deliveries)
 
-    sf = _storefront()
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf):
-        summary = await svc.force_check_leases()
+    summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
-    sf.notify_capacity_released.assert_awaited_once()
+    assert deliveries.calls == [{capacity_reservation_id: "released"}]
 
 
 #: The instant the lease the injected-time test commits ends at.
@@ -439,9 +410,7 @@ async def test_a_lease_is_due_only_once_the_process_s_time_reaches_its_end(
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "leased"
 
     source.set(_LEASE_END)
-    sf = _storefront()
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf):
-        summary = await svc.force_check_leases()
+    summary = await svc.force_check_leases()
 
     assert summary["released"] == 1
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
@@ -467,8 +436,7 @@ async def test_an_assigned_aggregate_is_abandoned_and_its_lease_released(session
     )
     svc = _lifecycle(session_factory, ledger)
 
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=_storefront()):
-        await svc.force_check_leases()
+    await svc.force_check_leases()
 
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
     assert _aggregate_state(session_factory, capacity_reservation_id) == _State.abandoned.value
@@ -552,7 +520,8 @@ async def test_a_teardown_stalled_past_the_grace_period_from_its_release_times_o
         capacity_reservation_id=capacity_reservation_id,
         offering_mode=VM_OFFERING_MODE,
     )
-    svc = _lifecycle(session_factory, ledger)
+    deliveries = _Deliveries(ledger)
+    svc = _lifecycle(session_factory, ledger, deliveries=deliveries)
 
     first = await svc.force_check_leases()
 
@@ -603,13 +572,12 @@ async def test_a_failed_teardown_waits_for_retry_which_adopts_the_finished_one(
         failure_message="host unreachable",
     )
 
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=_storefront()):
-        await svc.force_check_leases()
-        assert ledger.get_reservation(capacity_reservation_id)["failure_reason"] == (
-            "teardown_failed"
-        )
-        _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
-        retried = await svc.retry_release(capacity_reservation_id)
+    await svc.force_check_leases()
+    assert ledger.get_reservation(capacity_reservation_id)["failure_reason"] == (
+        "teardown_failed"
+    )
+    _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
+    retried = await svc.retry_release(capacity_reservation_id)
 
     assert retried["state"] == "released"
 
@@ -630,7 +598,7 @@ async def test_an_unexpected_repository_failure_is_recorded_as_release_submit_er
 
 
 @pytest.mark.asyncio
-async def test_an_operator_force_release_frees_an_unmanaged_lease_and_notifies(
+async def test_an_operator_force_release_frees_an_unmanaged_lease_and_delivers(
     session_factory, ledger
 ):
     capacity_reservation_id = _leased(ledger)
@@ -642,21 +610,20 @@ async def test_an_operator_force_release_frees_an_unmanaged_lease_and_notifies(
     assert ledger.record_unmanaged(
         capacity_reservation_id, reason="oversight_released", message="manual ops"
     )["state"] == "unmanaged"
-    svc = _lifecycle(session_factory, ledger)
-    sf = _storefront()
+    deliveries = _Deliveries(ledger)
+    svc = _lifecycle(session_factory, ledger, deliveries=deliveries)
 
-    with patch("compute_provisioning_service.services.deal_event_sink.StorefrontClient", return_value=sf):
-        released = await svc.force_release(
-            capacity_reservation_id,
-            LeaseForceRelease(reason="host inspected", evidence="VM absent"),
-        )
+    released = await svc.force_release(
+        capacity_reservation_id,
+        LeaseForceRelease(reason="host inspected", evidence="VM absent"),
+    )
 
     assert (released["state"], released["failure_reason"]) == (
         "force_released",
         "admin_force_release",
     )
     assert ledger.snapshot()[0]["available_units"] == 8
-    sf.notify_capacity_released.assert_awaited_once()
+    assert deliveries.calls == [{capacity_reservation_id: "force_released"}]
 
 
 class _ScriptedTeardownProvider:
@@ -744,8 +711,7 @@ async def test_a_fast_teardown_after_a_long_create_is_released_within_the_grace_
     await convergence.converge_teardowns()
     assert _aggregate_state(session_factory, capacity_reservation_id) == _State.torn_down.value
 
-    with patch("storefront_client.StorefrontClient", return_value=_storefront()):
-        summary = await lifecycle.force_check_leases()
+    summary = await lifecycle.force_check_leases()
 
     assert summary["released"] == 1 and summary["release_failed"] == 0
     assert ledger.get_reservation(capacity_reservation_id)["state"] == "released"
@@ -777,8 +743,7 @@ async def test_a_lease_timed_out_while_its_teardown_finished_is_freed_by_retry_r
     )
 
     _set_fulfillment_state(session_factory, capacity_reservation_id, _State.torn_down.value)
-    with patch("storefront_client.StorefrontClient", return_value=_storefront()):
-        retried = await lifecycle.retry_release(capacity_reservation_id)
+    retried = await lifecycle.retry_release(capacity_reservation_id)
 
     assert retried["state"] == "released"
     assert ledger.snapshot()[0]["available_units"] == 8

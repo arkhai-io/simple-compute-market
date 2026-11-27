@@ -2,12 +2,12 @@
 
 ``AnsibleJobExecutor`` owns the mechanics every Ansible job shares: rendering
 the variables file and the inventory, running the playbook, redacting what it
-reports, and classifying transport failures. A domain contributes an
-``AnsibleJobCodec`` for everything that is its own: how a job's opaque
-parameters become playbook variables, which inventory group its playbooks
-target, what a playbook's output means as a result and credentials, which of
-its own failures are not worth retrying, and which fields its playbooks print
-that are secret.
+reports, and classifying a failed run into its generic classes. A domain
+contributes an ``AnsibleJobCodec`` for everything that is its own: how a job's
+opaque parameters become playbook variables, which inventory group its
+playbooks target, what a playbook's output means as a result and credentials,
+what class a failed task of its playbooks carries and whether it is worth
+retrying, and which fields its playbooks print that are secret.
 
 A codec is a pure translation over its domain's parameter model, which the
 job authority stores without reading. A third domain contributes a codec and
@@ -27,9 +27,10 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
-from compute_provisioning.jobs import JobRun
+from compute_provisioning.jobs import ConfigurationRefusedError, JobRun
 from compute_provisioning.relays.variables import RELAY_JOB_RESERVED_VARIABLES
 
+from .failures import FailureClass, FailureRecord
 from .runner import AnsibleResult, InventoryTarget
 
 
@@ -87,8 +88,10 @@ class AnsibleJobCodec(Protocol):
 
         Called immediately before the playbook starts, so a value resolved
         here (a credential the job references, say) is current for every
-        attempt, retries included. Raising refuses the attempt as a failure
-        the executor did not anticipate, which is never retried.
+        attempt, retries included. Raising ``ConfigurationRefusedError``
+        refuses the attempt as configuration a retry would meet again — its
+        parameters, a resource it references — and raising anything else as a
+        failure the executor did not anticipate; neither is retried.
         """
 
     def interpret(
@@ -96,11 +99,16 @@ class AnsibleJobCodec(Protocol):
     ) -> AnsibleJobInterpretation:
         """The result and credentials a successful run's output reports."""
 
-    def is_retryable(self, message: str) -> bool:
-        """Whether a failure reported as ``message`` could succeed if run again.
+    def classify(self, run: JobRun, failure: FailureRecord) -> FailureClass:
+        """The class of a task failure of the domain's playbook, from its record.
 
-        Answers only for the domain's own failures; transport failures and
-        operator-configured patterns are classified by the executor.
+        Called only for a task that failed on a host that answered, after the
+        executor's generic classes: timeouts, cancellations and unreachable
+        hosts never reach it. A role declares a domain class by tagging the
+        task that can raise it (``failure_class:<class>``), and the codec maps
+        its tags, and may refine from the record's message or output. A
+        failure with no domain class is ``TASK_FAILED_CLASS``.
+        Operator-configured non-retryable messages are the executor's.
         """
 
 
@@ -118,19 +126,20 @@ def render_extra_vars(
     Each value is written as JSON, which is YAML, so a string is always a
     string whatever it contains. A job's own variables are authoritative: an
     extra variable with the same name is a configuration error, refused here
-    rather than silently overriding the job. Family role controls are also
+    rather than silently overriding the job, as a ``ConfigurationRefusedError``.
+    Family role controls are also
     reserved when absent from the emitted variables: global extra-vars would
     override include_role inputs and registered results.
     """
     invalid = sorted(name for name in extra_variables if not _EXTRA_VARIABLE_NAME.fullmatch(name))
     if invalid:
-        raise ValueError(f"extra variable names must be identifiers: {invalid!r}")
+        raise ConfigurationRefusedError(f"extra variable names must be identifiers: {invalid!r}")
     reserved = set(variables) | RELAY_JOB_RESERVED_VARIABLES | _CONNECTION_VARIABLES
     colliding = sorted(
         name for name in extra_variables if name in reserved or name.startswith("ansible_ssh_")
     )
     if colliding:
-        raise ValueError(
+        raise ConfigurationRefusedError(
             "extra variables collide with the job's own variables: "
             + ", ".join(colliding)
         )

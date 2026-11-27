@@ -1,6 +1,6 @@
 # How this repository runs the change workflow
 
-The change workflow ([`change-workflow`](../change-workflow/README.md)) asks each
+The change workflow, the installed distribution `arkhai-change-workflow`, asks each
 repository that adopts it to fill a set of roles. This document says how this
 repository fills them, and why its own part of the workflow — validation's evidence
 kinds, the isolation of each change's Helm validation, its workflow values, and its
@@ -13,14 +13,48 @@ The workflow is meant to be adopted by other repositories, and what every adopti
 repository will need is worked out here first. A general requirement in
 `change-workflow` states the rule and where a repository's part plugs in —
 validation's evidence kinds are the repository's (CW-zkhs); the push refuses the
-repository's protected branches (CW-59c7) and runs its pre-push hook where it declares one
-(CW-p7kq); each step runs on the models the repository prefers (CW-ebmo); the clone's
-bootstrap is the repository's (CW-8npg) — and this capability states what this
-repository adds. It is the shape every adopting repository's own capability will
-have: the workflow's rules hold no repository's values, so a repository's values
-never need to be read out of them. The engine holds none either: this repository's
-values are fields of its workflow configuration, `.agents/workflow.toml` (MCW-5tgp),
-and the branch a change lands on and the remote it is pushed to are read from Git.
+repository's protected branches (CW-59c7) and runs its pre-push hook where it declares
+one (CW-p7kq); each step runs on the models the repository prefers (CW-ebmo); the
+clone's bootstrap is the repository's (CW-8npg) — and this capability states what this
+repository adds. It is the shape every adopting repository's own capability will have:
+the workflow's rules hold no repository's values, so a repository's values never need
+to be read out of them. The engine holds none either: this repository's values are
+fields of its committed workflow configuration, `.agents/workflow.toml` (MCW-5tgp), or
+of each checkout's local one, and the branch a change lands on and the remote it is
+pushed to are read from Git.
+
+This repository adopts the workflow as any tool it installs: by its distribution,
+`arkhai-change-workflow`, within the versions its committed configuration accepts
+(`[workflow] version`), which every engine command reading the configuration checks,
+naming the installed version and the range when they disagree (MCW-9k0c). It holds no
+copy of the workflow — engine, skills, outcome schema, guidance, specification, or
+handbook — and cites it in prose, by requirement id and section, since an id and a
+section mean the same in every version the range admits, where a link pinned to a
+release would be rewritten at every range bump. The settings developers may vary — the
+engineering-guidance pointer and each step's models — are each checkout's local
+configuration, `.agents/workflow.local.toml`, which Git ignores and `change-workflow
+install` writes from the committed template, `.agents/workflow.local.template.toml`
+(MCW-iqh1).
+
+The workflow is how this repository is changed, not part of how it is validated, so it
+builds, tests, and releases on a machine without it (MCW-w7nb). CI installs no
+workflow; no suite `make test` runs and no release target calls `change-workflow`. The
+`Makefile` includes the workflow's fragment, at the path `change-workflow fragment`
+prints, only where the command is on the path, printing nothing where it is not: there
+every build, suite, and release target works, and asking for one of the workflow's
+gets make's own "no rule" error. The checks the workflow's steps run here — `make
+check-repository`, the guidance check, the citation check scoped to a change, and
+archive cleanup's `make record-capacity` — reach the installed command, as the steps
+that run them do. `make help` lists each target's help, the workflow's among them only
+where it is installed. None of the repository's own targets depends on the fragment's,
+so none refuses while a round view is open: the validation and diff targets —
+`validate-local`, `validate-ci`, `validate-helm`, `run-ci`, `run-e2e`, `review-diff`,
+and `last-diff` — ask in their help not to be run then, since the view points the
+branch at the round's base rather than its commit, and a run would describe the wrong
+commit. `code-snapshot` needs no such caution: a snapshot is made from any worktree.
+No interface of the workflow's tells a tool-free check that a view is open, its
+round-view state being internal, so the guard is an instruction rather than a check
+that a compatible release could silently pass.
 
 ## Validation's evidence kinds
 
@@ -260,13 +294,14 @@ The make fragment's targets complete in bash: source
 `scripts/completions/make-change.bash` from `~/.bashrc`, after bash-completion, to
 complete `CHANGE=` with the active changes — the archived ones after
 `archive-cleanup`, and both after `merge` — and `KIND=` with the review kinds. The
-script lives outside the engine's package though it completes the fragment's targets.
+script is this repository's, though it completes the fragment's targets.
 
-The configuration names each step's models (`[models]`): Opus at high effort for the
-steps that judge, Sonnet at medium for validation and archive cleanup, and Codex
-first for the review, falling back to Claude. It sends a review's refused draft back
-to its reviewer once (`[review]`'s `format-retries`), the workflow's default, stated
-so a reader of the file finds it.
+Each checkout's local configuration names each step's models (`[models]`), as the
+committed template writes them: Opus at high effort for the steps that judge, Sonnet
+at medium for validation and archive cleanup, and Codex first for the review, falling
+back to Claude. The committed configuration sends a review's refused draft back to
+its reviewer once (`[review]`'s `format-retries`), the workflow's default, stated so
+a reader of the file finds it.
 
 A clone's bootstrap is `make init` (MCW-uqlq), the configuration's `post-clone`, run
 in the clone as it is made. Its
@@ -289,18 +324,18 @@ workflow's or the engineering guidance's.
 
 | Check | Rule it enforces | Rule's layer | Where it runs |
 |---|---|---|---|
-| Change index (`change-workflow check index`; `make check-change-index`) | each row's cells, link, status, and dependencies; one row per active change ([`changes.md`, "The change index"](../../../docs/guidance/workflow/changes.md#the-change-index); [`closeout.md`, "Campaign index currency"](../../../docs/guidance/workflow/closeout.md#campaign-index-currency)) | workflow | the workflow's default checks, in every committing step's `run pre-commit` and in `make check-change` |
-| Task list (`change-workflow check tasks`; `make check-tasks`) | every numbered task sits under its own section's heading ([`change-workflow`'s companion, "The command and its tiers"](../change-workflow/README.md#the-command-and-its-tiers)) | workflow | the default checks; implementation's entry check |
-| Agent skills (`change-workflow check skills`; `make check-agent-skills`) | each skill has one source for every harness ([`change-workflow`'s CW-d8de](../change-workflow/spec.md#requirement-cw-d8de-each-skill-has-one-source-for-every-harness)) | workflow | the default checks; the packaging closeout part ([`openspec/README.md`, "Packaging"](../../README.md#packaging)) |
-| Specification index (`change-workflow check spec-index`; `make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, the change's deltas counted ([`openspec-documentation.md`, "A capability organized by an index"](../../../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index); [`openspec/README.md`, "The index check"](../../README.md#the-index-check)) | workflow | the default checks; closeout's "Promotion" |
-| Decision destinations (`change-workflow check decisions`; `make check-decision-destinations`) | each decision has a "Knowledge to promote" bullet ([`changes.md`, "Change documentation requirements"](../../../docs/guidance/workflow/changes.md#change-documentation-requirements)) | workflow | the default checks |
-| Strict OpenSpec validation (`change-workflow openspec validate <change> --strict`) | a change's delta requirements are well formed and carry scenarios ([`openspec-documentation.md`, "Capability documentation pattern"](../../../docs/guidance/workflow/openspec-documentation.md#capability-documentation-pattern)) | workflow | the default checks; closeout's "Documentation citations", last before the archive |
-| Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, change document's name, or change directory's name in code ([`change-references.md`](../../../docs/guidance/workflow/change-references.md)), over the file types, exclusions, and exemption [The closing checks](#the-closing-checks) names | workflow; its file types and exemptions the repository's | `make check-repository`; closeout's "Comment hygiene" |
-| Documentation citations (`make check-doc-citations`) | a cited path resolves and is no tombstone ([`documentation.md`, "Citations resolve"](../../../docs/guidance/engineering/documentation.md#citations-resolve)), over the directories and documents [The closing checks](#the-closing-checks) names, but the checkout's local workflow configuration, `.agents/workflow.local.toml`, which Git ignores and no branch holds | engineering; its directories the repository's | `make check-repository`, scoped to the change; closeout's "Documentation citations" |
+| Change index (`change-workflow check index`; `make check-change-index`) | each row's cells, link, status, and dependencies; one row per active change (`arkhai-change-workflow`'s guidance, "The change index" and "Campaign index currency") | workflow | the workflow's default checks, in every committing step's `run pre-commit` and in `make check-change` |
+| Task list (`change-workflow check tasks`; `make check-tasks`) | every numbered task sits under its own section's heading (`arkhai-change-workflow`'s companion, "The command and its tiers") | workflow | the default checks; implementation's entry check |
+| Agent skills (`change-workflow check skills`; `make check-agent-skills`) | each skill has one source for every harness, the workflow's installed in each harness's user skill directory (`change-workflow`'s CW-d8de) | workflow | the default checks; the packaging closeout part ([`openspec/README.md`, "Packaging"](../../README.md#packaging)) |
+| Specification index (`change-workflow check spec-index`; `make check-spec-index`) | an indexed capability's `spec.md` and `index.md` agree on its ids, the change's deltas counted (`arkhai-change-workflow`'s guidance, "A capability organized by an index"; [`openspec/README.md`, "The index check"](../../README.md#the-index-check)) | workflow | the default checks; closeout's "Promotion" |
+| Decision destinations (`change-workflow check decisions`; `make check-decision-destinations`) | each decision has a "Knowledge to promote" bullet (`arkhai-change-workflow`'s guidance, "Change documentation requirements") | workflow | the default checks |
+| Strict OpenSpec validation (`change-workflow openspec validate <change> --strict`) | a change's delta requirements are well formed and carry scenarios (`arkhai-change-workflow`'s guidance, "Capability documentation pattern") | workflow | the default checks; closeout's "Documentation citations", last before the archive |
+| Comment hygiene (`make check-comment-hygiene`) | no change id, section or task number, change document's name, or change directory's name in code (`arkhai-change-workflow`'s guidance, "Change references"), over the file types and exclusions [The closing checks](#the-closing-checks) names | workflow; its file types the repository's | `make check-repository`; closeout's "Comment hygiene" |
+| Documentation citations (`make check-doc-citations`) | a cited path resolves and is no tombstone ([`documentation.md`, "Citations resolve"](../../../docs/guidance/engineering/documentation.md#citations-resolve)), over the directories and documents [The closing checks](#the-closing-checks) names, but the checkout's local workflow configuration, `.agents/workflow.local.toml`, which Git ignores and no branch holds | engineering; its directories the repository's | `make check-repository`, scoped to the change; closeout's "Documentation citations"; run unscoped, it needs no workflow |
 | History wording (`make check-history-wording`) | a comment or docstring the change adds describes no history ([`comments.md`, "Comments describe the current system"](../../../docs/guidance/engineering/comments.md#comments-describe-the-current-system)) | engineering | `make check-repository`, against the merge-base with the landing branch |
 | Version bumps (`make check-version-bumps`) | a package's version moves at most one step from the landing branch's ([`versioning.md`, "One bump per unit of work"](../../../docs/guidance/engineering/versioning.md#one-bump-per-unit-of-work)) | engineering | `make check-repository`, against the merge-base |
 | Local imports (`make check-local-imports`) | an import added inside a function gives its reason ([`dependencies-python.md`, "Imports go at module level"](../../../docs/guidance/engineering/dependencies-python.md#imports-go-at-module-level)) | engineering | `make check-repository`, against the merge-base; closeout's "Import placement" |
-| Capability index (`make check-capability-index`) | every capability with a `spec.md` has a row in the capability index, and no row links nothing ([`openspec/README.md`, "Current capability documentation"](../../README.md#current-capability-documentation); the index's role, [`openspec-documentation.md`, "The capability index and the roadmap"](../../../docs/guidance/workflow/openspec-documentation.md#the-capability-index-and-the-roadmap)) | repository | `make check-repository` |
+| Capability index (`make check-capability-index`) | every capability with a `spec.md` has a row in the capability index, and no row links nothing ([`openspec/README.md`, "Current capability documentation"](../../README.md#current-capability-documentation); the index's role, `arkhai-change-workflow`'s guidance, "The capability index and the roadmap") | repository | `make check-repository` |
 | `dist`, the prerequisite of `make check-packaging` | none: it builds the wheelhouse the checks read | — | `make check-packaging` |
 | `make check-uv-setup` | internal packages are derived from the lock, never listed ([`packaging.md`, "Nothing is maintained by hand"](../../../docs/guidance/engineering/packaging.md#nothing-is-maintained-by-hand); [`packaging-uv.md`, "Refreshing a same-version wheel"](../../../docs/guidance/engineering/packaging-uv.md#refreshing-a-same-version-wheel)), through `scripts/uv_project.py` ([`wheelhouse.md`](../../../docs/guidance/repository/wheelhouse.md#the-wheelhouse)) | engineering; the script the repository's | `make check-packaging`: the functional pre-commit hook, the pre-archive hook, and validation's local part |
 | `make check-locks` | every lock is current and resolves internal packages from the wheelhouse ([`packaging-uv.md`, "Relock against fresh artifacts"](../../../docs/guidance/engineering/packaging-uv.md#relock-against-fresh-artifacts)), at the one lock revision ([`packaging-uv.md`, "Locks are written by a stated minimum uv"](../../../docs/guidance/engineering/packaging-uv.md#locks-are-written-by-a-stated-minimum-uv); [`locks.md`](../../../docs/guidance/repository/locks.md#locks)) | engineering; the revision and `.dist` the repository's | `make check-packaging`, wherever it runs |
@@ -313,7 +348,7 @@ workflow's or the engineering guidance's.
 | Secret scan (`scripts/check_secrets.py`, gitleaks; `make check-secrets`) | no private key or provider credential ([`repository-content.md`, "No credentials"](../../../docs/guidance/engineering/repository-content.md#no-credentials)) | engineering | the Git pre-commit hook; `make pre-push`; CI's `public-content.yml` |
 | `make pre-push` | the two rows above, over what a push would send | as the two rows above | the Git pre-push hook (`scripts/hooks/pre-push`) and the guarded push (`[hooks].pre-push`) |
 | `make audit-secrets` | reports every gitleaks finding in the tracked tree and refuses nothing ([`repository-content.md`, "No credentials"](../../../docs/guidance/engineering/repository-content.md#no-credentials)) | engineering | by hand before a release ([the release handbook, "Cutting a release"](../../../docs/release-handbook.md#cutting-a-release)); listed so the table is complete |
-| Guidance check (`make check-guidance`) | every guidance file's tags against the vocabularies, the exception tables, the link direction, and the anchors of guidance citations (`change-workflow`'s CW-g7lt, CW-d2rw, and CW-x4ex; [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules)) | workflow, enforced from this repository's script | `make check-repository`; closeout's "Guidance placement" |
+| Guidance check (`make check-guidance`) | every guidance file's tags against the vocabularies, the installed workflow's among them, the exception tables, the link direction, and the anchors of guidance citations (`change-workflow`'s CW-g7lt, CW-d2rw, and CW-x4ex; [MCW-c4ek](spec.md#requirement-mcw-c4ek-a-changes-closing-checks-enforce-written-rules)) | workflow, enforced from this repository's script | `make check-repository`; closeout's "Guidance placement" |
 
 ### The closing checks
 
@@ -350,9 +385,8 @@ check-decision-destinations` runs it alone):
   (`make check-local-imports`);
 - every capability with a `spec.md` has a row in `openspec/specs/README.md`, and
   every row links one (`make check-capability-index`);
-- the guidance is layered as
-  [`docs/guidance/workflow/README.md`, "The layers of guidance"](../../../docs/guidance/workflow/README.md#the-layers-of-guidance)
-  says (`make check-guidance`, `scripts/check_guidance.py`): every guidance file
+- the guidance is layered as `arkhai-change-workflow`'s guidance, "The layers of
+  guidance", says (`make check-guidance`, `scripts/check_guidance.py`): every guidance file
   carries one layer tag and other tags its layer's vocabulary or a lower one's
   defines, every vocabulary row is carried, every vocabulary and exception table is
   well formed and every exception row cites a guidance file and names `selects` or
@@ -367,8 +401,12 @@ every Markdown file under `docs/guidance/`; every Markdown file in a capability'
 directory under `openspec/specs/` but its `spec.md`, its companion, and its
 `index.md`, found by place so an untagged guide fails rather than escaping; every
 other Markdown file outside `openspec/changes/` that carries `tags`; and the
-documents `AGENTS.md`'s layer table names. A directory carries no meaning to it: a
-file's layer is its tag. `scripts/check_guidance.py --list [--tag <tag>]` prints the
+documents `AGENTS.md`'s layer table names. The workflow's layer is the installed
+workflow's guidance, outside the tree: the check reads its vocabulary, and the tags
+its files carry, from the directory `change-workflow config --json` names as
+`workflow.guidance`, and fails without the command, saying the workflow is needed; it
+runs in the workflow's `pre-commit`. A directory carries no meaning to it: a file's
+layer is its tag. `scripts/check_guidance.py --list [--tag <tag>]` prints the
 guidance set with each file's tags, and `--list-exceptions` every exception row, for
 whatever reads the set.
 
@@ -381,14 +419,12 @@ is reworded, or the rule amended. Whether an import's reason is sound, and wheth
 test sits at the level that can prove its behaviour, stay with review, which a
 pattern cannot judge.
 
-Comment hygiene, `make check-comment-hygiene`, holds
-[`change-references.md`](../../../docs/guidance/workflow/change-references.md)
-outside `openspec/`: it fails on a change id, a section or task number, or a change
+Comment hygiene, `make check-comment-hygiene`, holds the workflow's rule that code
+names no change (`arkhai-change-workflow`'s guidance, "Change references") outside
+`openspec/`: it fails on a change id, a section or task number, or a change
 document's name in a `.py`, `.yml`, or `.yaml` file, and on a change directory's name
 in those and `.toml` files outside `docs/`, which holds the roadmap, and `.claude/`.
-Its one exemption is each file name's definition in the script that reads it
-(`next_step.py`'s `TASKS_FILE`, `decisions.py`'s `DESIGN_FILE` and
-`PROPOSAL_FILE`). A comment's stable heading is in `openspec/specs` or
+It exempts nothing. A comment's stable heading is in `openspec/specs` or
 `ARCHITECTURE.md`, as in:
 
 ```python
@@ -404,8 +440,10 @@ documents but its `reviews/`. It treats a citation whose target does
 not resolve as a blocking defect, and additionally rejects a citation pointing at a
 *tombstone*: a tombstoned file still exists on disk while its content is gone, so a
 plain existence test could never fail on a rename-to-tombstone — the likeliest
-broken citation in a renaming change. Closeout runs it scoped to the change; run
-unscoped, it shows the repository-wide picture.
+broken citation in a renaming change. Closeout runs it scoped to the change, and a
+citation of a `spec.md` the change's delta creates resolves there, the paths a delta
+creates being those the installed workflow's `check spec-index --json` reports; run
+unscoped, it shows the repository-wide picture and needs no workflow.
 
 ### One lock revision
 
@@ -547,20 +585,19 @@ change's runs at once. No step runs the local compose lanes.
 
 ## How this repository provides the workflow's roles
 
-Each role is the workflow's, as
-[`change-workflow`](../change-workflow/README.md#what-an-adopting-repository-provides)
-states it; the provision is what fills it here: a field of this repository's
-workflow configuration, `.agents/workflow.toml`, or what the configuration does not
-hold. A test (`scripts/tests/test_change_workflow_assumptions.py`) fails when a make
-target or repository path the workflow's make fragment names, its own targets among
-them, is missing from these two tables and from the
-configuration's commands, or when the roles the workflow lists in `config --json`
-and this repository's statement of them differ. The workflow's
-skills name none of this repository's targets or paths
-([What the workflow's skills name of this repository](#what-the-workflows-skills-name-of-this-repository)).
-This repository declares no step hook, `before-<step>` or `after-<step>`: the engine's
-own gathering before validation and cleanup before archive cleanup are all it needs
-around a step.
+Each role is the workflow's, as `arkhai-change-workflow`'s companion, "What an
+adopting repository provides", states it, and as `change-workflow config --json`
+lists it in `roles`; the provision is what fills it here: a field of this
+repository's committed workflow configuration, `.agents/workflow.toml`, of each
+checkout's local configuration, or what neither holds. This repository keeps no test
+of the statement (MCW-5tgp): review holds it complete when a change edits `[workflow]
+version`, `.agents/workflow.toml`, this statement, or a make target it names, and a
+provision broken between those shows when the step running it fails. The workflow's
+own test holds its companion's roles to `roles`, which keeps the workflow consistent
+with itself but reads no adopter's statement, and that its skills name no adopting
+repository's targets or paths is the workflow's to verify (CW-n8tr). This repository
+declares no step hook, `before-<step>` or `after-<step>`: the engine's own gathering
+before validation and cleanup before archive cleanup are all it needs around a step.
 
 | Role | Provided by |
 |---|---|
@@ -571,44 +608,37 @@ around a step.
 | Removing a change's validation resources, and recording what they used, at archive cleanup | the `helm` kind's `cleanup`, recording the capacity measured into `helm/validation-capacity.toml`, then removing the change's namespace and images |
 | The repository's tests and environments: the suites, locks, builds, and environment refreshes a change's work runs | the configuration's `after-functional-change`, `make lock`, and `pre-commit-functional`, `make validate-local`, which clears the wheelhouse, checks packaging, and runs every suite; and its `[sandbox]`, whose `writable.common` gives every step, the review included, the tool state those write outside the checkout: uv's `~/.local/share/uv`, the cluster client's `~/.kube/cache`, the cloud CLI's `~/.config/gcloud`, Docker's `~/.docker`, and npm's `~/.npm`, the cache of the OpenSpec command `scripts/openspec` runs through `npx`. The steps that fix code write the whole checkout, where they run `make test`, the scripts' suite as `make test-release-tooling` (`make test-release-tooling TESTS=*`, one failing test run alone), a project's tests as `make -C <package> test` or `uv run --directory <package> pytest`, `make lock`, `make dist`, `make init`, `make reinit`, and a project's own `make -C <package> typecheck` and `make -C <package> first-use`; `uv lock --directory <package>`, a new project's first lock; a section's local bring-up, `make -C <package> migrate`, `docker run --rm`, and `docker compose -p` under a project name of the session's own; `make build-*`, the images a lane runs, `make -C e2e-tests e2e-*-down`, a lane's teardown, and `make -C e2e-tests e2e-*-logs`, its containers' logs; `make helm-values-schema`; internal dependencies from wheels and locks through `scripts/uv_project.py` |
 | The packaging check before closeout | the configuration's `pre-commit-functional` and `pre-archive`: `make check-packaging`, which runs `make check-architecture` over `docs/development/ARCHITECTURE.toml`, and `make check-architecture-change` |
-| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks, whose strict OpenSpec validation of the change runs the pinned validator through `scripts/openspec`; `make check-change`, the owner's complete closing check, which runs `change-workflow run pre-commit`; the checks they run, each through its own target, `make check-*`, or `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` and `make check-decision-destinations`, each calling the workflow's default check alone; and `scripts/openspec`, the pinned OpenSpec CLI, run directly as `scripts/openspec validate` |
+| The closing checks a step ends with | the configuration's `pre-commit`, `make check-repository` (`scripts/check_change.py`), after the workflow's default checks, whose strict OpenSpec validation of the change runs the pinned validator through `scripts/openspec`; `make check-change`, the owner's complete closing check, which runs `change-workflow run pre-commit`, a target only where the workflow is installed; the checks they run, each through its own target, `make check-*`, or `scripts/check_*`: `make check-comment-hygiene`, `make check-doc-citations` (`make check-doc-citations*`), `make check-spec-index` and `make check-decision-destinations`, each calling the workflow's default check alone where the workflow is installed; and `scripts/openspec`, the pinned OpenSpec CLI, run directly as `scripts/openspec validate` |
 | The change index at a known path | `openspec/changes/README.md`, checked in a prerequisite's proposal checkout beside this one by `make -C ../<prerequisite>-proposal check-change-index` (`make -C ../*-proposal check-change-index`) |
-| The guidance documents every step reads | the engineering guidance under `docs/guidance/engineering/`, which each checkout's local configuration points at as its template `.agents/workflow.local.template.toml` writes it; the workflow's under `docs/guidance/workflow/`, which the installed distribution serves; then `AGENTS.md`, this repository's rules under `docs/guidance/repository/`, every Markdown file beneath it, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, its closeout parts `openspec/README.md#this-repositorys-closeout-parts`; the roadmap `docs/development/ROADMAP.md`, which design loads too; and `openspec/config.yaml`. The owner's handbook, `docs/change-workflow-handbook.md`, is no guidance and no step reads it |
-| Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` and its guidance under `docs/guidance/`, the workflow's under `docs/guidance/workflow/`, the engineering guidance under `docs/guidance/engineering/`, and this repository's rules spanning its systems under `docs/guidance/repository/` |
+| The guidance documents every step reads | the engineering guidance under `docs/guidance/engineering/`, which each checkout's local configuration points at as its template `.agents/workflow.local.template.toml` writes it; the workflow's, which the installed distribution serves; then `AGENTS.md`, this repository's rules under `docs/guidance/repository/`, every Markdown file beneath it, `docs/development/ARCHITECTURE.md`, `docs/development/TESTING.md`, `docs/development/DEPLOYMENT_AND_CONFIG.md`, `openspec/README.md`, its closeout parts `openspec/README.md#this-repositorys-closeout-parts`; the roadmap `docs/development/ROADMAP.md`, which design loads too; and `openspec/config.yaml`. The workflow's handbook, which the installed distribution carries, is no guidance and no step reads it |
+| Where specifications and documentation live | `openspec/` (`openspec/**`): the capabilities under `openspec/specs/`, indexed by `openspec/specs/README.md`, each `openspec/specs/<capability>/spec.md`; and `docs/` (`docs/**`), its development documents under `docs/development/` and its guidance under `docs/guidance/`, the engineering guidance under `docs/guidance/engineering/`, and this repository's rules spanning its systems under `docs/guidance/repository/` |
 | Protected branches the guarded push refuses | `main` and `dev`, the configuration's `repository.protected-branches` |
 | A pre-push check the guarded push runs over what it would send, where the repository provides one | the configuration's `pre-push`, `make pre-push`, which runs `scripts/check_public_content.py --pre-push`, the public-content scan of the branch's name and every outgoing commit (MCW-q8vd), its local denylist named by Git's `scm.publicContentDenyFile`; then `scripts/check_secrets.py --pre-push`, the pinned gitleaks over the same commits; the same target `scripts/hooks/pre-push` runs. A step runs the gate over its staged additions with `make check-secrets`, and the audit of every rule with `make audit-secrets` |
 | The remote a change's branch is pushed to, its upstream's, from which the pipeline runs | `origin`, this repository on GitHub, which every branch of the workspace tracks, so a change's clone gives its branch an upstream there |
 | The branch a change lands on, merged before closeout and reviewed against | the clone's `--from`, or else the branch the workspace had checked out when the change's clone was made, `dev` for most changes, which the clone records |
 | The clone's bootstrap: one command that readies a fresh clone | the configuration's `post-clone`, `make init` |
-| The make fragment's targets, included by the repository's `Makefile` | `Makefile` includes `scripts/change_workflow/workflow.mk`, giving `make design`, `make plan`, `make implement`, `make review`, `make triage`, `make validate`, `make merge`, `make closeout`, `make archive-cleanup`, `make orchestrate`, `make change-next`, `make change-clone`, `make change-clone-remove`, `make round-view`, `make round-done` (`make round-done*`), `make round-view-closed`, `make change-watch`, `make change-cost`, `make change-history`, `make check-change-index`, `make check-tasks` (`make check-tasks*`), `make check-agent-skills`, `make check-change-workflow-config`, `make check-review` (`make check-review*`), `make check-push-ready`, `make push-branch`, and `make change-graph`; run in a change's clone as `make -C <clone> implement`, `make -C <clone> push-branch`, and `make -C <clone> change-history` |
+| The make fragment's targets, included by the repository's `Makefile` | `Makefile` includes the installed fragment, at the path `change-workflow fragment` prints, only where `change-workflow` is on the path, giving `make design`, `make plan`, `make implement`, `make review`, `make triage`, `make validate`, `make merge`, `make closeout`, `make archive-cleanup`, `make orchestrate`, `make change-next`, `make change-clone`, `make change-clone-remove`, `make round-view`, `make round-done` (`make round-done*`), `make round-view-closed`, `make change-watch`, `make change-cost`, `make change-history`, `make check-change-index`, `make check-tasks` (`make check-tasks*`), `make check-agent-skills`, `make check-change-workflow-config`, `make check-review` (`make check-review*`), `make check-push-ready`, `make push-branch`, and `make change-graph`, none of which this repository's own targets depends on; run in a change's clone as `make -C <clone> implement`, `make -C <clone> push-branch`, and `make -C <clone> change-history` |
 
 ### The engine's own assumptions
 
-How this repository meets what the engine itself holds. The test reads these as
-provisions too; whether the table names everything the engine holds is kept by
-review.
+How this repository meets what the engine itself holds; whether the table names
+everything the engine holds is kept by review. No path of the engine's is left in the
+tree: its documents, outcome schema and graph diagram among them, are the installed
+distribution's, which `config --json` names by role.
 
 | Assumption | Here |
 |---|---|
 | The change index's path | `openspec/changes/README.md` |
-| Its command, on the path, and its package | `change-workflow`, installed on the path from this tree's wheel by `make install-workflow`, which every make target and step runs; the tree's `scripts/change-workflow` and `scripts/change_workflow/`, which this repository's own scripts run and whose computation and graph the orchestrating skill cites, `scripts/change_workflow/next_step.py` and `scripts/change_workflow/graph.py` |
-| The repository's workflow configuration, at a fixed path, checked whenever it is read | `.agents/workflow.toml`, which no step's sandbox lets it write: read-only under the root, or, inside a writable checkout, mounted read-only, as `.git/config` is |
-| The outcome schema, at a fixed path | `.agents/change-outcome.schema.json` |
-| The skills' one source, linked into each harness's directory | the workflow's skills, installed into each harness's user skill directory by `make install-workflow`, their sources under `.agents/skills/` for the wheel alone; the skills this repository commits, OpenSpec's, one source under `.agents/skills`, linked from `.claude/` and `.codex/` |
-| The harness's local settings, which a clone links to the workspace's | `.claude/settings.local.json`, which the sandbox protects where the link leads: the workspace's file, outside the clone's scope and so read-only in it. The link itself, in the clone's writable checkout, is no mount: a step that removes it or renames a file over it leaves a file there the sandbox does not protect |
+| Its command, `change-workflow`, on the path | installed from the release's wheel with `uv tool install`, then `change-workflow install`, as the workflow's handbook sets it up; every make target of the fragment and every step runs it, and this repository's own scripts reach it through `scripts/workflow_command.py`, which names it once |
+| The repository's committed and local workflow configuration, each at a fixed path, checked whenever it is read | `.agents/workflow.toml`, and each checkout's `.agents/workflow.local.toml`, which Git ignores, written from `.agents/workflow.local.template.toml`; no step's sandbox lets it write either: read-only under the root, or, inside a writable checkout, mounted read-only, as `.git/config` is |
+| The workflow's own documents, the outcome schema and the graph diagram among them, beside the engine | the installed distribution's; none in the tree |
+| The workflow's skills in each harness's user skill directory, and a repository's own skills' one source, linked into each harness's directory | the workflow's skills, written into Claude Code's and Codex's user skill directories by `change-workflow install`; the skills this repository commits, OpenSpec's, one source under `.agents/skills`, linked from `.claude/` and `.codex/` |
+| The harness's local settings and the local configuration, which a clone links to the workspace's | `.claude/settings.local.json` and `.agents/workflow.local.toml`, which the sandbox protects where each link leads: the workspace's file, outside the clone's scope and so read-only in it. A link itself, in the clone's writable checkout, is no mount: a step that removes it or renames a file over it leaves a file there the sandbox does not protect |
 | The changes' directory, its archive, and each change's records under `reviews/` | `openspec/changes/`, each change at `openspec/changes/<change>/`, archived under `openspec/changes/archive/` as `openspec/changes/archive/<date>-<change>/`, beside the guidance reviews' untracked period ledger `openspec/changes/archive/guidance-reviews.jsonl`, which no reader of the archive takes for a change |
-| The graph diagram's place in this capability | `openspec/specs/change-workflow/diagrams/`, the workflow's own specification being `openspec/specs/change-workflow/spec.md` |
 | The `workspace` remote a clone names the owner's workspace by | `workspace`, set by `change-workflow clone` |
 | The harness's session id in the environment, `CLAUDE_CODE_SESSION_ID` | Claude Code's |
 | The tools it invokes, `git`, `claude`, `codex`, `bwrap`, which confines every unattended step, and `sh`, which runs every command the configuration declares | each on the owner's path, `bwrap` from Ubuntu's `bubblewrap` package, without which an unattended step runs unconfined; the configuration's commands run `make`, and its `ci` and `pipeline` kinds `gh` |
-
-## What the workflow's skills name of this repository
-
-The workflow's skills name no make target or path of an adopting repository, only the
-workflow's own (CW-n8tr). An exemption would be a row of a table here — what a skill
-names, the open change that owns its removal, and why — and none stands. The same
-test reads this section: it fails on a skill naming anything else, on an exemption
-no skill names, and on one whose owner is no open change.
+| Inside the sandbox only the owner's uid is mapped, and every step has a private `/tmp` | a file handed to a step from outside the tree, such as a release's wheel it checks, sits under the owner's home directory, never under `/tmp` |
 
 ## Current limits
 
@@ -619,10 +649,9 @@ no skill names, and on one whose owner is no open change.
   resources a namespace cannot separate; when side-by-side validations become
   routine, with several changes orchestrated from one session. Unattended steps are
   kept from the owner's files by the engine's sandbox, one per step run
-  ([`change-workflow`'s restrictions](../change-workflow/README.md#restrictions-bind-unattended-runs-only)),
-  not by a container; the container that holds an orchestrator and every session it
-  starts is
-  [`host-change-workflow-runner`](../../changes/host-change-workflow-runner/proposal.md)'s.
+  (`arkhai-change-workflow`'s companion, "Restrictions bind unattended runs only"),
+  not by a container; a container holding an orchestrator and every session it
+  starts, the hosted runner, is the workflow's repository's work.
 - Teardown removes a change's images from the machine's daemon but not from a kind
   node, which keeps every change's loaded images until the cluster is recreated.
 - Two releases at once may exhaust the node's memory: the capacity preflight is an

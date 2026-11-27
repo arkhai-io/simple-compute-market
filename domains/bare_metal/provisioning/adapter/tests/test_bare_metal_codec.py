@@ -9,8 +9,16 @@ from unittest.mock import MagicMock
 
 import pydantic
 import pytest
+import yaml
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
-from compute_provisioning_ansible import AnsibleJobExecutor, MockAnsibleRunner, render_extra_vars
+from compute_provisioning.jobs import ConfigurationRefusedError, JobFailure
+from compute_provisioning.jobs.executor_mock import MockRule
+from compute_provisioning_ansible import (
+    AnsibleJobExecutor,
+    FailureRecord,
+    MockAnsibleRunner,
+    render_extra_vars,
+)
 from compute_provisioning_ansible.runner import AnsibleResult, inventory_target
 from compute_provisioning_contracts import CREATE_JOB_RESULT_KIND
 from compute_provisioning.relays import RELAY_SECRET_VARIABLES
@@ -18,6 +26,7 @@ from compute_provisioning.relays import RELAY_SECRET_VARIABLES
 from bare_metal_provisioning_adapter.codec import (
     BARE_METAL_INVENTORY_GROUP,
     DEFAULT_BARE_METAL_RECLAIM_POLICY,
+    CLEANUP_REFUSED,
     BareMetalAnsibleCodec,
     BareMetalJobParams,
     reclaim_policy_from,
@@ -527,7 +536,7 @@ def test_stored_bare_metal_job_refuses_undeclared_role_controls(key, action):
     with pytest.raises(ValueError, match=key):
         render_extra_vars(plan.variables, {key: "synthetic-other"})
     for injected in ({key: "synthetic-other"}, {"provider_extra_vars": {key: "synthetic-other"}}):
-        with pytest.raises(pydantic.ValidationError):
+        with pytest.raises(ConfigurationRefusedError, match="not valid"):
             BareMetalAnsibleCodec().prepare(dataclasses.replace(
                 run, parameters={**run.parameters, **injected}
             ))
@@ -550,9 +559,103 @@ def test_bounded_policy_refuses_missing_correlation_before_execution(field):
         _grant(**values)
 
 
-@pytest.mark.parametrize("message, expected", [("Playbook failed", True), ("UNREACHABLE", False), ("Permission denied", False)])
-def test_real_runner_failure_messages_preserve_bounded_retry_classification(message, expected):
-    assert executor(MockAnsibleRunner(default_output=lambda run: "")).is_retryable(message) is expected
+_HELPER_TASK = "Clean attributable bounded scratch and IPC after verified termination"
+
+
+def _helper_failure(**overrides) -> FailureRecord:
+    values = dict(
+        host=HOST.host_id,
+        task=_HELPER_TASK,
+        role="bare-metal-access",
+        tags=("failure_class:cleanup_refused",),
+        module="ansible.builtin.command",
+        rc=1,
+        msg="non-zero return code",
+        stderr='{"version": 1, "error": "Refusal", "message": "cleanup refused a foreign-owned descendant"}',
+    )
+    values.update(overrides)
+    return FailureRecord(**values)
+
+
+def test_a_tagged_helper_failure_is_cleanup_refused_refined_from_its_refusal():
+    run = job_run(_grant(action=NODE_RECLAIM_ACCESS_ACTION))
+
+    failure = BareMetalAnsibleCodec().classify(run, _helper_failure())
+
+    assert (failure.code, failure.retryable) == (CLEANUP_REFUSED, True)
+    assert failure.summary == "cleanup refused a foreign-owned descendant"
+    assert failure.detail == {
+        "error": "Refusal", "message": "cleanup refused a foreign-owned descendant",
+    }
+
+
+@pytest.mark.parametrize(
+    "stderr", ["", "Traceback (most recent call last):", '{"version": 2, "message": "x"}', "[1]"],
+)
+def test_a_tagged_failure_without_the_helpers_refusal_is_still_cleanup_refused(stderr):
+    failure = BareMetalAnsibleCodec().classify(
+        job_run(_grant(action=NODE_RECLAIM_ACCESS_ACTION)), _helper_failure(stderr=stderr)
+    )
+
+    assert (failure.code, failure.retryable, failure.summary, dict(failure.detail)) == (
+        CLEANUP_REFUSED, True, None, {},
+    )
+
+
+@pytest.mark.parametrize("tags", [(), ("failure_class:not_a_bare_metal_class",), ("cleanup",)])
+def test_any_other_task_failure_is_task_failed(tags):
+    failure = BareMetalAnsibleCodec().classify(
+        job_run(_grant(action=NODE_RECLAIM_ACCESS_ACTION)), _helper_failure(tags=tags)
+    )
+
+    assert (failure.code, failure.retryable) == ("task_failed", True)
+
+
+def test_the_working_data_helpers_tasks_are_tagged_cleanup_refused():
+    """Every task of the bounded reclaim that runs the working-data helper, and
+    no other, declares ``cleanup_refused``."""
+    path = _ANSIBLE_ROOT / "roles" / "bare-metal-access" / "tasks" / "bounded-reclaim.yml"
+    tasks = yaml.safe_load(path.read_text())
+    tagged = {
+        task["name"] for task in tasks if "failure_class:cleanup_refused" in task.get("tags", ())
+    }
+    helper = {
+        task["name"]
+        for task in tasks
+        if any(
+            argument.endswith("/arkhai-tenant-working-data.py")
+            for argument in task.get("ansible.builtin.command", {}).get("argv", ())
+        )
+    }
+    assert len(helper) == 3
+    assert tagged == helper
+
+
+@pytest.mark.asyncio
+async def test_a_mocked_reclaim_failure_with_the_helpers_record_is_cleanup_refused():
+    mock = MockAnsibleRunner(default_output=lambda playbook: "")
+    mock.add_rule(
+        MockRule(
+            rule_id="refusal",
+            match={"action": NODE_RECLAIM_ACCESS_ACTION},
+            fail_with="cleanup refused",
+            failure_record=_helper_failure().to_mapping(),
+        )
+    )
+    run = job_run(_grant(action=NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="bounded_working_data",
+                         capacity_reservation_id="fixture-reservation",
+                         working_data_policy_id="fixture-v1"))
+
+    outcome = await executor(mock).execute(run)
+
+    assert isinstance(outcome, JobFailure)
+    assert (outcome.error.code, outcome.error.retryable) == (CLEANUP_REFUSED, True)
+    assert outcome.error.message == (
+        f'{HOST.host_id}: task "{_HELPER_TASK}" failed: '
+        "cleanup refused a foreign-owned descendant"
+    )
+    assert outcome.error.details["domain_detail"]["error"] == "Refusal"
+    assert outcome.error.details["task"] == _HELPER_TASK
 
 
 def test_legacy_grant_explicitly_prevents_inventory_from_enabling_bounded_cleanup():

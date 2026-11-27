@@ -3,8 +3,8 @@
 ## Why
 
 A step that writes a regression test shows it fails without the fix through
-`scripts/change-workflow run test-before <change> --test <path> [--at <commit>]`
-(`openspec/specs/change-workflow/spec.md`, CW-u4pc). The engine adds a detached
+`change-workflow run test-before <change> --test <path> [--at <commit>]`
+(`arkhai-change-workflow`'s CW-u4pc). The engine adds a detached
 worktree at the earlier commit, copies each named test file into it, runs the
 repository's `test-before` hook there, and removes the worktree however the run
 ends, so the change's worktree is never touched. The implement and triage skills
@@ -129,17 +129,17 @@ None.
 
 ## Impact
 
-- `scripts/change_workflow/hooks.py` (the values and the closing line),
-  `scripts/change_workflow/graph.py` (the steps that may run each hook),
-  `scripts/change_workflow/cli.py` (any new option), and their tests.
+- In `arkhai-change-workflow`, the installed change workflow: the engine's hooks
+  (the values and the closing line), its graph (the steps that may run each hook),
+  and its command line (any new option), and their tests.
 - `.agents/workflow.toml` (the `test-before` hook), a new script under `scripts/` for
   the environment, and its tests.
 - `.claude/change-steps.toml` (the merge step's rules), on the owner's word as for any
   change to the step table.
-- `.agents/skills/change-implement/`, `.agents/skills/change-triage/`, and
-  `.agents/skills/change-merge/`.
-- `openspec/specs/change-workflow/` (`spec.md`, `index.md`, `README.md`),
-  `openspec/specs/market-change-workflow/`, and `docs/change-workflow-handbook.md`.
+- In `arkhai-change-workflow`: the `change-implement`, `change-triage`, and
+  `change-merge` skills; the workflow's specification, index, and companion; and its
+  handbook.
+- `openspec/specs/market-change-workflow/`.
 
 ### Workflow engine interfaces
 
@@ -171,4 +171,4 @@ None.
 To be determined at design completion. Expected destinations: `change-workflow`'s
 `spec.md` and `README.md` for the hook's values, its setup-failure reading and the
 steps that may run it; `market-change-workflow` for this repository's hook;
-`docs/change-workflow-handbook.md` where it describes `test-before`.
+the workflow's handbook where it describes `test-before`.

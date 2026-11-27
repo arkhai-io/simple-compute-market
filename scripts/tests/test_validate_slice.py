@@ -15,6 +15,8 @@ from typing import Sequence
 
 import pytest
 
+from workflow_stand_in import change as found_as, put_on_path
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "validate_slice.py"
 _SPEC = importlib.util.spec_from_file_location("validate_slice", SCRIPT)
@@ -40,6 +42,16 @@ GIB = 2**30
 NOW = datetime(2026, 10, 22, 7, 0, tzinfo=timezone.utc)
 # The attempt an attempt started at NOW is kept in.
 ATTEMPT = "20261022T070000.000000Z"
+
+
+# The workflow's command, where a script reaches it, is a stand-in, since this
+# repository's suites run without the workflow installed: it finds the archived pilot
+# change, whose records are its reviews, and no other.
+@pytest.fixture(autouse=True)
+def _workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put_on_path(monkeypatch, tmp_path.parent / f"{tmp_path.name}-workflow", found_as(
+        "pilot", "openspec/changes/archive/2026-10-22-pilot", archived=True,
+        records="openspec/changes/archive/2026-10-22-pilot/reviews"))
 
 
 class Fake:
@@ -1258,12 +1270,13 @@ def test_a_malformed_capacity_figure_is_refused(tmp_path: Path, body: str) -> No
 
 # Archive cleanup's figure, from the change's latest validation, over a real checkout:
 # its records, the commits they name, and the Helm attempts of those commits' trees.
+# The workflow's command, which finds the change's records, is the stand-in every
+# test of this module has on its path.
 ARCHIVED_REVIEWS = Path("openspec/changes/archive/2026-10-22-pilot/reviews")
 
 
 def _checkout(root: Path) -> None:
-    """Make `root` a Git repository, as the workflow's command finds a change only in
-    one."""
+    """Make `root` a Git repository, whose commits the validation records name."""
     if not (root / ".git").exists():
         subprocess.run(["git", "init", "-q", str(root)], check=True)
 
@@ -1979,15 +1992,9 @@ def _make_n(target: str, *variables: str, environment: dict[str, str] | None = N
         env={**env, **(environment or {})}).stdout.strip()
 
 
-@pytest.mark.parametrize("unattended", [[], ["UNATTENDED=1"]])
-def test_all_scenarios_reach_the_helm_part_through_the_environment(
-        unattended: list[str]) -> None:
-    """A value of the owner's machine is no argument the validation skill reads: `make
-    validate` passes none, and the Helm part's own make reads the value from the
-    environment it inherits."""
-    assert _make_n("validate", "HELM_ALL_SCENARIOS=1", *unattended) == (
-        'change-workflow start validate "x"'
-        + (" --unattended" if unattended else ""))
+def test_all_scenarios_reach_the_helm_part_through_the_environment() -> None:
+    """A value of the owner's machine is no argument the validation skill reads: the
+    Helm part's own make reads the value from the environment it inherits."""
     assert "--all-scenarios" in _make_n("validate-helm",
                                         environment={"HELM_ALL_SCENARIOS": "1"})
     assert "--all-scenarios" not in _make_n("validate-helm")

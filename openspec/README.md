@@ -7,25 +7,22 @@ tags: [repository, openspec]
 How this repository uses OpenSpec. OpenSpec's documentation model — specifications,
 their companions, changes, the archive, and what the capability index and the roadmap
 are for — and the workflow's rules for a change's documents and its closeout are the
-change workflow's guidance:
-[`docs/guidance/workflow/openspec-documentation.md`](../docs/guidance/workflow/openspec-documentation.md),
-[`changes.md`](../docs/guidance/workflow/changes.md), and
-[`closeout.md`](../docs/guidance/workflow/closeout.md). This guide holds what is this
+guidance of the installed change workflow, `arkhai-change-workflow`: its "OpenSpec
+documentation", "A change's documents", and "Closeout". This guide holds what is this
 repository's.
 
 Use `bunx @fission-ai/openspec@1.14.0 list` to inspect active changes, `show <name>` to read one, and `validate --all --strict` before review. The validator is pinned to 1.14.0: 1.14.1 adds a strict-mode failure for requirement text over 500 characters, which most permanent specs do not yet meet, and [`shorten-long-requirements`](changes/shorten-long-requirements/) restructures them and moves the pin forward.
 
 ## Documentation placement
 
-The workflow's placement table
-([`openspec-documentation.md`, "Documentation placement"](../docs/guidance/workflow/openspec-documentation.md#documentation-placement))
-names the homes of a capability's specification, companion, and index, and of a
+The workflow's placement table (`arkhai-change-workflow`'s guidance, "Documentation
+placement") names the homes of a capability's specification, companion, and index, and of a
 change's documents. This repository's documents beside them:
 
 | Knowledge | Permanent home |
 |---|---|
 | That this repository works its changes through the change workflow, what every session reads, where each layer of the guidance lives and where its tags are, its exceptions to shared guidance across several systems, and its rules for any agent's actions here | `AGENTS.md` |
-| Guidance that holds in any repository, and the change workflow's guidance | `docs/guidance/engineering/` and `docs/guidance/workflow/` |
+| Guidance that holds in any repository | `docs/guidance/engineering/` |
 | This repository's rules spanning its systems — package layers, tests, configuration and deployment, packaging and publication — and its tag table: where a change promotes such a rule | `docs/guidance/repository/`, a file per subject |
 | Guidance pertaining to one capability, and an exception to shared guidance that applies to it alone | a guidance file in `openspec/specs/<capability>/`, beside its `spec.md`, carrying `tags` frontmatter |
 | The description of the system: its shape, package and dependency layers, authority boundaries, common vocabulary, major flows, and deployment topology | `docs/development/ARCHITECTURE.md` |
@@ -33,7 +30,6 @@ change's documents. This repository's documents beside them:
 | The description of how this repository's services are configured and deployed: its stacks, charts, release topology, persistence, and migrations | `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | Operating a deployment: document formats, procedures, upgrade and recovery steps | `docs/operator-handbook.md` |
 | Releasing this repository's packages and artifacts: loading a release candidate, the deployment's part, running the lanes on its images, cutting a release, the migration floor, and troubleshooting | `docs/release-handbook.md` |
-| Operating the change workflow | `docs/change-workflow-handbook.md` |
 | A developer's procedures: running the lanes and the full validation, rendering the charts, qualifying a purchase; and running one project's own tests | `docs/development/VALIDATION_RUNBOOK.md`; that project's `README.md` |
 | The roadmap: directional goals, the value each delivers, current state per goal, and which change owns each open gap | `docs/development/ROADMAP.md` |
 | Change provenance and review discussion | Git history and pull requests ([`documentation.md`, "Provenance lives in version control"](../docs/guidance/engineering/documentation.md#provenance-lives-in-version-control)) |
@@ -52,15 +48,13 @@ subject. `ARCHITECTURE.md` is a current-state cross-system map. It should link t
 
 ## The index check
 
-A capability organized by an index
-([`openspec-documentation.md`, "A capability organized by an index"](../docs/guidance/workflow/openspec-documentation.md#a-capability-organized-by-an-index))
-is held to its index by the change workflow's default check `spec-index`, which every step's `run pre-commit` and `make check-change` run with the change named, and `make check-spec-index [CHANGE=<change>]` runs alone (`change-workflow check spec-index`). It fails in a capability with an `index.md`, naming each, on: an `index.md` that declares no prefix, which leaves nothing else in that capability checked; a requirement whose name begins with no id; two requirements sharing an id; an id `index.md` omits or lists twice; a listed id in neither `spec.md` nor the named change's own deltas; a retired id in use; a link in `index.md` that does not resolve; and an entry whose link is not to its own id's heading in `spec.md`. With a change named, its deltas count as the archive will leave them, so closeout can write `index.md` before the archive merges a requirement into `spec.md`. A capability with no `index.md` is not checked.
+A capability organized by an index (`arkhai-change-workflow`'s guidance, "A
+capability organized by an index") is held to its index by the change workflow's default check `spec-index`, which every step's `run pre-commit` and `make check-change` run with the change named, and `make check-spec-index [CHANGE=<change>]` runs alone (`change-workflow check spec-index`). It fails in a capability with an `index.md`, naming each, on: an `index.md` that declares no prefix, which leaves nothing else in that capability checked; a requirement whose name begins with no id; two requirements sharing an id; an id `index.md` omits or lists twice; a listed id in neither `spec.md` nor the named change's own deltas; a retired id in use; a link in `index.md` that does not resolve; and an entry whose link is not to its own id's heading in `spec.md`. With a change named, its deltas count as the archive will leave them, so closeout can write `index.md` before the archive merges a requirement into `spec.md`. A capability with no `index.md` is not checked.
 
 ## This repository's closeout parts
 
-The workflow's closeout parts, and their order, are
-[`docs/guidance/workflow/closeout.md`](../docs/guidance/workflow/closeout.md). This
-repository adds two, packaging and end-to-end pipeline evidence, run in this order
+The workflow's closeout parts, and their order, are `arkhai-change-workflow`'s
+guidance, "Closeout". This repository adds two, packaging and end-to-end pipeline evidence, run in this order
 after campaign index currency and before promotion.
 
 ### The checks the workflow's parts run here
@@ -81,10 +75,9 @@ This repository's closeout runs `make check-packaging` and resolves every failur
 
 ### End-to-end pipeline
 
-This repository's closeout records the end-to-end pipeline's run that the latest passing validation gathered — a run of the code the closeout commit carries, since closeout changes no code; validation dispatches it by `make run-e2e` and collects it by `make fetch-e2e-logs` — with its result and the scenarios that exercise the change's behaviour, from that validation's record. Closeout dispatches no run of its own. A failed run fails that validation, which returns the change to implementation before closeout; a run that could not be made is recorded as unrun, naming its cause and the change that owns it ([`docs/guidance/engineering/testing.md`, "Work is not complete because its own tests pass"](../docs/guidance/engineering/testing.md#work-is-not-complete-because-its-own-tests-pass); [`docs/guidance/workflow/working-model.md`, "Implement"](../docs/guidance/workflow/working-model.md#implement)).
+This repository's closeout records the end-to-end pipeline's run that the latest passing validation gathered — a run of the code the closeout commit carries, since closeout changes no code; validation dispatches it by `make run-e2e` and collects it by `make fetch-e2e-logs` — with its result and the scenarios that exercise the change's behaviour, from that validation's record. Closeout dispatches no run of its own. A failed run fails that validation, which returns the change to implementation before closeout; a run that could not be made is recorded as unrun, naming its cause and the change that owns it ([`docs/guidance/engineering/testing.md`, "Work is not complete because its own tests pass"](../docs/guidance/engineering/testing.md#work-is-not-complete-because-its-own-tests-pass); `arkhai-change-workflow`'s guidance, "Implement").
 
 ## Current capability documentation
 
-This repository's capability index, whose role is
-[`openspec-documentation.md`, "The capability index and the roadmap"](../docs/guidance/workflow/openspec-documentation.md#the-capability-index-and-the-roadmap),
-is [`openspec/specs/README.md`](specs/README.md): every normative contract and architecture companion. `make check-capability-index` holds it complete: every capability with a `spec.md` has a row, and every row links one.
+This repository's capability index, whose role is `arkhai-change-workflow`'s
+guidance, "The capability index and the roadmap", is [`openspec/specs/README.md`](specs/README.md): every normative contract and architecture companion. `make check-capability-index` holds it complete: every capability with a `spec.md` has a row, and every row links one.

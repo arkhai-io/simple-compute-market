@@ -40,3 +40,24 @@ every import, not only those at the top of a module.
 A package declares every distribution it imports. An internal distribution declared
 but never imported is removed, or kept for a stated runtime reason — an entry point,
 a driver, an optional extra — recorded beside the declaration.
+
+## A port is satisfied structurally
+
+Where a lower component needs a fact a component beside it owns, it defines a port —
+the operation it calls and the values it gets back — and the composition that wires
+both supplies an implementation. The port is structural, the values it returns
+included, so the implementing component answers it with types of its own and never
+imports the port's owner. A concrete value type owned by the port's definer would
+make every implementation import it, and reverse the edge the port removed.
+
+For example, a scheduler that must not book a suspended account defines a standing
+reader returning a value with one member, whether the account is suspended. The
+billing component implements the reader with a record of its own carrying that member,
+and the application that composes both hands billing's reader to the scheduler.
+Neither component imports the other. Had the scheduler defined the returned record as
+a concrete type, billing would import the scheduler to build one.
+
+Nothing then checks that the implementation still fits the port when either changes,
+so where no type checker relates the two, the composition root, which imports both,
+holds a test that every member of the port's values is one the implementation's
+values carry.

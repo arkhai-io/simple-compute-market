@@ -16,7 +16,9 @@ permissions:
 
 # Runs `make test` as a change's validation runs it locally: one job per
 # target `make test` is made of, each the same command a developer runs, so a
-# suite passes here exactly when it passes there. Integration tests are mocked
+# suite passes here exactly when it passes there. No job installs the change
+# workflow: it is how this repository is changed, not part of its validation, and
+# no suite here needs it. Integration tests are mocked
 # at the boundary and reach no external service. A test asserts that the
 # matrix names every one of `make test`'s targets
 # (scripts/tests/test_tests_workflow.py).
@@ -54,6 +56,7 @@ jobs:
           - test-deployment-packaging
           - test-frp-grant-admission
           - test-injected-time
+          - test-eventing
           - test-lane-double-controls
           - test-payments-lane-double
           - test-mediation-lane-double
@@ -87,31 +90,10 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           make install-gitleaks GITLEAKS_INSTALL_DIR="$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      # bubblewrap for the change workflow's sandbox tests, with the runner's AppArmor
-      # restriction on unprivileged user namespaces lifted, so bubblewrap can make
-      # one; the engine's own probe then finds the sandbox runs.
-      - if: matrix.target == 'test-deployment-packaging'
-        name: Install bubblewrap and admit its user namespaces
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Build the repository's wheels
         run: make dist-ci
-      # The change workflow built from this tree and installed as a tool, its skills
-      # written into each harness's user skill directory, so the install is proven
-      # from the tree and a make target calling `change-workflow` finds the tree's
-      # engine. `change-workflow install` runs outside the checkout, which so keeps
-      # no local configuration: CI checks the committed configuration alone.
-      - if: matrix.target == 'test-deployment-packaging'
-        name: Install the change workflow from the tree
-        run: |
-          uv tool install --force scripts/change-workflow-wheel
-          bin="$(uv tool dir --bin)"
-          echo "$bin" >> "$GITHUB_PATH"
-          cd "$RUNNER_TEMP" && "$bin/change-workflow" install
-      # Where the script suites run, a real-gitleaks, real-Helm, real-Compose or
-      # real-bubblewrap case that would skip fails instead, and pytest's summary names
+      # Where the script suites run, a real-gitleaks, real-Helm, or real-Compose case
+      # that would skip fails instead, and pytest's summary names
       # each skip and its reason beside the failures and errors it lists by default,
       # whose lines the CI evidence reads failing tests from.
       - name: make ${{ matrix.target }}
@@ -120,7 +102,6 @@ jobs:
           GITLEAKS_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
           HELM_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
           COMPOSE_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
-          SANDBOX_REQUIRED: ${{ matrix.target == 'test-deployment-packaging' && '1' || '' }}
         run: make ${{ matrix.target }}
 
   # The frps admission plugin's gate, which needs the network: real frps and frpc,

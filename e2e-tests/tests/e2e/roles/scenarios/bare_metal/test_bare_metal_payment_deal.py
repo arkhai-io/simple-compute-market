@@ -77,6 +77,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage09c_LeaseRecorded,
     Stage11a2_ReleaseTeardownGateAndDrain,
     Stage11b_TeardownCompletion,
+    Stage11c_LeaseEventsRecorded,
 )
 from tests.e2e.roles.helpers.domain_deal import ordered_events, require_state
 from tests.e2e.roles.helpers.payment_compensation import (
@@ -458,6 +459,10 @@ class TestStage11_SellerRefundsTheHeldPayment:
 
 
 class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestStage11c_LeaseEventsRecorded(Stage11c_LeaseEventsRecorded):
     pass
 
 

@@ -28,6 +28,7 @@ from alembic import command
 from market_schema_migrations import (
     CheckState,
     MigrationRefused,
+    UnsupportedCause,
     schema_snapshot,
 )
 from sqlalchemy import create_engine
@@ -211,8 +212,12 @@ def test_an_earlier_revision_is_refused_naming_what_it_lacks(tmp_path: Path) -> 
     with pytest.raises(MigrationRefused) as refused:
         migrate_database(_url(database))
     message = str(refused.value)
+    assert refused.value.result.cause is UnsupportedCause.OLDER_OR_SHARED
     assert "017_publisher_replay_leases" in message and FLOOR_REVISION in message
-    assert "fresh database" in message
+    assert "that marketplace 0.3.0's registry recorded" in message
+    assert "If it is the registry's database" in message
+    assert "upgrade it through marketplace 0.3.0 first" in message
+    assert "fresh database" not in message
 
 
 def test_tables_without_a_revision_are_refused_unchanged(tmp_path: Path) -> None:
@@ -227,6 +232,9 @@ def test_tables_without_a_revision_are_refused_unchanged(tmp_path: Path) -> None
         migrate_database(_url(database))
 
     assert refused.value.result.state is CheckState.UNSUPPORTED
+    assert refused.value.result.cause is UnsupportedCause.NOT_THIS_CHAIN
+    assert "was not built by `registry-migrate`" in str(refused.value)
+    assert "upgrade" not in str(refused.value)
     assert database.read_bytes() == before
     with pytest.raises(IncompatibleDatabase):
         require_compatible_database(_url(database))

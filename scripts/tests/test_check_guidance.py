@@ -5,7 +5,6 @@ guidance, and every cited anchor a heading."""
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import pytest
 
 from check_guidance import (_HEADING, anchors, check, frontmatter_tags, main, prose,
                             repository_files, slug)
+from workflow_command import WorkflowRefused
 
 ENGINEERING_README = """---
 tags: [engineering]
@@ -169,16 +169,82 @@ def _problems(root: Path) -> list[str]:
     return check(root, _files(root)).problems
 
 
+# The workflow's layer as this repository holds it: the installed workflow's own
+# guidance, outside the checkout, its row of the layer table naming no path here.
+INSTALLED_ROW = ("| workflow | The installed `arkhai-change-workflow`'s guidance, the "
+                 "directory `change-workflow config --json` names as `workflow.guidance` |")
+WORKFLOW_FILES = {"docs/guidance/workflow/README.md": "README.md",
+                  WORKFLOW_CLOSEOUT: "closeout.md"}
+
+
+def _installed_tree(tmp_path: Path, changes: dict[str, str | None] | None = None,
+                    installed: dict[str, str] | None = None) -> tuple[Path, Path]:
+    """The passing tree in a checkout, its workflow files instead in an installed
+    directory beside it, with `changes` and `installed` written over each; the
+    checkout and the installed directory."""
+    root = tmp_path / "checkout"
+    workflow = tmp_path / "installed"
+    moved = {path: None for path in WORKFLOW_FILES}
+    agents = AGENTS.replace(
+        "| workflow | [`docs/guidance/workflow/`](docs/guidance/workflow/README.md) |",
+        INSTALLED_ROW)
+    _tree(root, {**moved, "AGENTS.md": agents, **(changes or {})})
+    files = {name: TREE[path] for path, name in WORKFLOW_FILES.items()}
+    for name, text in {**files, **(installed or {})}.items():
+        (workflow / name).parent.mkdir(parents=True, exist_ok=True)
+        (workflow / name).write_text(text, "utf-8")
+    return root, workflow
+
+
 def _testing_tags(tags: str) -> dict[str, str | None]:
     return {ENGINEERING_TESTING: TESTING.replace("[engineering, testing]", tags)}
 
 
 def test_the_passing_tree_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root = _tree(tmp_path)
+    root, installed = _installed_tree(tmp_path)
 
-    assert _problems(root) == []
-    assert main([], root=root, lister=_files) == 0
-    assert capsys.readouterr().out.startswith("OK: 8 guidance files are tagged")
+    assert check(root, _files(root), installed).problems == []
+    assert main([], root=root, lister=_files, workflow_guidance=lambda _: installed) == 0
+    assert capsys.readouterr().out.startswith("OK: 6 guidance files are tagged")
+
+
+def test_the_installed_layers_vocabulary_holds_and_its_files_are_no_members(
+        tmp_path: Path) -> None:
+    """A repository document carries a tag only the installed workflow's vocabulary
+    defines, and the vocabulary's rows are carried by the installed files; none of
+    them is a member of the set, and the layer table's row naming the installed
+    guidance names no path here."""
+    root, installed = _installed_tree(tmp_path, {
+        "openspec/README.md": OPENSPEC_README.replace("[repository]", "[repository, closeout]")})
+
+    guidance = check(root, _files(root), installed)
+
+    assert guidance.problems == []
+    assert guidance.vocabularies["workflow"][0] == str(installed / "README.md")
+    assert not any(path.startswith(str(installed)) for path in guidance.tags)
+
+
+def test_an_installed_vocabulary_row_no_installed_file_carries(tmp_path: Path) -> None:
+    root, installed = _installed_tree(tmp_path, installed={
+        "closeout.md": CLOSEOUT.replace("[workflow, closeout]", "[workflow]")})
+
+    assert check(root, _files(root), installed).problems == [
+        f"{installed / 'README.md'}: the workflow vocabulary's tag closeout is carried by no "
+        "guidance file"]
+
+
+def test_without_the_workflow_installed_the_check_fails_saying_it_is_needed(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root, _ = _installed_tree(tmp_path)
+
+    def missing(_: Path) -> Path:
+        raise WorkflowRefused("cannot run change-workflow: not found")
+
+    assert main([], root=root, lister=_files, workflow_guidance=missing) == 1
+    assert capsys.readouterr().out == (
+        "FAIL: the guidance's workflow layer is the installed change workflow's, "
+        "`arkhai-change-workflow`, which this check needs installed: cannot run "
+        "change-workflow: not found\n")
 
 
 def test_the_set_is_found_by_place_tags_and_the_layer_table(tmp_path: Path) -> None:
@@ -515,9 +581,9 @@ def test_the_listing_of_exceptions_prints_every_row(
 
 def test_a_failing_tree_fails_naming_each_problem(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    root = _tree(tmp_path, {POOL: "# Pool testing\n"})
+    root, installed = _installed_tree(tmp_path, {POOL: "# Pool testing\n"})
 
-    assert main([], root=root, lister=_files) == 1
+    assert main([], root=root, lister=_files, workflow_guidance=lambda _: installed) == 1
 
     out = capsys.readouterr().out
     assert out.startswith(f"{POOL}: has no tags")
@@ -546,7 +612,7 @@ def test_the_files_are_those_git_tracks_or_would_track(tmp_path: Path) -> None:
 
 
 # This repository's engineering guidance, which the workflow's skills cite by section
-# name: each name heads one section, so every citation resolves.
+# name: each name heads one section, so a citation of one is never ambiguous.
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 ENGINEERING = REPOSITORY / "docs/guidance/engineering"
@@ -561,30 +627,3 @@ def test_no_heading_repeats_beneath_the_engineering_guidance() -> None:
                 where.setdefault(heading[2], []).append(path.name)
 
     assert {name: files for name, files in where.items() if len(files) > 1} == {}
-
-
-def test_every_section_the_workflow_cites_resolves_in_this_repositorys_guidance(
-        tmp_path: Path) -> None:
-    """The workflow's `check config`, run as a process in a checkout pointing at this
-    repository's engineering guidance, reports no cited section missing or heading
-    two sections. Library integration: the engine's command over a temporary Git
-    checkout."""
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    (tmp_path / ".agents").mkdir()
-    (tmp_path / ".agents/workflow.toml").write_text('[workflow]\nversion = ">=0.1"\n', "utf-8")
-    (tmp_path / ".agents/workflow.local.toml").write_text(
-        '[guidance]\nengineering = { path = "engineering/" }\n', "utf-8")
-    (tmp_path / "engineering").symlink_to(ENGINEERING, target_is_directory=True)
-
-    command = str(REPOSITORY / "scripts/change-workflow")
-    shown = subprocess.run([command, "config", "--json"], cwd=tmp_path, capture_output=True,
-                           text=True, check=True)
-    checked = subprocess.run([command, "check", "config"], cwd=tmp_path, capture_output=True,
-                             text=True)
-
-    # The pointer is read, so the report below is of this repository's guidance.
-    assert json.loads(shown.stdout)["guidance"]["engineering"] == {
-        "path": str(tmp_path / "engineering")}
-    assert (checked.returncode, checked.stderr) == (0, "")
-    assert [line for line in checked.stdout.splitlines()
-            if line.startswith(("UNRESOLVED", "AMBIGUOUS"))] == []

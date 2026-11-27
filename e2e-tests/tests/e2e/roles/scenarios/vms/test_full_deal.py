@@ -164,6 +164,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage11a2_ReleaseTeardownGateAndDrain,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
+    Stage11c_LeaseEventsRecorded,
 )
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import E2E_RESOURCE_ID
 from tests.e2e.roles.helpers.domain_deal import require_state
@@ -607,6 +608,10 @@ class TestStage11a2_ReleaseTeardownGateAndDrain(Stage11a2_ReleaseTeardownGateAnd
 
 
 class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestStage11c_LeaseEventsRecorded(Stage11c_LeaseEventsRecorded):
     pass
 
 

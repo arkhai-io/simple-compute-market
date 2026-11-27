@@ -4,11 +4,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from market_resource_pools.db import Base as ResourcePoolBase, ResourcePool
 
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
 from market_site.router import make_capacity_router
+from pool_facts_double import PoolFactsDouble
 
 
 def _client():
@@ -18,18 +18,9 @@ def _client():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    ResourcePoolBase.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as db, db.begin():
-        db.add(
-            ResourcePool(
-                id="pool-a",
-                label="Pool A",
-                provider="test",
-                enabled=True,
-                policy_tags={"deliverable_modes": ["vm"]},
-            )
-        )
-    ledger = CapacityLedgerService(sessionmaker(bind=engine))
+    ledger = CapacityLedgerService(
+        sessionmaker(bind=engine), pool_facts=_pools("pool-a", modes=("vm",))
+    )
     ledger.register_resource(host_id="host-a", 
         resource_id="host-a",
         pool_id="pool-a",
@@ -75,26 +66,30 @@ def test_projection_versions_are_independent_and_snapshots_are_canonical():
     assert capacity["capacity_buckets"][0]["capacity_group_key"]
 
 
-def _engine_with_pools(*pool_ids: str):
-    """An in-memory site database holding the pools a test registers into;
-    registration refuses a pool the site does not have."""
+def _engine():
+    """An in-memory site database."""
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    ResourcePoolBase.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as db, db.begin():
-        for pool_id in pool_ids:
-            db.add(ResourcePool(id=pool_id, label=pool_id, provider="test",
-                                enabled=True, policy_tags={}))
     return engine
 
 
+def _pools(*pool_ids: str, modes=()) -> PoolFactsDouble:
+    """The pools a test registers into; registration refuses a pool the site
+    does not have."""
+    pools = PoolFactsDouble()
+    for pool_id in pool_ids:
+        pools.declare(pool_id, modes)
+    return pools
+
+
 def test_resource_pool_projection_uses_authoritative_inventory_provider():
-    engine = _engine_with_pools("pool-a")
-    ledger = CapacityLedgerService(sessionmaker(bind=engine))
+    ledger = CapacityLedgerService(
+        sessionmaker(bind=_engine()), pool_facts=_pools("pool-a")
+    )
     ledger.register_resource(resource_id="bucket-host", pool_id="pool-a", total_units=8)
     inventory = [{
         "resource_id": "host-from-repository",
@@ -129,8 +124,9 @@ def test_public_reservation_rejects_invalid_unit_claims(value):
 
 
 def test_get_pool_directory_surfaces_pool_metadata_on_the_projection():
-    engine = _engine_with_pools("pool-a")
-    ledger = CapacityLedgerService(sessionmaker(bind=engine))
+    ledger = CapacityLedgerService(
+        sessionmaker(bind=_engine()), pool_facts=_pools("pool-a")
+    )
     ledger.register_resource(host_id="host-a", 
         resource_id="host-a", pool_id="pool-a", total_units=8,
         attributes={},

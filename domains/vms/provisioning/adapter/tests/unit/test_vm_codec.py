@@ -23,9 +23,10 @@ import pytest
 import yaml
 
 from compute_provisioning.hosts import ConnectionEnvelope, ExecutionHost
-from compute_provisioning.jobs import JobRun, JobSuccess
-from compute_provisioning_ansible import AnsibleJobExecutor, render_extra_vars
+from compute_provisioning.jobs import ConfigurationRefusedError, JobFailure, JobRun, JobSuccess
+from compute_provisioning_ansible import AnsibleJobExecutor, FailureRecord, render_extra_vars
 from compute_provisioning_ansible.runner import (
+    AnsibleError,
     AnsibleResult,
     MaterializedInventory,
     inventory_target,
@@ -35,9 +36,12 @@ from types import SimpleNamespace
 from vm_provisioning_operator.models import HOST_DIAGNOSTICS_RESULT_KIND
 
 from vm_provisioning_adapter.codec import (
+    VM_ADDRESS_UNKNOWN,
     VM_CREATE_DETAIL,
     VM_DIAGNOSTICS_FIELDS,
+    VM_IMAGE_LOCKED,
     VM_INVENTORY_GROUP,
+    VM_NOT_FOUND,
     GoldenImageCredentials,
     VmAnsibleCodec,
     VmPlaybookOutput,
@@ -393,22 +397,70 @@ class TestPrepare:
 # ---------------------------------------------------------------------------
 
 
-class TestRetryClassification:
-    @pytest.mark.parametrize(
-        "message",
-        ["VM target not found", "error: failed to get domain 'vm-1'", "DOMAIN NOT FOUND"],
-    )
-    def test_vm_failures_are_not_retried(self, message):
-        assert VmAnsibleCodec().is_retryable(message) is False
-        assert _executor().is_retryable(message) is False
+class TestFailureClassification:
+    @staticmethod
+    def _classify(**record):
+        values = {"host": "kvm1", "task": "Look up the guest", **record}
+        return VmAnsibleCodec().classify(_run({}), FailureRecord(**values))
 
-    def test_transport_failures_are_not_retried(self):
-        assert _executor().is_retryable("Fatal: Invalid SSH key provided") is False
-        assert _executor().is_retryable("host UNREACHABLE: timeout") is False
+    @pytest.mark.parametrize(
+        "message,code",
+        [
+            ("VM target not found", VM_NOT_FOUND),
+            ("error: failed to get domain 'vm-1'", VM_NOT_FOUND),
+            ("DOMAIN NOT FOUND", VM_NOT_FOUND),
+            ('Failed to get "resize" lock', VM_IMAGE_LOCKED),
+            ("Is another process using the image [/var/lib/vm-1.qcow2]?", VM_IMAGE_LOCKED),
+            ("Cannot determine IP address for VM vm-1", VM_ADDRESS_UNKNOWN),
+        ],
+    )
+    def test_a_vm_failure_is_classed_from_the_tasks_message_and_not_retried(self, message, code):
+        failure = self._classify(msg=message)
+
+        assert (failure.code, failure.retryable) == (code, False)
+
+    def test_a_vm_failure_in_the_tasks_error_output_is_classed(self):
+        """A ``command`` task running ``virsh`` reports only its exit in ``msg``."""
+        failure = self._classify(
+            msg="non-zero return code", stderr="error: failed to get domain 'vm-1'"
+        )
+
+        assert (failure.code, failure.retryable) == (VM_NOT_FOUND, False)
 
     @pytest.mark.parametrize("message", ["Unexpected connection reset", ""])
-    def test_other_failures_are_retried(self, message):
-        assert _executor().is_retryable(message) is True
+    def test_any_other_task_failure_is_task_failed_and_retried(self, message):
+        failure = self._classify(msg=message)
+
+        assert (failure.code, failure.retryable) == ("task_failed", True)
+
+    def test_a_vm_jobs_missing_domain_fails_without_a_retry_through_the_executor(self):
+        """The job's run reports the record; the executor asks this codec."""
+        runner = MagicMock()
+        runner.write_inventory.return_value = MaterializedInventory(path=Path("/tmp/none.ini"))
+        runner.start_playbook.return_value = SimpleNamespace(process_id=1)
+        runner.execution_handle = lambda run: {"pid": 1}
+
+        async def wait(run, timeout_seconds, log_callback=None, redact=None):
+            raise AnsibleError(
+                "Playbook failed", stdout="", stderr="", returncode=2,
+                failures=(FailureRecord(host="kvm1", task="Stop the guest",
+                                        msg="Domain not found: no domain with matching name"),),
+            )
+
+        runner.wait_for_playbook = wait
+        outcome = asyncio.run(_executor(runner=runner).execute(_run(
+            {"host_id": "kvm1", "vm_action": "destroy", "offering_mode": "vm",
+             "vm_target": "vm-1"}, action="destroy",
+        )))
+
+        assert isinstance(outcome, JobFailure)
+        assert (outcome.error.code, outcome.error.retryable) == (VM_NOT_FOUND, False)
+        assert outcome.error.message.startswith('kvm1: task "Stop the guest" failed: Domain not found')
+
+
+def test_job_parameters_the_codec_cannot_read_are_refused_as_configuration():
+    with pytest.raises(ConfigurationRefusedError, match="VM job parameters are not valid"):
+        VmAnsibleCodec().prepare(_run({"host_id": "kvm1", "vm_action": "create"}))
 
 
 class TestRedaction:

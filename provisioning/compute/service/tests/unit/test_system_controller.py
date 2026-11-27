@@ -27,6 +27,9 @@ _UNCOMPOSED = [
     ("POST", "/api/v1/system/fulfillment-convergence/resume"),
     ("POST", "/api/v1/system/lease-watchdog/pause"),
     ("POST", "/api/v1/system/lease-watchdog/resume"),
+    ("POST", "/api/v1/system/event-delivery/run-cycle"),
+    ("POST", "/api/v1/system/event-delivery/pause"),
+    ("POST", "/api/v1/system/event-delivery/resume"),
 ]
 
 
@@ -35,6 +38,7 @@ def _app(*, status_service=None, lease_lifecycle=None, convergence_watchdog=None
         status_service=lambda: status_service,
         lease_lifecycle=lambda: lease_lifecycle,
         convergence_watchdog=lambda: convergence_watchdog,
+        event_delivery=lambda: None,
     )
     app = FastAPI()
     app.include_router(health)

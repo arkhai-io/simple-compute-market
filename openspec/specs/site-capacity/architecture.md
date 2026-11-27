@@ -16,6 +16,8 @@ fulfillment scheduling
 
 Putting the ledger outside storefronts allows several sellers or processes to share supply without treating independently refreshed caches as locks. It also lets a reservation outlive the storefront process that initiated it.
 
+What a storefront asks the ledger to probe or reserve is a capacity claim, one mapping read in two ways. Its `dimensions` are quantities, each matched by sufficiency: the resource must have at least that much of the dimension free, and a dimension the resource does not declare has none. A claim carrying no `dimensions` map asks a unit count under one of the composition's unit keys, which is read as its mirror dimension. Every remaining key but the `offering_mode`, which the resource's pool must deliver, is matched by equality against the declaration's attributes and its own facts, in one namespace: the pool or resource a claim names, its `resource_type`, and each attribute such as a GPU model. A claim that names no `resource_type` matches any.
+
 ## Declared capacity and connection identity
 
 What a site sells is declared by capacity declarations: a Physical Resource's shape
@@ -33,7 +35,7 @@ and neither appears. Where a declaration's pool is backed and the pool's provide
 delivers through a host, the declaration has a usable host only when it names one
 that is registered and enabled. A disabled host, a host never registered, and no
 host at all leave a backed listing equally undeliverable, so one predicate,
-`declaration_has_usable_host` in `market_resource_pools.host_requirement`, decides
+`declaration_has_usable_host` in `market_site.deliverable_hosts`, decides
 all three, and every layer that decides what is offered applies it itself: admission
 (probe, reserve, resize), the rebind recheck, settlement scheduling, and the ledger's
 offered read. A declaration without a usable host is neither admitted nor placed,
@@ -41,7 +43,11 @@ and projects not enabled. The rule does not apply in an unbacked pool, whose
 listings deliver nothing through a host and legitimately name none, nor where the
 provider needs no host. Disabling a host thereby drains it: nothing new lands on
 it, while an assignment already made keeps its host and its create waits at
-dispatch until the host is enabled again.
+dispatch until the host is enabled again. The predicate takes the pool's need for a
+host as a boolean, so it names no provider: the site owns it and the
+`DeliverableHosts` protocol beside it, `kit/fulfillment`'s scheduler and the compute
+relay report take both from `market_site`, and the pool authority keeps only the
+mapping from a pool's provider to that need (`market_resource_pools.host_requirement`).
 
 Which hosts take new delivery is the host registry's fact, and the site keeps no
 copy of it. The composition that owns hosts supplies a `DeliverableHosts` report,
@@ -73,6 +79,38 @@ disable commit between the read and the decision. A composition that supplies a 
 requirement but no report treats every named host as usable; one that supplies no
 requirement, as API credits does, applies no host rule.
 
+The site decides on four facts of a Resource Pool — whether it exists, whether it is
+enabled, the offering modes it delivers, and whether its declarations need a host —
+and the pool is another authority's record, so the site reads none of its storage.
+`kit/site` defines a pool-facts port, `PoolFactsReader` in `market_site.pool_facts`,
+and the ledger requires one at construction: it has no default, so no composition can
+omit it and no permissive reader exists to fall back on. Each decision reads each pool
+it touches once, in its own session, so admission judges the pool inside the
+transaction that creates the reservation, under the ledger's serialization, and a
+pool's deliverable modes cannot narrow between the check and the write. Registration
+refuses a pool the reader reports as not existing; probe, reserve, resize, and the
+rebind recheck admit only into an enabled pool declaring the requested mode, then
+apply the usable-host predicate with the pool's `needs_host`; a pool whose declaration
+cannot be read admits nothing. The port's values are structural, `PoolFacts` as much
+as the reader, so a reader answers it with values of its own and never imports
+`market_site`: the edge runs from the composition root to both authorities, never
+between them. The pool authority's `ResourcePoolFacts` answers it from the stored
+pool, resolving the pool's provider against the composition's host requirement into
+`needs_host`, and reports a missing pool as not existing, not enabled, with unreadable
+modes, and needing a host exactly when a requirement is supplied. The provisioning
+service composes it with the merged requirement its scheduler applies too, so
+admission and placement judge a pool's need for a host alike, and holds the test that
+the reader's values carry every member the port declares; API credits composes it
+with no requirement, so no pool needs a host and its admission is host-agnostic
+([resource-pool management, "Ownership boundary"](../resource-pool-management/architecture.md#ownership-boundary)).
+`kit/site` imports and declares neither pool distribution, which its boundary test,
+`kit/site/tests/unit/test_import_boundaries.py`, holds, since the layer and scope rules
+cannot see an edge between two kits of empty scope. Sanctioning the edge by amending
+the kit-area order was rejected: it would retire the rule that authorities build on
+the foundation alone, and leave each new fact half a row read and half an injected
+value. A port method per fact was rejected because it moves the site's admission rules
+into the reader, and a raw row view because it keeps the site interpreting pool tags.
+
 Projected `enabled` follows admission. A storefront mirrors admission's constraints
 from its projections only to avoid committing to what admission will refuse, so
 the projection states what admission enforces: a declaration's projected `enabled`
@@ -87,23 +125,25 @@ listing keeps each declaration's stored `enabled`, so an operator sees what they
 declared.
 
 The ledger states each declaration's offered `enabled` in one read,
-`list_offered_resources`, which takes the declarations, the host requirement, the
-pools' providers and deliverable offering modes, and the deliverable-host report in
-one transaction. The capacity-bucket projection, the advisory snapshot, and the
-compute service's resource-pool projection are all built from it, so the domain
-views that projection builds, bare metal's `available` among them, cannot drift from
-the capacity-bucket projection, and no projection builder reads a host. The read
-judges a pool by whether it declares a deliverable offering mode, as admission does,
-rather than by its backing: an unbacked pool delivers nothing, so a pool declaring no
-deliverable mode keeps its declarations' own `enabled`, and the site takes no new
-read of pool state while its edge into the pool authority stands. A missing pool, or
-one whose modes do not parse, is judged to deliver, so the read fails closed rather
-than offering what admission would refuse. Applying the rule in each projection
-builder instead was rejected: it calls the rule from two places and reads hosts in a
-session apart from the declarations. This makes the ledger hold projection logic
-beside its records; a ledger would better be closer to a raw data structure, with
-projection logic kept apart from it, but the ledger already mixes the two, and
-separating them is a change of its own.
+`list_offered_resources`, which takes the declarations, each pool's facts through
+the port, and the deliverable-host report in one transaction, reading the report at
+most once, and only once a pool needs a host. The capacity-bucket projection, the
+advisory snapshot, and the compute service's resource-pool projection are all built
+from it, so the domain views that projection builds, bare metal's `available` among
+them, cannot drift from the capacity-bucket projection, and no projection builder
+reads a host. The read judges a pool by whether it declares a deliverable offering
+mode, as admission does, rather than by its backing, which the port does not carry:
+an unbacked pool delivers nothing, so a pool declaring no deliverable mode keeps its
+declarations' own `enabled`. A pool whose modes cannot be read, a missing pool among
+them, is judged to deliver, so wherever it needs a host the host rule applies rather
+than being skipped: its declarations are offered enabled only with a usable host.
+Admission refuses them whatever their host, since such a pool delivers no mode it can
+read, so the offered read can show enabled a declaration that admission refuses.
+Applying the rule in each projection builder instead was rejected: it calls the rule
+from two places and reads hosts in a session apart from the declarations. This makes
+the ledger hold projection logic beside its records; a ledger would better be closer
+to a raw data structure, with projection logic kept apart from it, but the ledger
+already mixes the two, and separating them is a change of its own.
 
 The alternatives each left capacity with more than one authority. Adding vCPU, RAM,
 and disk columns to hosts would have folded sellable capacity into records whose
@@ -132,7 +172,11 @@ the same refusals, so a declaration means the same thing however it arrives. Eve
 declaration names its pool, and a stored row with none is malformed: it is reported
 by the administrative listing, so an operator can find and re-declare it, but is
 projected, admitted, scheduled, and moved as a member of no pool, rather than read
-as `default` or as a pool named for its resource.
+as `default` or as a pool named for its resource. The ledger skips such a row before
+reading any pool fact for it: the offered read reports it not offered, so the advisory
+snapshot omits it, and each read logs it. The column stays nullable rather than
+backfilled or refused by a migration, since the rows are already inert; that is worth
+revisiting once anything other than the ledger writes declarations.
 
 Administration composes with the ledger's serialization rather than around it. A
 declaration's checks against stored state (a pool move while the resource holds a
@@ -173,18 +217,29 @@ Both properties — evaluating the new shape's availability *as if* the old hold
 The ledger records one immutable `lease_ended` event with the transition that
 forms end intent, before executor teardown. Repeating that transition returns
 the same event. The event binds reservation/site, instant, cause and source state,
-including termination/failure reasons and any applicable deadline phase. The
-service's separately acknowledged report outbox borrows the same transaction,
-so rollback removes both; direct release, expiry, explicit termination, failed
-release and operator force-release are all covered.
+including termination/failure reasons and any applicable deadline phase. In the
+same transaction the ledger records a `site.lease_ended` event carrying that
+payload through the event recorder its composition injects, and the kind's
+record-time hook, which compute provisioning attaches, signs the report and keeps
+it, so rollback removes the record, the event and the signed report together;
+direct release, expiry, explicit termination, failed release and operator
+force-release are all covered. A ledger composed without a recorder records no
+event. The release that frees capacity records `site.capacity_released` in its own
+transaction the same way. The release-failure transition records an event its
+caller prepared, `provisioning.lease_release_failed` from the lease lifecycle, in
+its transaction without interpreting its kind, and records nothing when it refuses
+the transition, so a failure the site turned away, such as one an operator's force
+release overtook, reports nothing. The site's kinds are declared in `kit/site`
+(`market_site.events`); the eventing system is
+[`ARCHITECTURE.md`, "Events"](../../../docs/development/ARCHITECTURE.md#events).
 
 Compute provisioning signs and persists the original wrapper under
 `arkhai.site.lease-ended.v1`. Owner-scoped push and authenticated
 `LeaseView.end_reports` recovery return identical signed bytes even after signer
-changes. Unsupported push parks per configured peer, transient failures retry,
-and old events are never redirected on peer reconfiguration. Explicit resumption
-follows receiver upgrade. See
-[report delivery](../physical-provisioning/architecture.md#lease-end-report-delivery).
+changes. Push is a consumer of `site.lease_ended`: unsupported push parks the
+configured peer's destination, transient failures retry, and old events are never
+redirected on peer reconfiguration. Explicit resumption follows receiver upgrade.
+See [report delivery](../physical-provisioning/architecture.md#lease-end-report-delivery).
 
 This report states intended end, not successful teardown or financial state.
 A due end terminates immediately; a future end truncates the lease without

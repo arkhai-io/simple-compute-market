@@ -8,11 +8,29 @@ domain whose executor ran the job.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from .contracts import CredentialEnvelope, ResultEnvelope
+
+
+class ProvisioningErrorEnvelope(BaseModel):
+    """Why a job's attempt failed, as its executor or the job authority classified it.
+
+    ``code`` is the failure's class, from an open set of strings: a generic
+    class (``task_failed``, ``unreachable``, ``timed_out``, the job
+    authority's ``not_dispatchable`` and ``internal_error``, among others) or
+    one a domain declares. ``retryable`` says whether running the job again
+    could succeed; whether and when a retry happens is the job authority's.
+    ``details`` are what the failure's reader may want — its host, task,
+    module, return code — already redacted, since they leave the service.
+    """
+
+    code: str
+    message: str
+    retryable: bool = False
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobSubmitResponse(BaseModel):
@@ -42,6 +60,16 @@ class JobStatusResponse(BaseModel):
         description="The result the job's executor reported on success",
     )
     error: Optional[str] = Field(default=None, description="Error message if the job failed")
+    failure: Optional[ProvisioningErrorEnvelope] = Field(
+        default=None,
+        description=(
+            "The latest failed attempt's classified failure: its code, message, "
+            "whether it is retryable, and redacted details. Null while no attempt "
+            "has failed, once an attempt succeeds, and for a job that failed before "
+            "its service kept structured failures; a job cancelled after a failed "
+            "attempt keeps it. ``error`` carries the failure's text"
+        ),
+    )
     retry_count: int = Field(default=0, description="Number of retries attempted so far")
     max_retries: int = Field(default=3, description="Maximum retries allowed for this job")
     next_retry_at: Optional[datetime] = Field(
@@ -112,4 +140,5 @@ __all__ = [
     "JobLogsResponse",
     "JobStatusResponse",
     "JobSubmitResponse",
+    "ProvisioningErrorEnvelope",
 ]

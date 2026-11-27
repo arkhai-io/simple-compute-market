@@ -83,6 +83,7 @@ def test_a_new_unpinned_host_does_not_connect(tmp_path, monkeypatch):
 
     assert isinstance(outcome, JobFailure)
     assert outcome.error.code == "host_key_refused" and not outcome.error.retryable
+    assert outcome.error.details == {"host": "fixture-node"}
     assert "pinned: none" in outcome.error.message
     assert "presented: unavailable" in outcome.error.message
     assert events == []

@@ -12,7 +12,7 @@ and `skip_specs` in `.openspec.yaml` is revisited with it.
       as a finding for its capability's owner.
 - [ ] 3. Move the validator pin in `openspec/README.md` forward, and pass
       `validate --all --strict` under it.
-- [ ] 4. Closeout, per `docs/guidance/workflow/closeout.md`, with this
+- [ ] 4. Closeout, per `arkhai-change-workflow`'s guidance, "Closeout", with this
       repository's parts in `openspec/README.md#this-repositorys-closeout-parts`,
       in its order: comment hygiene and import placement confirmed (no code is expected
       to change, so recorded no-ops); documentation compliance; narrative

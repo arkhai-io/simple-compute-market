@@ -60,6 +60,27 @@ def probe_command(request: dict[str, Any], *, operator: bool) -> str:
     return shlex.join(argv)
 
 
+#: The event the provisioning service records for a teardown attempt held for
+#: an operator's repair.
+TEARDOWN_ATTEMPT_HELD = "provisioning.teardown_attempt_held"
+
+
+def held_attempt_event(events: list[Any], job: Any) -> Any:
+    """The one ``provisioning.teardown_attempt_held`` event of ``job``'s
+    current failed attempt, naming its cleanup refusal, its retry time and the
+    retries it has left, as the job records them."""
+    held = [event for event in events if event.kind == TEARDOWN_ATTEMPT_HELD
+            and event.details.get("retry_count") == job.retry_count]
+    assert len(held) == 1, f"expected one held-attempt event for retry {job.retry_count}: {events}"
+    event = held[0]
+    assert event.subject.type == "job" and event.subject.id == job.job_id, event
+    assert event.severity == "action_required", event
+    assert event.attributes.get("failure_class") == "cleanup_refused", event
+    assert event.attributes.get("retries_left") == job.max_retries - job.retry_count, event
+    assert event.details.get("host_id") == job.host_id, event
+    return event
+
+
 def retryable_refusal(job: Any) -> bool:
     """Only an actual failed attempt with a scheduled remaining retry is repairable."""
     if job.status in ("failed", "cancelled", "succeeded"):
@@ -144,12 +165,15 @@ class WorkingDataQualification:
             driver.jobs.sleep(min(1.0, max(0.0, deadline - driver.jobs.clock())))
         logs = driver.provisioning_client.get_job_logs(job.job_id).logs or ""
         assert "foreign descendant" in logs, "failed attempt did not prove the intended unsafe-tree refusal"
-        # The operator's notification of the refusal is this record, read
-        # through the typed job API: log where it was observed.
+        # The operator is told of the refusal by the event the attempt held for
+        # repair records, which their routes push to their sinks, read here
+        # through the typed event API beside the job's record.
+        held = held_attempt_event(driver.provisioning_client.list_events(
+            kind=TEARDOWN_ATTEMPT_HELD, subject=f"job:{job.job_id}").events, observation)
         log.info("Reclaim job %s of reservation %s refused: %s, retry %s of %s, next at %s; "
-                 "observed through the provisioning job API", job.job_id, reservation,
-                 observation.error, observation.retry_count, observation.max_retries,
-                 observation.next_retry_at)
+                 "event %s %s observed through the provisioning event API", job.job_id,
+                 reservation, observation.error, observation.retry_count,
+                 observation.max_retries, observation.next_retry_at, held.id, held.summary)
         assert deal_state.deal_lease.refresh()["status"] == "releasing"
         assert deal_state.deal_lease.resource_consumed(storefront_admin_client, deal_state.reserved_resource_id), "unsafe cleanup advertised available capacity"
         # The foreign child is inside a selected UID-owned directory. The

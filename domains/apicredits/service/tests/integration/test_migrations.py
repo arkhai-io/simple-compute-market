@@ -1,10 +1,13 @@
 """The API-credit service's migration chain, its command, and its startup check.
 
-The chain begins at the service's baselines and adopts no database: a fresh
-database is migrated, and every non-empty database it did not build is refused
-unchanged. The application's startup only checks, refusing any database not
-exactly at the chain with a message naming ``apicredits-service-migrate``, and
-then seeds the ``default`` pool, which no migration writes.
+The chain begins at the service's baselines, which reproduce the schema the
+marketplace v0.3.0 release's service built (``tests/fixtures/v0_3_0_floor``)
+but for one index a migration after the baseline repairs: a fresh database is
+migrated, a database that release ran on is adopted, and any other non-empty
+database is refused unchanged by its cause. The application's startup only
+checks, refusing any database not exactly at the chain with a message naming
+``apicredits-service-migrate``, and then seeds the ``default`` pool, which no
+migration writes.
 
 External boundary: file-backed SQLite in a temp directory, migrated through the
 engine as ``apicredits-service-migrate`` runs it; the command itself runs
@@ -14,6 +17,7 @@ application is started.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable
 from importlib.metadata import entry_points
@@ -29,6 +33,7 @@ from market_schema_migrations import (
     Chain,
     CheckState,
     MigrationRefused,
+    UnsupportedCause,
     migrate,
     schema_snapshot,
 )
@@ -43,11 +48,41 @@ from apicredits_service.db.database import (
     initialise_database,
     migrate_database,
 )
-from apicredits_service.db.migrations import CHAIN, COMMAND
+from apicredits_service.db.migrations import CHAIN, COMMAND, FLOOR_IDS
 from apicredits_service.db.models import Base
 
 _SERVICE_TABLES = ("api_keys", "credit_grants", "consumption_events")
 _UNKNOWN_ID = "20991231_001_from_a_newer_image"
+_FLOOR = Path(__file__).resolve().parents[1] / "fixtures" / "v0_3_0_floor"
+#: The index the site ledger's baseline names, which the v0.3.0 service's
+#: models never created; the site ledger's
+#: ``20261126_001_capacity_bucket_host_index`` gives an adopted database it.
+_HOST_INDEX = "uq_capacity_buckets_host_id"
+_HOST_INDEX_REPAIR = "20261126_001_capacity_bucket_host_index"
+
+
+def _floor_ids() -> list[str]:
+    return json.loads((_FLOOR / "floor_ids.json").read_text(encoding="utf-8"))
+
+
+def _floor_snapshot() -> dict:
+    return json.loads((_FLOOR / "schema.json").read_text(encoding="utf-8"))
+
+
+def _floor_database(path: Path, *, recorded: list[str] | None = None) -> Path:
+    """A database as the v0.3.0 release's service left it, its ledger recording
+    ``recorded`` in place of the release's IDs where given."""
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript((_FLOOR / "ddl.sql").read_text(encoding="utf-8"))
+        with connection:
+            connection.executemany(
+                "INSERT INTO schema_migrations (id) VALUES (?)",
+                [(i,) for i in (_floor_ids() if recorded is None else recorded)],
+            )
+    finally:
+        connection.close()
+    return path
 
 
 def _engine(path: Path) -> Engine:
@@ -95,7 +130,12 @@ def _behind(path: Path) -> Path:
     try:
         with engine.connect() as connection:
             migrate(
-                Chain(service=CHAIN.service, command=CHAIN.command, baselines=CHAIN.baselines),
+                Chain(
+                    service=CHAIN.service,
+                    command=CHAIN.command,
+                    baselines=CHAIN.baselines,
+                    floor=CHAIN.floor,
+                ),
                 SqlAlchemyMigrationConnection(connection),
             )
     finally:
@@ -161,10 +201,147 @@ class TestAFreshDatabase:
         assert path.read_bytes() == before
 
 
-class TestAnExistingDatabase:
-    """No API-credit database from before the baseline is supported."""
+class TestTheReleaseDatabase:
+    """A database the v0.3.0 release's service built is adopted."""
 
-    def test_one_the_earlier_startup_built_is_refused_unchanged(self, tmp_path):
+    def test_the_chain_floor_is_the_fixture_floor(self):
+        assert CHAIN.floor.release == "marketplace 0.3.0"
+        assert list(CHAIN.floor.recorded) == list(FLOOR_IDS) == _floor_ids()
+
+    def test_the_baselines_reproduce_the_release_schema_but_for_the_named_index(
+        self, tmp_path
+    ):
+        """The site ledger's baseline names a unique index on a bucket's host,
+        which the table's own ``UNIQUE (host_id)`` already enforces and the
+        release's models never named; it is the only difference."""
+        path = tmp_path / "baselines.db"
+        engine = create_engine(f"sqlite:///{path}")
+        try:
+            with engine.connect() as connection:
+                adapter = SqlAlchemyMigrationConnection(connection)
+                for baseline in CHAIN.baselines:
+                    with adapter.transaction():
+                        baseline.apply(connection)
+        finally:
+            engine.dispose()
+
+        built, release = _snapshot(path), _floor_snapshot()
+        indexes = built["tables"]["capacity_buckets"]["indexes"]
+        named = [index for index in indexes if index["name"] == _HOST_INDEX]
+        assert len(named) == 1
+        assert named[0]["unique"] is True
+        assert [c["column"] for c in named[0]["columns"]] == ["host_id"]
+        without = {
+            **built,
+            "tables": {
+                **built["tables"],
+                "capacity_buckets": {
+                    **built["tables"]["capacity_buckets"],
+                    "indexes": [i for i in indexes if i["name"] != _HOST_INDEX],
+                },
+            },
+        }
+        assert without == release
+
+    def test_one_is_adopted_keeping_its_rows_and_ends_as_a_fresh_one(self, tmp_path):
+        path = _floor_database(tmp_path / "credits.db")
+        _execute(
+            path,
+            "INSERT INTO api_keys (key_id, secret_hash, status, balance, created_at, "
+            "updated_at) VALUES ('k1', 'hash', 'active', 42, CURRENT_TIMESTAMP, "
+            "CURRENT_TIMESTAMP)",
+            "INSERT INTO credit_grants (id, key_id, request_digest, quantity, reason, "
+            "granted_at) VALUES (1, 'k1', 'digest', 42, 'purchase', CURRENT_TIMESTAMP)",
+        )
+        later = tuple(migration.id for migration in CHAIN.migrations)
+
+        engine = _engine(path)
+        try:
+            assert check_database(engine).adopting == CHAIN.baseline_ids
+            report = migrate_database(engine)
+            assert check_database(engine).compatible
+        finally:
+            engine.dispose()
+
+        assert report.adopted is True
+        assert report.applied == later
+        assert _HOST_INDEX_REPAIR in report.applied
+        connection = sqlite3.connect(path)
+        try:
+            assert connection.execute("SELECT key_id, balance FROM api_keys").fetchall() == [
+                ("k1", 42)
+            ]
+            assert connection.execute(
+                "SELECT key_id, request_digest FROM credit_grants"
+            ).fetchall() == [("k1", "digest")]
+        finally:
+            connection.close()
+        fresh = _migrated(tmp_path / "fresh.db")
+        assert _snapshot(path) == _snapshot(fresh)
+        assert sorted(_recorded(path)) == sorted(_recorded(fresh)) == sorted(CHAIN.ids)
+
+    def test_one_carrying_an_earlier_record_and_table_is_adopted(self, tmp_path):
+        earlier = "20250101_001_recorded_by_an_earlier_release"
+        path = _floor_database(tmp_path / "credits.db", recorded=[*FLOOR_IDS, earlier])
+        _execute(
+            path,
+            "CREATE TABLE earlier_release_extension (id TEXT PRIMARY KEY)",
+            "INSERT INTO earlier_release_extension VALUES ('kept')",
+        )
+
+        engine = _engine(path)
+        try:
+            result = check_database(engine)
+            assert result.state is CheckState.BEHIND
+            assert result.floor == "marketplace 0.3.0"
+            assert result.set_aside == (earlier,)
+            report = migrate_database(engine)
+            assert check_database(engine).compatible
+        finally:
+            engine.dispose()
+
+        assert report.adopted is True
+        assert report.set_aside == (earlier,)
+        assert report.applied == tuple(migration.id for migration in CHAIN.migrations)
+        assert sorted(_recorded(path)) == sorted(CHAIN.ids)
+        connection = sqlite3.connect(path)
+        try:
+            assert connection.execute(
+                "SELECT id FROM earlier_release_extension"
+            ).fetchall() == [("kept",)]
+        finally:
+            connection.close()
+
+    def test_the_index_repair_changes_nothing_on_a_fresh_database(self, tmp_path):
+        without_repair = tuple(m for m in CHAIN.migrations if m.id != _HOST_INDEX_REPAIR)
+        assert len(without_repair) == len(CHAIN.migrations) - 1
+        path = tmp_path / "credits.db"
+        engine = _engine(path)
+        try:
+            with engine.connect() as connection:
+                migrate(
+                    Chain(
+                        service=CHAIN.service,
+                        command=CHAIN.command,
+                        baselines=CHAIN.baselines,
+                        migrations=without_repair,
+                        floor=CHAIN.floor,
+                    ),
+                    SqlAlchemyMigrationConnection(connection),
+                )
+            before = _snapshot(path)
+            report = migrate_database(engine)
+        finally:
+            engine.dispose()
+
+        assert report.applied == (_HOST_INDEX_REPAIR,)
+        assert _snapshot(path) == before
+
+
+class TestAnExistingDatabase:
+    """Any other non-empty database is refused unchanged, by its cause."""
+
+    def test_one_missing_a_floor_id_is_refused_as_older_or_shared(self, tmp_path):
         path = tmp_path / "credits.db"
         engine = create_engine(f"sqlite:///{path}")
         Base.metadata.create_all(engine)
@@ -185,7 +362,10 @@ class TestAnExistingDatabase:
 
         engine = _engine(path)
         try:
-            assert check_database(engine).state is CheckState.UNSUPPORTED
+            result = check_database(engine)
+            assert result.state is CheckState.UNSUPPORTED
+            assert result.cause is UnsupportedCause.OLDER_OR_SHARED
+            assert result.missing == FLOOR_IDS[1:]
             with pytest.raises(MigrationRefused) as refused:
                 migrate_database(engine)
             with pytest.raises(IncompatibleDatabase) as startup:
@@ -193,9 +373,29 @@ class TestAnExistingDatabase:
         finally:
             engine.dispose()
 
-        assert f"`{COMMAND}`" in str(refused.value)
-        assert "fresh database" in str(refused.value)
-        assert f"`{COMMAND}`" in str(startup.value)
+        for refusal in (refused.value, startup.value):
+            assert refusal.result.cause is UnsupportedCause.OLDER_OR_SHARED
+            assert f"`{COMMAND}`" in str(refusal)
+            assert "upgrade it through marketplace 0.3.0 first" in str(refusal)
+            assert "fresh database" not in str(refusal)
+        assert path.read_bytes() == before
+
+    def test_a_ledger_recording_none_of_the_floor_is_refused_as_not_the_services(
+        self, tmp_path
+    ):
+        path = _floor_database(tmp_path / "credits.db", recorded=["20250101_001_another"])
+        before = path.read_bytes()
+
+        engine = _engine(path)
+        try:
+            with pytest.raises(MigrationRefused) as refused:
+                migrate_database(engine)
+        finally:
+            engine.dispose()
+
+        assert refused.value.result.cause is UnsupportedCause.NOT_THIS_CHAIN
+        assert f"was not built by `{COMMAND}`" in str(refused.value)
+        assert "upgrade" not in str(refused.value)
         assert path.read_bytes() == before
 
     def test_tables_without_a_ledger_are_refused_unchanged(self, tmp_path):
@@ -332,6 +532,19 @@ class TestTheCommand:
         assert "behind" in output.out
         for migration in CHAIN.migrations:
             assert migration.id in output.out
+        assert path.read_bytes() == before
+
+    def test_the_command_refuses_a_database_missing_a_floor_id(
+        self, tmp_path, command, capsys
+    ):
+        path = _floor_database(tmp_path / "credits.db", recorded=_floor_ids()[:-1])
+        before = path.read_bytes()
+
+        assert command(path) == 1
+
+        error = capsys.readouterr().err
+        assert "marketplace 0.3.0" in error
+        assert _floor_ids()[-1] in error
         assert path.read_bytes() == before
 
     def test_check_on_no_database_creates_none(self, tmp_path, command):

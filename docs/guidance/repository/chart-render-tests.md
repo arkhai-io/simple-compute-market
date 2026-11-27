@@ -136,14 +136,23 @@ Use the standard library only. `test-render.sh` runs a plain
 and asserts on the rendered text; the storefront's `storefront.json` is read back
 with `json`.
 
-## A values schema generated from typed models
+## A chart's values schema types the chart's own values
 
-**A values schema generated from typed models**
-([`helm-render-tests.md`](../engineering/helm-render-tests.md#a-values-schema-generated-from-typed-models)).
-Each storefront chart's values
-schema carries a definition generated from that storefront's typed configuration
-models (`make helm-values-schema`, which runs each storefront's generator in its own
-environment). The generator is `kit/config`'s, with its own unit tests over small
+**A chart's values schema types the chart's own values**
+([`helm.md`](../engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)).
+The provisioning chart passes its `config` through to the service's profile: its
+schema types the chart's own values and refuses under `config` only the keys the
+chart derives itself or delivers from a Secret, and retired ones, so a section the
+service adds, such as `[Events]`, deploys with no chart change. No chart gains a
+schema generated from a service's configuration models.
+
+The two storefront charts do not yet meet the rule, which is deferred work: each
+storefront chart's values schema carries a definition generated from that
+storefront's typed configuration models (`make helm-values-schema`, which runs each
+storefront's generator in its own environment), because the storefront's loader does
+not refuse a secret in its public file, an unknown key, or a doubled spelling
+itself. Moving those refusals into the loader would let the definitions go. The generator
+is `kit/config`'s, with its own unit tests over small
 model sets; each storefront supplies only its sections, settlement registrations,
 and discovered delivery sinks, and writes only its own chart's schema. Both
 storefronts opt into the generator's `accepting_null` form: the definition accepts
@@ -153,7 +162,5 @@ refused as `null`; the transformation does not widen array item schemas to
 accept null elements. Each storefront's drift test is its own unit test —
 `domains/vms/storefront/tests/unit/test_values_schema.py` and
 `domains/bare_metal/storefront/tests/test_values_schema.py` — so `make test` fails
-when a model or settlement registration changes without regenerating; it runs in
-the storefront's environment because the definition is built from the storefront's
-models and installed sinks. The render tests then assert what the schema refuses
-and accepts.
+when a model or settlement registration changes without regenerating. The render
+tests then assert what the schema refuses and accepts.

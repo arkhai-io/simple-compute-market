@@ -114,6 +114,10 @@ def resolve_request_path_services() -> None:
     _container_module.resolved_capacity_reservation_watchdog = (
         container.capacity_reservation_watchdog()
     )
+    # Built here so a sink, route or finally sink the eventing component
+    # refuses refuses the service's start, naming it.
+    _container_module.resolved_event_delivery_worker = container.event_delivery_worker()
+    _container_module.resolved_event_service = container.event_service()
 
 
 def import_contributed_definitions_if_configured() -> None:
@@ -330,6 +334,18 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
             "(fulfillment_convergence_watchdog_enabled=false)"
         )
 
+    # The event delivery worker delivers what the routes select, and the
+    # storefront peer's lease-end reports and capacity-released callbacks, and
+    # prunes by the configured retention; its controls hold and step it.
+    tasks.append(
+        ComputeProvisioningBackgroundTask(
+            "event-delivery-worker",
+            lambda: _container_module.resolved_event_delivery_worker.run(),
+            "Event delivery worker started (interval=%gs)",
+            (container.events_settings().delivery_interval_seconds,),
+        )
+    )
+
     contributed = _container_module.resolved_background_tasks
     if contributed is None:
         raise RuntimeError("contributed background tasks are not composed")
@@ -337,7 +353,8 @@ def background_tasks() -> tuple[ComputeProvisioningBackgroundTask, ...]:
 
 
 async def close_storefront_client() -> None:
-    await container.lifecycle_event_sink().close()
+    for peer in container.storefront_peers():
+        peer.close()
 
 
 

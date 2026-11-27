@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-07-13
+# No delta is written until the design session settles the open questions; the
+# design's Q10 names the requirements this change modifies and the one it adds.
+skip_specs: true

@@ -4,8 +4,9 @@ tags: [engineering, persistence]
 
 # Persistence
 
-How stored representations are kept readable, how a schema changes, and how a
-cutover of live records is made safely. How a migration runs at a deployment is
+How stored representations are kept readable, how long state kept for notification
+or audit is retained, how a schema changes, and how a cutover of live records is
+made safely. How a migration runs at a deployment is
 [Migrations](migrations.md).
 
 ## Accepted representations and application views
@@ -28,6 +29,22 @@ inferred from a compatible encoding. No open record using a form does not establ
 that its reader is unused: retained terminal evidence and recovery a client still
 supports may require it. The rule calls for no inventory of every stored artifact,
 nor for automatic measurement of when a reader retires.
+
+## State kept for notification or audit is retained by time
+
+State a service keeps to notify others or to audit what it did — the events it has
+recorded, the delivery state of each, the statements it signed for a receiver — is
+pruned by time, its retention configured per table rather than fixed in code, so
+each table is kept as long as its own readers need. A table configured with no limit
+keeps every row, the choice for records that are evidence a reader may need
+indefinitely. A row still owed to someone — an event a destination has yet to
+receive — is kept past its retention until it is no longer owed.
+
+Retention never leaves a reference dangling: a row is pruned only after, or together
+with, every retained row that points at it. An order's notification event and the
+receipt it announces are an example: the receipt's own retention may be shorter, but
+while the event is kept so is the receipt, so delivering the event always finds what
+it names; the event's delivery records go with the event.
 
 ## Schema changes
 

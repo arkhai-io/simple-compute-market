@@ -56,9 +56,9 @@
 
 ## 6. Closeout
 
-Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
+Per `arkhai-change-workflow`'s guidance, "Closeout", with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
-Listed in an earlier order; closeout works the parts in `docs/guidance/workflow/closeout.md`'s order.
+Listed in an earlier order; closeout works the parts in the order of `arkhai-change-workflow`'s guidance, "Closeout".
 
 - [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added for any that narrate the review or migration that

@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from importlib.resources import files
 
-from market_schema_migrations import CheckState, refusal_message
+import pytest
+
+from market_schema_migrations import CheckState, UnsupportedCause, refusal_message
 
 from core_registry.db.migrations import (
     COMMAND,
+    FLOOR_RELEASE,
     FLOOR_REVISION,
     PRE_FLOOR_REVISIONS,
     SERVICE,
@@ -44,9 +47,35 @@ def test_no_database_or_no_tables_is_absent() -> None:
     assert classify({"alembic_version"}, [], KNOWN).state is CheckState.ABSENT
 
 
-def test_tables_without_a_revision_are_unsupported() -> None:
-    assert classify({"publishers"}, None, KNOWN).state is CheckState.UNSUPPORTED
-    assert classify(TABLES, [], KNOWN).state is CheckState.UNSUPPORTED
+def test_tables_without_a_revision_are_not_the_registrys() -> None:
+    for result in (classify({"publishers"}, None, KNOWN), classify(TABLES, [], KNOWN)):
+        assert result.state is CheckState.UNSUPPORTED
+        assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
+
+
+@pytest.mark.parametrize(
+    ("tables", "revisions"),
+    [
+        (set(), None),
+        (TABLES, None),
+        (TABLES, ["020_latest"]),
+        (TABLES, ["v0_3_0_baseline"]),
+        (TABLES, [FLOOR_REVISION]),
+        (TABLES, ["014_agent_to_publisher"]),
+        (TABLES, ["021_from_a_newer_image"]),
+        (TABLES, ["v0_3_0_baseline", "019_later"]),
+    ],
+)
+def test_every_result_names_the_floor_release(
+    tables: set[str], revisions: list[str] | None
+) -> None:
+    assert FLOOR_RELEASE == "marketplace 0.3.0"
+    assert classify(tables, revisions, KNOWN).floor == FLOOR_RELEASE
+
+
+def test_only_an_unsupported_result_carries_a_cause() -> None:
+    for revisions in (["020_latest"], ["v0_3_0_baseline"], [FLOOR_REVISION], ["021_new"]):
+        assert classify(TABLES, revisions, KNOWN).cause is None
 
 
 def test_the_head_is_compatible() -> None:
@@ -77,6 +106,7 @@ def test_the_floor_is_behind_with_the_baseline_to_adopt() -> None:
 def test_a_revision_before_the_floor_is_unsupported_naming_what_it_lacks() -> None:
     result = classify(TABLES, ["015_listing_settlement_options"], KNOWN)
     assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.OLDER_OR_SHARED
     assert result.missing == (
         "016_marketplace_principal_auth",
         "017_publisher_replay_leases",
@@ -94,11 +124,32 @@ def test_an_unknown_revision_is_ahead() -> None:
     assert result.unknown == ("021_from_a_newer_image",)
 
 
-def test_several_known_revisions_are_unsupported() -> None:
-    assert (
-        classify(TABLES, ["v0_3_0_baseline", "019_later"], KNOWN).state
-        is CheckState.UNSUPPORTED
-    )
+def test_several_known_revisions_are_not_the_registrys() -> None:
+    result = classify(TABLES, ["v0_3_0_baseline", "019_later"], KNOWN)
+    assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
+
+
+@pytest.mark.parametrize(
+    "revisions",
+    [
+        ["v0_3_0_baseline", "021_from_a_newer_image"],
+        [FLOOR_REVISION, "021_from_a_newer_image"],
+        ["021_from_a_newer_image", "022_from_a_newer_image"],
+    ],
+)
+def test_several_revisions_with_an_unknown_one_are_not_the_registrys(
+    revisions: list[str],
+) -> None:
+    """No registry image leaves several revisions, so an unknown one among
+    them is refused as not the registry's, not as ahead with a newer image's
+    remedy."""
+    result = classify(TABLES, revisions, KNOWN)
+    assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
+    message = refusal_message(result, service=SERVICE, command=COMMAND)
+    assert "was not built by `registry-migrate`" in message, message
+    assert "image that wrote them" not in message, message
 
 
 def test_each_refusal_names_the_command() -> None:

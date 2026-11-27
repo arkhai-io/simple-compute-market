@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
+from eventing import EventDraft
+
 
 class SiteAuthorityPort(Protocol):
     """Reservation lifecycle facts consumed by compute orchestration."""
@@ -32,6 +34,7 @@ class SiteAuthorityPort(Protocol):
         message: str | None = None,
         release_job_id: str | None = None,
         end_context: dict[str, Any] | None = None,
+        event: EventDraft | None = None,
     ) -> dict[str, Any] | None: ...
 
     def record_release_success(
@@ -74,6 +77,7 @@ class SiteAuthorityLedger(Protocol):
         message: str | None = None,
         release_job_id: str | None = None,
         end_context: dict[str, Any] | None = None,
+        event: EventDraft | None = None,
     ) -> dict[str, Any] | None: ...
 
     def release(
@@ -84,6 +88,7 @@ class SiteAuthorityLedger(Protocol):
         end_context: dict[str, Any] | None = None,
         failure_reason: str | None = None,
         failure_message: str | None = None,
+        lease_lifecycle: bool = False,
     ) -> dict[str, Any] | None: ...
 
     def record_unmanaged(
@@ -125,13 +130,18 @@ class LedgerSiteAuthority:
         message: str | None = None,
         release_job_id: str | None = None,
         end_context: dict[str, Any] | None = None,
+        event: EventDraft | None = None,
     ) -> dict[str, Any] | None:
-        """Record a failed release; refused once an operator or a release won."""
+        """Record a failed release; refused once an operator or a release won.
+
+        ``event``, the caller's prepared event, is recorded with an accepted
+        failure in its transaction, and not at all with a refused one.
+        """
         return self._ledger.record_release_failed(
             capacity_reservation_id,
             reason=reason,
             message=message,
-            release_job_id=release_job_id, end_context=end_context,
+            release_job_id=release_job_id, end_context=end_context, event=event,
         )
 
     def record_release_success(
@@ -152,6 +162,7 @@ class LedgerSiteAuthority:
             forced=forced, end_context=end_context,
             failure_reason=reason,
             failure_message=message,
+            lease_lifecycle=True,
         )
 
     def record_unmanaged(

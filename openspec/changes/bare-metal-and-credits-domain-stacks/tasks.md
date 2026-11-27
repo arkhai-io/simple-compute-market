@@ -68,8 +68,22 @@ lane needs.
 
 Composing bare metal onto the kit negotiation runtime moved to
 `bare-metal-mock-provisioned-deal` on 2026-10-01, because its pipeline deal needs
-multi-round negotiation and force-accept for parity with VM's. What remains here is
-moving the bare-metal routes onto the shell.
+multi-round negotiation and force-accept for parity with VM's. Moving the bare-metal
+routes onto shared routes and reducing its runtime and server (4a.3 to 4a.6) moved to
+`unify-vm-and-bare-metal-storefronts` on 2026-11-27: one compute storefront serves bare
+metal, and bare metal's own routes, runtime and server are deleted there, directly if
+that change lands first and after `kit-owned-storefront-shell` has composed them onto
+the kit's routes if it lands second. Nothing of this section remains here.
+
+Noted 2026-11-27, for Section 2 and for `unify-vm-and-bare-metal-storefronts`, which
+took 4a.3 and 4a.5: the bare-metal and API-credits
+storefronts still resolve their domain contract through a module getter,
+`get_market_domain_contract()` in each one's `domain_runtime.py`. Bare metal's
+`build_runtime_from_configuration` (`runtime.py`) and `SQLiteClient` (`sqlite_client.py`)
+fall back to it when given no contract, and API credits' `ListingService.publish_from_quota`
+(`services/listing_service.py`) calls it on each request. The VM storefront has no such
+getter and builds its contract in one place, which
+`test_vm_storefront_constructs_contract_only_in_domain_contribution` holds.
 
 - [x] 4a.1 **Migrated** to `bare-metal-mock-provisioned-deal`. Re-verify that `negotiation_service.py`, `negotiation.py`, the
       `/api/v1/negotiate/*` and listing routes in `api.py`, and their thread
@@ -84,19 +98,19 @@ moving the bare-metal routes onto the shell.
       commercial values to the original demand, `build_artifacts` producing the
       accepted obligation the settlement runtime already consumes, and `place_hold`
       as today's hold placement.
-- [ ] 4a.3 Route bare-metal negotiation through the shared shell's negotiate routes
+- [x] 4a.3 **Migrated** to `unify-vm-and-bare-metal-storefronts`. Route bare-metal negotiation through the shared shell's negotiate routes
       with the contribution registered, and delete the bare-metal negotiate routes in
       `api.py`. No compatibility endpoint may select by URL, payload kind, app
       instance, or module getter. Amended 2026-10-01: serving the existing routes over
       the kit runtime and deleting the parallel service, hook class, and thread
       persistence moved to `bare-metal-mock-provisioned-deal`; this task is the move
       onto the shell's routes.
-- [ ] 4a.4 Serve bare-metal listings through the shared shell's listing routes from
+- [x] 4a.4 **Migrated** to `unify-vm-and-bare-metal-storefronts`. Serve bare-metal listings through the shared shell's listing routes from
       the common binding, and delete the domain-local listing routes.
-- [ ] 4a.5 Reduce what remains of `runtime.py` and `server.py` to contribution
+- [x] 4a.5 **Migrated** to `unify-vm-and-bare-metal-storefronts`. Reduce what remains of `runtime.py` and `server.py` to contribution
       adapters over `StorefrontAppConfig`; record in `design.md` anything that cannot
       reduce and why.
-- [ ] 4a.6 Focused tests: the bare-metal e2e lane's negotiation stages pass unchanged
+- [x] 4a.6 **Migrated** to `unify-vm-and-bare-metal-storefronts`. Focused tests: the bare-metal e2e lane's negotiation stages pass unchanged
       through the shared routes. Amended 2026-10-01: the conformance matrix under the
       bare-metal contract, opening refusal for each forbidden demand field, and terms
       mismatch refusal moved with 4a.2 to `bare-metal-mock-provisioned-deal`.
@@ -199,7 +213,7 @@ evidence. Task 5.3 is intentionally unrun in this delegated lane.
 
 ## 6. Closeout
 
-Per `docs/guidance/workflow/closeout.md`, with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
+Per `arkhai-change-workflow`'s guidance, "Closeout", with this repository's parts in `openspec/README.md#this-repositorys-closeout-parts`.
 
 - [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added for any that narrate the review or migration that

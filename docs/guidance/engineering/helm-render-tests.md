@@ -37,10 +37,3 @@ deployment evidence.
 - When the rendered artifact is a document a service parses, parse one rendered
   instance with the service's own parser as well. The render test proves the chart
   emits what it was given; only the parser proves the service accepts it.
-
-## A values schema generated from typed models
-
-Where a service's configuration is defined by typed models, its chart's values schema
-is generated from those models rather than written by hand, and a drift test in the
-service's own suite fails when a model changes without the schema being regenerated.
-The render tests then assert what the schema refuses and accepts.

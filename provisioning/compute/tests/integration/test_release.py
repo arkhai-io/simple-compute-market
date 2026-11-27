@@ -27,7 +27,7 @@ from market_fulfillment import (
 from market_fulfillment.db import Base as FulfillmentBase
 from market_fulfillment.db import SettlementRecord
 from market_fulfillment.settlement_repository import SettlementRepository
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import ResourcePoolFacts, ResourcePoolService
 from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
@@ -108,6 +108,7 @@ def _world(release_effects=None):
     repository = SettlementRepository()
     ledger = CapacityLedgerService(
         factory,
+        pool_facts=ResourcePoolFacts(),
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
         release_guard=FulfillmentReleaseGuard(repository),
@@ -359,6 +360,7 @@ def test_a_dispatch_that_wins_the_race_with_the_guard_keeps_the_capacity(tmp_pat
         )
     ledger = CapacityLedgerService(
         factory,
+        pool_facts=ResourcePoolFacts(),
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
         release_guard=FulfillmentReleaseGuard(_DispatchWinsRepository(factory)),

@@ -57,7 +57,8 @@ None.
   when the requested shape changes, and that section waits on that payload.
 - Do not change what settlement does with a held reservation; commit is unchanged.
 - Do not remove the non-consuming feasibility verification. It stays, and remains the
-  only capacity interaction before a counter-offer.
+  only capacity interaction before a counter-offer. What "verifying feasibility" means
+  for a buyer is open in `negotiation-capacity-feasibility-probe` (its design, Q2).
 - Do not change admission, matching, or scheduling.
 
 ## Impact

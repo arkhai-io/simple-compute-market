@@ -119,5 +119,5 @@ and network assumptions owned by the mechanism kit. The Alkahest continuation
 therefore adopts a matching attestation only through a supported injected query
 capability. It never blindly resubmits after an ambiguous outcome: submission
 intent is durable before the external effect, delivery stays pending for operator
-reconciliation, and already-delivered compute is not undone. The capability gap
-belongs to `openspec/changes/add-alkahest-attestation-reference-query`.
+reconciliation, and already-delivered compute is not undone. Supplying that
+query capability is open work.

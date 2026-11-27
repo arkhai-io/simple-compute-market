@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-bare-metal-storefront"
-version = "0.29.1"
+version = "0.30.0"
 license = "MIT"
 description = "Seller-side storefront composition for the Arkhai bare-metal domain."
 requires-python = ">=3.12,<3.14"
@@ -14,10 +14,10 @@ dependencies = [
     "arkhai-kit-deal-lifecycle-contracts>=0.3.0",
     "arkhai-kit-deal-lifecycle-client>=0.2.0",
     "arkhai-compute-provisioning-contracts>=0.11.0",
-    "arkhai-kit-resource-pools-contracts>=0.4.0",
+    "arkhai-kit-resource-pools-contracts>=0.5.0",
     "arkhai-bare-metal>=0.16.0",
-    "arkhai-kit-delivery==0.2.2",
-    "arkhai-kit-delivery-apprise==0.1.2",
+    "arkhai-kit-delivery==0.3.0",
+    "arkhai-kit-delivery-apprise==0.2.0",
     "arkhai-kit-contact-exchange>=0.5.1",
     "arkhai-compute-provisioning-client>=0.7.0",
     "arkhai-core>=0.6.0",
@@ -32,10 +32,9 @@ dependencies = [
     "arkhai-kit-site-client>=0.11.0",
     "arkhai-kit-capacity-publication==0.12.1",
     "arkhai-kit-pool-overrides==0.3.0",
-    "arkhai-kit-resource-pools>=0.7.0",
     "arkhai-kit-arkhai-payments>=0.9.0",
     "arkhai-kit-settlement-runtime>=0.8.0",
-    "arkhai-kit-schema-migrations>=0.1.0",
+    "arkhai-kit-schema-migrations>=0.2.0",
     "arkhai-kit-storefront==0.12.0",
     "dynaconf>=3.0.0",
     "fastapi~=0.115.8",
@@ -71,10 +70,13 @@ dev = [
     # The site's own claim predicate, which the claim and fulfillment-service
     # tests check the storefront's derived claims against, and its capacity
     # router and ledger, which the site-reservation integration test reserves
-    # and commits a deal's claim through. Test-only.
-    "arkhai-kit-site>=0.10.0",
-    # The in-memory database that test's site ledger runs over. Test-only.
+    # and commits a deal's claim through; the first version whose ledger takes
+    # the pool reader that test builds it with. Test-only.
+    "arkhai-kit-site>=0.15.0",
+    # The in-memory database that test's site ledger runs over, the pool row it
+    # seeds there, and the pool reader the ledger reads it through. Test-only.
     "sqlalchemy>=2.0",
+    "arkhai-kit-resource-pools>=0.11.0",
     # Validates documents against the generated Helm values schema, and
     # published listings against the compute registry's listing schema.
     "jsonschema>=4.0",
