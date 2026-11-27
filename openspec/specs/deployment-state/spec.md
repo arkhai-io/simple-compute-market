@@ -1743,4 +1743,4 @@ applicable to the role.
 - Explicit contribution configuration and secret-free render surfaces: `domains/vms/storefront/tests/unit/test_config_loader.py`, `test_cli.py`, `helm/charts/storefront/templates/tests/storefront-environment-test.yaml`, and Helm schema fixtures.
 - Bare-metal staged-wheel/image boundary and installed contribution: `domains/bare_metal/storefront/pyproject.toml`, `domains/bare_metal/storefront/Dockerfile`, `domains/bare_metal/storefront/tests/test_package.py`, `test_import_boundaries.py`, and `test_app_composition.py`.
 
-The registry's PostgreSQL cutover and its rollout remain proposed in `migrate-registry-to-postgres`.
+The registry's PostgreSQL cutover and its rollout remain proposed.
