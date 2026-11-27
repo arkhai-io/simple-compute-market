@@ -17,7 +17,7 @@ from tests.integration.credit_negotiation import SELLER_PRINCIPAL, payment_optio
 
 PINS = (
     Path(__file__).resolve().parents[5]
-    / "kit" / "api" / "tests" / "fixtures" / "pins" / "issuance_pins.json"
+    / "domains" / "api" / "tests" / "fixtures" / "pins" / "issuance_pins.json"
 )
 
 

@@ -10,7 +10,7 @@ verifies keys and keeps the accounts.
 
 The behavioral contract — status codes and machine-readable bodies —
 is shared with the TypeScript and Rust gates and pinned by the
-conformance fixtures under ``kit/api/gate-ports/conformance``.
+conformance fixtures under ``domains/api/gate-ports/conformance``.
 """
 
 from .asgi import TokenGateMiddleware

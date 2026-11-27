@@ -11,7 +11,7 @@ itself.
 
 Decision vocabulary (status + machine-readable body) is identical
 across languages — it is the behavioral contract the conformance
-fixtures pin (``kit/api/gate-ports/conformance``).
+fixtures pin (``domains/api/gate-ports/conformance``).
 """
 
 from __future__ import annotations

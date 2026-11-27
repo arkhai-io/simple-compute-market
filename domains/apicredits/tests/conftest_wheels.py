@@ -17,17 +17,17 @@ APICREDITS = REPO / "domains" / "apicredits"
 def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     output = tmp_path_factory.mktemp("apicredits-wheels")
     projects = {
-        "api": (REPO / "kit" / "api", "arkhai_api-*.whl"),
-        "api_contracts": (REPO / "kit" / "api" / "contracts", "arkhai_api_contracts-*.whl"),
-        "api_client": (REPO / "kit" / "api" / "client", "arkhai_api_client-*.whl"),
-        "api_authority": (REPO / "kit" / "api" / "authority", "arkhai_api_authority-*.whl"),
-        "api_selling": (REPO / "kit" / "api" / "selling", "arkhai_api_selling-*.whl"),
+        "api": (REPO / "domains" / "api", "arkhai_api-*.whl"),
+        "api_contracts": (REPO / "domains" / "api" / "contracts", "arkhai_api_contracts-*.whl"),
+        "api_client": (REPO / "domains" / "api" / "client", "arkhai_api_client-*.whl"),
+        "api_authority": (REPO / "domains" / "api" / "authority", "arkhai_api_authority-*.whl"),
+        "api_selling": (REPO / "domains" / "api" / "selling", "arkhai_api_selling-*.whl"),
         "api_selling_alkahest": (
-            REPO / "kit" / "api" / "selling-alkahest",
+            REPO / "domains" / "api" / "selling-alkahest",
             "arkhai_api_selling_alkahest-*.whl",
         ),
         "api_selling_arkhai_payments": (
-            REPO / "kit" / "api" / "selling-arkhai-payments",
+            REPO / "domains" / "api" / "selling-arkhai-payments",
             "arkhai_api_selling_arkhai_payments-*.whl",
         ),
         "domain": (

@@ -33,7 +33,7 @@ from arkhai_apicredits.label import API_CREDITS_LABEL
 
 FIXTURE = (
     Path(__file__).resolve().parents[3]
-    / "kit" / "api" / "tests" / "fixtures" / "pins" / "issuance_pins.json"
+    / "domains" / "api" / "tests" / "fixtures" / "pins" / "issuance_pins.json"
 )
 
 # Deterministic development keys for this test only; never used on any network.

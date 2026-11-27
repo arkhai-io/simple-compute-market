@@ -7,9 +7,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/arkhai-io/simple-compute-market.git",
-    "directory": "kit/api/gate-ports/typescript"
+    "directory": "domains/api/gate-ports/typescript"
   },
-  "homepage": "https://github.com/arkhai-io/simple-compute-market/tree/main/kit/api/gate-ports/typescript#readme",
+  "homepage": "https://github.com/arkhai-io/simple-compute-market/tree/main/domains/api/gate-ports/typescript#readme",
   "bugs": "https://github.com/arkhai-io/simple-compute-market/issues",
   "exports": {
     ".": {

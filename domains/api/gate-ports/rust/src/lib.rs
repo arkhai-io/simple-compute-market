@@ -11,7 +11,7 @@
 //! The behavioral contract — status codes and machine-readable bodies —
 //! is shared with the Python and TypeScript middlewares and pinned by
 //! the conformance fixtures under
-//! `kit/api/gate-ports/conformance`.
+//! `domains/api/gate-ports/conformance`.
 
 pub mod client;
 pub mod config;

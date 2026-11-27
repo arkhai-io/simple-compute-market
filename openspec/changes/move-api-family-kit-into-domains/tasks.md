@@ -19,11 +19,17 @@ the manifest, and every test that reaches the family by path. Touches
 `manifests/release-components.json`, and tests under `domains/apicredits`,
 `domains/inference`, and `tools/issue-discovery`.
 
-- [ ] 1.1 Remove the ignored `domains/api` directory of stale environments and
+- [x] 1.1 Remove the ignored `domains/api` directory of stale environments and
       caches, on the owner's word, then `git mv kit/api domains/api` (D1).
       Verify: `git ls-files kit/api` lists nothing, `git ls-files domains/api`
       lists the family, and no path is `domains/api/api`.
-- [ ] 1.2 `docs/development/ARCHITECTURE.toml`: the `api` family's `directory`
+      *Note:* done. 262 tracked files moved; `git ls-files kit/api` lists
+      nothing and no path is `domains/api/api`. The ignored `domains/api`
+      held environments and caches only (787 MB, no tracked file). The
+      family's ignored `.venv` directories moved with it, carrying absolute
+      paths to `kit/api`, so `uv run` could not spawn `pytest`; they were
+      removed and rebuilt by each project's `reinit`.
+- [x] 1.2 `docs/development/ARCHITECTURE.toml`: the `api` family's `directory`
       is `domains/api`. `scripts/architecture.py`: `read_path` reads a family
       only under `domains/`, as the branch this change lands on has it.
       `scripts/tests/test_architecture.py`: remove
@@ -31,7 +37,11 @@ the manifest, and every test that reaches the family by path. Touches
       check-architecture` passes with no new exception or override row, and
       `make test-release-tooling TESTS=scripts/tests/test_architecture.py`
       passes.
-- [ ] 1.3 Move the family's `dist-api*` and `test-api*` recipes from
+      *Note:* `scripts/architecture.py` and its test are restored to the
+      landing branch's bytes (`git diff origin/dev` empty for both). `make
+      check-architecture` holds the layer, scope, dependency, and kind rules
+      with no new row; 61 cases pass.
+- [x] 1.3 Move the family's `dist-api*` and `test-api*` recipes from
       `kit/Makefile` to `domains/Makefile`, with the wheelhouse variable they
       use; add them to `domains/Makefile`'s `.PHONY`, `dist-release`, and
       `test`; remove them, `test-api` from `test`, the `dist-api*` targets from
@@ -39,13 +49,30 @@ the manifest, and every test that reaches the family by path. Touches
       `kit/Makefile` (D1). Verify: `make -C domains -n test` names `test-api`,
       `make -C kit -n test` does not, and `make dist` builds the twelve family
       wheels.
-- [ ] 1.4 `.github/workflows/tests.yml`: the Node and Rust installs and the
+      *Note:* `kit/Makefile` is restored to the landing branch's bytes. The
+      recipes use `domains/Makefile`'s own `DIST_DIR`, already absolute, so
+      `API_DIST_DIR` is not carried over; that file already exports the
+      Python version and build constraint the family's recipes needed. The
+      family's wheels precede the API-credits and inference wheels in
+      `dist-release`, and `test-api` precedes `test-apicredits` in `test`.
+      `make -C domains -n test` runs the family's thirteen recipe lines;
+      `make -C kit -n test` names none; `make dist-clean && make dist` built
+      the twelve.
+- [x] 1.4 `.github/workflows/tests.yml`: the Node and Rust installs and the
       Rust cache's `workspaces` follow the family to the job that runs the
       domain tests, with the comment above them (D1). Verify: the conditions
       name the domain target and the cache names `domains/api/gate-ports/rust`.
-- [ ] 1.5 `manifests/release-components.json`: the twelve family `path` values
+      *Note:* the three steps and their comment now match the landing
+      branch's shape, with the cache at `domains/api/gate-ports/rust`,
+      checked by reading; no test reads a step's condition or the cache's
+      workspace, so the dispatched run 1.8 owes is what shows them working.
+      `test_tests_workflow.py` and `test_workflow_targets.py`, which hold the
+      matrix equal to `make test`'s targets: 10 passed.
+- [x] 1.5 `manifests/release-components.json`: the twelve family `path` values
       (D1). Verify: `make check-release-components` passes.
-- [ ] 1.6 Tests that build the family's path from separate words:
+      *Note:* twelve paths rewritten; `make check-release-components`
+      passes.
+- [x] 1.6 Tests that build the family's path from separate words:
       `domains/apicredits/tests/conftest_wheels.py`,
       `domains/inference/tests/conftest_wheels.py`,
       `domains/apicredits/service/tests/integration/test_compat_baseline.py`,
@@ -55,11 +82,23 @@ the manifest, and every test that reaches the family by path. Touches
       `tools/issue-discovery/tests/test_bootstrap.py`, which runs a recipe in
       the family's directory (D1). Verify: each named suite passes from the new
       path.
-- [ ] 1.7 Lines inside the family that name its own path: the gate ports'
+      *Note:* a tree-wide search for the path written whole or as `"kit" /
+      "api"` found exactly these seven files. The six Python tests pass in
+      the suites 1.8 names. The issue-discovery bootstrap suite did not run:
+      on this Mac 15 of its 18 cases fail in a fixture asserting `getent`, a
+      Linux tool, before any test body, and the local end-to-end image has
+      `getent` but no `make`, which the cases calling the edited line need.
+      The suite is in no CI matrix (design, "Notes for planning"), so no
+      validation runs it either: the edited line is unexercised. Running the
+      recipe by hand under the real `PATH` exits 0, which is not the test's
+      faked environment.
+- [x] 1.7 Lines inside the family that name its own path: the gate ports'
       READMEs and source comments, the TypeScript gate's `package.json`
       `repository.directory` and `homepage`, and the gate's module docstrings
       (D1). Verify: `git grep -n "kit/api" -- domains/api` finds nothing.
-- [ ] 1.8 Verification. `make dist-clean && make dist && make lock`, then
+      *Note:* nine files; `git grep -n "kit/api" -- domains/api` finds
+      nothing.
+- [x] 1.8 Verification. `make dist-clean && make dist && make lock`, then
       reinstall each dependent's environment; the twelve locks are unchanged
       but for their path. Family suites, unit and library integration:
       `make -C domains test-api`. Domain suites, unit and application
@@ -68,6 +107,26 @@ the manifest, and every test that reaches the family by path. Touches
       End-to-end: `e2e_credits_deal` on the API-credit lane and
       `e2e_inference_deal` on the inference lane exercise the family's code
       from its new path; no scenario is added.
+      *Note:* `make dist-clean && make dist && make lock` passed and changed
+      no lock: each records the wheelhouse by a relative path whose depth
+      the move keeps. Family, unit and library integration, `make -C
+      domains test-api`: twelve Python suites, 786 passed; the Rust port 10
+      passed; the TypeScript port's check passed. Domain, unit and
+      application integration, `make -C domains test-apicredits
+      test-inference`: 471 and 358 passed, five suites each. `make
+      check-packaging` passed. `change-workflow run pre-commit --base
+      origin/dev`: the relock and every repository check passed; its `make
+      test` stopped at the bare-metal provisioning IaC suites, which read
+      `/proc/self/fdinfo` and fail on macOS on the landing branch too,
+      before it reached the family. End-to-end scenarios confirmed as the
+      plan names them: `e2e_credits_deal` and `e2e_inference_deal` install
+      the family's wheels, built from the new path; neither was run here,
+      and no scenario is added.
+      Owed by validation (ci tests.yml): job `test · test-domains` — the
+      Node and Rust installs and the Rust cache of
+      `domains/api/gate-ports/rust` run, and `make test-domains` runs the
+      family's Python suites, the TypeScript port's check, and the Rust
+      port's `cargo test`, each passing.
 
 ## 2. Documents and citations follow the move
 

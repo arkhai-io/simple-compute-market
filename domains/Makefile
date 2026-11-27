@@ -7,7 +7,8 @@ export UV_BUILD_CONSTRAINT := $(or $(wildcard $(abspath ../build-constraints.txt
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-inference-domain dist-inference-service dist-inference-storefront dist-inference-buyer dist-inference-gateway dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-inference test-inference-service test-inference-storefront test-inference-buyer test-inference-gateway-service
+	test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-inference test-inference-service test-inference-storefront test-inference-buyer test-inference-gateway-service \
+	dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-api-buying dist-api-buying-alkahest dist-api-buying-arkhai-payments dist-api-gate dist-api-gateway test-api test-api-client test-api-authority test-api-selling test-api-selling-alkahest test-api-selling-arkhai-payments test-api-buying test-api-buying-alkahest test-api-buying-arkhai-payments test-api-gate test-api-gateway
 
 DIST_DIR ?= $(abspath ../.dist)
 
@@ -16,6 +17,7 @@ DIST_DIR ?= $(abspath ../.dist)
 # sample app, the demo API the end-to-end harness drives, which no operator installs.
 dist-release: dist-compute dist-compute-delivery dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
+	dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-api-buying dist-api-buying-alkahest dist-api-buying-arkhai-payments dist-api-gate dist-api-gateway \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-buyer \
 	dist-inference-domain dist-inference-service dist-inference-storefront dist-inference-buyer dist-inference-gateway \
@@ -23,7 +25,7 @@ dist-release: dist-compute dist-compute-delivery dist-vms dist-vms-listings dist
 
 dist: dist-release dist-apicredits-sample-app ## Build every domains-scoped wheel
 
-test: test-storefront test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-apicredits test-inference test-provisioning-adapter test-provisioning-iac
+test: test-storefront test-bare-metal test-compute test-compute-delivery test-vms-domain test-vms-buyer test-api test-apicredits test-inference test-provisioning-adapter test-provisioning-iac
 
 # ---------------------------------------------------------------------------
 # Dist -- leaf wheel-build recipes for domains/-scoped packages, mirroring
@@ -178,6 +180,80 @@ dist-buyer: dist-vms-listings dist-vms-negotiation dist-vms-settlement ## Build 
 	@ls $(DIST_DIR)/arkhai_vms_buyer-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-vms-buyer produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
+# The api family's wheels: its vocabulary, contracts, client, authority, selling and
+# buying libraries, gate, and gateway.
+dist-api: ## Build arkhai-api wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-contracts: dist-api ## Build arkhai-api-contracts wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/contracts && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_contracts-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-contracts produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-client: dist-api-contracts ## Build arkhai-api-client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-authority: dist-api-contracts ## Build arkhai-api-authority wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/authority && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_authority-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-authority produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-selling: dist-api-client ## Build arkhai-api-selling wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/selling && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_selling-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-selling produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-selling-alkahest: dist-api-selling ## Build arkhai-api-selling-alkahest wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/selling-alkahest && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_selling_alkahest-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-selling-alkahest produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-selling-arkhai-payments: dist-api-selling ## Build arkhai-api-selling-arkhai-payments wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/selling-arkhai-payments && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_selling_arkhai_payments-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-selling-arkhai-payments produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-buying: dist-api ## Build arkhai-api-buying wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/buying && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_buying-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-buying produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-buying-alkahest: dist-api-buying ## Build arkhai-api-buying-alkahest wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/buying-alkahest && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_buying_alkahest-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-buying-alkahest produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-buying-arkhai-payments: dist-api-buying ## Build arkhai-api-buying-arkhai-payments wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/buying-arkhai-payments && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_buying_arkhai_payments-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-buying-arkhai-payments produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-gate: ## Build arkhai-api-gate wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/gate && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_gate-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-gate produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-gateway: dist-api-gate ## Build arkhai-api-gateway wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/gateway && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_gateway-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-gateway produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
 # ---------------------------------------------------------------------------
 # Test -- leaf test invocations for domains/-scoped packages. Same
 # cross-directory-prerequisite rule as the dist targets above: none of
@@ -236,3 +312,50 @@ test-provisioning-adapter: ## VM provisioning adapter tests against built wheels
 .PHONY: test-bare-metal-iac
 test-bare-metal-iac:
 	cd bare_metal/provisioning/iac && $(MAKE) test
+
+# The api family's tests: its vocabulary, contracts, client, authority, selling and
+# buying libraries, gate and its ports, and gateway.
+test-api: ## api-family vocabulary, contracts, client, authority, selling-side, buyer-side, gate and its ports, and gateway tests
+	cd api && $(MAKE) test
+	cd api/contracts && $(MAKE) test
+	cd api/client && $(MAKE) test
+	cd api/authority && $(MAKE) test
+	cd api/selling && $(MAKE) test
+	cd api/selling-alkahest && $(MAKE) test
+	cd api/selling-arkhai-payments && $(MAKE) test
+	cd api/buying && $(MAKE) test
+	cd api/buying-alkahest && $(MAKE) test
+	cd api/buying-arkhai-payments && $(MAKE) test
+	cd api/gate && $(MAKE) test
+	cd api/gateway && $(MAKE) test
+	cd api && $(MAKE) test-middleware
+
+test-api-client: ## api-family client tests
+	cd api/client && $(MAKE) test
+
+test-api-authority: ## api-family authority tests
+	cd api/authority && $(MAKE) test
+
+test-api-selling: ## api-family selling tests
+	cd api/selling && $(MAKE) test
+
+test-api-selling-alkahest: ## api-family selling-side Alkahest tests
+	cd api/selling-alkahest && $(MAKE) test
+
+test-api-selling-arkhai-payments: ## api-family selling-side Arkhai payments tests
+	cd api/selling-arkhai-payments && $(MAKE) test
+
+test-api-buying: ## api-family buying tests
+	cd api/buying && $(MAKE) test
+
+test-api-buying-alkahest: ## api-family buyer-side Alkahest tests
+	cd api/buying-alkahest && $(MAKE) test
+
+test-api-buying-arkhai-payments: ## api-family buyer-side Arkhai payments tests
+	cd api/buying-arkhai-payments && $(MAKE) test
+
+test-api-gate: ## api-family gate tests: unit, the conformance replay, and the contract parity
+	cd api/gate && $(MAKE) test
+
+test-api-gateway: ## api-family gateway tests: unit and the library's integration level
+	cd api/gateway && $(MAKE) test

@@ -50,7 +50,7 @@ tokens = []
 
 [[families]]
 name = "api"
-directory = "kit/api"
+directory = "domains/api"
 vocabulary = "arkhai-api"
 tokens = []
 

@@ -186,13 +186,9 @@ def _kind_of(segment: str, rules: Rules, roles: bool) -> str:
 def read_path(path: str, distribution: str, rules: Rules) -> Reading | None:
     """Layer, kind, and scope as the path and name state them, or None."""
     parts = path.split("/")
-    directory = "/".join(parts[:2])
-    in_family_kit = parts[0] == "kit" and any(
-        family["directory"] == directory for family in rules.families.values()
-    )
     if parts[0] == "core" and len(parts) <= 2:
         return Reading("core", "library", frozenset())
-    if parts[0] == "kit" and len(parts) == 2 and not in_family_kit:
+    if parts[0] == "kit" and len(parts) == 2:
         mechanism = rules.mechanism_of_kit(distribution)
         dispute = rules.dispute_of_kit(distribution)
         scope = frozenset(e for e in (mechanism, dispute) if e)
@@ -200,8 +196,9 @@ def read_path(path: str, distribution: str, rules: Rules) -> Reading | None:
         return Reading("kit", kind, scope)
     if parts[0] == "roles" and len(parts) == 2:
         return Reading("composition", "executable", frozenset())
-    if (parts[0] != "domains" and not in_family_kit) or len(parts) < 2:
+    if parts[0] != "domains" or len(parts) < 2:
         return None
+    directory = "/".join(parts[:2])
     scope: set[str] = set()
     for name, family in rules.families.items():
         if family["directory"] == directory:

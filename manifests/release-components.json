@@ -22,7 +22,7 @@
     },
     {
       "key": "api",
-      "path": "kit/api",
+      "path": "domains/api",
       "dist": "arkhai-api"
     },
     {
@@ -62,12 +62,12 @@
     },
     {
       "key": "api-contracts",
-      "path": "kit/api/contracts",
+      "path": "domains/api/contracts",
       "dist": "arkhai-api-contracts"
     },
     {
       "key": "api-client",
-      "path": "kit/api/client",
+      "path": "domains/api/client",
       "dist": "arkhai-api-client"
     },
     {
@@ -157,7 +157,7 @@
     },
     {
       "key": "api-authority",
-      "path": "kit/api/authority",
+      "path": "domains/api/authority",
       "dist": "arkhai-api-authority"
     },
     {
@@ -192,42 +192,42 @@
     },
     {
       "key": "api-selling",
-      "path": "kit/api/selling",
+      "path": "domains/api/selling",
       "dist": "arkhai-api-selling"
     },
     {
       "key": "api-selling-alkahest",
-      "path": "kit/api/selling-alkahest",
+      "path": "domains/api/selling-alkahest",
       "dist": "arkhai-api-selling-alkahest"
     },
     {
       "key": "api-selling-arkhai-payments",
-      "path": "kit/api/selling-arkhai-payments",
+      "path": "domains/api/selling-arkhai-payments",
       "dist": "arkhai-api-selling-arkhai-payments"
     },
     {
       "key": "api-buying",
-      "path": "kit/api/buying",
+      "path": "domains/api/buying",
       "dist": "arkhai-api-buying"
     },
     {
       "key": "api-buying-alkahest",
-      "path": "kit/api/buying-alkahest",
+      "path": "domains/api/buying-alkahest",
       "dist": "arkhai-api-buying-alkahest"
     },
     {
       "key": "api-buying-arkhai-payments",
-      "path": "kit/api/buying-arkhai-payments",
+      "path": "domains/api/buying-arkhai-payments",
       "dist": "arkhai-api-buying-arkhai-payments"
     },
     {
       "key": "api-gate",
-      "path": "kit/api/gate",
+      "path": "domains/api/gate",
       "dist": "arkhai-api-gate"
     },
     {
       "key": "api-gateway",
-      "path": "kit/api/gateway",
+      "path": "domains/api/gateway",
       "dist": "arkhai-api-gateway"
     },
     {

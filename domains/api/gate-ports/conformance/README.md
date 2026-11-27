@@ -2,7 +2,7 @@
 
 `session.json` is the shared behavioral contract for the API-credits
 gating middleware. All three implementations reproduce this recorded
-session exactly: Python (the api family's gate, `kit/api/gate`, the
+session exactly: Python (the api family's gate, `domains/api/gate`, the
 reference, which also gates the e2e sample service), TypeScript
 (`../typescript`), and Rust
 (`../rust`). Keeping the trace in data (not in each language's test
@@ -60,7 +60,7 @@ synchronous consume and the call trace is deterministic.
 
 The reference harnesses (identical structure in each language):
 
-- Python — `kit/api/gate/tests/conformance_runner.py`
+- Python — `domains/api/gate/tests/conformance_runner.py`
 - TypeScript — `typescript/test/conformanceRunner.ts`
 - Rust — `rust/tests/conformance.rs` (+ `rust/tests/common/mod.rs`)
 

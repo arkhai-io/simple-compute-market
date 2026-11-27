@@ -180,19 +180,6 @@ def test_scope_roots_and_nested_paths_are_libraries_in_their_scope(tmp_path):
     assert (projects["solo-middleware"].kind, projects["solo-middleware"].scope) == ("library", {"solo"})
 
 
-def test_a_family_under_kit_is_read_as_its_family(tmp_path):
-    rules = _tree(tmp_path).model().rules
-    rules.families["fam"]["directory"] = "kit/fam"
-
-    root = architecture.read_path("kit/fam", "fam-vocab", rules)
-    contracts = architecture.read_path("kit/fam/contracts", "fam-contracts", rules)
-    neutral = architecture.read_path("kit/other", "kit-other", rules)
-
-    assert (root.layer, root.scope) == ("specialization", {"fam"})
-    assert (contracts.layer, contracts.kind, contracts.scope) == ("specialization", "contracts", {"fam"})
-    assert (neutral.layer, neutral.scope) == ("kit", frozenset())
-
-
 def test_a_domain_without_a_family_implies_nothing(tmp_path):
     tree = _tree(tmp_path)
     tree.project("domains/solo", "solo-domain")

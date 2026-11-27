@@ -158,7 +158,7 @@ def run_prerequisites(entrypoint: str, env: dict[str, str]) -> subprocess.Comple
     else:
         make = shutil.which("make")
         assert make is not None
-        command = [make, "-s", "-C", str(repo_root() / "kit/api"),
+        command = [make, "-s", "-C", str(repo_root() / "domains/api"),
                    "check-middleware-toolchains"]
     return subprocess.run(command, cwd=repo_root(), env=env, check=False,
                           text=True, capture_output=True)

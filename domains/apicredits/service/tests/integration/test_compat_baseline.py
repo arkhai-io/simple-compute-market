@@ -41,7 +41,7 @@ from tests.integration.signed_service import (
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "baseline"
 #: The surface the family's contracts declare, which its own tests also read.
 CONTRACT_FIXTURES = (
-    Path(__file__).resolve().parents[5] / "kit" / "api" / "contracts" / "tests" / "fixtures" / "baseline"
+    Path(__file__).resolve().parents[5] / "domains" / "api" / "contracts" / "tests" / "fixtures" / "baseline"
 )
 CONTRACT_RECORDS = frozenset({"routes", "openapi", "route_contracts", "refusals"})
 SOURCE = Path(__file__).resolve().parents[2] / "src" / "apicredits_service"

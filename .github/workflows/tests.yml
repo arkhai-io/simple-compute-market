@@ -67,17 +67,17 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           version: "0.12.22"
-      # The kit suite includes the api family gate's TypeScript and Rust ports.
-      - if: matrix.target == 'test-kits'
+      # The domain suite includes the api family gate's TypeScript and Rust ports.
+      - if: matrix.target == 'test-domains'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - if: matrix.target == 'test-kits'
+      - if: matrix.target == 'test-domains'
         uses: dtolnay/rust-toolchain@stable
-      - if: matrix.target == 'test-kits'
+      - if: matrix.target == 'test-domains'
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: kit/api/gate-ports/rust
+          workspaces: domains/api/gate-ports/rust
       - if: matrix.target == 'test-deployment-packaging'
         uses: azure/setup-helm@v4
         with:

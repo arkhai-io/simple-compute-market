@@ -4,7 +4,7 @@
  * Drives the real `TokenGate` + `TokensClient` against the in-process
  * `ScriptedService` over real HTTP, so the test exercises request
  * shaping and response parsing — not a stub. Mirrors the Python
- * reference runner (`kit/api/gate/tests/conformance_runner.py`) step for step.
+ * reference runner (`domains/api/gate/tests/conformance_runner.py`) step for step.
  */
 
 import assert from "node:assert/strict";
