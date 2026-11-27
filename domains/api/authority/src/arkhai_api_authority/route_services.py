@@ -12,6 +12,7 @@ from arkhai_api_contracts.models import IssuanceRequest
 from injected_time import TimeRouteError, TimeRouteService
 
 from arkhai_api_authority.keys_service import (
+    CHARGE_MISMATCH,
     FULFILLMENT_CONFLICT,
     INSUFFICIENT_CREDITS,
     KEY_NOT_FOUND,
@@ -41,6 +42,7 @@ _CONSUME_STATUS = {
     KEY_NOT_FOUND: 404,
     KEY_REVOKED: 403,
     KEY_OUT_OF_SCOPE: 403,
+    CHARGE_MISMATCH: 409,
     INSUFFICIENT_CREDITS: 402,
 }
 

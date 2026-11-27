@@ -176,3 +176,10 @@ def test_a_consumption_outside_the_keys_scope_is_a_403():
     assert _refusal(lambda: routes.consume("ak_1", amount=1, idempotency_key=None, service="svc")) == (
         403, {"error": "key_out_of_scope", "balance": 0},
     )
+
+
+def test_a_consumption_at_another_amount_than_the_pinned_charge_is_a_409_carrying_the_balance():
+    routes = AuthorityRouteService(_Keys(consume={"ok": False, "reason": "charge_mismatch", "balance": 10}))
+    assert _refusal(lambda: routes.consume("ak_1", amount=2, idempotency_key=None)) == (
+        409, {"error": "charge_mismatch", "balance": 10},
+    )

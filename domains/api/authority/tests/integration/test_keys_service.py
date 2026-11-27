@@ -677,3 +677,74 @@ def test_verify_and_consume_inside_or_without_a_scope_admit_and_charge(service):
     assert service.verify(key_id=key["key_id"], secret="wrong", **scope) == {
         "valid": False, "status": "active", "balance": 8,
     }
+
+
+# A pinned key's charge
+
+
+def test_a_pinned_key_charged_another_amount_is_refused_carrying_its_unchanged_balance(service):
+    key = _pinned_key(service)
+
+    assert service.consume(key_id=key["key_id"], amount=2) == {
+        "ok": False, "reason": "charge_mismatch", "balance": 10,
+    }
+    assert service.get_key(key["key_id"])["balance"] == 10
+    assert service.list_usage(key["key_id"]) == []
+
+
+def test_a_mismatch_beyond_the_balance_is_a_mismatch_not_insufficient_credits(service):
+    key = _pinned_key(service)
+
+    assert service.consume(key_id=key["key_id"], amount=11) == {
+        "ok": False, "reason": "charge_mismatch", "balance": 10,
+    }
+
+
+def test_a_key_refusal_precedes_a_mismatch(service):
+    key = _pinned_key(service)
+
+    assert service.consume(key_id=key["key_id"], amount=2, service="other-service") == {
+        "ok": False, "reason": "key_out_of_scope", "balance": 0,
+    }
+    service.revoke(key["key_id"])
+    assert service.consume(key_id=key["key_id"], amount=2) == {
+        "ok": False, "reason": "key_revoked", "balance": 10,
+    }
+
+
+def test_a_request_repeated_at_another_amount_is_a_mismatch_not_a_duplicate(service):
+    key = _pinned_key(service)
+    assert service.consume(key_id=key["key_id"], amount=1, idempotency_key="r1")["ok"] is True
+
+    assert service.consume(key_id=key["key_id"], amount=2, idempotency_key="r1") == {
+        "ok": False, "reason": "charge_mismatch", "balance": 9,
+    }
+    assert service.consume(key_id=key["key_id"], amount=1, idempotency_key="r1") == {
+        "ok": True, "consumed": 0, "duplicate": True, "balance": 9,
+    }
+
+
+def test_a_batch_refuses_its_mismatched_item_in_place_and_applies_the_others(service):
+    key = _pinned_key(service)
+
+    results = service.consume_batch(
+        [
+            {"key_id": key["key_id"], "amount": 1, "idempotency_key": "b1"},
+            {"key_id": key["key_id"], "amount": 3, "idempotency_key": "b2"},
+            {"key_id": key["key_id"], "amount": 1, "idempotency_key": "b3"},
+        ]
+    )
+
+    assert results == [
+        {"ok": True, "consumed": 1, "balance": 9},
+        {"ok": False, "reason": "charge_mismatch", "balance": 9},
+        {"ok": True, "consumed": 1, "balance": 8},
+    ]
+    assert len(service.list_usage(key["key_id"])) == 2
+
+
+def test_an_unpinned_key_is_charged_the_amount_sent(service):
+    key = _issue(service, negotiation_id="0xu1", quantity=10, key_mode="new", **BUYER)
+
+    assert service.consume(key_id=key["key_id"], amount=3) == {"ok": True, "consumed": 3, "balance": 7}
+    assert service.consume(key_id=key["key_id"], amount=1) == {"ok": True, "consumed": 1, "balance": 6}

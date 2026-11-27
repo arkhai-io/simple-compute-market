@@ -219,8 +219,23 @@ async def test_a_caller_naming_no_scope_can_neither_verify_nor_charge_a_key(app)
     assert (consumed.ok, consumed.reason) == (False, "scope_required")
     batched = await gateway.consume_batch([
         {"key_id": issued.key_id, "amount": 3},
-        {"key_id": issued.key_id, "amount": 5, **SCOPE},
+        {"key_id": issued.key_id, "amount": 3, **SCOPE},
     ])
     assert [(r.ok, r.reason) for r in batched] == [(False, "scope_required"), (True, None)]
 
-    assert (await gateway.verify(key_id=issued.key_id, secret=issued.secret, **SCOPE)).balance == 95
+    assert (await gateway.verify(key_id=issued.key_id, secret=issued.secret, **SCOPE)).balance == 97
+
+
+async def test_a_consumption_at_another_amount_than_the_pinned_charge_is_refused_and_charges_nothing(app):
+    issued = await _storefront(app).submit_issuance(_request("neg-charge-1", 100))
+    gateway = _gateway(app)
+
+    consumed = await gateway.consume(key_id=issued.key_id, amount=5, **SCOPE)
+    assert (consumed.ok, consumed.reason, consumed.balance) == (False, "charge_mismatch", 100)
+    batched = await gateway.consume_batch([
+        {"key_id": issued.key_id, "amount": 5, "idempotency_key": "b1", **SCOPE},
+        {"key_id": issued.key_id, "amount": 3, "idempotency_key": "b2", **SCOPE},
+    ])
+    assert [(r.ok, r.reason, r.balance) for r in batched] == [(False, "charge_mismatch", 100), (True, None, 97)]
+
+    assert (await gateway.verify(key_id=issued.key_id, secret=issued.secret, **SCOPE)).balance == 97

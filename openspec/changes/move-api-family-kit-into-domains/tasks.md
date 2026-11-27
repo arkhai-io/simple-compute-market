@@ -228,12 +228,16 @@ companions that cite the path, and the active changes' documents that cite it.
 Delivers D4 and the delta requirement "A key is scoped to its first grant".
 Touches `domains/api/contracts` and `domains/api/authority`.
 
-- [ ] 3.1 `arkhai_api_contracts/refusals.py`: `CHARGE_MISMATCH` beside the
+- [x] 3.1 `arkhai_api_contracts/refusals.py`: `CHARGE_MISMATCH` beside the
       others and outside `CONSUME_REFUSALS`, whose comment says it holds the
       refusals of a key or its credit; `models.py`: the consume refusal
       model's description says the same (D4). Verify: the contracts unit suite
       and the gate's contract parity test pass unchanged.
-- [ ] 3.2 `arkhai_api_authority/keys_service.py`: `consume` refuses an amount
+      *Note:* the contracts unit suite, 47 passed, and the gate's suite,
+      contract parity among it, 108 passed, each unchanged. The authority
+      imports `CHARGE_MISMATCH` from the contracts, so the reason is
+      declared once; its other reasons keep their own strings, as before.
+- [x] 3.2 `arkhai_api_authority/keys_service.py`: `consume` refuses an amount
       other than the first grant's pinned charge, after the not-found, revoked,
       and out-of-scope refusals and before the idempotency lookup and the
       balance check, answering the key's balance and debiting nothing; an
@@ -241,17 +245,59 @@ Touches `domains/api/contracts` and `domains/api/authority`.
       answers `409` (D4). Verify: unit cases for each scenario of the delta —
       another amount, a revoked pinned key, a replay at another amount, an
       unpinned key — and for a batch carrying one mismatched item.
-- [ ] 3.3 Application integration: the inference service refuses a signed
+      *Note:* the scenarios are library-integration cases in
+      `tests/integration/test_keys_service.py`, against a real store, not
+      unit cases: another amount, another amount beyond the balance (a
+      mismatch, not insufficient credits), a key refusal (out of scope,
+      then revoked) before a mismatch, a replay at another amount, a batch
+      with one mismatched item, and an unpinned key charged three then
+      one. The
+      `409` mapping is a unit case in `tests/unit/test_route_services.py`.
+      `make -C domains test-api-authority`: 101 passed. `change-workflow run
+      test-before` on the integration file at `de67cd348`, before the
+      beyond-the-balance case was added: the three mismatch cases fail
+      there and the key-refusal and unpinned cases
+      pass, as they describe behaviour that holds already. `consume` now
+      reads the key's first grant on every call, scoped or not, since a
+      pinned charge applies to an unscoped caller too.
+- [x] 3.3 Application integration: the inference service refuses a signed
       consume of a pinned key at another amount with `409 charge_mismatch`
       through its typed client, and the API-credits service's recorded
       baselines are unchanged (D4). Verify: `make -C domains
       test-inference-service test-apicredits`.
-- [ ] 3.4 Verification. `make -C domains test-api-authority`; the contracts
+      *Note:* application integration through the service's ASGI app: the
+      gate's typed client, `TokensClient`, sees `charge_mismatch` with the
+      unchanged balance for a single consume and in place in a batch,
+      whose other item is applied. The client does not expose the status,
+      and a raw call would break `integration-tests.md`'s "No raw calls",
+      so the `409` is shown by the route service's unit case (3.2), not
+      at this level. Outside the plan: the existing case that a caller naming no
+      scope is refused consumed five credits from a key pinned at three in
+      its batch's scoped item; it now consumes three. `make -C domains
+      test-inference-service test-apicredits`: 33 passed, and API credits'
+      five suites 471 passed, as in round 1, with no baseline fixture
+      changed.
+- [x] 3.4 Verification. `make -C domains test-api-authority`; the contracts
       and gate suites; `change-workflow run pre-commit
       move-api-family-kit-into-domains`.
       End-to-end: none reaches the refusal, since the gate always sends the
       pinned charge; `e2e_inference_deal` shows a pinned key still charged its
       pinned amount. None is owed.
+      *Note:* `make -C domains test-api-authority`: 101 passed; the
+      contracts suite 47 and the gate suite 108, unchanged. `change-workflow
+      run pre-commit move-api-family-kit-into-domains --base origin/dev`:
+      the relock changed no lock and the closing checks passed; its local
+      `make test` stopped, as on the landing branch, at the bare-metal
+      provisioning IaC suites, which read `/proc/self/fdinfo` and fail on
+      macOS. End-to-end confirmed as planned: no scenario reaches the
+      refusal, and `e2e_inference_deal`, not run here, charges the pinned
+      amount. A dependent of the authority keeps the old refusal until its
+      wheel is rebuilt (`make -C domains dist-api-authority`, which
+      rebuilds the contracts first) and its environment reinstalled.
+      The fresh-context check found a raw call in the inference service's
+      application test, removed; no case of a mismatch beyond the balance,
+      added; the authority's second declaration of the reason, now
+      imported from the contracts; and two overstated notes, corrected.
 
 ## 4. The selling library takes the emitter by injection and assembles the settlement composition
 

@@ -135,7 +135,11 @@ class ConsumeOutcome(BaseModel):
 
 
 class ConsumeRefusal(BaseModel):
-    """The body of a refused consume; ``error`` is one of `CONSUME_REFUSALS`."""
+    """The body of a refused consume.
+
+    ``error`` is one of `CONSUME_REFUSALS`, the refusals of a key or its
+    credit, or `CHARGE_MISMATCH`, an amount other than the key's pinned charge.
+    """
 
     model_config = ConfigDict(extra="forbid")
 

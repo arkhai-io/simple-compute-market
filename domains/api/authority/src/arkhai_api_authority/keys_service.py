@@ -22,6 +22,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from arkhai_api_contracts.models import KeyDisposition, issuance_request_model
+from arkhai_api_contracts.refusals import CHARGE_MISMATCH
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
 
 from arkhai_api_authority.models import ApiKey, ConsumptionEvent, CreditGrant, GrantTerms
@@ -574,13 +575,16 @@ class KeysService:
         """Decrement ``amount`` credits. Outcome dict, never raises for
         market-state conditions; a named ``service`` or ``resource_id`` the
         key's first grant does not match refuses as ``key_out_of_scope``
-        before any balance change:
+        before any balance change. A key whose first grant pins a request
+        charge is refused any other ``amount`` as ``charge_mismatch``, after
+        the key's own refusals and before an idempotent replay is recognised;
+        an unpinned key is charged the amount sent:
 
         - ``{"ok": True, "consumed": N, "balance": B}``
         - ``{"ok": True, "consumed": 0, "balance": B, "duplicate": True}``
           — the idempotency key was already applied
         - ``{"ok": False, "reason": ..., "balance": B}`` — not found /
-          revoked / insufficient credits
+          revoked / charge mismatch / insufficient credits
         - ``{"ok": False, "reason": "key_out_of_scope", "balance": 0}``
         """
         if amount < 1:
@@ -595,10 +599,15 @@ class KeysService:
                     "reason": KEY_REVOKED,
                     "balance": int(key.balance or 0),
                 }
-            if (service is not None or resource_id is not None) and not _in_scope(
-                _first_grant(db, key_id)[0], service=service, resource_id=resource_id
-            ):
+            first, first_terms = _first_grant(db, key_id)
+            if not _in_scope(first, service=service, resource_id=resource_id):
                 return {"ok": False, "reason": KEY_OUT_OF_SCOPE, "balance": 0}
+            if first_terms is not None and amount != int(first_terms.request_charge):
+                return {
+                    "ok": False,
+                    "reason": CHARGE_MISMATCH,
+                    "balance": int(key.balance or 0),
+                }
             if idempotency_key is not None:
                 seen = (
                     db.query(ConsumptionEvent)
