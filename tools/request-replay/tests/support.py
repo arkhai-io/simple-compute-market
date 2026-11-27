@@ -116,9 +116,14 @@ class MemoryStore:
         )
         return True
 
-    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+    def conclude(self, entry: Entry, *, now: int) -> Row | None:
+        principal, request_id = entry.principal, entry.request_id
         row = self.rows.get((principal, request_id))
-        if row is None or row.expires_at <= now:
+        if (
+            row is None
+            or row.expires_at <= now
+            or (row.request_hash, row.origin) != (entry.request_hash, entry.origin)
+        ):
             return None
         if (
             row.resolution is Resolution.RECORDED
@@ -192,3 +197,24 @@ class RecordingFirst:
             return target(*args, **kwargs)
 
         return recorded_first
+
+
+class TakenFirst:
+    """A store whose concluding step lets another party take the key first, as when
+    the retry's row expires and another request claims its key between the retry's
+    read and its concluding write."""
+
+    def __init__(self, store: object, take: Callable[[], None]) -> None:
+        self._store = store
+        self._take = take
+
+    def __getattr__(self, name: str) -> object:
+        target = getattr(self._store, name)
+        if name != "conclude":
+            return target
+
+        def taken_first(*args: object, **kwargs: object) -> object:
+            self._take()
+            return target(*args, **kwargs)
+
+        return taken_first

@@ -89,6 +89,12 @@ class Row:
         )
 
 
+def same_request(row: Row, entry: Entry) -> bool:
+    """Whether ``row`` holds ``entry``'s request, not another one under its key."""
+
+    return row.request_hash == entry.request_hash and row.origin == entry.origin
+
+
 class StoreUnavailable(Exception):
     """A store step failed, so the caller may rely on nothing it did.
 
@@ -131,13 +137,15 @@ class ReplayStore(Protocol):
         """
         ...
 
-    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
-        """Conclude a live recorded row's ended attempt, and answer the row after.
+    def conclude(self, entry: Entry, *, now: int) -> Row | None:
+        """Conclude ``entry``'s live recorded row's ended attempt, and answer the row after.
 
-        In one writing transaction: where the row has no response and its lease
-        has ended at ``now``, clear the lease's end and keep its owner; then read the
-        row. Answers the live row as it then stands -- concluded, or recorded in the
-        meantime -- or ``None`` when no live row holds the key. Under SQLite the
+        In one writing transaction: where the row under ``entry``'s key still has
+        its hash and origin, no response, and a lease ended at ``now``, clear the
+        lease's end and keep its owner; then read the row. Answers the live row as
+        it then stands -- concluded, or recorded in the meantime -- or ``None`` when
+        no live row with ``entry``'s hash and origin holds the key, as when the row
+        expired and another request has taken the key since. Under SQLite the
         write takes the database's one write lock, so the answer waits for any
         transaction the attempt still holds on that database; a database with
         finer locks, PostgreSQL among them, gives no such order.

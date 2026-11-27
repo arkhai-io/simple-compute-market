@@ -45,7 +45,7 @@ The caller admits each request as an `Entry`:
 | `InProgress()` | An attempt holds the lease | Refuses the retry as in progress |
 | `ChangedReuse()` | The key is held under another hash | Refuses the request |
 | `OutcomeUnknown()` | A `RECORDED` attempt's lease ended with no response recorded, and the retry concluded it | Refuses the retry; the sender reads current state before writing again under a new ID |
-| `Expired()` | A `RECORDED` retry whose origin is older than the retention, or older than the skew with no row | Refuses the retry as expired |
+| `Expired()` | A `RECORDED` retry whose origin is older than the retention, older than the skew with no row, or whose row expired since the retry's read, another request perhaps taking its key | Refuses the retry as expired |
 
 A `RECORDED` request is dispatched once: its lease is never reclaimed. A `RERUN`
 request's ended lease is reclaimed by one retry. `complete` records a `RECORDED`
@@ -55,6 +55,10 @@ lease, recording nothing.
 A retry that finds a `RECORDED` attempt's lease ended with no response first
 concludes the attempt, by one conditional write in the store, and only then is
 answered `OutcomeUnknown`; a retry finding it already concluded is answered the same.
+The concluding write and the read after it are bound to the retry's hash and origin:
+a row that expired and was taken by another request under the same key since the
+retry's first read is never concluded, nor its outcome answered, and the retry is
+`Expired`.
 Where the handler writes the same SQLite database, the write waits for SQLite's one
 write lock, so the answer cannot precede a transaction the handler still holds: a
 caller's read after it sees whatever that transaction wrote. A database with finer

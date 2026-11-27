@@ -70,7 +70,8 @@ release may stop accepting the version before
   mutation, absolute setters and deletes included, keeps its outcome (D6), and is
   dispatched once: the core renews a running attempt's lease, and an exact retry
   finding no outcome after the attempt's lease has ended concludes the attempt by a
-  write in the store, which cannot overtake a transaction the attempt still holds, and
+  write in the store, which on the authority's own SQLite database cannot overtake a
+transaction the attempt still holds, and
   is then answered with a signed "outcome unknown"; a recorded 500's effect is likewise
   unknown, and the caller reads current state before writing again (D3, D7). A replay
   store failing while it admits a request is a signed 503, after which the caller
@@ -162,8 +163,9 @@ every expired row is deleted within one sweep interval; no recorded outcome hold
 contact or a secret; the 0.4.0 tables are gone and the
 SQLite files compacted after the upgrade; every refusal that names a request is signed,
 on a path no route serves too, and an unexpected failure after authentication is a
-signed 500, a replay store's failure while admitting a request a signed 503; no
-`exact_retry_outcome_unknown` answer precedes the end of a transaction its attempt holds;
+signed 500, a replay store's failure while admitting a request a signed 503; on an authority's own SQLite
+database no `exact_retry_outcome_unknown` answer precedes the end of a transaction its
+attempt holds;
 version 2 requests are refused and version 2 evidence still verifies; version 3
 evidence verifies offline from its record and body alone.
 

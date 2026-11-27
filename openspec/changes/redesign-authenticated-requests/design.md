@@ -520,12 +520,16 @@ when its handler returns and a later exact retry receives it. Only a retry whose
 concluding write applied, or that finds the row already concluded, is answered with a
 signed 409 whose body code is `exact_retry_outcome_unknown`, and it is never
 dispatched. The concluding write takes the store's write lock, so on the authority's
-own database the answer cannot overtake a transaction the attempt still holds: under
+own SQLite database the answer cannot overtake a transaction the attempt still holds: under
 SQLite, whose one writer the handler's transaction is, a handler writing in one
 transaction has committed or rolled back before its retry is told the outcome is
 unknown, whichever store the authority uses, the SQLAlchemy store's plain read
-included. That answer therefore means, but in the cases below, that the attempt ended
-without recording: none of its local writes can still commit. A lease is reclaimed only
+included. A database with finer locks, PostgreSQL among them, gives no such order: a
+handler's transaction on its own tables does not conflict with the replay row, so the
+answer may precede its commit, and the requirement promises the order only on SQLite.
+Under SQLite that answer therefore
+means, but in the cases below, that the attempt ended without recording: none of its
+local writes can still commit. A lease is reclaimed only
 on a `RERUN` route, where a second run is proven safe (D5). A caller told the outcome is
 unknown, or answered a recorded 500 (D3), learns what applied by reading current state,
 as it does after the 410 (D8), and sends any further write under a new request ID.
@@ -578,6 +582,11 @@ shared unit of work, rejected under 27 F1. The plan proves it with a retry arriv
 while a handler holds the database's write lock, answered only after that handler's
 commit, then a read and a replacement write that the original no longer overtakes, in
 both stores; and a retry whose reservation fails, answered the 503.
+
+*Implementation review 71:* the 5b notes recorded that the requirement promised the
+conclusion's order on any database while the concluding write gives it only under
+SQLite's one write lock. The owner chose to narrow the requirement to the authority's
+own SQLite database over giving PostgreSQL an order of its own.
 
 *Design review 35, F3:* the 27 F1 triage answered `exact_retry_outcome_unknown` once a
 fixed lease ended, and told the caller to read current state. A handler still running

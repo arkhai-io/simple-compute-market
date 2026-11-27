@@ -8,7 +8,7 @@ from contextlib import closing, contextmanager
 
 from request_replay.ddl import DEFAULT_TABLE, table_name
 from request_replay.policy import Resolution
-from request_replay.store import COLUMNS, Entry, Outcome, Row, row_from_columns
+from request_replay.store import COLUMNS, Entry, Outcome, Row, row_from_columns, same_request
 
 _COLUMNS = ", ".join(COLUMNS)
 
@@ -91,17 +91,25 @@ class SqliteReplayStore:
             )
             return cursor.rowcount == 1
 
-    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+    def conclude(self, entry: Entry, *, now: int) -> Row | None:
         with self._transaction() as connection:
             connection.execute(
                 f"UPDATE {self._table} SET lease_until = NULL "
-                "WHERE principal = ? AND request_id = ? AND resolution = ? "
-                "AND outcome_status IS NULL AND lease_until <= ? "
+                "WHERE principal = ? AND request_id = ? AND request_hash = ? AND origin = ? "
+                "AND resolution = ? AND outcome_status IS NULL AND lease_until <= ? "
                 "AND expires_at > ?",
-                (principal, request_id, Resolution.RECORDED.value, now, now),
+                (
+                    entry.principal,
+                    entry.request_id,
+                    entry.request_hash,
+                    entry.origin,
+                    Resolution.RECORDED.value,
+                    now,
+                    now,
+                ),
             )
-            row = self._row(connection, principal, request_id)
-        return row if row is not None and row.expires_at > now else None
+            row = self._row(connection, entry.principal, entry.request_id)
+        return row if row is not None and row.expires_at > now and same_request(row, entry) else None
 
     def record(self, principal: str, request_id: str, owner: str, outcome: Outcome) -> bool:
         with self._transaction() as connection:

@@ -13,11 +13,12 @@ from request_replay import (
     Dispatch,
     Expired,
     InProgress,
+    Outcome,
     OutcomeUnknown,
     Resolution,
 )
 
-from tests.support import OUTCOME, POLICY, START, ManualClock, RecordingFirst, entry, guard
+from tests.support import OUTCOME, POLICY, START, ManualClock, RecordingFirst, TakenFirst, entry, guard
 
 RERUN = Resolution.RERUN
 RECORDED = Resolution.RECORDED
@@ -284,3 +285,64 @@ def test_an_outcome_recorded_before_the_concluding_write_is_answered(store) -> N
 
     assert guard(racing, clock).admit(entry(RECORDED)) == Answered(OUTCOME)
     assert racing.recorded
+
+
+REPLACEMENT = Outcome(status=201, headers=(("content-type", "application/json"),), body=b'{"other":true}')
+
+
+def _retry_meeting_a_replacement(store, *, record: bool):
+    """An ended attempt's retry that reads its row on the last instant of its
+    retention, then meets the row expired and its key taken by another request,
+    recorded or still running, before its concluding write."""
+
+    clock = ManualClock()
+    replay = guard(store, clock)
+    first = replay.admit(entry(RECORDED))
+    assert isinstance(first, Dispatch)
+
+    later = ManualClock(store.get("scheme:caller-1", "request-1", now=clock()).expires_at)
+    other = guard(store, later)
+    replacement = entry(RECORDED, request_hash="hash-b", origin=later())
+
+    taken_row = []
+
+    def take() -> None:
+        taken = other.admit(replacement)
+        assert isinstance(taken, Dispatch)
+        if record:
+            other.complete(taken.attempt, REPLACEMENT)
+        taken_row.append(store.get("scheme:caller-1", "request-1", now=later()))
+
+    clock.now = START + RETENTION
+    admission = guard(TakenFirst(store, take), clock).admit(entry(RECORDED))
+    return admission, taken_row[0], store.get("scheme:caller-1", "request-1", now=later())
+
+
+def test_a_retry_whose_key_another_request_took_and_recorded_is_expired(store) -> None:
+    admission, before, after = _retry_meeting_a_replacement(store, record=True)
+
+    assert admission == Expired()
+    assert after == before and after.request_hash == "hash-b" and after.outcome == REPLACEMENT
+
+
+def test_a_retry_whose_key_another_request_holds_is_expired_leaving_its_lease(store) -> None:
+    admission, before, after = _retry_meeting_a_replacement(store, record=False)
+
+    assert admission == Expired()
+    assert after == before and after.request_hash == "hash-b" and after.lease_until is not None
+
+
+def test_the_concluding_write_leaves_another_requests_row_and_answers_none(store) -> None:
+    clock = ManualClock()
+    first = guard(store, clock).admit(entry(RECORDED))
+    assert isinstance(first, Dispatch)
+    later = ManualClock(store.get("scheme:caller-1", "request-1", now=clock()).expires_at)
+    taken = guard(store, later).admit(entry(RECORDED, request_hash="hash-b", origin=later()))
+    assert isinstance(taken, Dispatch)
+    later.advance(LEASE)
+    before = store.get("scheme:caller-1", "request-1", now=later())
+
+    # At this instant the replacement's own lease has ended, so only the request's
+    # identity keeps the write off it.
+    assert store.conclude(entry(RECORDED), now=later()) is None
+    assert store.get("scheme:caller-1", "request-1", now=later()) == before

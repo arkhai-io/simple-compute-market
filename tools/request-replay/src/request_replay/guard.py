@@ -15,8 +15,9 @@ answers what to do with it:
   only once a store write has concluded the attempt: where the attempt writes the
   same SQLite database, that write waits for any transaction the attempt still
   holds there;
-- :class:`Expired` -- a recorded request past its retention, or whose origin
-  is too old for a first use and whose row is gone.
+- :class:`Expired` -- a recorded request past its retention; one whose origin
+  is too old for a first use and whose row is gone; or one whose row expired
+  after the retry read it, another request perhaps holding its key now.
 
 Once its handler returns or raises, an attempt is completed: a recorded request's
 response is recorded, a re-run request's lease released.
@@ -34,7 +35,7 @@ from dataclasses import dataclass
 from typing import ParamSpec, TypeVar, Union
 
 from request_replay.policy import Policy, Resolution
-from request_replay.store import Entry, Outcome, ReplayStore, Row, StoreUnavailable
+from request_replay.store import Entry, Outcome, ReplayStore, Row, StoreUnavailable, same_request
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -210,9 +211,12 @@ class RequestReplay:
             # What a read found is not enough to say the outcome is unknown: under
             # SQLite a plain read passes the write lock an attempt's own
             # transaction may still hold. The concluding write waits for that lock.
-            after = self._step(self._store.conclude, entry.principal, entry.request_id, now=now)
-            if after is None:
-                # Gone since the read: another process, its clock later, swept it.
+            after = self._step(self._store.conclude, entry, now=now)
+            if after is None or not same_request(after, entry):
+                # Gone since the read: another process, its clock later, swept it,
+                # and another request may hold the key now, whose outcome is not
+                # this one's to answer. The store answers no such row; the check
+                # here keeps that true of a store that does.
                 return Expired()
             if after.outcome is not None:
                 return Answered(after.outcome)

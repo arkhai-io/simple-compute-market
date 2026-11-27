@@ -1089,6 +1089,45 @@ Notes (section 5b):
   PostgreSQL scope and the broad `StoreUnavailable` mapping, both recorded above for
   the owner. The section's "Touches" line omits the README, `renewal.py`,
   `__init__.py` and `tests/unit/`, which it also changed.
+- Fix from implementation review 71 F1 (triage of round 2): `conclude` took only the
+  key, so a retry whose row expired between its read and its concluding write, its key
+  then claimed by another request, was answered that request's recorded outcome, or
+  told it was in progress. `ReplayStore.conclude` now takes the retry's `Entry`; both
+  stores condition the concluding update on its hash and origin and answer `None` when
+  the row under the key holds another request (`store.same_request`), and the guard
+  rechecks the returned row, so the retry is `Expired`. The in-memory double and the
+  README follow. Proven by three rule cases, each run on the in-memory double (unit)
+  and both stores over real SQLite (library integration): a retry meeting a
+  replacement recorded, and one still running, is `Expired` and leaves the
+  replacement's row as it was; and `conclude` called directly once the replacement's
+  own lease has ended answers `None` and leaves its row, proving the stores' condition
+  apart from the guard. A unit case proves the guard's recheck against a store
+  answering another request's row.
+  Evidence: `make test-request-replay` — mypy strict clean; 77 unit and 97
+  library-integration tests passed. `make -C kit/authenticated-requests test` against
+  the rebuilt wheel: 199 passed (unit and library integration). `change-workflow run
+  test-before` at `528a5a945` over `tests/rules.py`, `tests/support.py` and
+  `tests/integration/test_store_rules.py`: 6 failed, 44 passed — the two retry cases
+  on both stores on `admission == Expired()`, and the direct `conclude` case, whose
+  signature is new; the unit cases cannot run there, the double's `conclude` taking
+  the new signature. A scratch mutation confirmed each half alone is proven: without
+  the guard's recheck the unit case fails, and without the stores' identity check the
+  direct case fails on both stores. End-to-end: none — nothing deployed uses it until
+  section 16.
+  `change-workflow run pre-commit`: `after-functional-change at 528a5a945: passed,
+  exit 0`; `pre-commit-functional at 528a5a945: passed, exit 0`; `pre-commit at
+  528a5a945: passed, exit 0`.
+  The fresh-context check found no correctness defect; it found that neither half of
+  the fix was proven alone (the direct `conclude` case and the guard's unit case were
+  added), the proposal's two statements of the order unscoped to SQLite, D7's opening
+  sentence unscoped, the decision recorded inline rather than as a history paragraph,
+  the `Expired` wording in the guard's docstring and the README conflating cases, the
+  guard's recheck uncommented, and a blank line at the end of `tests/rules.py`; all
+  fixed.
+- The owner's direction in that triage: the delta requirement "Each route declares how
+  an exact retry is resolved" is narrowed to promise the conclusion's order only where
+  the replay store is on the authority's own SQLite database, PostgreSQL getting no
+  such order; D7 records it. That settles the PostgreSQL scope recorded above.
 
 ## 5c. The admission core amended
 

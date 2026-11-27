@@ -32,7 +32,7 @@ from sqlalchemy.exc import IntegrityError
 
 from request_replay.ddl import DEFAULT_TABLE, table_name
 from request_replay.policy import Resolution
-from request_replay.store import COLUMNS, Entry, Outcome, Row, row_from_columns
+from request_replay.store import COLUMNS, Entry, Outcome, Row, row_from_columns, same_request
 
 # A key whose row a concurrent sweep deletes, or that expires, between the failed
 # insert and the read is claimed again; past this many such races the database is
@@ -147,13 +147,15 @@ class SqlAlchemyReplayStore:
         )
         return self._changed_one(statement)
 
-    def conclude(self, principal: str, request_id: str, *, now: int) -> Row | None:
+    def conclude(self, entry: Entry, *, now: int) -> Row | None:
         t = self._table
-        key = (t.c.principal == principal) & (t.c.request_id == request_id)
+        key = (t.c.principal == entry.principal) & (t.c.request_id == entry.request_id)
         statement = (
             update(t)
             .where(
                 key
+                & (t.c.request_hash == entry.request_hash)
+                & (t.c.origin == entry.origin)
                 & (t.c.resolution == Resolution.RECORDED.value)
                 & t.c.outcome_status.is_(None)
                 & (t.c.lease_until <= now)
@@ -165,8 +167,8 @@ class SqlAlchemyReplayStore:
         # matches, and the read after it is in the same transaction, behind it.
         with self._engine.begin() as connection:
             connection.execute(statement)
-            row = self._row(connection, principal, request_id)
-        return row if row is not None and row.expires_at > now else None
+            row = self._row(connection, entry.principal, entry.request_id)
+        return row if row is not None and row.expires_at > now and same_request(row, entry) else None
 
     def record(self, principal: str, request_id: str, owner: str, outcome: Outcome) -> bool:
         t = self._table
