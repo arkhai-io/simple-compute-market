@@ -24,6 +24,11 @@ design. Tasks in 7–13 and 15 that move a client or declare routes now also car
 query rule below; 9 and 10 move the storefronts' replay-table migration so that section
 9 can be committed alone. Sections 2, 4, 5a and 5c stay as done, with correction notes.
 
+*Amended a third time 2026-11-27* after section 7 stopped before its first task:
+sections 7 and 8 became one section, 7, since one typed client signs both sections'
+authorities. 7.7 names the doubles in other packages, and section 8's tasks are marked
+moved.
+
 Every section that declares routes declares, for each operation, whether it acts on a
 target object. `Market-Resource` is sent only for one that does (D2, D21). Every
 classification task's note names the declaration. Each authority here runs SQLite, so
@@ -2140,64 +2145,177 @@ Notes (section 6):
     other chains); parsing the chart's two new lines with the registry's loader in
     the release topology test, left to whoever next touches that test.
 
-## 7. The provisioning service and its hosted site on the admission core
+## 7. The provisioning service, its hosted site, the site kit and the API-credits service on the admission core
 
-Moves the provisioning service, the site it hosts, and its typed client onto the core
-in the middleware form (D3, D5, D6, D7, D9; physical-provisioning "Service calls use
-the shared version 3 identity contract", "A failure after authentication is answered
-signed"; compute-provisioning-contract "Deal-scoped lifecycle events"). Touches
-`provisioning/compute/service/src/compute_provisioning_service/` (`middleware/auth.py`,
-`container.py`, `main.py`, `db/models.py`, `db/migrations.py`, settings),
-`provisioning/compute/contracts/` route declarations,
-`provisioning/compute/client/src/compute_provisioning_client/` (`base.py`,
-`client.py`), the provisioning chart, and
-`domains/vms/provisioning/` route declarations it serves.
+*Replanned 2026-11-27 against the reviewed design* (section 7's stop, as its notes
+record): sections 7 and 8 are one section, since `kit/site-client` signs the requests of
+both sections' authorities and neither could pass the functional checks alone. 7.1–7.6
+were replaced and 8.1–8.7 moved here; none had started.
 
-- [ ] 7.1 Classify every authenticated provisioning and hosted-site route against D6's
-      criterion and declare it in its contract, naming whether each operation has a
-      target (the plan's preamble); record the table in this task's note.
-      `POST relays`, relay `token` rotation, relay `grant-keys/stage`, host and pool
-      upserts and deletes, the VM-domain job routes but `reset-password`, and the
-      `check-leases`, convergence `run-cycle` and `advance-cycle` routes are `RECORDED`;
-      confirm `reset-password` `RERUN` as a keyed operation (D6, 27 F4). A difference
-      from the design's table, or a `RECORDED` route whose caller could not learn by
-      reading, stops the section as in 6.1. The provisioning service runs SQLite, so
-      the table names any `RECORDED` route holding a write transaction near the lease
-      period or writing in more than one transaction, as 6.1's does (D7, 45 F1, 61 F1).
+Moves the provisioning service, the site it hosts, `kit/site`'s middleware, the
+API-credits service, and their typed clients onto the core in the middleware form, with
+the suites in other packages that double their wire (D3, D5, D6, D7, D9, D25). The
+requirements:
+- physical-provisioning "Service calls use the shared version 3 identity contract", "A
+  failure after authentication is answered signed";
+- compute-provisioning-contract "Deal-scoped lifecycle events";
+- api-credits "Online bearer consumption";
+- marketplace-identity "A recorded route's attempt is lost after its domain write", "A
+  recorded route's handler runs longer than its lease period", "A recorded route raises
+  after its domain write commits", "An issuance answer is lost", "A relay token rotation
+  is retried after a later rotation", "An authority restarts", "A recorded outcome
+  expires".
+
+Touches:
+- `provisioning/compute/service/src/compute_provisioning_service/` (`middleware/auth.py`,
+  `route_table.py`, `container.py`, `main.py`, `db/models.py`, `db/migrations.py`,
+  settings) and its tests, the integration conftest's `provisioning_clients` among them;
+- `provisioning/compute/contracts/` route declarations and `routes.py`'s canonical
+  query form;
+- `provisioning/compute/client/src/compute_provisioning_client/` (`base.py`,
+  `client.py`);
+- `domains/vms/provisioning/` route declarations the service serves;
+- `kit/site/src/market_site/` (`auth.py`, `identity.py`, `router.py`);
+- `kit/site-client/src/market_site_client/client.py`;
+- `domains/apicredits/service/src/apicredits_service/` (`main.py`,
+  `middleware/route_contracts.py`, `models/keys_model.py`, settings, migrations);
+- `domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py`;
+- `domains/apicredits/middleware/python/src/apicredits_middleware/` (`client.py`,
+  `signing.py`);
+- the provisioning and API-credits service charts;
+- the doubles 7.7 names.
+
+The section is large: it is one commit because no smaller one passes every suite. Its
+tasks are ordered so the declarations and the core's composition land before the clients
+and doubles move. Section 6's handoff applies: keep `dependency.py`'s annotations
+evaluated, for the older FastAPI some authorities lock.
+
+- [ ] 7.1 Classify every authenticated provisioning, hosted-site, site-kit and
+      API-credits route against D6's criterion. Declare each one, naming whether its
+      operation has a target (the plan's preamble), and record the table in this task's
+      note. The `RECORDED` routes:
+      - provisioning: `POST relays`, relay `token` rotation, relay `grant-keys/stage`,
+        host and pool upserts and deletes, the VM-domain job routes but
+        `reset-password`, and the `check-leases`, convergence `run-cycle` and
+        `advance-cycle` routes;
+      - API credits: `credits_key_adjust`.
+
+      Consume and issuance are `RERUN`. Confirm `reset-password` `RERUN` as a keyed
+      operation (D6, 27 F4).
+
+      This section adds the declaration the hosted site and the API-credits service both
+      read: `kit/site`'s `SiteRouteContract` gains the required `exact_retry` field, from
+      `kit/identity`'s vocabulary, replacing `exact_retry_safe`. Provisioning's
+      `route_table.py` takes it through `site_route_contracts` for the hosted site's
+      capacity and capacity-definition routes, beside its own contracts' declarations.
+
+      A difference from the design's table, or a `RECORDED` route whose caller could not
+      learn by reading, stops the section as in 6.1. Both services run SQLite, so the
+      table names any `RECORDED` route holding a write transaction near the lease period,
+      or writing in more than one transaction, as 6.1's does (D7, 45 F1, 61 F1). Verify
+      with a unit test over each route table: every route declared or marked.
 - [ ] 7.2 Replace `ProvisioningAuthMiddleware` and `SqlAlchemyProvisioningReplayStore`
-      with the core's middleware form over provisioning's database. Verify by
-      application integration tests through the typed client: an exact `terminate`
-      retry re-run converging; an exact `POST relays` retry with no relay ID answered
-      with the recorded outcome and no second relay; a relay token rotation retried after
-      a later rotation answered with the recorded outcome, the later token kept; a
-      grant-key staging retried after a later staging answered with the recorded outcome,
-      the later key kept (physical-provisioning and marketplace-identity scenarios); a
-      route raising after authentication answered with a signed 500, recorded on a
-      `RECORDED` route and re-run on a `RERUN` route; a double-dispatch case per `RERUN`
-      mutation and the completeness test.
-- [ ] 7.3 Add to provisioning's chain the kit's replay-table migration and a
-      space-freeing migration dropping `provisioning_replay_reservations` (D9). Verify by
-      the provisioning migration-chain test from its floor fixture and from a database
-      holding the 0.4.0 table with rows, the file compacted after.
-- [ ] 7.4 Move the provisioning client to version 3, and record each capacity-released
-      notification's origin beside its request identity in provisioning's callback
-      outbox (a column added by 7.3's migration), so every resend carries the same
-      identity and origin. The callbacks themselves are sent through
-      `core/storefront-client`, which moves to version 3 in section 10; the resent
-      notification's end-to-end behaviour is proven in 11.3. Remove the family's
-      canonical query form (`compute_provisioning_contracts/routes.py`): the
-      client builds every query through 5d.3's encoding, and `@query` covers it (D25,
-      the plan's preamble). Verify by:
-      - the client's unit suite and the outbox's unit tests;
-      - an application integration test: a job-list read whose query an intermediary
-        changed refused as an invalid proof.
-- [ ] 7.5 Add the retention and sweep-interval settings to provisioning's settings and
-      chart values schema. Verify by its configuration tests and chart render test.
-- [ ] 7.6 Verify the section: `make test-compute-provisioning`,
-      `make test-compute-provisioning-client`, `make test-compute-provisioning-contracts`,
-      `make test-provisioning`.
+      with the core's middleware form over provisioning's database, the hosted site's
+      routes included. Verify by application integration tests through the typed clients
+      (physical-provisioning and marketplace-identity scenarios):
+      - an exact `terminate` retry re-run, converging;
+      - an exact `POST relays` retry with no relay ID answered with the recorded outcome,
+        and no second relay;
+      - a relay token rotation retried after a later rotation answered with the recorded
+        outcome, the later token kept;
+      - a grant-key staging retried after a later staging answered with the recorded
+        outcome, the later key kept;
+      - a route raising after authentication answered with a signed 500, recorded on a
+        `RECORDED` route and re-run on a `RERUN` route;
+      - a hosted-site capacity call through `kit/site-client`'s `SiteCapacityClient`
+        admitted under version 3;
+      - a double-dispatch case per `RERUN` mutation, and the completeness test.
+- [ ] 7.3 Replace `SiteAuthMiddleware` and `InMemoryReplayStore` with the core's
+      middleware form. The store is bound to each hosting service's database, and no
+      in-memory store remains outside tests (D7). Verify by `kit/site`'s integration
+      suite, and an application integration test that a replay inside the skew across a
+      restart is refused (marketplace-identity "An authority restarts").
+- [ ] 7.4 Require `idempotency_key` on consume and consume-batch in the version 3 wire
+      models; the Python middleware client mints one where its caller gives none
+      (api-credits "Consumption omits its idempotency key"). Verify by application
+      integration tests:
+      - a consume without the key refused before charging;
+      - an exact consume retry re-run, charged once.
+- [ ] 7.5 Prove adjust's crash boundary, renewal and post-commit failure through the API
+      (D7). Verify as application integration tests through the typed client:
+      - a crash after `KeysService.adjust` commits and before the outcome is recorded:
+        its exact retry answered `exact_retry_outcome_unknown`, the balance adjusted
+        once, then a read showing the final balance;
+      - a handler held past its lease: its retry in progress, then answered with the
+        recorded outcome;
+      - adjust raising after it commits: a recorded 500 whose retry dispatches nothing,
+        the balance adjusted once;
+      - an exact adjust retry whose origin is older than the retention answered with a
+        signed 410 `exact_retry_expired`, and no adjustment (marketplace-identity "A
+        recorded outcome expires");
+      - an issuance answer lost, its retry rotating the unused key's secret, and no
+        secret in the replay store;
+      - a double-dispatch case per `RERUN` mutation, and the completeness test.
+- [ ] 7.6 Move the clients to version 3 signing and response verification:
+      `compute_provisioning_client`, `kit/site-client`, the settlement credits client
+      and the Python middleware client.
+      - Remove the canonical query forms: the family's
+        (`compute_provisioning_contracts/routes.py`, `canonical_provisioning_request_body`)
+        and the site kit's (`kit/site/src/market_site/auth.py`, the signed body of the
+        reservation and projection reads). The clients build every query through 5d.3's
+        encoding, and `@query` covers it (D25, the plan's preamble).
+      - Record each capacity-released notification's origin beside its request identity
+        in provisioning's callback outbox, a column 7.8's migration adds, so every resend
+        carries the same identity and origin. The callbacks themselves are sent through
+        `core/storefront-client`, which moves to version 3 in section 10; 11.3 proves the
+        resent notification end to end.
+
+      Verify by:
+      - the clients' unit suites and the outbox's unit tests;
+      - 7.2–7.5's integration tests;
+      - application integration tests: a job-list read, and a projection read whose
+        `after` an intermediary changed, each refused as an invalid proof.
+- [ ] 7.7 Move the suites in other packages that double these wires to version 3. Each
+      signs or verifies the version 2 provisioning or site wire, or imports
+      `canonical_provisioning_request_body`, against the installed clients:
+      - `domains/vms/storefront/tests/integration/test_site_trust.py`;
+      - `domains/vms/storefront/tests/fake_site.py`;
+      - `domains/bare_metal/storefront/tests/signed_sites.py`, with the
+        `test_site_clients.py`, `test_site_trust.py` and `test_app_composition.py` that
+        use it;
+      - `domains/bare_metal/storefront/tests/integration/test_site_reservation.py`;
+      - `domains/apicredits/service/tests/integration/test_signed_authority.py`;
+      - `e2e-tests/src/e2e_harness/provisioning_test_client.py`, which `make
+        test-e2e-unit` runs inside `make test`. Section 15 keeps the rest of the
+        harness.
+
+      Any further suite the functional checks find doubling these wires moves here too,
+      named in this task's note. Verify by those suites passing, via `make test-domains`
+      and `make test-e2e-unit`.
+- [ ] 7.8 Migrations (D9). Add to provisioning's chain the kit's replay-table migration,
+      the outbox's origin column, and a space-freeing migration dropping
+      `provisioning_replay_reservations`. Add the kit's replay-table migration to the
+      API-credits service's chain. Verify by each chain's migration test:
+      - provisioning's from its floor fixture, and from a database holding the 0.4.0
+        table with rows, the file compacted after;
+      - the API-credits service's from its floor.
+- [ ] 7.9 Add the retention and sweep-interval settings to provisioning's and the
+      API-credits service's settings and chart values schemas. Verify by their
+      configuration tests and chart render tests.
+- [ ] 7.10 Verify the section:
+      - `make test-compute-provisioning`, `make test-compute-provisioning-client`,
+        `make test-compute-provisioning-contracts`, `make test-provisioning`;
+      - `kit/site` and `kit/site-client` suites (via `make test-kits`);
+      - the API-credits service, domain and Python middleware suites, and the VM and
+        bare-metal storefronts' suites for 7.7's doubles (via `make test-domains`);
+      - `make test-e2e-unit`;
+      - the credits middleware's cross-language conformance session,
+        `domains/apicredits/middleware/conformance/session.json`, still passing for the
+        Python port.
+
       End-to-end: `provisioning`, `provisioning_readonly`, `provisioning_security`,
-      `e2e_compute_dynamic_listings` — evidence once section 16 lands.
+      `e2e_compute_dynamic_listings`, `e2e_credits_deal`, `e2e_credits_payment_deal` —
+      evidence once section 16 lands.
 
 Notes (section 7):
 
@@ -2257,6 +2375,9 @@ Notes (section 7):
 
 ## 8. The site kit and the API-credits service on the admission core
 
+*Replanned 2026-11-27:* every task moved to section 7, which moves this section's
+authorities together with the provisioning service; none had started.
+
 Moves `kit/site`'s middleware and the API-credits service onto the core, with the
 credits clients (D3, D5, D6, D7; api-credits "Online bearer consumption";
 marketplace-identity "A recorded route's attempt is lost after its domain write",
@@ -2270,22 +2391,22 @@ raises after its domain write commits", "An issuance answer is lost"). Touches
 `domains/apicredits/middleware/python/src/apicredits_middleware/` (`client.py`,
 `signing.py`), and the API-credits service chart.
 
-- [ ] 8.1 Classify every authenticated site and API-credits route against D6's
+- [x] 8.1 (Moved to section 7, as 7.1.) Classify every authenticated site and API-credits route against D6's
       criterion and declare it, naming whether each operation has a target (the plan's
       preamble), replacing `SiteRouteContract.exact_retry_safe`;
       `credits_key_adjust` is `RECORDED`, consume and issuance `RERUN`; record the table
       in this task's note; a difference stops the section as in 6.1.
-- [ ] 8.2 Replace `SiteAuthMiddleware` and `InMemoryReplayStore` with the core's
+- [x] 8.2 (Moved to section 7, as 7.3.) Replace `SiteAuthMiddleware` and `InMemoryReplayStore` with the core's
       middleware form, the store bound to each hosting service's database; no in-memory
       store remains outside tests (D7). Verify by `kit/site`'s integration suite and an
       application integration test that a replay inside the skew across a restart is
       refused (marketplace-identity "An authority restarts").
-- [ ] 8.3 Require `idempotency_key` on consume and consume-batch in the version 3 wire
+- [x] 8.3 (Moved to section 7, as 7.4.) Require `idempotency_key` on consume and consume-batch in the version 3 wire
       models; the Python middleware client mints one where its caller gives none
       (api-credits "Consumption omits its idempotency key"). Verify by application
       integration tests: a consume without the key refused before charging; an exact
       consume retry re-run, charged once.
-- [ ] 8.4 Prove adjust's crash boundary, renewal and post-commit failure through the API
+- [x] 8.4 (Moved to section 7, as 7.5.) Prove adjust's crash boundary, renewal and post-commit failure through the API
       (D7): a crash after `KeysService.adjust` commits and before the outcome is recorded,
       its exact retry answered `exact_retry_outcome_unknown` and the balance adjusted
       once, then a read showing the final balance; a handler held past its lease, its
@@ -2297,7 +2418,7 @@ raises after its domain write commits", "An issuance answer is lost"). Touches
       secret in the replay store. Verify as application integration tests through the
       typed client, with a double-dispatch case per `RERUN` mutation and the completeness
       test.
-- [ ] 8.5 Move `kit/site-client`, the settlement credits client and the Python middleware
+- [x] 8.5 (Moved to section 7, as 7.6.) Move `kit/site-client`, the settlement credits client and the Python middleware
       client to version 3 signing and response verification. Remove the site kit's
       canonical query form (`kit/site/src/market_site/auth.py`, the signed body of the
       reservation and projection reads). The site client builds those queries through
@@ -2305,10 +2426,10 @@ raises after its domain write commits", "An issuance answer is lost"). Touches
       - their unit suites and 8.3–8.4's integration tests;
       - an application integration test: a projection read whose `after` an
         intermediary changed refused as an invalid proof.
-- [ ] 8.6 Add the kit's replay-table migration to the API-credits service's chain, and the
+- [x] 8.6 (Moved to section 7, as 7.8 and 7.9.) Add the kit's replay-table migration to the API-credits service's chain, and the
       retention and sweep-interval settings to its settings and chart values schema.
       Verify by its migration-chain test, configuration tests and chart render test.
-- [ ] 8.7 Verify the section: `kit/site` and `kit/site-client` suites (via
+- [x] 8.7 (Moved to section 7, as 7.10.) Verify the section: `kit/site` and `kit/site-client` suites (via
       `make test-kits`); the API-credits service, domain and Python middleware suites
       (via `make test-domains`); the cross-language conformance session of the credits
       middleware, `domains/apicredits/middleware/conformance/session.json`, still passing
@@ -2608,7 +2729,7 @@ readable through the evidence verifiers (D2, D8, D9, D10a, D12, D21, D22, D23). 
       advances past the skew", "Another operation arrives skewed"). Verify as an
       application integration test through the storefront client.
 - [ ] 15.6 Move the end-to-end harness's signing clients to version 3, building any query
-      through 5d.3's encoding (D25). Verify by `make test-e2e-unit`.
+      through 5d.3's encoding (D25); `provisioning_test_client.py` moved in 7.7. Verify by `make test-e2e-unit`.
 - [ ] 15.7 Remove version 2 request signing and acceptance from `kit/identity`, and the
       version 2 form of the capture seam. Keep version 2 verification inside the evidence
       verifiers (D9, D12). Confirm no package outside them imports version 2 request code.
@@ -2632,7 +2753,7 @@ its fix and test land here.
       registry database from the `marketplace-v0.4.0` floor fixtures migrate, the replay
       tables gone and the SQLite files compacted. The registry's version 2 publication
       evidence is carried under `publication` and still verifies. Verify by the
-      migration-chain tests named in 6.4, 7.3 and 10.2 run together.
+      migration-chain tests named in 6.4, 7.8 and 10.2 run together.
 - [ ] 16.3 Verify the section: the full local suites through the pre-commit functional
       checks.
       End-to-end: every lane's scenarios — `e2e_deal`, `e2e_buy`, `e2e_deal_buyer_cli`,
