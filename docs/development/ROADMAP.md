@@ -34,6 +34,7 @@ Each goal links to its campaign in the [active-change index](../../openspec/chan
 | [Goal 5 — Make capacity exclusivity compensated](#goal-5--make-capacity-exclusivity-compensated) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-capacity-exclusivity-compensated) |
 | [Goal 6 — Make the settlement mechanism a composed choice](#goal-6--make-the-settlement-mechanism-a-composed-choice) | [campaign](../../openspec/changes/README.md#roadmap-goal--make-the-settlement-mechanism-a-composed-choice) |
 | [Goal 8 — Sell compute by the period until either party stops](#goal-8--sell-compute-by-the-period-until-either-party-stops) | [campaign](../../openspec/changes/README.md#roadmap-goal--sell-compute-by-the-period-until-either-party-stops) |
+| [Goal 9 — Let buyers request compute and be introduced to sellers who can supply it](#goal-9--let-buyers-request-compute-and-be-introduced-to-sellers-who-can-supply-it) | [campaign](../../openspec/changes/README.md#roadmap-goal--let-buyers-request-compute-and-be-introduced-to-sellers-who-can-supply-it) |
 | [Completed goals](#completed-goals) | |
 
 ## Goal 2 — Negotiate full compute capability, not GPU count alone
@@ -347,6 +348,39 @@ Work this goal found and leaves unowned:
 | A buyer whose options the default buyer's refusals alone ruled out is told nothing at normal verbosity: `BuyerTermsPolicy` (`kit/settlement-runtime`'s `buyer_terms.py`) raises them before dispute-authority acceptance and only logs them, keeping them out of the selection's refusals, so `market buy` prints "No listings matched" and exits 0, where term-validation and dispute-acceptance refusals print and exit 2 ([buyer quickstart, "7. On-demand and spot"](../buyer-quickstart.md#7-on-demand-and-spot)) | Unowned — recording each default refusal among the selection's refusals would answer it |
 | What a `prepared` delivery end means: SCM's watch records an end from a ruling's delivery-end effect whatever its applied state, so a ruling held before its effects already ends delivery at the storefront's next servicing step; the mediation double records it `prepared` under its gate, and the lane scenarios step no servicing while a ruling waits there. Whether SCM should wait for `applied` is the producer's semantics to state first | Unowned — needs the producer's answer, then a change if SCM's watch should wait |
 | The shared compute deal stage 09b learns that delivery finished through the storefronts' admin settle wait, a server-side long-poll (60 s as the stage asks, capped at 120 s by the route), rather than by stepping the delivery explicitly and reading its status once. [`system-tests.md`](../guidance/engineering/system-tests.md#a-scenario-is-a-sequence-of-state-changes) admits it as a wait on a request the stage made; whether that is preview, advance and measure, and whether 09b should step a recovery or convergence cycle instead, is undecided. The wait route itself stays an operator surface either way | Unowned — needs a new change; found in the implementation review of `unify-compute-delivery-path` |
+
+---
+
+## Goal 9 — Let buyers request compute and be introduced to sellers who can supply it
+
+**Value.** A buyer who needs a block of compute for a term — 100 eight-GPU nodes for six months, say — can search what sellers advertise, but cannot say what it needs. Much compute demand, committed blocks above all, starts from the buyer's requirement rather than from a listing, and is met by more than one provider or by capacity nobody has listed yet. Letting a buyer publish a structured request, and letting sellers respond, opens that demand to the market and introduces each buyer to the providers who can serve it. The marketplace's part ends at the introduction; the parties arrange the contract themselves.
+
+**Current state.** The registry serves supply only. Sellers publish listings under their marketplace principal, and buyers discover them with the installed filter specification's listing filters. Nothing lets a buyer publish demand, and no seller can see it.
+
+A buyer's marketplace identity is a key pair held through a buyer profile, created by generating or importing a key; the buyer CLI signs every request with it. A person who knows only an email login has no way to obtain one. The registry admits writes either openly or by an operator-issued key, so a registry closed to anonymous writes admits a new buyer only when its operator issues that buyer a key.
+
+Introductions exist for deals settled by contact exchange: the seller's storefront holds both parties' contacts, redacts them one-way after a retention window it discloses before commitment, and delivers them to each side's own sinks. The contacts are stored unencrypted. Nothing holds contacts for a party that runs no service, as a buyer does not.
+
+| Open gap | Owned by |
+|---|---|
+| A person who knows only an email login cannot obtain a buyer key, and a closed registry cannot admit the buyers who sign up without its operator issuing each a key | [`add-buyer-account-login`](../../openspec/changes/add-buyer-account-login/) |
+| Introduction contacts are held only by a storefront, unencrypted, with no early end by a participant, no sweep before traffic after downtime, and no redaction of a restored backup | [`unify-introduction-custody`](../../openspec/changes/unify-introduction-custody/) |
+| A buyer cannot publish structured compute demand, and no seller can find it, respond, or be introduced to the buyer | [`add-buyer-compute-rfqs`](../../openspec/changes/add-buyer-compute-rfqs/) |
+| An RFQ search pays for every open RFQ, and listings name regions as free text while RFQs use region codes | [`search-rfqs-in-the-database`](../../openspec/changes/search-rfqs-in-the-database/) |
+| A principal owns its RFQs directly, so a changed key cannot carry them | [`rotate-registry-account-principals`](../../openspec/changes/rotate-registry-account-principals/) |
+| A registry operator cannot ban a buyer account: a takedown removes one RFQ, and revocation at the buyer account service waits for certificate expiry | [`deny-banned-buyer-accounts`](../../openspec/changes/deny-banned-buyer-accounts/) |
+
+The first three are the minimum the goal launches with: a buyer logs in from the CLI, posts an RFQ to a registry that admits certificates, receives responses, and is introduced to the respondents it selects. The other three follow it.
+
+**Done when** every change in the table above has closed out, and a lane shows, on every pipeline run, a buyer logged in through the buyer account service's double posting an RFQ that two respondents answer, and the buyer selecting both and each pair reading the other's contact. Qualifying the same flow against the hosted buyer account service is blocked on that service, which signs buyers up, holds their keys so that its administrators cannot use them, and issues key-bound admission certificates; it is outside this repository.
+
+**Accepted limitations** until the changes that lift them close out: a buyer whose key is compromised closes and reposts its RFQs (`rotate-registry-account-principals`); an operator facing an abusive buyer takes its RFQs down one at a time (`deny-banned-buyer-accounts`); and search slows as open RFQs accumulate (`search-rfqs-in-the-database`).
+
+Role-based access and enterprise accounts, where several people act for one organization, are not part of this goal; they are planned as a goal of their own. A web interface for RFQs is the web application's, which uses this repository's clients.
+
+| Item | Status |
+|---|---|
+| Private notes revealed with an introduction: nuance a structured RFQ cannot state, shown only after both consents | Unowned — RFQs publish no free text (`add-buyer-compute-rfqs`, D5) |
 
 ---
 
