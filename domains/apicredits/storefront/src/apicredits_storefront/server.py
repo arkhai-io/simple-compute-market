@@ -179,6 +179,7 @@ def build_api_credit_negotiation_runtime(
             _container.SELLING_CONTRIBUTIONS,
             lambda repository: _container.QUOTA_CAPACITY.client(lambda: repository),
         ),
+        stage_event=stage_event,
         escrow=_container.ALKAHEST_STAGE.escrow_acceptance,
         seller_round_hook=seller_round_hook,
         accepted_obligation_dispatch=accepted_obligation_dispatch,
@@ -204,6 +205,7 @@ def build_listing_service(
         close=lambda listing_id: _container.QUOTA_PUBLICATION.close(sqlite_client, listing_id),
         settlement_defaults=settlement_publication_defaults,
         storefront_url=BASE_URL_OVERRIDE,
+        stage_event=stage_event,
         escrow_mechanism=_container.ALKAHEST_STAGE.mechanism,
         release_conditions=partial(
             _container.ALKAHEST_STAGE.release_conditions, settlement_composition

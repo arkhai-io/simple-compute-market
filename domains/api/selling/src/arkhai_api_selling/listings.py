@@ -8,7 +8,6 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from core_storefront.sqlite_client import store_timestamp
-from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract
 from market_core.schemas import settlement_option_schema
 from market_identity import Identity
@@ -177,10 +176,12 @@ class ListingService:
         close: Callable[[str], Awaitable[dict[str, Any]]],
         settlement_defaults: Callable[[], Sequence[Mapping[str, Any]]],
         storefront_url: str | None,
+        stage_event: Callable[..., Any],
         escrow_mechanism: str | None = None,
         release_conditions: ReleaseConditions | None = None,
     ) -> None:
         self._contributions = contributions
+        self._stage_event = stage_event
         self._db = sqlite_client
         self._seller_principal = seller_principal
         self._settlement_composition = settlement_composition
@@ -386,7 +387,7 @@ class ListingService:
             oracle_address=None,
             paused=paused,
         )
-        stage_event(
+        self._stage_event(
             "discovery",
             "token_listing_created",
             listing_id=listing_id,

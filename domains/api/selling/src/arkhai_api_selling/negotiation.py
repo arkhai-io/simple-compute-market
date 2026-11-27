@@ -17,7 +17,6 @@ from functools import partial
 from fractions import Fraction
 from typing import Any, Protocol
 
-from core_storefront.stage_log import stage_event
 from market_core import MarketDomainContract, SettlementStageTable
 from market_core.schemas import (
     Agreement,
@@ -1136,6 +1135,7 @@ def build_negotiation_runtime(
     key_lookup: KeyLookup | None,
     storefront_is_paused: Callable[[], bool],
     listing_source_check: ListingSourceCheck,
+    stage_event: Callable[..., Any],
     escrow: EscrowAcceptance | None = None,
     seller_round_hook: SellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,

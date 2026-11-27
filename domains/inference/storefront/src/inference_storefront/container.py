@@ -185,6 +185,7 @@ STOREFRONT_LOOPS = StorefrontLoops(
     settlement_worker=lambda: resolved_settlement_worker,
     capacity=QUOTA_CAPACITY,
     settings=config.LOOP_SETTINGS,
+    stage_event=stage_event,
     contributed_loops=lambda: mechanism_loops(SELLER_STAGES),
     listing_seed=lambda: resolved_listing_seed,
 )

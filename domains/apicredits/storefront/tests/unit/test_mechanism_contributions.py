@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from arkhai_api_selling.lifecycle import StorefrontLoops, loop_controller
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
@@ -43,6 +43,7 @@ async def test_an_alkahest_only_storefront_registers_no_payment_loop(monkeypatch
             settlement_worker=lambda: None,
             capacity=container.QUOTA_CAPACITY,
             settings=config.LOOP_SETTINGS,
+            stage_event=MagicMock(),
             contributed_loops=lambda table=table: container.mechanism_loops(table),
         ).register_steps(loops)
         assert ("payment_reconciliation" in loops.step_routes().values()) is has_payment_loop

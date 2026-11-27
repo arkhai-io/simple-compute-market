@@ -14,7 +14,7 @@ from typing import Any
 from arkhai_api_client import AuthorityClient
 from market_core import MarketDomainContract, SettlementStageTable
 from market_core.schemas import settlement_option_schema
-from market_identity import Identity
+from market_identity import Identity, Signer, TrustedIdentitySet
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -28,7 +28,11 @@ from market_settlement_runtime import (
 )
 
 from arkhai_api_selling.contributions import SellingContributions
-from arkhai_api_selling.evidence_store import IssuanceEvidenceService, PrivateResultRepository
+from arkhai_api_selling.evidence_store import (
+    IssuanceEvidenceRepository,
+    IssuanceEvidenceService,
+    PrivateResultRepository,
+)
 from arkhai_api_selling.issuance import accepted_agreement
 
 logger = logging.getLogger(__name__)
@@ -278,6 +282,76 @@ class SellingSettlementComposition:
                 dict(item) for item in envelope.get("settlement_options", ())
             )
         return accepted_escrows, settlement_options, readiness
+
+
+def validate_stage_configuration(stages: SettlementStageTable, settlement_config: Any) -> None:
+    """Refuse a mechanism configuration a composed seller stage cannot honour."""
+    for stage in stages.values():
+        stage.validate_configuration(settlement_config)
+
+
+def build_selling_settlement_composition(
+    *,
+    contributions: SellingContributions,
+    stages: SettlementStageTable,
+    domain: MarketDomainContract,
+    database_path: str,
+    settlement_configuration: Mapping[str, Any],
+    resources: Mapping[str, Any],
+    signer: Signer,
+    credits_client: AuthorityClient,
+    failure_policy: Any,
+    worker_id: str,
+    servicing_interval_seconds: float,
+    on_event: Callable[[str, dict[str, Any]], None],
+    disputes: RegistryDisputePolicy | None = None,
+    dispute_interfaces: frozenset[str] = frozenset(),
+) -> SellingSettlementComposition:
+    """Assemble a storefront's settlement composition from the resources it passes.
+
+    ``resources`` is held, not copied: a chain probe it carries updates its
+    chain clients in place. Issuance evidence is trusted only from ``signer``.
+    """
+    registry = build_settlement_registry(stages)
+    settlement_config = registry.resolve(settlement_configuration, role="seller")
+    validate_stage_configuration(stages, settlement_config)
+    repository = SettlementSQLiteRepository(database_path)
+    mechanism_clients = servicing_mechanism_clients(stages, registry, settlement_config, resources)
+    runtime = SettlementRuntime(repository, mechanism_clients)
+    evidence_service = IssuanceEvidenceService(
+        IssuanceEvidenceRepository(database_path, contributions),
+        contributions=contributions,
+        signer=signer,
+        trusted_issuers=TrustedIdentitySet(identities=(signer.identity,)),
+    )
+    worker = SettlementServicingWorker(
+        runtime,
+        repository,
+        worker_id=worker_id,
+        interval_seconds=servicing_interval_seconds,
+        on_event=on_event,
+    )
+    policy = {} if disputes is None else {"disputes": disputes}
+    return SellingSettlementComposition(
+        contributions=contributions,
+        stages=stages,
+        domain=domain,
+        repository=repository,
+        runtime=runtime,
+        worker=worker,
+        local_principal=signer.identity,
+        mechanism_clients=mechanism_clients,
+        settlement_config=settlement_config,
+        configuration_registry=registry,
+        mechanism_resources=resources,
+        credits_client=credits_client,
+        evidence_service=evidence_service,
+        private_results=PrivateResultRepository(database_path, contributions),
+        failure_policy=failure_policy,
+        servicing=mechanism_servicing(stages, settlement_config),
+        dispute_interfaces=dispute_interfaces,
+        **policy,
+    )
 
 
 # The settlement job coordinator's continuations, bound by the storefront to its stage table.

@@ -16,7 +16,6 @@ from core_storefront.domain_registry import (
     StorefrontDomainBindingError,
     StorefrontDomainRegistryError,
 )
-from core_storefront.stage_log import stage_event
 from market_capacity_publication import (
     CapacityBindingError,
     CapacityConfigurationError,
@@ -120,6 +119,7 @@ class StorefrontLoops:
         settlement_worker: Callable[[], Any | None],
         capacity: QuotaCapacity,
         settings: LoopSettings,
+        stage_event: Callable[..., Any],
         contributed_loops: Callable[[], Sequence[ContributedLoop]] = tuple,
         listing_seed: Callable[[], ListingSeedProgress | None] = lambda: None,
     ) -> None:
@@ -127,6 +127,7 @@ class StorefrontLoops:
         self._settlement_worker = settlement_worker
         self._capacity = capacity
         self._settings = settings
+        self._stage_event = stage_event
         self._contributed_loops = contributed_loops
         self._listing_seed = listing_seed
 
@@ -141,7 +142,7 @@ class StorefrontLoops:
         abandoned = await sweep_stale_negotiations(
             self._db(),
             policy,
-            emit_stage_event=stage_event,
+            emit_stage_event=self._stage_event,
             logger=logger,
         )
         if abandoned:

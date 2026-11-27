@@ -304,17 +304,29 @@ Touches `domains/api/contracts` and `domains/api/authority`.
 Delivers D5 and D7. Touches `domains/api/selling`, the API-credits and
 inference storefronts, and `docs/development/ARCHITECTURE.toml`.
 
-- [ ] 4.1 `ListingService`, `StorefrontLoops`, and `build_negotiation_runtime`
+- [x] 4.1 `ListingService`, `StorefrontLoops`, and `build_negotiation_runtime`
       take `stage_event` as a required keyword, and `listings.py`,
       `lifecycle.py`, and `negotiation.py` stop importing it from the
       storefront role; each storefront passes the emitter where it constructs
       them (D5). Verify: `git grep -n "core_storefront.stage_log" --
       domains/api/selling/src` finds nothing, and the selling unit suite
       passes with a recorder in its fixtures.
-- [ ] 4.2 `docs/development/ARCHITECTURE.toml`: the reason of the exception row
+      *Note:* the emitter is a required keyword on the two constructors and
+      the builder, placed among the required ones; `git grep -n
+      "core_storefront.stage_log" -- domains/api/selling/src` finds
+      nothing. The listing fixture's emitter is a `MagicMock`, and the
+      first listing case asserts its `token_listing_created` call; the
+      loops fixture's is one too, unasserted, since no loop case reaches
+      the watchdog's sweep. Each storefront passes the `stage_event` its
+      server and container already import, and API credits'
+      loop-registration unit case passes a `MagicMock`. Selling, unit and
+      library integration: 244 passed.
+- [x] 4.2 `docs/development/ARCHITECTURE.toml`: the reason of the exception row
       for `arkhai-api-selling` on `arkhai-core-storefront` no longer lists the
       stage-event log (D5). Verify: `make check-architecture` passes.
-- [ ] 4.3 `arkhai_api_selling/settlement_composition.py`: one builder that
+      *Note:* the row keeps its owner and the rest of its reason; `make
+      check-architecture` passes with no new row.
+- [x] 4.3 `arkhai_api_selling/settlement_composition.py`: one builder that
       takes the contributions, stages, domain, database path, settlement
       configuration, the storefront's resources, signer, authority client,
       failure policy, worker identity, servicing interval, and event recorder,
@@ -323,17 +335,72 @@ inference storefronts, and `docs/development/ARCHITECTURE.toml`.
       (D7). The library gains no dependency. Verify: library-integration cases
       build a composition with and without a dispute policy, and assert the
       evidence service trusts only the signer passed.
-- [ ] 4.4 Each storefront's `settlement_composition.py` builds its own
+      *Note:* `build_selling_settlement_composition` takes the settlement
+      configuration as the storefront's mapping and resolves it against
+      the stages' registry itself, then validates it with every stage
+      before it builds any client. Without a dispute policy the
+      composition keeps its own default, the empty policy. The new imports,
+      `Signer`, `TrustedIdentitySet`, and `IssuanceEvidenceRepository`,
+      come from packages the library already depends on. Library
+      integration, `tests/integration/test_settlement_composition.py`, over
+      a migrated SQLite store and an empty stage table: the resources
+      passed are held, not copied; a composition without a dispute policy
+      offers the empty one and no interface, and one with a policy
+      carries it and its interfaces; evidence the passed signer published
+      resolves verified, and evidence another signer published into the
+      same store is refused as untrusted; with one stage, whose
+      registration is real, the stage validates the resolved
+      configuration and its client and servicing are composed, and a
+      configuration the stage refuses raises before any client is built.
+      The new integration module imports what only this section adds, so `test-before` would show only its collection error and was
+      not run.
+- [x] 4.4 Each storefront's `settlement_composition.py` builds its own
       resources and calls the library's builder; API credits alone passes the
       dispute policy and the mediation interface.
       `services/fulfillment_service.py` is unchanged in both (D7). Verify:
       the storefronts' application-integration suites pass unchanged.
-- [ ] 4.5 Verification. `make -C domains test-api-selling test-apicredits
+      *Note:* each storefront keeps `build_storefront_settlement_registry`,
+      `validate_mechanism_configuration` (now over the library's stage
+      validation), and `record_servicing_event`, gains
+      `settlement_resources` for its chain clients, chains, Alkahest
+      resources, and probe, and calls the library's builder. Its arguments
+      — the resources with the Alkahest stage's, the authority client,
+      the servicing interval, and in API credits the dispute policy read
+      from settings — are now evaluated before the configuration is
+      resolved and validated, where they were built after; so a direct
+      caller with several settings wrong may see another error first. The
+      servers validate the configuration at startup before composing, as
+      before. `services/fulfillment_service.py`
+      is unchanged in both. API credits: 471 passed, as in round 1, with
+      `test_settlement_events.py` building the composition as the
+      storefront does; inference storefront: 77 passed, no test changed.
+- [x] 4.5 Verification. `make -C domains test-api-selling test-apicredits
       test-inference-storefront`; `make check-packaging`;
       `change-workflow run pre-commit move-api-family-kit-into-domains`.
       End-to-end: `e2e_credits_deal` and `e2e_inference_deal` settle and
       issue through the builder and record stage events through the injected
       emitter.
+      *Note:* `make -C domains test-api-selling test-apicredits
+      test-inference-storefront`: 244, 471, and 77 passed, after the
+      selling wheel was rebuilt (`make -C domains dist-api-selling`). One
+      run failed API credits'
+      `test_startup_seed_quota.py::test_the_seed_waits_while_the_credits_service_does_not_answer_its_registration[5xx]`
+      on an asyncio "task was destroyed" log record; the module passed
+      three reruns and the full suite passed again, so it is recorded as
+      intermittent, not diagnosed. `make check-packaging` passed.
+      `change-workflow run pre-commit move-api-family-kit-into-domains
+      --base origin/dev`: the relock changed no lock and the closing checks
+      passed; its local `make test` stopped at the bare-metal provisioning
+      IaC suites, as on the landing branch. End-to-end confirmed as
+      planned and not run here: both deals compose the settlement
+      composition through the library's builder and emit stage events
+      through the emitter each storefront injects; no scenario is added.
+      The fresh-context check found the stage validation tested only as a
+      unit and never inside the builder, now a library-integration case
+      with a refusing stage; the empty dispute policy stated in two
+      places, now the composition's default alone; lambda doubles for the
+      emitter, now `MagicMock`; and two notes that overstated or
+      under-recorded, corrected.
 
 ## 5. Tests take their doubles through seams, and the family replays its own pin
 

@@ -5,29 +5,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from arkhai_api_selling.evidence_store import (
-    IssuanceEvidenceRepository,
-    IssuanceEvidenceService,
-    PrivateResultRepository,
-)
 from arkhai_api_selling.settlement_composition import (
     SellingSettlementComposition,
+    build_selling_settlement_composition,
     build_settlement_registry,
-    mechanism_servicing,
-    servicing_mechanism_clients,
+    validate_stage_configuration,
 )
 from core_storefront.stage_log import stage_event
 from market_alkahest import AlkahestChainProbe
 from market_arkhai_mediation.contract import INTERFACE as MEDIATION_INTERFACE
 from market_core import MarketDomainContract
-from market_identity import Signer, TrustedIdentitySet
+from market_identity import Signer
 from market_storefront_kit.dispute_configuration import RegistryDisputePolicy
-from market_settlement_runtime import (
-    SettlementConfigurationRegistry,
-    SettlementRuntime,
-    SettlementServicingWorker,
-    SettlementSQLiteRepository,
-)
+from market_settlement_runtime import SettlementConfigurationRegistry
 
 from apicredits_storefront.container import ALKAHEST_STAGE, SELLER_STAGES, SELLING_CONTRIBUTIONS
 from apicredits_storefront.services.credits_service_client import get_credits_service_client
@@ -48,14 +38,37 @@ def validate_mechanism_configuration(settlement_config: Any = None) -> None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    for stage in SELLER_STAGES.values():
-        stage.validate_configuration(settlement_config)
+    validate_stage_configuration(SELLER_STAGES, settlement_config)
 
 
 def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
     """Record a servicing worker's event as a ``claims`` stage event, so a
     failing step is on the deal's record."""
     stage_event("claims", event, **fields)
+
+
+def settlement_resources(
+    *,
+    marketplace_signer: Signer,
+    chain_clients: Mapping[str, Any],
+    chain_probe: AlkahestChainProbe | None = None,
+) -> dict[str, Any]:
+    """The chain clients, chains, and Alkahest resources this storefront's mechanisms build from.
+
+    ``chain_clients`` is the live map ``chain_probe`` updates in place, so it is
+    held here rather than copied; readiness reads the probe's results.
+    """
+    resources: dict[str, Any] = {
+        "marketplace_signer": marketplace_signer,
+        "clients": chain_clients,
+        "get_client": lambda chain: chain_clients.get(chain or ""),
+        "chains": storefront_config.CHAINS,
+        "default_chain": next(iter(storefront_config.CHAINS), None),
+        **ALKAHEST_STAGE.composition_resources(),
+    }
+    if chain_probe is not None:
+        resources["chain_probe"] = chain_probe
+    return resources
 
 
 def build_api_credit_settlement_composition(
@@ -67,67 +80,26 @@ def build_api_credit_settlement_composition(
     failure_policy: Any,
     chain_probe: AlkahestChainProbe | None = None,
 ) -> SellingSettlementComposition:
-    """Build the servicing clients, each mechanism's servicing, and the shared servicing worker.
-
-    ``chain_clients`` is the live map ``chain_probe`` updates in place, so it is
-    held here rather than copied; readiness reads the probe's results.
-    """
-    registry = build_storefront_settlement_registry()
-    settlement_config = registry.resolve(
-        storefront_config.settlement_config_mapping(),
-        role="seller",
-    )
-    validate_mechanism_configuration(settlement_config)
-    repository = SettlementSQLiteRepository(sqlite_client.db_path)
-    resources: dict[str, Any] = {
-        "marketplace_signer": marketplace_signer,
-        "clients": chain_clients,
-        "get_client": lambda chain: chain_clients.get(chain or ""),
-        "chains": storefront_config.CHAINS,
-        "default_chain": next(iter(storefront_config.CHAINS), None),
-        **ALKAHEST_STAGE.composition_resources(),
-    }
-    if chain_probe is not None:
-        resources["chain_probe"] = chain_probe
-    mechanism_clients = servicing_mechanism_clients(
-        SELLER_STAGES, registry, settlement_config, resources
-    )
-
-    runtime = SettlementRuntime(repository, mechanism_clients)
-    # The process-wide client carries the storefront's signed authority
-    # configuration; every issuance and rollback goes through it.
-    credits_client = get_credits_service_client()
-    evidence_service = IssuanceEvidenceService(
-        IssuanceEvidenceRepository(sqlite_client.db_path, SELLING_CONTRIBUTIONS),
-        contributions=SELLING_CONTRIBUTIONS,
-        signer=marketplace_signer,
-        trusted_issuers=TrustedIdentitySet(identities=(marketplace_signer.identity,)),
-    )
-    private_results = PrivateResultRepository(sqlite_client.db_path, SELLING_CONTRIBUTIONS)
-    worker = SettlementServicingWorker(
-        runtime,
-        repository,
-        worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
-        interval_seconds=storefront_config.settlement_servicing_interval(),
-        on_event=record_servicing_event,
-    )
-    return SellingSettlementComposition(
+    """The selling library's settlement composition over this storefront's resources, with the dispute authorities its registries recommend."""
+    return build_selling_settlement_composition(
         contributions=SELLING_CONTRIBUTIONS,
         stages=SELLER_STAGES,
         domain=domain,
-        repository=repository,
-        runtime=runtime,
-        worker=worker,
-        local_principal=marketplace_signer.identity,
-        mechanism_clients=mechanism_clients,
-        settlement_config=settlement_config,
-        configuration_registry=registry,
-        mechanism_resources=resources,
-        credits_client=credits_client,
-        evidence_service=evidence_service,
-        private_results=private_results,
+        database_path=sqlite_client.db_path,
+        settlement_configuration=storefront_config.settlement_config_mapping(),
+        resources=settlement_resources(
+            marketplace_signer=marketplace_signer,
+            chain_clients=chain_clients,
+            chain_probe=chain_probe,
+        ),
+        signer=marketplace_signer,
+        # The process-wide client carries the storefront's signed authority
+        # configuration; every issuance and rollback goes through it.
+        credits_client=get_credits_service_client(),
         failure_policy=failure_policy,
-        servicing=mechanism_servicing(SELLER_STAGES, settlement_config),
+        worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
+        servicing_interval_seconds=storefront_config.settlement_servicing_interval(),
+        on_event=record_servicing_event,
         disputes=RegistryDisputePolicy.from_document(storefront_config.settings.as_dict()),
         dispute_interfaces=frozenset({MEDIATION_INTERFACE}),
     )

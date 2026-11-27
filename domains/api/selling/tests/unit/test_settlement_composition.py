@@ -158,3 +158,4 @@ def test_a_stage_payload_that_is_not_the_settle_response_is_refused():
         checked_refund_payload({"status": "refunded"})
     refunded = {"negotiation_id": "neg-1", "settlement_ref": "tx-1", "status": "refunded"}
     assert checked_refund_payload(refunded) == refunded
+

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from market_core import ImmutableCodecCapability
@@ -101,7 +102,7 @@ class _Store:
 ESCROW = {"chain_name": "dev", "escrow_address": "0x" + "11" * 20}
 
 
-def _service(store: _Store, contributions=EXAMPLE, **options) -> ListingService:
+def _service(store: _Store, contributions=EXAMPLE, *, stage_event=None, **options) -> ListingService:
     async def publish(_listing):
         return {"status": "published"}
 
@@ -119,15 +120,18 @@ def _service(store: _Store, contributions=EXAMPLE, **options) -> ListingService:
         close=close,
         settlement_defaults=lambda: (),
         storefront_url="https://seller.example",
+        stage_event=MagicMock() if stage_event is None else stage_event,
         **options,
     )
 
 
 async def test_a_listing_is_the_bundles_mapping_of_the_request_over_its_quota_resource():
     store = _Store()
+    stage_event = MagicMock()
 
     result = await _service(
         store,
+        stage_event=stage_event,
         escrow_mechanism="example.escrow.v1",
         release_conditions=lambda escrows, *, readiness: [{"chain_name": escrows[0]["chain_name"]}],
     ).publish_from_quota(resource_id="quota-a", accepted_escrows=[ESCROW], product="Example")
@@ -138,6 +142,9 @@ async def test_a_listing_is_the_bundles_mapping_of_the_request_over_its_quota_re
     assert written["listing_resource"]["quota"] == "quota-a"
     assert written["demands"] == [{"chain_name": "dev"}]
     assert written["binding"].physical_resource_id == "quota-a"
+    assert [(c.args, c.kwargs["resource_id"]) for c in stage_event.call_args_list] == [
+        (("discovery", "token_listing_created"), "quota-a")
+    ]
 
 
 async def test_a_publication_guard_refuses_the_listing_before_anything_is_written():

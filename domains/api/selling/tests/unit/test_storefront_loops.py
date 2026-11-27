@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from market_storefront_kit import LifecycleRouteError, NegotiationWatchdogPolicy, StorefrontLoopController
@@ -43,6 +44,7 @@ def _loops(*, db=None, worker=None, contributed=()) -> StorefrontLoops:
         settlement_worker=lambda: worker,
         capacity=SimpleNamespace(configured_site_ids=lambda: ("quota",)),
         settings=SETTINGS,
+        stage_event=MagicMock(),
         contributed_loops=lambda: contributed,
     )
 
