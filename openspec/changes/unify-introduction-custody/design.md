@@ -107,11 +107,18 @@ current eligibility cannot be established, before reads reopen (D18).
 
 Contact payloads are bounded by one validator, used at every ingress (D24).
 
-### D9 — Delivery is unchanged
+### D9 — Delivery is unchanged but for the exact retry of a failed start
 
 Each side delivers to its own configured sinks as `introduction-delivery` defines. An RFQ
 participant's buyer CLI will deliver from its own process after a read; the registry
 delivers nothing.
+
+One rule of `introduction-delivery` changes with D28 (17 F1): an exact retry of a start
+whose completion failed runs the start again and completes the reveal, as a new start
+does, instead of answering its recorded 503. The rule it replaces rested only on every
+route answering an exact replay with its recorded outcome, which `marketplace-identity`'s
+credential-capable routes no longer do. Dispatch stays at most once, held by the seller
+dispatch claim, and completion stays the buyer's, by a start of its own.
 
 ### D10 — A mechanism-neutral kit and its own capability
 
@@ -194,8 +201,10 @@ custody_introductions
 ```
 
 A slot's associated data is the canonical JSON
-`{"protocol": "arkhai.introduction-custody.v1", "introduction_id": …, "role": …}`. A
-ciphertext moved to another row or slot fails to decrypt. Nothing that changes is bound: no
+`{"protocol": "arkhai.introduction-custody.v1", "introduction_id": …, "slot": "a"|"b",
+"role": …}`. A ciphertext moved to another row or slot fails to decrypt, whatever role
+labels the host supplied: the slot is bound because labels may repeat, as two parties of
+a symmetric introduction may share one (17 F2). Nothing that changes is bound: no
 expiry and no window, which D4 needs; no host identity, since hosts share no key; and no
 principal, since custody stores none. Authorization stays the host's. Redaction is one
 statement, and the row remains as the tombstone. Contact exchange maps its roles to the
@@ -203,10 +212,20 @@ existing buyer and seller projection, so its wire is unchanged.
 
 Custody's `reveal` keeps today's idempotency: an identical re-reveal returns the stored
 record, a different one is refused, and a reveal of a redacted introduction answers the
-deleted outcome. Ciphertexts are randomized, so custody compares decrypted values.
+deleted outcome. Ciphertexts are randomized, so custody compares decrypted values. A
+`read` has three results: absent, for an identifier never revealed; revealed, with both
+slots, either of which may be an empty contact, which the validator admits (D24) and which
+is not absence; and redacted, with its redaction time (17 F4). Role labels are non-blank
+strings of at most 64 characters, and the context is a JSON object under a size bound of
+custody's, which the plan sets above anything contact exchange's agreed introduction
+context can carry, since nothing bounds that today; both are checked on `reveal`, `hold`
+and `promote`, before anything is written.
 
 Rejected:
 
+- Requiring the two role labels to differ, with the associated data left as it was (17 F2).
+  It narrows the neutral interface, making a host with symmetric parties invent labels, to
+  stand in for binding the slot itself.
 - An introduction row with a child table of contacts. It admits any number of parties at the
   cost of a multi-row redaction, three triggers per dialect and a blurred moment of reveal;
   introductions are pairwise.
@@ -279,14 +298,33 @@ custody_held_contacts
 Its operations, each on the caller's connection, are `hold`; `discard`, which deletes the
 row (a held contact was never revealed, so leaves no tombstone) and converges when it is
 already gone; and `promote`, which in one transaction re-encrypts the held contact into a new
-introduction's slot beside the other party's contact and deletes the held row, custody
-holding plaintext equality across it. The host owns when each happens: deadlines and expiry
+introduction's slot, under that slot's associated data (D13), beside the other party's
+contact and deletes the held row, custody holding plaintext equality across it.
+
+Their repeats follow `reveal`'s idempotency (17 F4), so a host's exact retry, which runs
+the operation again, needs no special case:
+
+- `hold` repeated with the same role and contact returns the held contact and writes
+  nothing; with a different role or contact under the same identifier it is refused, and
+  the held contact is unchanged.
+- `promote` whose held contact is gone converges when the target introduction exists with
+  the same other party's contact, roles and context, returning it; answers the deleted
+  outcome when that introduction is redacted; and is refused as not held when no
+  introduction exists either, writing nothing.
+- `promote` whose held contact remains but whose target introduction already exists is
+  refused, and changes nothing.
+
+The host owns when each happens: deadlines and expiry
 are the RFQ change's, so a deadline the buyer moves needs nothing from custody. Held contacts
 are covered by re-encryption, its per-key count and startup refusal, and by restore
 redaction.
 
 Rejected:
 
+- A typed refusal for every repeated or absent case, leaving retries to the host's own
+  rows (17 F4). Sound, since those rows commit with custody's, but it gives custody two
+  creating operations with different repeat rules and gives every credential-capable
+  selection retry a special case in the host.
 - A held contact as an introduction row with one slot filled. It breaks "revealed when
   persisted" and needs a third trigger state.
 - Encryption primitives only, with the registry storing pending contacts in its own table. A
@@ -427,7 +465,7 @@ Two rounds, the kit reviewed before anything adopts it:
   value, the two workers, and the conformance suite.
 - Round 2, two sessions: first, `kit/contact-exchange` onto custody — its asynchronous
   adapter for the storefronts, the D15 migration, the D27 route, client and buyer command,
-  the dispatch claim untouched; second, both storefronts' wiring — keyset settings and
+  the route service's exact retry running again (D28), the dispatch claim untouched; second, both storefronts' wiring — keyset settings and
   refusals, the startup sweep, `introduction-rekey` registration, the migration-command mode,
   the credential-capable routes and the D28 migration, the charts' values schemas, and the
   lane and local keysets — closing with the integration and lane scenarios.
@@ -456,7 +494,14 @@ repeat converges. The buyer ends access with `introduction end`, a command in th
 mechanism's buyer command group; the seller's side remains the operator's deletion of one
 introduction, since the storefront is the seller's. The route and command are additive.
 
-Rejected: ending a buyer's access only by asking the seller's operator, which fails D5.
+Ending an introduction never revealed is refused with a stable not-revealed answer and
+persists nothing (17 F4): D5 ends contact access, and before a reveal there is none.
+
+Rejected:
+
+- Ending a buyer's access only by asking the seller's operator, which fails D5.
+- Ending an unrevealed introduction by writing a tombstone (17 F4). It would let either
+  party prevent a reveal before it happens, a policy beyond this change.
 
 ### D28 — Introduction routes record no contact for exact retry
 
@@ -467,6 +512,21 @@ rather than replaying a contact. A storefront migration removes the contact memb
 introduction outcomes already recorded. A response the system can re-derive from a record it
 protects from modification gains nothing from being recorded for replay: a retry cannot
 differ from running the request again.
+
+Every exact retry runs again, whatever the outcome recorded (17 F1). A retried start
+resumes, as `marketplace-identity` has a credential-capable route's mutation resume:
+custody's identical reveal returns the stored record, completion is idempotent, and the
+seller dispatch claim, already taken, dispatches nothing; a start whose completion failed
+is completed by its exact retry, which amends `introduction-delivery` (D9). The retry is
+resolved in two places today, and both change: each storefront's map, and
+`IntroductionRouteService._replay` in `kit/contact-exchange`, which answers a recorded
+outcome after authorization and before custody is read, and which the start, read and end
+operations no longer call.
+
+Rejected (17 F1): replaying a recorded refusal, the failed start's 503 among them, while
+running a recorded reveal again. It keeps `introduction-delivery`'s rule at the cost of a
+start route that resumes one mutation and replays another, an exception to the identity
+rule for a case a retry can complete.
 
 This takes the introduction slice of the unbounded-replay gap `redesign-authenticated-requests`
 owns; the change index records the move in that change's row, and the roadmap's row narrows
@@ -486,12 +546,15 @@ D17, D18, D19, D23, D26).
 ## Verification
 
 Integration tests in `kit/introduction-custody` prove, on SQLite: encryption and the
-associated-data binding, re-encryption with plaintext equality and per-key counts, the
-startup refusals, one-way redaction under the trigger and under concurrent reads, reveal
-idempotency, window changes, early end, held contacts and their promotion, restore
-redaction, and the workers' pause, preview and step. Each storefront's integration tests
-prove its composition through its own routes: the keyset refusals, the startup sweep, early
-end, credential-capable retries after a redaction, and the migration-command mode. The
+associated-data binding, a slot swap failing under repeated role labels among it,
+re-encryption with plaintext equality and per-key counts, the startup refusals, one-way
+redaction under the trigger and under concurrent reads, reveal idempotency, read's three
+results, window changes, early end, held contacts with their repeated, conflicting and
+absent holds and promotions, restore redaction, and the workers' pause, preview and step.
+Each storefront's integration tests prove its composition through its own routes: the
+keyset refusals, the startup sweep, early end and its refusal for an unrevealed
+introduction, credential-capable retries after a redaction, an exact retry completing a
+failed start with one seller dispatch, and the migration-command mode. The
 storefront migration-chain tests prove the D15 and D28 migrations from 0.3.0 and 0.4.0
 databases. The contact-exchange lane scenarios keep passing, with early end added.
 
@@ -500,9 +563,10 @@ databases. The contact-exchange lane scenarios keep passing, with early end adde
 | Accepted decision | Permanent location |
 |---|---|
 | D1–D8, D13, D14, D16, D18, D21–D24 | `openspec/specs/introduction-custody/spec.md` |
-| D1, D10–D14, D16, D17 | `openspec/specs/introduction-custody/architecture.md` |
-| D19 | `openspec/specs/introduction-custody/configuration.md`; `openspec/specs/contact-exchange-settlement/configuration.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
+| D1, D10–D14, D16, D17 | the `introduction-custody` capability's architecture companion, created at closeout |
+| D19 | the `introduction-custody` capability's configuration guidance, created at closeout; `openspec/specs/contact-exchange-settlement/configuration.md`; `docs/development/DEPLOYMENT_AND_CONFIG.md` |
 | D10, D15, D27, D28 | `openspec/specs/contact-exchange-settlement/spec.md` |
+| D9, D28 | `openspec/specs/introduction-delivery/spec.md` |
 | D10 | `openspec/specs/README.md`; `docs/development/ARCHITECTURE.md`, "Kit areas" |
 | D12 | `docs/guidance/repository/production-code.md`, "Libraries" |
 | D14 | `docs/guidance/engineering/persistence.md`, an integrity rule over encrypted data, with an example |

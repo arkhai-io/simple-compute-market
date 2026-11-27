@@ -206,9 +206,11 @@ command. The seller-side delivery claim MUST remain the mechanism's own, keyed b
 A storefront composing the mechanism MUST serve an authenticated introduction end
 operation, admitting only the deal's buyer and seller principals, that redacts the
 introduction through custody's end and answers the deleted outcome, converging when it
-is already deleted. The mechanism's buyer command group MUST offer ending an
-introduction, so every domain buyer that mounts it can. The seller's operator ends an
-introduction by the operator-invoked deletion.
+is already deleted. Ending an introduction never revealed MUST be refused with a stable
+not-revealed answer and MUST persist nothing, so an end cannot prevent a later reveal. The
+mechanism's buyer command group MUST offer ending an introduction, so every domain buyer
+that mounts it can. The seller's operator ends an introduction by the operator-invoked
+deletion.
 
 #### Scenario: A buyer ends an introduction
 
@@ -221,12 +223,21 @@ introduction by the operator-invoked deletion.
 - **WHEN** a principal that is not a party to the deal requests the end
 - **THEN** the request is refused and the introduction is unchanged
 
+#### Scenario: A party ends an introduction never revealed
+
+- **WHEN** the buyer or seller of a deal whose introduction was never started requests the
+  end
+- **THEN** the request is refused as not revealed, nothing is persisted, and a later start
+  reveals the introduction
+
 ### Requirement: Introduction routes record no contact for exact retry
 
 The introduction start, read and end operations MUST be declared credential-capable on
 every storefront composing the mechanism: the outcome recorded for an exact retry MUST
-hold no contact payload, and an exact retry MUST run the operation again under current
-authorization. Outcomes of those operations recorded before this declaration MUST have
+hold no contact payload, and every exact retry MUST run the operation again under current
+authorization, whatever outcome was recorded: a retried start resumes the start, so an
+exact retry of a start whose completion failed completes the reveal, as
+`introduction-delivery` requires. Outcomes of those operations recorded before this declaration MUST have
 their contact payloads removed when the storefront's database is upgraded.
 
 #### Scenario: A read is retried exactly after deletion
@@ -234,6 +245,12 @@ their contact payloads removed when the storefront's database is upgraded.
 - **WHEN** a party repeats an exact introduction read after the introduction's payloads
   were deleted
 - **THEN** it receives the deleted outcome, not the earlier reveal
+
+#### Scenario: A start is retried exactly after a reveal
+
+- **WHEN** a buyer repeats an exact introduction start whose reveal completed
+- **THEN** it receives the reveal with the counterparty's contact read from custody, not a
+  recorded outcome stripped of it, and the seller's side is not dispatched again
 
 #### Scenario: A reveal's recorded outcome is inspected
 

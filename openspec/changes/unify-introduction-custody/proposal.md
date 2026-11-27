@@ -41,10 +41,11 @@ This change builds one custody layer with both sets, and composes it into the st
 - **Contact payloads are validated once**, by one bounded validator (D8, D24).
 - **Upgrading a 0.3.0 or 0.4.0 storefront redacts the contacts it held**, keeping every
   introduction as a tombstone (D15).
-- **Introduction routes record no contact for exact retry**, and the contacts already
-  recorded are removed (D28).
-- **Each side's delivery to its own sinks** stays as `introduction-delivery` defines it, and
-  the seller-side dispatch claim stays contact exchange's (D9, D20).
+- **Introduction routes record no contact for exact retry**: every exact retry runs again,
+  and the contacts already recorded are removed (D28).
+- **Each side's delivery to its own sinks** stays as `introduction-delivery` defines it, but
+  for an exact retry of a start whose completion failed, which now completes the reveal; the
+  seller-side dispatch claim stays contact exchange's (D9, D20).
 
 ### Non-goals
 
@@ -67,8 +68,8 @@ This change builds one custody layer with both sets, and composes it into the st
 - `contact-exchange-settlement`: a storefront holds its introductions in introduction
   custody; buyers may end an introduction early; introduction routes record no contact for
   exact retry; an upgraded storefront holds no plaintext contact.
-- `introduction-delivery`: unchanged in behavior; the seller-side dispatch claim stays
-  beside custody.
+- `introduction-delivery`: an exact retry of a start whose completion failed completes the
+  reveal, as a new start does; the seller-side dispatch claim stays beside custody.
 
 ## Impact
 
@@ -103,8 +104,8 @@ This change builds one custody layer with both sets, and composes it into the st
 - D6: the sweep to `introduction-custody` and `docs/operator-handbook.md`.
 - D7: restore redaction to `introduction-custody` and `docs/operator-handbook.md`.
 - D8: one payload validator to `introduction-custody`.
-- D9: no permanent destination — delivery is unchanged, and `introduction-delivery` already
-  states it.
+- D9: the exact retry of a failed start to `introduction-delivery`; the rest of delivery is
+  unchanged, and `introduction-delivery` already states it.
 - D10: the kit and its capability to `openspec/specs/README.md`, `introduction-custody`'s
   companion, `contact-exchange-settlement`, and `docs/development/ARCHITECTURE.md`, "Kit
   areas".

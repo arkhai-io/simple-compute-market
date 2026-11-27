@@ -6,13 +6,17 @@ Introduction custody MUST hold the contacts of every introduction a host makes, 
 nothing of the host's domain: it MUST NOT depend on a settlement mechanism, a market family
 or a deployed service. A host MUST supply each introduction's identifier, the role label of
 each of its two parties, and an optional opaque, non-secret context, and custody MUST
-interpret none of them. Authorizing who may reveal, read, end or delete an introduction MUST
+interpret none of them; the two labels MAY be the same. Custody MUST refuse, before writing
+anything, a role label that is blank or longer than 64 characters, and a context that is
+not a JSON object or exceeds custody's size bound. Authorizing who may reveal, read, end or delete an introduction MUST
 remain the host's.
 
 An introduction MUST be persisted once, with both parties' contacts, at the moment it is
 revealed. A reveal repeated with identical contacts MUST return the stored introduction, a
 reveal with different contacts MUST be refused, and a reveal of a redacted introduction MUST
-answer the deleted outcome.
+answer the deleted outcome. A read MUST distinguish three results: an identifier never
+revealed is absent; a revealed introduction returns both contacts, an empty contact being
+present rather than absent; and a redacted introduction answers the deleted outcome.
 
 Every custody operation MUST run on a connection the host supplies, so that it takes part in
 the host's transaction. Custody MUST own the schema it persists in, for every database
@@ -36,6 +40,12 @@ statements.
 - **WHEN** a host reveals an introduction already revealed with different contacts
 - **THEN** custody refuses the reveal and the stored contacts are unchanged
 
+#### Scenario: An identifier never revealed is read
+
+- **WHEN** a host reads an identifier it never revealed
+- **THEN** custody answers that it is absent, which differs from a revealed introduction
+  holding an empty contact
+
 #### Scenario: A custody operation joins the host's transaction
 
 - **WHEN** a host ends an introduction and records its own state change in one transaction
@@ -47,9 +57,9 @@ statements.
 Custody MUST store every contact as authenticated ciphertext under a keyset held outside the
 database, and MUST NOT store a contact in plaintext. Each ciphertext MUST name the key that
 wrote it, so a contact written under any key the keyset still holds can be read. Each
-ciphertext MUST be bound to the introduction or held contact and the role it was written
-for, so that one moved to another record or another role fails to decrypt, and MUST NOT be
-bound to any retention value.
+ciphertext MUST be bound to the introduction or held contact, the slot and the role it was
+written for, so that one moved to another record or another slot fails to decrypt whatever
+role labels the host supplied, and MUST NOT be bound to any retention value.
 
 A host composing custody MUST refuse to start when its keyset is absent or malformed, or when
 a stored ciphertext names a key its keyset does not hold; the refusal MUST name the setting
@@ -65,6 +75,12 @@ or the missing key ids.
 
 - **WHEN** a stored ciphertext is copied into another introduction's slot or into the other
   slot of its own introduction
+- **THEN** reading that slot fails to decrypt and no contact is returned
+
+#### Scenario: A ciphertext is moved between slots with the same role label
+
+- **WHEN** a host revealed an introduction whose two parties share one role label, and one
+  slot's ciphertext is copied into the other slot
 - **THEN** reading that slot fails to decrypt and no contact is returned
 
 #### Scenario: A host starts without its keyset
@@ -156,7 +172,9 @@ by restore redaction — MUST go through one shared deletion operation.
 
 Custody MUST offer an end operation that redacts an introduction's contacts for both parties,
 in the host's transaction, through the one deletion operation, converging when the
-introduction is already redacted. The host MUST authorize that the caller is one of the
+introduction is already redacted. Ending an identifier never revealed MUST persist nothing
+and MUST report it absent, so the host can answer it and a later reveal is not prevented.
+The host MUST authorize that the caller is one of the
 introduction's participants.
 
 #### Scenario: A participant ends an introduction
@@ -226,6 +244,15 @@ contact and removes the held contact, the promoted contact decrypting to the hel
 held contact MUST NOT be changed but by re-encryption. When a held contact is held,
 discarded or promoted MUST be the host's decision.
 
+Holding and promoting MUST follow a reveal's idempotency. A hold repeated with the same role
+and contact MUST return the held contact and write nothing, and a hold with a different role
+or contact under the same identifier MUST be refused, leaving the held contact unchanged. A
+promotion whose held contact is gone MUST return the target introduction when it exists
+with the same other party's contact, roles and context, MUST answer the deleted outcome when
+that introduction is redacted, and MUST be refused as not held, writing nothing, when no
+introduction exists either. A promotion whose held contact remains but whose target
+introduction already exists MUST be refused and change nothing.
+
 #### Scenario: A held contact is promoted
 
 - **WHEN** a host promotes a held contact with the other party's contact
@@ -236,6 +263,34 @@ discarded or promoted MUST be the host's decision.
 
 - **WHEN** a host discards a held contact, once or twice
 - **THEN** it no longer exists and the repeated discard converges
+
+#### Scenario: A hold is repeated
+
+- **WHEN** a host holds a contact again under the same identifier, role and contact
+- **THEN** custody returns the held contact and writes nothing
+
+#### Scenario: A hold conflicts with the held contact
+
+- **WHEN** a host holds a different contact under an identifier already held
+- **THEN** custody refuses the hold and the held contact is unchanged
+
+#### Scenario: A promotion is repeated
+
+- **WHEN** a host promotes a held contact again after its promotion committed, with the same
+  other party's contact
+- **THEN** custody returns the introduction the first promotion revealed and writes nothing
+
+#### Scenario: A discarded contact is promoted
+
+- **WHEN** a host promotes a held contact that was discarded, and no introduction exists
+  under the target identifier
+- **THEN** custody refuses the promotion as not held and writes nothing
+
+#### Scenario: A promotion targets an existing introduction
+
+- **WHEN** a host promotes a held contact into an introduction identifier already revealed
+- **THEN** custody refuses the promotion, and the held contact and the introduction are
+  unchanged
 
 ### Requirement: A restored backup can be redacted before the host starts
 
