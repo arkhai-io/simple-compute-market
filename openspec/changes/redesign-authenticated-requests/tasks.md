@@ -1401,6 +1401,79 @@ Notes (section 6):
   and the transport signature would still be what the authority checks.
 - Nothing of section 6 was implemented, and no task is checked. This commit holds
   only these notes.
+- **Stopped again before 6.1 (2026-11-27); the change returns to design.** The
+  registry's descriptor read cannot be served under version 3 as designed. The
+  evidence:
+  - `GET /.well-known/arkhai/registry-descriptor.json` is a trust bootstrap.
+    `RegistryClient.bootstrap_registry_descriptor` and `_descriptor_bootstrap_request`
+    (`core/registry-client/src/registry_client/client.py`) sign the request knowing no
+    registry principal, then verify the signed response against the principal set
+    the descriptor itself names. Registry-discovery's permanent "Registry
+    self-description is authority-authenticated" requires this ("A bootstrap client
+    MUST verify the signed response against the principal set carried in the
+    validated descriptor"; scenario "Descriptor is used as a trust bootstrap"). It
+    still names version 2, and the change's deltas do not modify it.
+  - Under version 3 every request carries `Market-Audience`, "the principals the
+    caller would accept the answer from", and "an authority MUST accept a request
+    only when its own signing principal is listed" (the marketplace-identity delta;
+    D10). `AdmissionCore.admit` answers any other request a signed 421
+    `audience_mismatch`. A bootstrap client has no principal to list, so every
+    bootstrap is refused, unless the route is served outside the requirement. Neither
+    the design nor the deltas mention the descriptor.
+  - Today only the registry's own tests call the bootstrap
+    (`core/registry/tests/integration/test_registry_descriptor.py`), but it is public
+    client API.
+- The decision the design owes, with the recommendation here:
+  - (a), recommended: the descriptor read is exempt from the audience check, as
+    the time-setting operation is exempt from freshness. This is a route declaration
+    the core honours. The read is `RERUN` and writes nothing, every other check is
+    kept, and the bootstrap client verifies the signed answer against the
+    descriptor's principals. It needs a marketplace-identity delta for the exemption,
+    and registry-discovery's descriptor requirement restated for version 3.
+  - (b) Retire the bootstrap. The descriptor becomes an ordinary audience-bound read
+    by a client configured with the registry's principal, and the bootstrap
+    scenario and client method go. This is cheaper, but removes a public client
+    capability and the requirement's trust bootstrap.
+  - (c) The bootstrap request carries an empty audience, learns the principal from
+    the signed 421, and re-sends. This makes a refusal part of the protocol.
+  - (d) The descriptor route is unauthenticated and its body self-signed under
+    `kit/identity`'s own framing. This changes the descriptor's wire.
+- Also for the design to confirm while it is open: a read's query values. The
+  marketplace-identity delta says "Behavior-affecting query values MUST be
+  represented in the signed semantic body", and `Content-Digest` covers the bytes
+  sent. So a registry read would send the canonical query document that version 2
+  hashed without sending (`_query_body`: the sorted query items, and a normalized
+  `If-Match`) as a GET body, and the registry would refuse a read whose body differs
+  from its URL's document. A GET with a body is unusual; whether the deployed
+  ingress passes it is untested.
+- Found while checking, for planning (not design questions):
+  - Section 9 cannot pass a functional commit's checks alone. `create_lifecycle_router`
+    is composed by the bare-metal storefront (`server.py`) and by the VM storefront's
+    integration tests (`tests/recurring_world.py`, `test_spot_notice.py`,
+    `test_vm_delivery_path.py`, `test_payment_settlement.py`). 9.2 makes it take the
+    admission core, which the storefronts compose only in 10–12, and
+    `pre-commit-functional` runs every suite. Either section 9 composes a core where
+    those callers build the router, or it moves with 11–12.
+  - Section 6 also breaks the VM storefront's
+    `tests/unit/test_registry_client_contract.py`, which doubles the registry's
+    version 2 wire against the installed client; 6.5 does not name it.
+- Choices made reading the code, for the replanned section (nothing implemented):
+  - Trust: the registry admits any verified principal; version 2 trusted the
+    claimed principal, and the routes check ownership. The core's `trust` is typed
+    `TrustedIdentitySet`, so the kit's parameter becomes a protocol of `allows`.
+  - Store: the registry's SQLite engine uses `StaticPool`, one shared connection.
+    The replay store needs its own engine on the same file, or its transactions
+    interleave with the request session's.
+  - Rotation and retirement pass D6 as keyed by nonce: a re-run after a later write
+    changes nothing. But each reaches an applied rotation only after its proof-expiry
+    or primary check, so a late retry is answered 401 or 403 rather than with the
+    rotation. The section would answer an existing rotation for the same intent
+    first.
+  - The singletons with no identifier (descriptor, filter spec, health, stats) have
+    no target.
+- Nothing of section 6 was implemented by this session, and no task is checked.
+  Sections 7–9 were not started: a section stopped for a design question ends the
+  session's sections.
 
 ## 7. The provisioning service and its hosted site on the admission core
 
