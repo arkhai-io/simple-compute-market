@@ -108,7 +108,7 @@ None.
   setup-bearing row exists to extend.
 - No other change gates this one. Goal 8 waits for
   `discover-open-ended-compute-listings`, `filter-listings-by-capacity-bounds`,
-  `renewable-compute-lease-deadlines`, `end-delivery-when-funding-runs-out` and
+  `enforce-delivery-deadlines-at-the-site`, `end-delivery-when-funding-runs-out` and
   `offer-a-seller-chosen-payout-hold` as closeouts the roadmap's "Done when" names, not
   through this change.
 - `complete-real-provisioning-qualification` states the same rule for when a real-host

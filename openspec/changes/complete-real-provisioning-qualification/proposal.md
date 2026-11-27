@@ -54,7 +54,7 @@ such a run is.
 **Two things a real host can show are in no list.** The nine guest-isolation
 observations are made by a module of their own and are not among what the runbook
 owes. And no observation covers a teardown that follows an interrupted create, which
-`renewable-compute-lease-deadlines` makes routine.
+`enforce-delivery-deadlines-at-the-site` makes routine.
 
 ## What Changes
 
@@ -126,7 +126,7 @@ None.
 - `report-provisioning-failures-to-operators` amends observation 5's notification
   clause. This change rewrites the paragraph above the observations, not observation
   5. Whichever lands second reverifies the section against the other.
-- `renewable-compute-lease-deadlines` hands this change one question: whether the
+- `enforce-delivery-deadlines-at-the-site` hands this change one question: whether the
   owed observations gain a teardown after an interrupted create (its design, Q9; this
   design's Q4).
 - `harden-shared-relays` concerns the same buyer relays. Observation 1's procedure

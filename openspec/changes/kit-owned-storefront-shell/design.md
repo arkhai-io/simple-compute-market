@@ -145,6 +145,13 @@ Design phase; not planned.
   their loops at shutdown as bare metal does, or the shell, whose composition root owns
   the loop controller, stops every storefront's loops itself.
 
+- **The order against `unify-vm-and-bare-metal-storefronts`.** Added 2026-11-27. Not
+  settled here: that change's design session decides whether it lands after this
+  change, before it, or between this change's route set and its executable assembly
+  (its design's Q1). Three questions above bear on it: where a domain's extra routes
+  go and who owns their authentication, whether the shell owns the operator CLI, and
+  the compute shell's home.
+
 ## Decisions
 
 None yet.

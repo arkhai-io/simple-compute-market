@@ -184,23 +184,30 @@ Registration controls construction, not lifecycle ownership. A composition injec
 
 ## Frozen storefront registry and executable ownership
 
-The compute-family storefront executable is core-owned, schema-opaque role
-machinery extended from below. Installed domain packages publish one validated
-`StorefrontDomainContribution` through the canonical
-`market.storefront_contributions` entry group. Public configuration selects an
-exact contribution/mode/domain/version set; startup validates it and freezes
-one registry before state or network effects. Each registry value retains the
-exact contract object plus its publication and legacy-migration hooks.
+The registry, its bindings, and the application builder are core-owned,
+schema-opaque role machinery extended from below; each storefront executable
+is a domain-owned composition root over them. Every executable freezes its
+registrations in a `StorefrontDomainRegistry` before state or network effects. Each registration
+retains its contribution ID, its offering mode, and the exact contract object,
+whose publication capability supplies that contribution's publication source.
+Installed domain packages publish one `StorefrontDomainContribution`, an ID
+and a contract builder, through the canonical `market.storefront_contributions`
+entry group. The VM executable's public configuration selects an exact
+contribution/mode/domain/version set among them, which startup validates; the
+bare-metal and API-credit executables register their own contract alone.
 
 Application, persistence, publication, negotiation, settlement, fulfillment,
-recovery, result, and teardown layers receive that same registry. Every listing
-binding freezes its selected contribution identity, contract version, Resource
-Pool offering mode, trusted site, and Physical Resource; negotiation copies the
-immutable binding before storing a domain artifact. Durable bindings resolve
-only to their pre-registered exact objects, and schema-opaque payloads are
-validated only by the selected contract. A one-domain storefront uses these
-same carriers with one explicit registration, never a separate executable or
-default, so adding a shared shell changes neither persistence nor routing.
+recovery, result, and teardown layers resolve bindings only through the
+executable's frozen registrations. Every listing binding freezes its offering
+mode, domain identity, contract version, trusted site, and pool or Physical
+Resource provenance; negotiation copies the immutable binding before storing a
+domain artifact. Durable bindings resolve only to their pre-registered exact
+objects, and schema-opaque payloads are validated only by the selected
+contract. Every executable uses these same carriers, and none has a default
+registration. Each builds its services for one registration, so a second
+registration changes neither persistence nor routing: it is validated and
+reported, and serves nothing
+([`ARCHITECTURE.md`, "Capacity publication and multi-domain storefront composition"](../../../docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition)).
 
 ## Storefront composition kit
 
@@ -365,13 +372,13 @@ The buyer CLI and registry executable remain core-owned for the same
 schema-opaque reason. Each domain package exports one validated contribution
 while retaining its market meaning, codecs, publication semantics, seller
 policy,
-route and service contributions, and concrete fulfillment behavior. A
-one-domain executable or shared shell owns process configuration. The
+route and service contributions, and concrete fulfillment behavior. Each
+storefront executable owns its process configuration. The
 bare-metal contribution uses shared lifecycle contexts with its own
-site/capacity/fulfillment adapters and never imports VM services. The
-compute-family shell gives VM and bare metal the shared frozen-registry
-lifecycle, while API credits composes the same kit mechanisms at its own
-non-physical storefront boundary. No topology gains a default domain, global
+site/capacity/fulfillment adapters and never imports VM services. VM and bare
+metal share the frozen-registry lifecycle and those contexts, each in its own
+executable, while API credits composes the same registry and kit mechanisms at
+its own non-physical storefront boundary. No topology gains a default domain, global
 selector, or no-op fulfillment implementation.
 
 ## Agreement-based payment composition

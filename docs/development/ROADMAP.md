@@ -1,6 +1,6 @@
 # Arkhai Market Stack — Directional Roadmap
 
-> **Purpose:** The goals currently being pursued, and those completed, the value each delivers, what is true today, and which OpenSpec change owns each open gap. This document carries no readiness status, no delivery sequencing, no acceptance criteria, and no implementation tasks — those belong to the changes themselves and to [`openspec/changes/README.md`](../../openspec/changes/README.md).
+> **Purpose:** The goals currently being pursued, and those completed, the value each delivers, what is true today, what completes each goal, and which OpenSpec change owns each open gap. This document carries no readiness status, no delivery sequencing, and no implementation tasks, and a change's own acceptance is the change's — those belong to the changes themselves and to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## How this document relates to the others
 
@@ -14,7 +14,7 @@ Three cross-cutting documents divide the work between them. Each answers a diffe
 
 To find out whether work on a goal is ready, blocked, or deferred, follow the change link and read the active-change index. This document deliberately does not say.
 
-Each goal below carries a present-tense **current state** grounded in the code as it is, and a table of **open gaps** with the change that owns each. When a change completes, its row leaves the table and the result is absorbed into the current-state prose — so this document shows where things stand, not a history of how they got there. Progress is visible in the current-state paragraphs growing and the gap tables shrinking.
+Each goal below carries a present-tense **current state** grounded in the code as it is, a table of **open gaps** with the change that owns each, and, where one is stated, what completes the goal, with anything outside this repository that it waits on. When a change completes, its row leaves the table and the result is absorbed into the current-state prose — so this document shows where things stand, not a history of how they got there. Progress is visible in the current-state paragraphs growing and the gap tables shrinking.
 
 A gap identified without an owning change does not become a standing entry here; an OpenSpec change is opened for it and linked. Where a goal has known work that no change yet owns, the current-state section says so plainly rather than the gap table implying coverage that does not exist.
 
@@ -135,35 +135,51 @@ Buyer-negotiated VM connectivity terms are no longer a gap of this goal. The rel
 
 **Value.** This decouples *how hardware is sold* from *how hardware is partitioned*. Today the listing form factor is a deployment boundary, so a site owner must physically dedicate hosts to VMs rather than bare metal rather than pods. Removing that lets one pool of hardware be offered concurrently as several form factors, priced independently, with the site authority arbitrating exclusivity between them — higher utilization and better price discovery without buying more hardware.
 
-**Current state.** The common storefront shell now discovers installed domain
-contributions, applies explicit public registrations, and freezes an exact
-mode/domain/version registry. VM and bare-metal publication sources can share
-one process. Listings, negotiation threads, and fulfillment contexts carry
-immutable domain, offering-mode, selected-site, and provenance bindings;
-negotiation, settlement, fulfillment, result recovery, and teardown route from
-those records rather than payload guessing, installed order, or a VM default.
-Existing single-domain VM databases enter this schema only through the
-explicit, preview-first, backed-up transactional migration.
+**Current state.** A storefront discovers installed domain contributions, applies the
+operator's explicit registrations, and freezes one registry of offering mode, domain
+identity and contract version. Listings, negotiation threads, and fulfillment contexts
+carry immutable domain, offering-mode, selected-site, and provenance bindings;
+negotiation, settlement, fulfillment, result recovery, and teardown resolve their
+contract from those records, never from a payload, installed order, or a default. All
+three storefronts compose that registry.
 
-Resource Pools already declare exact deliverable offering modes. Capacity
-claims carry that mode through reservation, scheduling, and provider dispatch,
-and accepted records retain it when publication changes. The shared
-storefront-to-site clients pin mapped work to one trusted authority with no
-cross-site fallback. The registry catalogue can now receive the public
-`listing_resource.offering_mode` projected from the frozen binding.
+Resource Pools declare exact deliverable offering modes. Capacity claims carry that
+mode through reservation, scheduling, and provider dispatch, and accepted records
+retain it when publication changes. One provisioning service delivers VMs and whole
+machines side by side, and its site refuses a whole-machine claim on a machine a VM
+slice holds, and the reverse. The storefront-to-site clients pin accepted work to its
+recorded site with no cross-site fallback. A listing publishes its
+`listing_resource.offering_mode` from its binding, and VM and bare-metal listings share
+one registry schema.
 
-Goal 3's shared storefront boundary is therefore implemented and promoted. The
-bare-metal producer has landed too: an installable buyer contribution, a seller
-composition that starts through the shared shell and composes kit publication, a
-compose stack and its own end-to-end lane, and a real-host deal scenario. Complete
-product acceptance still depends on bare metal negotiating through the kit runtime
-rather than its own service, and on the topology proof below; the shell deliberately
-does not fake either.
+Bare metal is a complete domain: an installable buyer contribution, a storefront that
+negotiates through the kit runtime and composes kit publication, a chart and a compose
+stack, an end-to-end lane that runs a mock-provisioned deal on every pipeline run, and
+a real-host deal scenario.
+
+What the goal names is not yet true. No storefront process serves two domains: the VM
+storefront can register the bare-metal contribution beside its own, and then serves VM
+alone and reports the other. Bare metal is sold by a storefront program of its own,
+with its own executable, routes, chart, and database. A provisioning service trusts
+and calls back one storefront, so each storefront runs beside a provisioning service of
+its own, a site's hardware is still dedicated to one form factor by its deployment, and
+the site's cross-mode arbitration is reached only by tests.
+
+One storefront serving several sites is not part of this goal. The storefront's code
+routes each record to its own site and integration tests prove it; no deployment runs
+it, and it is planned as a goal of its own.
 
 | Open gap | Owned by |
 |---|---|
-| The bare-metal contribution serves its own negotiate and listing routes over the kit negotiation runtime, beside the shared shell's routes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) (Goal 4, Section 4a) |
-| One-process VM/bare-metal behavior across more than one authority needs live selected-authority, cross-mode, execution-dispatch, teardown, and capacity-restoration evidence | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
+| No storefront process serves both compute domains, so no deployment sells one site's hardware as VM slices and as whole machines | [`unify-vm-and-bare-metal-storefronts`](../../openspec/changes/unify-vm-and-bare-metal-storefronts/) |
+| Bare metal is sold by a storefront program of its own, which serves its own negotiate and listing routes over the kit negotiation runtime | [`unify-vm-and-bare-metal-storefronts`](../../openspec/changes/unify-vm-and-bare-metal-storefronts/), which deletes that program: one compute storefront executable serves both domains |
+
+**Done when** a lane shows, on every pipeline run, one storefront process publish a VM
+listing and a bare-metal listing from one site's hardware, complete a deal of each, and
+the site refuse the cross-mode conflict. That scenario is the acceptance of
+`unify-vm-and-bare-metal-storefronts`, which is recorded as waiting for
+[`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/)
+(Goal 4) and settles that order in its own design.
 
 ---
 
@@ -207,7 +223,8 @@ same capacity and publication seams, the shared watchdog and chain factory, and
 selected-site fulfillment, result, and teardown, and has a deployable stack with
 its own end-to-end lane, which runs a mock-provisioned deal stage for stage with
 VM's. It negotiates through the kit negotiation runtime, as VM and API credits do,
-serving its own negotiate and listing routes over it. `kit/policy`,
+serving its own negotiate and listing routes over it from a storefront program of its
+own, which Goal 3's `unify-vm-and-bare-metal-storefronts` removes. `kit/policy`,
 `kit/identity`, `kit/fulfillment`, `kit/config`, and `kit/alkahest` likewise
 carry no domain vocabulary.
 
@@ -239,12 +256,11 @@ VMs, bare metal, and API credits compose Arkhai payments and Alkahest as peer se
 
 The domain layer's own structure is better than the duplication suggests. All three domains follow one pattern — a base contract with a storefront-side extension — and all three pass the shared conformance suite, which works without assuming a repository layout. Only the directory conventions differ, and a composed domain is small enough that relocating them buys nothing.
 
-**Completion test.** Bare metal and API credits each run a full deal through a composed storefront, with no domain-local copy of an extracted concern.
+**Completion test.** API credits and the compute storefront each run a full deal through a composed storefront, with no domain-local copy of an extracted concern.
 
 | Open gap | Owned by |
 |---|---|
 | Production buyers build storefront requests by hand instead of using the storefront's typed client, so the route contract has two independent implementations | [`buyers-use-the-storefront-client`](../../openspec/changes/buyers-use-the-storefront-client/) |
-| The bare-metal storefront serves its own negotiate and listing routes over the kit negotiation runtime rather than the shell's shared routes | [`bare-metal-and-credits-domain-stacks`](../../openspec/changes/bare-metal-and-credits-domain-stacks/) |
 | The API-credit lane does not hold and step its storefront's loops, and the storefront has no test that runs the production application | [`apicredits-end-to-end-lane`](../../openspec/changes/apicredits-end-to-end-lane/) |
 | Every storefront carries its own route set, executable assembly, and health service | [`kit-owned-storefront-shell`](../../openspec/changes/kit-owned-storefront-shell/) |
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
@@ -270,9 +286,6 @@ settlement qualification gaps build on these seams rather than reopening them.
 API-credit issuance uses canonical principal ownership, deterministic fulfillment/grant identities, request digests, unknown-outcome retrieval, and a private credential result channel. Arkhai payment receipts gate issuance; Alkahest retains its own condition and collection path.
 
 No domain's capacity declaration carries another domain's dimension name: the dimension the legacy scalar total mirrors is supplied by each composition, and a declaration holds exactly the dimensions it names.
-
----|---|
-| The offering mode falls back implicitly to VM where durable identity is absent, which a growing set of offering modes cannot tolerate | [`market-platform-compute-40-multi-domain-proof`](../../openspec/changes/market-platform-compute-40-multi-domain-proof/) |
 
 ---
 
@@ -358,16 +371,16 @@ The changes that own the open gaps follow. The campaign index holds their order 
 |---|---|---|
 | A buyer finds an on-demand or spot option only by a settlement clause written by hand, the bare-metal buyer only by reading a listing for an option ID, and each buyer chooses its settlement option by its own code | [`discover-open-ended-compute-listings`](../../openspec/changes/discover-open-ended-compute-listings/) | a class — reserved, on-demand, spot or committed spot — read from each option's early-termination entitlements, and a class shorthand finding it in both compute buyers, over one selection the VM, bare-metal and API-credit buyers share |
 | A buyer cannot narrow a registry query by how long a seller's capacity lasts | [`filter-listings-by-capacity-bounds`](../../openspec/changes/filter-listings-by-capacity-bounds/) | the registry's lower-bound filters on `max_duration_seconds` and `available_until_utc` |
-| No site enforces a delivery deadline: the storefront alone enforces the one a deal accepted, which is the seller's clause value, and a storefront lost before delivery holds capacity until the agreed end | [`renewable-compute-lease-deadlines`](../../openspec/changes/renewable-compute-lease-deadlines/) | the site's suite: activation racing expiry in both orders, a deal's accepted deadline anchored at its commitment instant lapsing, a commit refused beyond a value its pool resolves, and the accepted deadline enforced where the pool states none; both compositions publishing a pool's resolved value in place of the clause's, the clause's kept where a pool gives none |
+| No site enforces a delivery deadline: the storefront alone enforces the one a deal accepted, which is the seller's clause value, and a storefront lost before delivery holds capacity until the agreed end | [`enforce-delivery-deadlines-at-the-site`](../../openspec/changes/enforce-delivery-deadlines-at-the-site/) | the site's suite: activation racing expiry in both orders, a deal's accepted deadline anchored at its commitment instant lapsing, a commit refused beyond a value its pool resolves, and the accepted deadline enforced where the pool states none; both compositions publishing a pool's resolved value in place of the clause's, the clause's kept where a pool gives none |
 | A changed `delivery_end` claim never reaches the dispute authority and leaves its deal repair required; the seller's list can show a deal `ended` while a filing of its own is unsent or unanswered; a deal's physical end waits behind authority reads within a servicing page; and most rate rows beyond the baseline run in no lane, no dispute row on a rate deal in the bare-metal lane | [`converge-ongoing-compute-leases`](../../openspec/changes/converge-ongoing-compute-leases/) | those three fixed, and the remaining rate qualification rows run against the lane doubles |
 | A deal's delivery ends for want of funds only when its storefront reads the payment authority's stop: with the authority out of reach nothing ends it and the seller serves unpaid, and each mechanism reaches end service by its own route, Alkahest's through a hook each compute storefront wires differently | [`end-delivery-when-funding-runs-out`](../../openspec/changes/end-delivery-when-funding-runs-out/) | one rule in the kit ending delivery at the instant a deal's mechanism reports as funded, after a read made past that instant, in both compute storefronts; every mechanism's adapter reporting that instant through one port, with the storefronts' terminal-settlement hooks removed; and funds running out with the payment authority readable and out of reach run on lane time in both compute lanes |
 | A seller whose storefront is not running cannot file its `delivery_end` or send its notice: it ends the lease at the site and files once the storefront is back | [`recover-deals-from-the-storefront-cli`](../../openspec/changes/recover-deals-from-the-storefront-cli/) — deferred until a seller needs it | a storefront CLI command that acts on a deal's exported evidence through the composed adapters with the storefront stopped |
 | Every payout hold lasts until the part's stop plus the dispute window, so a seller is paid nothing while a deal runs, and the premature-stop penalty is collectible only from the seller's money still held, which an earlier release shrinks | [`offer-a-seller-chosen-payout-hold`](../../openspec/changes/offer-a-seller-chosen-payout-hold/) — its implementation is blocked on a capability the hosted dispute authority owes: a published mediation contract that maps a stated hold shape | an option stating a hold shape the buyer sees, the first releasing each rate period's earnings the dispute window after they are earned, derived and checked exactly and mapped by the dispute authority, beside what a case and the premature-stop penalty can reach under it, with a seller's filing on such a deal ruled live by a hosted dispute authority that maps the shape |
 | Per-period bare metal and a setup charge are not supported seller configurations: no shipped bare-metal example, quickstart or handbook section offers on-demand or spot, setup-bearing presets stay disabled by requirement, and no live observation runs the bare-metal buyer's commands or involves a setup part. An operator's ruling of a buyer's contested case on a rate deal has not been observed live: the buyer's filing and the storefront's contest were made, and no prepared topology applied a ruling policy ([live verification summary](../attachments/switch-on-hosted-per-period-vm/live-verification.md)). Arkhai operators rule disputes by hand for the deals a production seller's options name | [`qualify-per-period-bare-metal-and-setup-charges`](../../openspec/changes/qualify-per-period-bare-metal-and-setup-charges/) — its design waits for `converge-ongoing-compute-leases`. Its live verification is blocked on a topology that applies a ruling policy to a contested case, a capability the dispute authority's side provides; mechanical remedies are blocked on a capability the hosted dispute authority owes, ruling a seller's filing without a person for the deals a production seller's options name | per-period bare metal and a setup charge documented as supported, with the bare-metal chart's production example offering on-demand and spot; the live observations still unmade recorded as live evidence, on mock provisioning, an operator's ruling of a buyer's contested case among them; and a seller's filing ruled without a person by the dispute authority a production seller's options name |
 
-**Done when** every change in the table above has closed out, the deferred `recover-deals-from-the-storefront-cli` excepted — `discover-open-ended-compute-listings`, `filter-listings-by-capacity-bounds`, `renewable-compute-lease-deadlines`, `converge-ongoing-compute-leases`, `end-delivery-when-funding-runs-out`, `offer-a-seller-chosen-payout-hold` and `qualify-per-period-bare-metal-and-setup-charges`, in whatever order their own dependencies allow — and with them: per-period bare metal and a setup charge are supported seller configurations beside on-demand and spot VM; a buyer that has changed no acceptance setting has taken on-demand and spot live in both domains under the shipped presets, a live preemption returning the unstarted remainder; every per-period scenario whose authority output a prepared topology can produce is recorded as live evidence, an operator's ruling of a buyer's contested case among them, and every other as lane-double evidence; the hosted dispute authority rules a seller's filing without a person for the deals a production seller's options name; and the scenario diagrams are promoted. Whichever of those changes closes out last records the goal complete. The VM switch-on is current state, not completion.
+**Done when** every change in the table above has closed out, the deferred `recover-deals-from-the-storefront-cli` excepted — `discover-open-ended-compute-listings`, `filter-listings-by-capacity-bounds`, `enforce-delivery-deadlines-at-the-site`, `converge-ongoing-compute-leases`, `end-delivery-when-funding-runs-out`, `offer-a-seller-chosen-payout-hold` and `qualify-per-period-bare-metal-and-setup-charges`, in whatever order their own dependencies allow — and with them: per-period bare metal and a setup charge are supported seller configurations beside on-demand and spot VM; a buyer that has changed no acceptance setting has taken on-demand and spot live in both domains under the shipped presets, a live preemption returning the unstarted remainder; every per-period scenario whose authority output a prepared topology can produce is recorded as live evidence, an operator's ruling of a buyer's contested case among them, and every other as lane-double evidence; the hosted dispute authority rules a seller's filing without a person for the deals a production seller's options name; and the scenario diagrams are promoted. Whichever of those changes closes out last records the goal complete. The VM switch-on is current state, not completion.
 
-**Accepted limitations**, each stated with its bound by the change that owns it: if the resource is lost while the seller's storefront is down, the buyer is charged until its own stop lands — the buyer's opt-in watchdog in `spot-deals-through-arkhai-payments`, run in the foreground by the buyer's own `buy` command (there is no buyer daemon), covers one failure, the deal's disclosed SSH endpoint ceasing to accept connections, and sends that stop within `interval × threshold + probe timeout` of that failure while it runs, and a deal it is not running for is shown as unmonitored, a seller that recovers within the dispute window returns everything since the loss, and a case is the remedy after that; a buyer whose stop or case the authorities never receive is protected only by the evidence it kept, ruled after the fact; each party has one priced notice, zero for the buyer in the shipped presets; after a payment stop the seller's observation and teardown latency is its own capacity risk; a seller collects a running deal's earnings only after the part's stop plus the dispute window; the on-demand preemption penalty is a ceiling on what the seller has earned and not yet been paid, which early in a deal is the setup charge alone and nothing without one, until a seller-funded bond exists; a storefront that is absent after activation leaves the lease running to its agreed end, with the buyer's stop as the buyer's lever; and an Arkhai dispute authority whose address or signing key changes mid-deal is not followed — the payments service publishes no key-retention commitment, so the switch-on assumes each environment's key stays stable for a deal's life and the storefront runbooks drain running deals before a key change, while how the dispute authority dismisses and rules cases, its advisory time to rule and its continuity are its own published policy, which SCM's documentation points to rather than restates; no response bound is asked of the authority, since a binding one would end unruled cases in default judgements against someone and an unbounded one is no bound — a case holds a seller's earnings until a person dismisses or rules on it, with no fee or deposit on the filer, the authority's expected time to rule shown as advisory where it publishes one, and the seller's levers are its acceptance policy and its choice of authority for its next deals; until `renewable-compute-lease-deadlines` lands, the delivery deadline is the seller's own clause value, which its storefront enforces and no site does, so a lease whose storefront stops before delivery is ended by an operator; and once it lands, the site's deadline runs from an anchor its storefront supplies and it cannot verify, so it is the seller's safeguard against its own absence, while the buyer's accepted deadline is judged by the dispute authority from the payment authority's approval record, and a lease whose deal accepted no deadline, in a pool that states none, has none, so a storefront lost before its delivery still holds its capacity until the agreed end.
+**Accepted limitations**, each stated with its bound by the change that owns it: if the resource is lost while the seller's storefront is down, the buyer is charged until its own stop lands — the buyer's opt-in watchdog in `spot-deals-through-arkhai-payments`, run in the foreground by the buyer's own `buy` command (there is no buyer daemon), covers one failure, the deal's disclosed SSH endpoint ceasing to accept connections, and sends that stop within `interval × threshold + probe timeout` of that failure while it runs, and a deal it is not running for is shown as unmonitored, a seller that recovers within the dispute window returns everything since the loss, and a case is the remedy after that; a buyer whose stop or case the authorities never receive is protected only by the evidence it kept, ruled after the fact; each party has one priced notice, zero for the buyer in the shipped presets; after a payment stop the seller's observation and teardown latency is its own capacity risk; a seller collects a running deal's earnings only after the part's stop plus the dispute window; the on-demand preemption penalty is a ceiling on what the seller has earned and not yet been paid, which early in a deal is the setup charge alone and nothing without one, until a seller-funded bond exists; a storefront that is absent after activation leaves the lease running to its agreed end, with the buyer's stop as the buyer's lever; and an Arkhai dispute authority whose address or signing key changes mid-deal is not followed — the payments service publishes no key-retention commitment, so the switch-on assumes each environment's key stays stable for a deal's life and the storefront runbooks drain running deals before a key change, while how the dispute authority dismisses and rules cases, its advisory time to rule and its continuity are its own published policy, which SCM's documentation points to rather than restates; no response bound is asked of the authority, since a binding one would end unruled cases in default judgements against someone and an unbounded one is no bound — a case holds a seller's earnings until a person dismisses or rules on it, with no fee or deposit on the filer, the authority's expected time to rule shown as advisory where it publishes one, and the seller's levers are its acceptance policy and its choice of authority for its next deals; until `enforce-delivery-deadlines-at-the-site` lands, the delivery deadline is the seller's own clause value, which its storefront enforces and no site does, so a lease whose storefront stops before delivery is ended by an operator; and once it lands, the site's deadline runs from an anchor its storefront supplies and it cannot verify, so it is the seller's safeguard against its own absence, while the buyer's accepted deadline is judged by the dispute authority from the payment authority's approval record, and a lease whose deal accepted no deadline, in a pool that states none, has none, so a storefront lost before its delivery still holds its capacity until the agreed end.
 
 Work this goal found and leaves unowned:
 
@@ -421,7 +434,7 @@ The published rate is one number per listing shape, not a per-dimension structur
 
 This goal is not complete on a queryable listing alone. Its value statement is discovery *and* a trustworthy introduction, so closing it requires a release-qualified business scenario in which unbacked discovery reaches a usable introduction. For VM that scenario runs in the VM end-to-end lane and against a local Helm release: backed and unbacked VM listings are found by one rate-bounded query, and the unbacked one is negotiated, revealed through the buyer CLI, and delivered to both sides. For bare metal, the primary target, it runs in the bare-metal end-to-end lane as `e2e_bare_metal_unbacked_introduction`, on the same introduction stages as VM's: backed and unbacked bare-metal listings are found by one rate-bounded query, a `capacity_backing=unbacked` query returns only the unbacked one, which publishes no host fields and only an introduction option, and it is negotiated, revealed through the buyer CLI, and delivered to both sides, with no fulfillment.
 
-The multi-seller shape this goal requires is in place in both domains: the seller's contact is resolved per listing origin, never from one storefront-wide value, and seller-side delivery is routed per origin. In the topology supported today — one registry with several storefronts, each holding its own site — every storefront reveals its own seller's contact by construction. One storefront serving several seller sites is not supported and is not yet a goal, so the live scenario for that shape is recorded as unowned in the [change index](../../openspec/changes/README.md), and this goal closes without it.
+The multi-seller shape this goal requires is in place in both domains: the seller's contact is resolved per listing origin, never from one storefront-wide value, and seller-side delivery is routed per origin. In the topology supported today — one registry with several storefronts, each holding its own site — every storefront reveals its own seller's contact by construction. One storefront serving several seller sites is handled in code and proven at integration level, but no deployment runs it; it is planned as a roadmap goal of its own, not yet written, so the live scenario for that shape is recorded as unowned in the [change index](../../openspec/changes/README.md), and this goal closes without it.
 
 Finite unbacked listings, and payment settlement over them, are anticipated and unowned. They are the reason backing is modelled as a listing property rather than as a domain: a seller's supply becomes capacity-backed later without a new domain, a new registry, or a migration unwinding a fabricated site. Backing itself is immutable per durable listing — an unbacked listing does not become backed, it closes and a backed one is published in its place — because moving from no admission guarantee to a named authority is a material provenance change a buyer holding a listing reference should not have happen underneath them.
 
