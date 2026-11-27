@@ -321,7 +321,12 @@ class AlkahestBuySession:
 
 
 class AlkahestBuyerStage:
-    """``wallet`` and ``chains`` resolve the buyer's EVM wallet and configured chains; each defaults to the buyer's configuration."""
+    """``wallet`` and ``chains`` resolve the buyer's EVM wallet and configured chains; each defaults to the buyer's configuration.
+
+    ``submit_settlement``, ``wait_settlement``, and ``resolve_chain`` are the
+    seller calls and the chain lookup a resumed settlement makes; each
+    defaults to the function this module imports, looked up when called.
+    """
 
     mechanism_id = ALKAHEST_MECHANISM_ID
     escrow_codec = AlkahestEscrowCodec()
@@ -334,9 +339,15 @@ class AlkahestBuyerStage:
         *,
         wallet: Callable[[], tuple[str | None, str | None]] | None = None,
         chains: Callable[[], dict[str, Any]] | None = None,
+        submit_settlement: Callable[..., Any] | None = None,
+        wait_settlement: Callable[..., Any] | None = None,
+        resolve_chain: Callable[[str], Any] | None = None,
     ) -> None:
         self._wallet = wallet
         self._chains = chains
+        self._submit_settlement = submit_settlement
+        self._wait_settlement = wait_settlement
+        self._resolve_chain = resolve_chain
 
     def wallet(self) -> tuple[str | None, str | None]:
         return (self._wallet or resolve_buyer_wallet)()
@@ -473,7 +484,7 @@ class AlkahestBuyerStage:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        chain_cfg = chain_by_name(chain_cfg_name)
+        chain_cfg = (self._resolve_chain or chain_by_name)(chain_cfg_name)
         if deal.accepted_escrow_proposal is None:
             typer.secho(
                 "Run-log carries no seller-accepted escrow proposal. Re-run negotiation so the accepted proposal is captured — token settlement always settles the seller-confirmed shape.",
@@ -557,7 +568,7 @@ class AlkahestBuyerStage:
             )
             console.print(f"[green]escrow created[/green]  {resolved_uid}")
         try:
-            submit_body = submit_settlement_request(
+            submit_body = (self._submit_settlement or submit_settlement_request)(
                 seller_url=deal.seller_url,
                 escrow_uid=resolved_uid,
                 payload={
@@ -584,7 +595,7 @@ class AlkahestBuyerStage:
             log.event("settle_status", attempt=attempt, body=body)
 
         try:
-            final = wait_for_settlement(
+            final = (self._wait_settlement or wait_for_settlement)(
                 seller_url=deal.seller_url,
                 escrow_uid=resolved_uid,
                 principal=deal.buyer_principal,

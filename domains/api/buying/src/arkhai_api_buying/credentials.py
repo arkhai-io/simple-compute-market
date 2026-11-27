@@ -12,7 +12,7 @@ import os
 import re
 import secrets
 import stat
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -48,9 +48,11 @@ def checked_run_id(run_id: str) -> str:
     return run_id
 
 
-def _open_component(parent: int, name: str, path: Path, *, create: bool) -> int | None:
+def _open_component(
+    parent: int, name: str, path: Path, *, create: bool, opener: Callable[..., int] = os.open,
+) -> int | None:
     try:
-        return os.open(name, _DIRECTORY, dir_fd=parent)
+        return opener(name, _DIRECTORY, dir_fd=parent)
     except FileNotFoundError:
         if not create:
             return None
@@ -64,7 +66,7 @@ def _open_component(parent: int, name: str, path: Path, *, create: bool) -> int 
         pass
     except OSError:
         raise CredentialStoreError(f"{path} cannot be created") from None
-    return _open_component(parent, name, path, create=False)
+    return _open_component(parent, name, path, create=False, opener=opener)
 
 
 class FileCredentialStore:
@@ -77,12 +79,25 @@ class FileCredentialStore:
     (or sticky); the store's own directories must be the user's and closed to
     others' writes, and the last is held at ``0700``. Saves hold an exclusive
     lock on the store directory.
+
+    ``replace``, ``fsync``, and ``open`` are three of the operating system's
+    calls the store makes, each ``os``'s by default.
     """
 
     scheme = "file"
 
-    def __init__(self, directory: Path | None = None) -> None:
+    def __init__(
+        self,
+        directory: Path | None = None,
+        *,
+        replace: Callable[..., None] = os.replace,
+        fsync: Callable[[int], None] = os.fsync,
+        open: Callable[..., int] = os.open,
+    ) -> None:
         self._directory = directory
+        self._replace = replace
+        self._fsync = fsync
+        self._open = open
 
     @property
     def directory(self) -> Path:
@@ -99,12 +114,12 @@ class FileCredentialStore:
     def _open_directory(self, *, create: bool) -> int | None:
         prefix, own = self._layout()
         uid = os.getuid()
-        fd = os.open("/", _DIRECTORY)
+        fd = self._open("/", _DIRECTORY)
         path = Path("/")
         try:
             for index, name in enumerate((*prefix.parts[1:], *own)):
                 path = path / name
-                child = _open_component(fd, name, path, create=create)
+                child = _open_component(fd, name, path, create=create, opener=self._open)
                 os.close(fd)
                 fd = -1
                 if child is None:
@@ -163,7 +178,7 @@ class FileCredentialStore:
                 existing = None
             if existing is not None and stat.S_ISLNK(existing.st_mode):
                 raise CredentialStoreError(f"credential file {self.location(reference)} is a symbolic link")
-            fd = os.open(
+            fd = self._open(
                 temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600,
                 dir_fd=directory,
             )
@@ -171,8 +186,8 @@ class FileCredentialStore:
                 with os.fdopen(fd, "wb") as stream:
                     stream.write(payload)
                     stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
+                    self._fsync(stream.fileno())
+                self._replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
             except BaseException:
                 try:
                     os.unlink(temporary, dir_fd=directory)
@@ -180,7 +195,7 @@ class FileCredentialStore:
                     pass
                 raise
             try:
-                os.fsync(directory)
+                self._fsync(directory)
             except OSError:
                 # The record is already in place under its name.
                 pass
@@ -207,7 +222,7 @@ class FileCredentialStore:
             return None
         try:
             try:
-                fd = os.open(f"{run_id}.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+                fd = self._open(f"{run_id}.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
             except FileNotFoundError:
                 return None
             except OSError:

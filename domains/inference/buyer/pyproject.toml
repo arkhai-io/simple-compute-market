@@ -28,6 +28,7 @@ dev = [
   "arkhai-kit-settlement-runtime>=0.4.0",
   "pyyaml>=6",
   "packaging",
+  "rich>=13.7.0",
 ]
 
 [build-system]

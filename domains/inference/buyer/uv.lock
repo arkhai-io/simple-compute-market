@@ -270,6 +270,7 @@ dev = [
     { name = "packaging" },
     { name = "pytest" },
     { name = "pyyaml" },
+    { name = "rich" },
 ]
 
 [package.metadata]
@@ -291,6 +292,7 @@ dev = [
     { name = "packaging" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "rich", specifier = ">=13.7.0" },
 ]
 
 [[package]]

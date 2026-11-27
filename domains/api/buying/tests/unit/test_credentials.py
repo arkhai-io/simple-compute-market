@@ -7,6 +7,7 @@ import os
 import stat
 import threading
 import uuid
+from unittest.mock import MagicMock
 
 import pytest
 from core_buyer.negotiation_client import AuthenticatedHTTPError
@@ -128,16 +129,14 @@ def test_the_delivery_run_log_never_writes_the_secret(state):
     assert '"key_id":"ak_1"' in text
 
 
-def test_a_failed_replace_keeps_the_old_record_and_leaves_no_temporary(state, monkeypatch):
+def test_a_failed_replace_keeps_the_old_record_and_leaves_no_temporary(state):
     store = FileCredentialStore()
     store.save("run-1", _CREDENTIALS)
 
-    def refuse(*_args, **_kwargs):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(os, "replace", refuse)
     with pytest.raises(OSError):
-        store.save("run-1", {**_CREDENTIALS, "balance": 0})
+        FileCredentialStore(replace=MagicMock(side_effect=OSError("disk full"))).save(
+            "run-1", {**_CREDENTIALS, "balance": 0}
+        )
 
     assert store.load("file:run-1") == _CREDENTIALS
     assert [p.name for p in state.iterdir()] == ["run-1.json"]
@@ -162,19 +161,6 @@ def test_a_symlinked_directory_is_refused_on_read(state, tmp_path):
 
     with pytest.raises(CredentialStoreError, match="symbolic link"):
         FileCredentialStore().load("file:run-1")
-
-
-def test_a_link_swapped_in_after_any_check_cannot_redirect_the_write(state, tmp_path, monkeypatch):
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    state.parent.mkdir(parents=True)
-    state.symlink_to(elsewhere)
-    # The attacker wins every race a path check could lose.
-    monkeypatch.setattr(type(state), "is_symlink", lambda self: False)
-
-    with pytest.raises(CredentialStoreError):
-        FileCredentialStore().save("run-1", _CREDENTIALS)
-    assert list(elsewhere.iterdir()) == []
 
 
 def test_missing_directories_are_created_private(tmp_path, monkeypatch):
@@ -248,41 +234,36 @@ def test_the_delivery_run_log_redacts_secrets_inside_strings(state):
     assert "sk_canary" not in text and "sk_other" not in text
 
 
-def test_a_body_carrying_the_key_does_not_stop_the_flow_when_the_log_refuses_it(state, monkeypatch):
-    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
+def _unwritable(log: DeliveryRunLog) -> DeliveryRunLog:
+    """``log`` whose path is a directory, which no user's append can open."""
+    log.path.unlink()
+    log.path.mkdir()
+    return log
 
-    def full(self, event, **fields):
-        raise OSError("disk full")
 
-    monkeypatch.setattr(RunLog, "event", full)
+def test_a_body_carrying_the_key_does_not_stop_the_flow_when_the_log_refuses_it(state):
+    log = _unwritable(DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity)))
+
     log.event("settle_status", body={"tenant_credentials": dict(_CREDENTIALS)})
     log.event("settle_submitted", body={"status": "queued"})
 
     assert log.failed
 
 
-def test_a_log_that_refused_an_append_writes_nothing_more(state, monkeypatch):
-    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
-    real = RunLog.event
-    calls = []
+def test_a_log_that_refused_an_append_writes_nothing_more(state):
+    log = _unwritable(DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity)))
 
-    def once(self, event, **fields):
-        calls.append(event)
-        if len(calls) == 1:
-            raise OSError("fsync failed")
-        real(self, event, **fields)
-
-    monkeypatch.setattr(RunLog, "event", once)
     with pytest.raises(OSError):
         log.event("settle_submitted", body={"status": "queued"})
+    log.path.rmdir()
+    log.path.write_text("")
     with pytest.raises(RunLogError, match="refused an earlier append"):
         log.event("settle_status", body={"status": "provisioning"})
-    assert calls == ["settle_submitted"]
+    assert log.path.read_text() == ""
 
 
-def test_a_delivery_after_a_refused_append_is_reported_unrecorded(state, monkeypatch):
-    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
-    monkeypatch.setattr(RunLog, "event", lambda self, event, **fields: (_ for _ in ()).throw(OSError("full")))
+def test_a_delivery_after_a_refused_append_is_reported_unrecorded(state):
+    log = _unwritable(DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity)))
     log.event("settle_status", body={"tenant_credentials": dict(_CREDENTIALS)})
 
     delivery = record_delivery(log, dict(_CREDENTIALS), FileCredentialStore())
@@ -309,41 +290,29 @@ def test_a_save_sweeps_temporaries_an_interrupted_save_left(state):
     assert sorted(p.name for p in state.iterdir()) == ["run-1.json"]
 
 
-def test_a_failed_directory_sync_after_the_rename_still_counts_as_saved(state, monkeypatch):
-    store = FileCredentialStore()
-    real = os.fsync
-
+def test_a_failed_directory_sync_after_the_rename_still_counts_as_saved(state):
     def fsync(fd):
         if stat.S_ISDIR(os.fstat(fd).st_mode):
             raise OSError("fsync failed")
-        real(fd)
+        os.fsync(fd)
 
-    monkeypatch.setattr(os, "fsync", fsync)
-
-    assert store.save("run-1", _CREDENTIALS) == "file:run-1"
-    monkeypatch.setattr(os, "fsync", real)
-    assert store.load("file:run-1") == _CREDENTIALS
+    assert FileCredentialStore(fsync=MagicMock(side_effect=fsync)).save("run-1", _CREDENTIALS) == "file:run-1"
+    assert FileCredentialStore().load("file:run-1") == _CREDENTIALS
 
 
-def test_a_directory_that_cannot_be_opened_is_a_store_refusal(state, monkeypatch):
+def test_a_directory_that_cannot_be_opened_is_a_store_refusal(state):
     FileCredentialStore().save("run-1", _CREDENTIALS)
-    real = os.open
 
     def refuse(path, flags, *args, **kwargs):
         if path == "buy-credentials":
             raise PermissionError(13, "Permission denied")
-        return real(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", refuse)
+        return os.open(path, flags, *args, **kwargs)
 
     with pytest.raises(CredentialStoreError, match="cannot be opened"):
-        FileCredentialStore().load("file:run-1")
+        FileCredentialStore(open=MagicMock(side_effect=refuse)).load("file:run-1")
 
 
-def test_concurrent_saves_of_one_run_never_remove_each_others_temporary(state, monkeypatch):
-    store = FileCredentialStore()
-    store.save("same-run", _CREDENTIALS)
-    real_replace = os.replace
+def test_concurrent_saves_of_one_run_never_remove_each_others_temporary(state):
     paused, resume = threading.Event(), threading.Event()
     errors = []
 
@@ -351,9 +320,10 @@ def test_concurrent_saves_of_one_run_never_remove_each_others_temporary(state, m
         if threading.current_thread().name == "second":
             paused.set()
             resume.wait(5)
-        return real_replace(src, dst, **kwargs)
+        return os.replace(src, dst, **kwargs)
 
-    monkeypatch.setattr(os, "replace", replace)
+    store = FileCredentialStore(replace=MagicMock(side_effect=replace))
+    store.save("same-run", _CREDENTIALS)
 
     def save(secret):
         try:

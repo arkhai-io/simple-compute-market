@@ -408,38 +408,110 @@ Delivers D8 and D9. Touches `domains/api/buying-alkahest`,
 `domains/api/buying`, `domains/api/tests`, `domains/inference/buyer/tests`,
 and `domains/apicredits/tests`.
 
-- [ ] 5.1 `AlkahestBuyerStage`: optional keyword collaborators for the two
+- [x] 5.1 `AlkahestBuyerStage`: optional keyword collaborators for the two
       seller calls and the chain resolver its settle path uses, each resolved
       when called and falling back to the module's function (D8). Verify: the
       API-credits and inference buyer suites pass unchanged.
-- [ ] 5.2 The scope-refusal test moves to the Alkahest buying library's unit
+      *Note:* `submit_settlement`, `wait_settlement`, and `resolve_chain`
+      default to `None` and the resume calls `(collaborator or module
+      function)`, so a module-level replacement other tests make still
+      takes effect. `make -C domains test-inference-buyer test-apicredits`:
+      22 passed, and API credits' five suites 468 passed, three fewer than
+      before because the inference-label pin cases left its domain suite
+      (5.5); no buyer test changed for this task.
+- [x] 5.2 The scope-refusal test moves to the Alkahest buying library's unit
       tests, driving `AlkahestBuyerStage.resume` through those collaborators
       and a settlement resume whose log, buy configuration, and seller
       principals are doubles; it replaces no library name (D8). Verify: it
       fails against the stage without the collaborators
       (`change-workflow run test-before`) and passes with them.
-- [ ] 5.3 `domains/inference/buyer/tests/test_scope_refusal.py`: the delivered
+      *Note:* `tests/unit/test_resume.py`, unit: the resume is a subclass
+      of the real `SettlementResume` whose `open_log`, `buy_config`, and
+      `seller_principals` return doubles, with `MagicMock` collaborators,
+      wallet, log, and credential store and an empty user configuration (`XDG_CONFIG_HOME`
+      set to a temporary directory) so the chain names no address book;
+      `finish` is the real one. It asserts exit status 7, the refusal
+      printed once, one submission and one wait, the chain resolved by
+      name, and the run ended `failed`. `test-before` at `de67cd348`: it
+      fails constructing the stage, `TypeError` on `submit_settlement`,
+      which shows the collaborators are absent there, not the behaviour.
+      The Alkahest buying unit suite: 19 passed. "Printed once" counts
+      the injected console; nothing on this path writes the reason to
+      standard error. The address book is still read from the user's
+      configuration, steered by `XDG_CONFIG_HOME`, since D8 gives the stage
+      no seam for it.
+- [x] 5.3 `domains/inference/buyer/tests/test_scope_refusal.py`: the delivered
       credential's rows are asserted by calling the settlement resume's
       `finish` with the inference contributions, a memory credential store,
       and a log double (D8). Verify: the module holds no `monkeypatch.setattr`.
-- [ ] 5.4 `FileCredentialStore`: optional `replace`, `fsync`, and `open`
+      *Note:* unit, calling `finish` directly with the inference buyer's
+      `CONTRIBUTIONS`, a `MagicMock` log and credential store; it asserts
+      the key, base URL, and model rows and the run ended `ready`. Outside
+      the plan: the module imports `rich`, which the inference buyer did
+      not declare, so its `dev` group now names `rich>=13.7.0` and its lock
+      gains the entry. The
+      module holds no `monkeypatch.setattr`. It keeps its path, which the
+      design and proposal cite, though its one case is no longer a scope
+      refusal; its docstring says what it holds. The delivered credential
+      carries no secret, as before, so the store records nothing.
+- [x] 5.4 `FileCredentialStore`: optional `replace`, `fsync`, and `open`
       parameters. `tests/unit/test_credentials.py`: each standard-library
       patch becomes a parameter, the patch of a method no code under test
       calls is deleted, and the log failures use a log double or a real
       unwritable path (D8). Verify: the module patches nothing in `os` or on
       `RunLog`, and the buying unit suite passes.
-- [ ] 5.5 The family's `tests/unit/test_issuance_pins.py` replays the
+      *Note:* the parameters are keyword-only and default to `os.replace`,
+      `os.fsync`, and `os.open`; the opener reaches every open the store
+      makes, the component walk included. The failed replace, the failed
+      directory sync, the directory that cannot be opened, and the
+      concurrent saves pass a `MagicMock` double to the store. The replaced
+      `Path.is_symlink`, which the store never calls, is deleted, and with
+      it the case it stood in, which was then the same as
+      `test_a_symlinked_directory_is_refused`. The three log failures
+      replace the run log's file with a directory, which no user's append
+      opens, root's included. The module patches nothing in `os` or on
+      `RunLog` (`XDG_STATE_HOME` is still set through
+      `monkeypatch.setenv`). Buying unit: 70 passed.
+- [x] 5.5 The family's `tests/unit/test_issuance_pins.py` replays the
       inference-label case from the recorded fixture, its helper carrying
       accepted terms, the terms digest, and the request charge;
       `domains/apicredits/tests/test_issuance_pins.py` keeps its own cases and
       a writer for those alone. The fixture's bytes do not change (D9).
       Verify: `git diff --stat` shows no change to
       `tests/fixtures/pins/issuance_pins.json`, and both suites pass.
-- [ ] 5.6 Verification. `make -C domains test-api-buying
+      *Note:* the family's helper builds the request and the evidence body
+      with the case's terms, digest, and charge when it records them; the
+      inference case is replayed with its recorded canonical request and
+      its digest under the API-credits label, and its terms are checked as
+      digested and signed but not carried in the body. The API-credits
+      file keeps its five cases; its writer builds only `cases` and keeps
+      a recorded case set byte for byte. `git diff --stat` shows no change
+      to the fixture. Family vocabulary, unit: 80 passed, the pin module
+      26; the API-credits domain suite 16.
+- [x] 5.6 Verification. `make -C domains test-api-buying
       test-api-buying-alkahest test-api test-inference-buyer test-apicredits`;
       `change-workflow run pre-commit move-api-family-kit-into-domains`.
       End-to-end: `e2e_credits_deal` and `e2e_inference_deal` settle through
       the Alkahest buyer stage with its default collaborators.
+      *Note:* after `make -C domains dist-api-buying
+      dist-api-buying-alkahest`: `make -C domains test-api` passed every
+      family suite (the vocabulary 80, buying 71 then 70, Alkahest buying
+      19, and the gate ports' Rust and TypeScript checks among them), and
+      `test-inference-buyer test-apicredits` 22 and 468. `change-workflow
+      run pre-commit move-api-family-kit-into-domains --base origin/dev`:
+      the relock changed only the inference buyer's lock, for `rich`; the
+      history-wording check refused a docstring saying "no longer", now
+      reworded; its local `make test` stopped at the bare-metal
+      provisioning IaC suites, as on the landing branch. End-to-end
+      confirmed as planned and not run here; no scenario is added. The
+      fresh-context check found the undeclared `rich`, hand-written doubles
+      where `testing-python.md` asks for mocks, two docstrings claiming
+      more than the code does, the duplicate symlink case, the log cases'
+      dependence on a non-root user, and an overstated note, each fixed.
+      Declined, for the round's triage: it reads the moved refusal case as
+      orchestration that `test-levels.md` proves at library integration,
+      with a real run log; D8 and task 5.2 place it at unit, and the
+      seller calls it doubles are the stage's external boundary.
 
 ## 6. The roadmap, the notes, and the rows
 

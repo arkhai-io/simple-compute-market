@@ -1,11 +1,11 @@
-"""The API-credits pins replayed through the vocabulary under the label `api-credits`."""
+"""The recorded issuance pins replayed through the vocabulary: the API-credits cases under `api-credits`, the pinned-terms case under `inference`."""
 
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
-from market_identity import Ed25519Signer, Identity
+from market_identity import Ed25519Signer, Identity, canonical_json
 from pydantic import ValidationError
 
 from arkhai_api.evidence import (
@@ -36,20 +36,38 @@ INFERENCE = IssuanceLabel("inference")
 # The pins' deterministic development issuer; never used on any network.
 ISSUER = Ed25519Signer(bytes(range(32)))
 
-CASES = json.loads(PINS.read_text(encoding="utf-8"))["cases"]
+RECORDED = json.loads(PINS.read_text(encoding="utf-8"))
+CASES = RECORDED["cases"]
+INFERENCE_CASES = RECORDED["inference_cases"]
 
 
-def _pins(label: IssuanceLabel, inputs: dict[str, Any]) -> dict[str, str]:
-    owner = Identity.model_validate(inputs["owner"])
-    request = issuance_request(
+def _recorded_terms(inputs: dict[str, Any]) -> dict[str, Any]:
+    """A case's accepted terms, their digest, and its request charge; none for an unpinned case."""
+    if "accepted_terms" not in inputs:
+        return {}
+    return {
+        "accepted_terms": inputs["accepted_terms"],
+        "terms_digest": accepted_terms_digest(inputs["accepted_terms"]),
+        "request_charge": inputs["request_charge"],
+    }
+
+
+def _request(label: IssuanceLabel, inputs: dict[str, Any]):
+    return issuance_request(
         label,
         negotiation_id=inputs["negotiation_id"],
-        owner=owner,
+        owner=Identity.model_validate(inputs["owner"]),
         service=inputs["service"],
         resource_id=inputs["resource_id"],
         quantity=inputs["quantity"],
         key=KeyDisposition.model_validate(inputs["key"]),
+        **_recorded_terms(inputs),
     )
+
+
+def _pins(label: IssuanceLabel, inputs: dict[str, Any]) -> dict[str, str]:
+    owner = Identity.model_validate(inputs["owner"])
+    request = _request(label, inputs)
     body = IssuanceEvidenceBodyV1(
         domain=label.name,
         condition_anchor=inputs["condition_anchor"],
@@ -67,6 +85,8 @@ def _pins(label: IssuanceLabel, inputs: dict[str, Any]) -> dict[str, str]:
         issuer=ISSUER.identity,
         committed_at_unix=inputs["committed_at_unix"],
         request_digest=request.request_digest,
+        terms_digest=request.terms_digest,
+        request_charge=request.request_charge,
     )
     evidence = sign_issuance_evidence(label, body, ISSUER)
     evidence_digest = issuance_evidence_digest(label, evidence)
@@ -85,13 +105,35 @@ def _pins(label: IssuanceLabel, inputs: dict[str, Any]) -> dict[str, str]:
 
 
 def test_the_pins_record_this_issuer():
-    for case in CASES:
+    for case in (*CASES, *INFERENCE_CASES):
         assert case["inputs"]["issuer"] == ISSUER.identity.model_dump(mode="json")
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["name"])
 def test_every_pin_matches_byte_for_byte_under_api_credits(case):
     assert _pins(API_CREDITS, case["inputs"]) == case["expected"]
+
+
+@pytest.mark.parametrize("case", INFERENCE_CASES, ids=lambda case: case["name"])
+def test_the_pinned_terms_case_matches_byte_for_byte_under_inference(case):
+    inputs = case["inputs"]
+    request = _request(INFERENCE, inputs)
+    assert {
+        **_pins(INFERENCE, inputs),
+        "issuance_request": canonical_json(request.model_dump(mode="json")).decode("utf-8"),
+        "api_credits_request_digest": _request(API_CREDITS, inputs).request_digest,
+    } == case["expected"]
+
+
+@pytest.mark.parametrize("case", INFERENCE_CASES, ids=lambda case: case["name"])
+def test_the_pinned_terms_are_digested_and_signed_but_their_payload_is_not(case):
+    expected = case["expected"]
+    digest = accepted_terms_digest(case["inputs"]["accepted_terms"])
+    assert json.loads(expected["issuance_request"])["terms_digest"] == digest
+    body = json.loads(expected["signed_evidence"])["body"]
+    assert (body["terms_digest"], body["request_charge"]) == (digest, case["inputs"]["request_charge"])
+    assert "accepted_terms" not in body
+    assert expected["request_digest"] != expected["api_credits_request_digest"]
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["name"])
