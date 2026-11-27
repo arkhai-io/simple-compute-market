@@ -385,6 +385,16 @@ Recommended: (a). A buyer's remedy for a setup charge on a deal never delivered 
 wholly on that one ruling. Its lane twin is a row of `converge-ongoing-compute-leases`
 if that change's lanes declare a setup charge; otherwise this change adds the twin.
 
+Settled by `converge-ongoing-compute-leases`' design, D10: its lanes declare a setup
+charge. Each lane storefront that runs a setup row declares `setup = true` in its lane
+configuration only, beside a lane option whose clause prices a setup amount, as the
+lanes declared `charged` and `returned` before either was supported. Its setup rows —
+the baseline's setup variant, the setup returned when a deal is never delivered (row 5)
+or never available (row 8), and the end of the penalty's cap where the setup charge
+alone is held (row 10) — run in the VM lane, and are the lane twins for (a). The
+requirement keeping setup-bearing presets disabled stands until this change rewords
+it, and this change adds live twins only for the setup rows that reach an authority.
+
 ### Q3 — Which of converge's landed rows get a live twin
 
 The design names them once `converge-ongoing-compute-leases` has landed. The candidates
@@ -413,6 +423,13 @@ The alternatives:
 - (c) Only D5's and D6's observations.
 
 Recommended: (b), by the rule Q1 applies.
+
+Settled by `converge-ongoing-compute-leases`' design, D6 and D14: a revised
+`delivery_end` is no longer a candidate here. The dispute authority owes a mechanical
+ruling of a payee's earlier-end revision, netted against earlier cases, and that change
+writes the revision's live verification scenario itself, sharing its row 3's assertion;
+a coordinator runs it and writes the evidence into that change, whose closeout waits
+for it.
 
 ### Q4 — What shows the mechanical-remedy criterion met
 
