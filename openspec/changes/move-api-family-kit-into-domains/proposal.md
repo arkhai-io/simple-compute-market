@@ -170,4 +170,4 @@ None.
 
 ## Status
 
-Ready for planning; design review 01 is triaged.
+Ready for implementation; planned in `tasks.md`.
