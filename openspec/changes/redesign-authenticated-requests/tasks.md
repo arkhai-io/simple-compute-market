@@ -29,13 +29,24 @@ sections 7 and 8 became one section, 7, since one typed client signs both sectio
 authorities. 7.7 names the doubles in other packages, and section 8's tasks are marked
 moved.
 
+*Amended a fourth time 2026-11-27* against the design as design review 112's triage left
+it (D30–D40, with D3, D5, D6, D7, D14, D20, D27 and D31 amended). Section 7 stopped at
+7.1 on routes D6's table omitted; D6's table is now complete. Every route-declaration
+task declares from that table and stops only on a route it does not list. Section 7 was
+replanned again; 9–14 gain D36's reorders and D37's and D40's tasks, and 16 and 17
+follow.
+
 Every section that declares routes declares, for each operation, whether it acts on a
 target object. `Market-Resource` is sent only for one that does (D2, D21). Every
 classification task's note names the declaration. Each authority here runs SQLite, so
 every classification also names any `RECORDED` route that holds a write transaction
-near its lease period or writes in more than one transaction (D7, design review 61 F1).
-Such a route is a defect the section fixes, or, where the fix is a design question, the
-change returns to design.
+near its lease period or writes in more than one transaction (D7, design review 61 F1),
+and confirms each read D6's table names for a `RECORDED` route, marking any further
+`RECORDED` route with none (D31). Such a route is a defect the section fixes, or, where
+the fix is a design question, the change returns to design. A `RERUN` route that
+recognises an applied request by a record answers it before any check governing a new
+request (D30), and its double-dispatch case has a variant whose retry follows the
+precondition that moved (D5).
 
 Every request's query is covered by `@query` (D25). So every section that moves an
 authority or a client removes the query values that version 2 folded into a signed
@@ -2152,96 +2163,164 @@ record): sections 7 and 8 are one section, since `kit/site-client` signs the req
 both sections' authorities and neither could pass the functional checks alone. 7.1–7.6
 were replaced and 8.1–8.7 moved here; none had started.
 
+*Replanned again 2026-11-27* after section 7's second stop, at 7.1, on routes D6's table
+omitted: D6's table is now complete (D39), and this section gains the site's reserve and
+release wire (D32, D35), the provisioning operations made recognisable (D33, D34, D40)
+and the reorders D36 places here. No task had started; the tasks below replace 7.1–7.10.
+
 Moves the provisioning service, the site it hosts, `kit/site`'s middleware, the
 API-credits service, and their typed clients onto the core in the middleware form, with
-the suites in other packages that double their wire (D3, D5, D6, D7, D9, D25). The
-requirements:
+the suites in other packages that double their wire (D3, D5, D6, D7, D9, D25, D30–D36,
+D38–D40). The requirements:
 - physical-provisioning "Service calls use the shared version 3 identity contract", "A
-  failure after authentication is answered signed";
+  failure after authentication is answered signed", "Provisioning operations are
+  recognisable when repeated";
+- site-capacity "Reservation lifecycle", "Reserve replay is keyed by the deal's
+  placement", "Idempotent release recording";
 - compute-provisioning-contract "Deal-scoped lifecycle events";
 - api-credits "Online bearer consumption";
-- marketplace-identity "A recorded route's attempt is lost after its domain write", "A
-  recorded route's handler runs longer than its lease period", "A recorded route raises
-  after its domain write commits", "An issuance answer is lost", "A relay token rotation
-  is retried after a later rotation", "An authority restarts", "A recorded outcome
-  expires".
+- marketplace-identity "Each route declares how an exact retry is resolved" (its
+  recognition-first and read-first rules among them), "A recorded route's attempt is
+  lost after its domain write", "A recorded route's handler runs longer than its lease
+  period", "A recorded route raises after its domain write commits", "An issuance answer
+  is lost", "A relay token rotation is retried after a later rotation", "An authority
+  restarts", "A recorded outcome expires".
 
 Touches:
 - `provisioning/compute/service/src/compute_provisioning_service/` (`middleware/auth.py`,
   `route_table.py`, `container.py`, `main.py`, `db/models.py`, `db/migrations.py`,
-  settings) and its tests, the integration conftest's `provisioning_clients` among them;
-- `provisioning/compute/contracts/` route declarations and `routes.py`'s canonical
-  query form;
+  `services/principal_authority.py`, settings) and its tests, the integration conftest's
+  `provisioning_clients` among them;
+- `provisioning/compute/src/compute_provisioning/relays/` (`service.py`,
+  `route_service.py`);
+- `provisioning/compute/contracts/` route declarations, the relay create and activation
+  models, and `routes.py`'s canonical query form;
 - `provisioning/compute/client/src/compute_provisioning_client/` (`base.py`,
   `client.py`);
-- `domains/vms/provisioning/` route declarations the service serves;
-- `kit/site/src/market_site/` (`auth.py`, `identity.py`, `router.py`);
+- `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/` route declarations,
+  and `controllers/hosts_controller.py`;
+- `kit/fulfillment/src/market_fulfillment/scheduler.py`;
+- `kit/site/src/market_site/` (`auth.py`, `identity.py`, `router.py`, `http_models.py`,
+  `ledger.py`);
 - `kit/site-client/src/market_site_client/client.py`;
+- the reserve and release callers: `kit/capacity-publication` (`admin_routes.py`,
+  `capacity.py`), `core/storefront/src/core_storefront/aggregation.py`,
+  `domains/compute/delivery/src/compute_delivery/path.py`, the VM storefront's
+  `negotiation_runtime.py` and `controllers/admin_controller.py`, the bare-metal
+  storefront's `api.py` and `deal_controls.py`, and the API-credits storefront's
+  `settlement_stages.py` and `services/fulfillment_service.py`;
 - `domains/apicredits/service/src/apicredits_service/` (`main.py`,
-  `middleware/route_contracts.py`, `models/keys_model.py`, settings, migrations);
+  `middleware/route_contracts.py`, `models/keys_model.py`, `services/keys_service.py`,
+  settings, migrations);
 - `domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py`;
 - `domains/apicredits/middleware/python/src/apicredits_middleware/` (`client.py`,
   `signing.py`);
 - the provisioning and API-credits service charts;
-- the doubles 7.7 names.
+- the doubles 7.9 names.
 
 The section is large: it is one commit because no smaller one passes every suite. Its
-tasks are ordered so the declarations and the core's composition land before the clients
-and doubles move. Section 6's handoff applies: keep `dependency.py`'s annotations
-evaluated, for the older FastAPI some authorities lock.
+tasks are ordered so the declarations, the wire changes and the core's composition land
+before the clients and doubles move. Section 6's handoff applies: keep `dependency.py`'s
+annotations evaluated, for the older FastAPI some authorities lock.
 
-- [ ] 7.1 Classify every authenticated provisioning, hosted-site, site-kit and
-      API-credits route against D6's criterion. Declare each one, naming whether its
-      operation has a target (the plan's preamble), and record the table in this task's
-      note. The `RECORDED` routes:
-      - provisioning: `POST relays`, relay `token` rotation, relay `grant-keys/stage`,
-        host and pool upserts and deletes, the VM-domain job routes but
-        `reset-password`, and the `check-leases`, convergence `run-cycle` and
-        `advance-cycle` routes;
-      - API credits: `credits_key_adjust`.
+- [ ] 7.1 Declare every provisioning, hosted-site, site-kit and API-credits route as
+      D6's table gives it, naming whether its operation has a target (the plan's
+      preamble), and record the declarations in this task's note.
+      - `kit/site`'s `SiteRouteContract` gains the required `exact_retry` field, from
+        `kit/identity`'s vocabulary, replacing `exact_retry_safe`; provisioning's
+        `route_table.py` carries it through `site_route_contracts` for the hosted site's
+        routes, beside its own contracts' declarations.
+      - Confirm each read the table names for a `RECORDED` route, and mark any further
+        `RECORDED` route with none (D31): the relay token rotation, the convergence and
+        watchdog pause and resume are already marked.
+      - Both services run SQLite, so the note names any `RECORDED` route holding a write
+        transaction near the lease period or writing in more than one transaction, as
+        the table does (D7, the plan's preamble).
 
-      Consume and issuance are `RERUN`. Confirm `reset-password` `RERUN` as a keyed
-      operation (D6, 27 F4).
+      A route the table does not list, or one the code shows the table misreads, stops
+      the section as a design question (D39). Verify with a unit test over each route
+      table: every route declared or marked, and each declaration the table's.
+- [ ] 7.2 Make the site's reserve and release recognisable (D32, D35).
+      - `ReserveRequest` gains `placement_key`, a required top-level field; a reserve
+        without it is refused as malformed. The ledger recognises a reserve by its key
+        alone: its recognition by `escrow_uid` alone and its adoption of an unkeyed row
+        go, and a reserve whose escrow another placement holds is still refused.
+      - The release request requires `capacity_reservation_id`; the ledger's escrow
+        lookup for release goes.
+      - `kit/site-client`'s `SiteCapacityClient.reserve`,
+        `core_storefront.aggregation.AggregateCapacityClient.reserve` and
+        `kit/capacity-publication`'s `CapacityRuntime.reserve` and
+        `CapacityEffects.reserve` take the key as a parameter.
+      - The callers move: the VM negotiation hold and compute delivery's hold replay and
+        settlement reserve send `{nid}:hold` and `{nid}:settlement` as the field, no
+        longer in `deal_ref`; the API-credits storefront's quota hold sends `{nid}:hold`;
+        the API-credits service's `_commit_quota` passes `{fulfillment_id}:issuance`;
+        `CapacityAdminRouteService.reserve` gains a placement-key argument, which the VM
+        and bare-metal administrator routes give as `admin:<request_id>` from the
+        request's identity (under their current authentication until sections 11 and
+        12 take it from the admission's request record); the API-credits storefront's
+        fulfillment service skips a release when it holds no reservation ID.
 
-      This section adds the declaration the hosted site and the API-credits service both
-      read: `kit/site`'s `SiteRouteContract` gains the required `exact_retry` field, from
-      `kit/identity`'s vocabulary, replacing `exact_retry_safe`. Provisioning's
-      `route_table.py` takes it through `site_route_contracts` for the hosted site's
-      capacity and capacity-definition routes, beside its own contracts' declarations.
+      Verify by `kit/site`'s library integration suite (site-capacity scenarios: a
+      reserve retried before and after its hold expired, a replay changing its window
+      refused, a reserve with no key refused, a release naming only an escrow refused),
+      and the callers' unit suites.
+- [ ] 7.3 Make the provisioning operations recognisable, and answer an applied request
+      first (D33, D34, D36, D40).
+      - Relay create requires `relay_id` (`create_relay`), and a repeat under it is
+        refused 409.
+      - A grant-key activation names the staged key's ID it activates, and is refused,
+        activating nothing, when that key is not the one staged (`activate_grant_key`).
+      - Host `capacity` and `diagnostics` pass `_request_operation_id`
+        (`hosts_controller.py`), as `vms_controller.py` does.
+      - `principal_authority.py:rotate` answers a nonce already recorded with the same
+        intent before its active-principal and intent-expiry checks.
+      - `scheduler.py:schedule_resource` answers a reservation's existing assignment
+        before the pool's delivery check.
 
-      A difference from the design's table, or a `RECORDED` route whose caller could not
-      learn by reading, stops the section as in 6.1. Both services run SQLite, so the
-      table names any `RECORDED` route holding a write transaction near the lease period,
-      or writing in more than one transaction, as 6.1's does (D7, 45 F1, 61 F1). Verify
-      with a unit test over each route table: every route declared or marked.
-- [ ] 7.2 Replace `ProvisioningAuthMiddleware` and `SqlAlchemyProvisioningReplayStore`
+      Verify by the provisioning service's and `kit/fulfillment`'s unit suites, and 7.4's
+      integration cases.
+- [ ] 7.4 Replace `ProvisioningAuthMiddleware` and `SqlAlchemyProvisioningReplayStore`
       with the core's middleware form over provisioning's database, the hosted site's
       routes included. Verify by application integration tests through the typed clients
-      (physical-provisioning and marketplace-identity scenarios):
+      (physical-provisioning, site-capacity and marketplace-identity scenarios):
       - an exact `terminate` retry re-run, converging;
-      - an exact `POST relays` retry with no relay ID answered with the recorded outcome,
-        and no second relay;
+      - a relay create retried after a later `PATCH` moved its endpoint refused under its
+        ID, and no second relay;
       - a relay token rotation retried after a later rotation answered with the recorded
         outcome, the later token kept;
       - a grant-key staging retried after a later staging answered with the recorded
         outcome, the later key kept;
+      - an activation of one staged key retried after a later staging, the later key
+        staged and not activated;
+      - a principal rotation retried after its intent expired answered with the applied
+        rotation;
+      - a fulfillment scheduling retried after its pool stopped delivering answered with
+        its assignment;
+      - a host capacity check retried, answering the first job and submitting no second;
+      - a reserve retried after its release answering the released reservation, and no
+        new capacity;
       - a route raising after authentication answered with a signed 500, recorded on a
         `RECORDED` route and re-run on a `RERUN` route;
       - a hosted-site capacity call through `kit/site-client`'s `SiteCapacityClient`
         admitted under version 3;
-      - a double-dispatch case per `RERUN` mutation, and the completeness test.
-- [ ] 7.3 Replace `SiteAuthMiddleware` and `InMemoryReplayStore` with the core's
+      - a double-dispatch case per `RERUN` mutation, with the moved-precondition variant
+        for the rotation and the scheduling (D5), and the completeness test.
+- [ ] 7.5 Replace `SiteAuthMiddleware` and `InMemoryReplayStore` with the core's
       middleware form. The store is bound to each hosting service's database, and no
       in-memory store remains outside tests (D7). Verify by `kit/site`'s integration
       suite, and an application integration test that a replay inside the skew across a
       restart is refused (marketplace-identity "An authority restarts").
-- [ ] 7.4 Require `idempotency_key` on consume and consume-batch in the version 3 wire
+- [ ] 7.6 Require `idempotency_key` on consume and consume-batch in the version 3 wire
       models; the Python middleware client mints one where its caller gives none
-      (api-credits "Consumption omits its idempotency key"). Verify by application
-      integration tests:
+      (api-credits "Consumption omits its idempotency key"). `keys_service.py:consume`
+      answers a recorded idempotency key as a duplicate before the key's status (D36).
+      Verify by application integration tests:
       - a consume without the key refused before charging;
-      - an exact consume retry re-run, charged once.
-- [ ] 7.5 Prove adjust's crash boundary, renewal and post-commit failure through the API
+      - an exact consume retry re-run, charged once;
+      - a consume retried after its key was revoked answered as a duplicate, charging
+        nothing (api-credits "A consume is retried after its key was revoked").
+- [ ] 7.7 Prove adjust's crash boundary, renewal and post-commit failure through the API
       (D7). Verify as application integration tests through the typed client:
       - a crash after `KeysService.adjust` commits and before the outcome is recorded:
         its exact retry answered `exact_retry_outcome_unknown`, the balance adjusted
@@ -2256,26 +2335,27 @@ evaluated, for the older FastAPI some authorities lock.
       - an issuance answer lost, its retry rotating the unused key's secret, and no
         secret in the replay store;
       - a double-dispatch case per `RERUN` mutation, and the completeness test.
-- [ ] 7.6 Move the clients to version 3 signing and response verification:
+- [ ] 7.8 Move the clients to version 3 signing and response verification:
       `compute_provisioning_client`, `kit/site-client`, the settlement credits client
-      and the Python middleware client.
+      and the Python middleware client. `compute_provisioning_client`'s relay create
+      takes `relay_id` and its activation the staged key's ID (D33, D40).
       - Remove the canonical query forms: the family's
         (`compute_provisioning_contracts/routes.py`, `canonical_provisioning_request_body`)
         and the site kit's (`kit/site/src/market_site/auth.py`, the signed body of the
         reservation and projection reads). The clients build every query through 5d.3's
         encoding, and `@query` covers it (D25, the plan's preamble).
       - Record each capacity-released notification's origin beside its request identity
-        in provisioning's callback outbox, a column 7.8's migration adds, so every resend
-        carries the same identity and origin. The callbacks themselves are sent through
-        `core/storefront-client`, which moves to version 3 in section 10; 11.3 proves the
-        resent notification end to end.
+        in provisioning's callback outbox, a column 7.10's migration adds, so every
+        resend carries the same identity and origin. The callbacks themselves are sent
+        through `core/storefront-client`, which moves to version 3 in section 10; 11.3
+        proves the resent notification end to end.
 
       Verify by:
       - the clients' unit suites and the outbox's unit tests;
-      - 7.2–7.5's integration tests;
+      - 7.4–7.7's integration tests;
       - application integration tests: a job-list read, and a projection read whose
         `after` an intermediary changed, each refused as an invalid proof.
-- [ ] 7.7 Move the suites in other packages that double these wires to version 3. Each
+- [ ] 7.9 Move the suites in other packages that double these wires to version 3. Each
       signs or verifies the version 2 provisioning or site wire, or imports
       `canonical_provisioning_request_body`, against the installed clients:
       - `domains/vms/storefront/tests/integration/test_site_trust.py`;
@@ -2286,28 +2366,30 @@ evaluated, for the older FastAPI some authorities lock.
       - `domains/bare_metal/storefront/tests/integration/test_site_reservation.py`;
       - `domains/apicredits/service/tests/integration/test_signed_authority.py`;
       - `e2e-tests/src/e2e_harness/provisioning_test_client.py`, which `make
-        test-e2e-unit` runs inside `make test`. Section 15 keeps the rest of the
-        harness.
+        test-e2e-unit` runs inside `make test`, its relay create and activation carrying
+        7.8's fields. Section 15 keeps the rest of the harness.
 
-      Any further suite the functional checks find doubling these wires moves here too,
-      named in this task's note. Verify by those suites passing, via `make test-domains`
-      and `make test-e2e-unit`.
-- [ ] 7.8 Migrations (D9). Add to provisioning's chain the kit's replay-table migration,
+      Any further suite the functional checks find doubling these wires, or a reserve
+      double carrying the key in `deal_ref`, moves here too, named in this task's note.
+      Verify by those suites passing, via `make test-domains` and `make test-e2e-unit`.
+- [ ] 7.10 Migrations (D9). Add to provisioning's chain the kit's replay-table migration,
       the outbox's origin column, and a space-freeing migration dropping
       `provisioning_replay_reservations`. Add the kit's replay-table migration to the
       API-credits service's chain. Verify by each chain's migration test:
       - provisioning's from its floor fixture, and from a database holding the 0.4.0
         table with rows, the file compacted after;
       - the API-credits service's from its floor.
-- [ ] 7.9 Add the retention and sweep-interval settings to provisioning's and the
+- [ ] 7.11 Add the retention and sweep-interval settings to provisioning's and the
       API-credits service's settings and chart values schemas. Verify by their
       configuration tests and chart render tests.
-- [ ] 7.10 Verify the section:
+- [ ] 7.12 Verify the section:
       - `make test-compute-provisioning`, `make test-compute-provisioning-client`,
         `make test-compute-provisioning-contracts`, `make test-provisioning`;
-      - `kit/site` and `kit/site-client` suites (via `make test-kits`);
-      - the API-credits service, domain and Python middleware suites, and the VM and
-        bare-metal storefronts' suites for 7.7's doubles (via `make test-domains`);
+      - `kit/site`, `kit/site-client`, `kit/capacity-publication` and `kit/fulfillment`
+        suites (via `make test-kits`), and `make test-core` for the aggregation client;
+      - the API-credits service, domain, storefront and Python middleware suites, the
+        compute delivery suite, and the VM and bare-metal storefronts' suites for 7.2's
+        callers and 7.9's doubles (via `make test-domains`);
       - `make test-e2e-unit`;
       - the credits middleware's cross-language conformance session,
         `domains/apicredits/middleware/conformance/session.json`, still passing for the
@@ -2458,6 +2540,9 @@ Notes (section 7):
 *Replanned 2026-11-27:* every task moved to section 7, which moves this section's
 authorities together with the provisioning service; none had started.
 
+*Correction (2026-11-27, second replan of section 7):* the moved tasks are now 7.1,
+7.5, 7.6, 7.7, 7.8, 7.10, 7.11 and 7.12, in the order below.
+
 Moves `kit/site`'s middleware and the API-credits service onto the core, with the
 credits clients (D3, D5, D6, D7; api-credits "Online bearer consumption";
 marketplace-identity "A recorded route's attempt is lost after its domain write",
@@ -2520,6 +2605,8 @@ raises after its domain write commits", "An issuance answer is lost"). Touches
 ## 9. The deal-lifecycle routes on the admission core
 
 *Replanned 2026-11-27 against the reviewed design* (D21–D23); no task had been started.
+*Amended 2026-11-27* (D36, D37, D39): 9.1 declares from D6's table, and 9.5 and 9.6 are
+added; the verification is now 9.7.
 
 Moves `kit/deal-servicing`'s lifecycle routes and the deal-lifecycle client onto the
 core in the dependency form. This gives them the reservation they lack and removes their
@@ -2530,14 +2617,17 @@ is signed by the Agreement's seller"). Touches:
 - `kit/deal-lifecycle-contracts/` (route declarations, `models.py`'s
   `SignedEndDeliveryReceipt`);
 - `kit/deal-lifecycle/src/market_deal_lifecycle/acknowledgements.py`;
-- `kit/deal-lifecycle-client/src/market_deal_lifecycle_client/client.py`.
+- `kit/deal-lifecycle-client/src/market_deal_lifecycle_client/client.py`;
+- `kit/deal-servicing/src/market_deal_servicing/` (`seller.py`, `schema.py`), and the VM
+  and bare-metal storefronts' chains (`domains/vms/storefront/src/market_storefront/utils/migrations.py`,
+  `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/migrations.py`).
 
-- [ ] 9.1 Declare each lifecycle route against D6's criterion and record it in this task's
+- [ ] 9.1 Declare each lifecycle route as D6's table gives it and record it in this task's
       note: submit and peer keyed by `operation_key`, reads `RERUN`. Each names its
       negotiation as its target, but `lifecycle_list`, a collection read with no
       target, whose filters `dispatch` folds into its resource today: they travel as
-      the query, covered by `@query` (D25, D28). A difference stops the section as in
-      6.1.
+      the query, covered by `@query` (D25, D28). A route the table does not list stops
+      the section (D39).
 - [ ] 9.2 Authenticate through the core's dependency form, the router taking the admission
       core its storefront composes. So that this section passes a functional commit's
       checks alone, it composes that core wherever `create_lifecycle_router` is built
@@ -2585,7 +2675,21 @@ is signed by the Agreement's seller"). Touches:
 - [ ] 9.4 Move the deal-lifecycle client to version 3. Its captures pass records through
       the seam (5a.6), and it builds the end receipt from the records of what it sent and
       verified. Verify by its unit suite, its messages from 5a.7's fixture.
-- [ ] 9.5 Verify the section: `kit/deal-servicing`, `kit/deal-lifecycle-contracts`,
+- [ ] 9.5 Answer a recorded lifecycle submit first (D36): `seller.py:submit` answers an
+      `operation_key` already recorded for its negotiation with the same request before
+      the Agreement authority's credential availability and the other checks that govern
+      a new submission. Verify by `kit/deal-servicing`'s integration suite (deal-lifecycle
+      "A dispute submit is retried after its credential was removed"), with the
+      moved-precondition variant of the submit's double-dispatch case.
+- [ ] 9.6 Remove the lifecycle transport rows (D37). The routes stop writing
+      `_lifecycle_transport` rows into `servicing_operations`, since the core's
+      reservation replaces them. `kit/deal-servicing` exports the deletion of those rows,
+      and the VM and bare-metal storefronts' chains append it as a space-freeing
+      migration (section 5's declaration), leaving every other operation row and
+      evidence item. Verify by each storefront's migration-chain test from a database
+      holding the rows (deployment-state "A storefront upgrades with lifecycle transport
+      rows"), the file compacted after.
+- [ ] 9.7 Verify the section: `kit/deal-servicing`, `kit/deal-lifecycle-contracts`,
       `kit/deal-lifecycle`, `kit/deal-lifecycle-client` and `kit/deal-lifecycle-buyer`
       suites (via `make test-kits`). The buyer kit is run because its ending verifies the
       receipt. Also run the VM and bare-metal storefronts' suites (via `make
@@ -2603,7 +2707,11 @@ core's replay table, and binds the kit route services (D3, D7, D9; storefront-pu
 `migrations.py`, `identity_authority.py` callers, settings),
 `core/storefront-client/src/storefront_client/` (`auth.py`, `client.py`),
 `kit/storefront/src/market_storefront_kit/deal_control_routes.py`, and
-`kit/pool-overrides` route binding.
+`kit/pool-overrides` route binding, `core/storefront/src/core_storefront/identity_authority.py`
+and `heartbeats.py` (D36).
+
+*Amended 2026-11-27* (D36, D39): 10.4 declares from D6's table; 10.5 and 10.6 are added,
+and the settings and verification are now 10.7 and 10.8.
 
 - [ ] 10.1 Replace `core_storefront.auth`'s request authentication, `ReplayStore` and the
       SQLite client's `claim_replay` and `record_replay_outcome` with the core, its store
@@ -2629,19 +2737,32 @@ core's replay table, and binds the kit route services (D3, D7, D9; storefront-pu
       query through 5d.3's encoding, `@query` covering it (D25). Verify by its unit
       suite, its messages from 5a.7's fixture.
 - [ ] 10.4 Declare and bind the shared route services' operations (deal-control routes,
-      pool overrides) against D6's criterion: trading and listing pause and resume,
-      force-accept, admin reserve and release, run-cycle and projection refresh `RECORDED`
-      (D6), each naming whether it has a target (the plan's preamble). Record them in this
-      task's note; a difference stops the section as in 6.1.
+      lifecycle routes, pool overrides) as D6's table gives them, each naming whether it
+      has a target (the plan's preamble): among them trading, listing and lifecycle-loop
+      pause and resume, the pool-override `PUT` and `DELETE`, force-accept, admin reserve
+      and release, run-cycle and projection refresh `RECORDED`. Record them in this
+      task's note; a route the table does not list stops the section (D39).
       Verify by `kit/storefront` and `kit/pool-overrides` suites, and an application
       integration test through the storefront client: a delayed exact retry of a listing
       pause after a later resume answered with the recorded outcome, the listing left
       resumed (marketplace-identity "A delayed retry of an absolute setter follows a later
       write"; storefront-publication "Exact retry of an administrator setter").
-- [ ] 10.5 Add the retention and sweep-interval settings to core storefront's settings,
+- [ ] 10.5 Answer an applied identity rotation or retirement first (D36):
+      `identity_authority.py:apply_rotation` answers a nonce applied with the same intent
+      before proof expiry and the overlap bound, and `complete_rotation` answers "already
+      retired" before "replacement still primary". Verify by `core/storefront`'s
+      integration suite (marketplace-identity "An applied rotation is retried after its
+      proofs expired"), and a retirement retried after a later rotation answered with its
+      status.
+- [ ] 10.6 Answer an accepted heartbeat first (D36): `heartbeats.py:record_heartbeat`
+      answers a heartbeat already stored for the same deal, principals and send time as
+      recorded, before the skew and "newer" checks. Verify by `core/storefront`'s unit
+      suite and the VM storefront's heartbeat integration test in 11.2
+      (settlement-servicing "An accepted heartbeat is retried").
+- [ ] 10.7 Add the retention and sweep-interval settings to core storefront's settings,
       through `kit/config`'s values-schema generator into each storefront chart's schema.
       Verify by the configuration tests and the generated-schema test.
-- [ ] 10.6 Verify the section: `make test-core`; `kit/storefront`, `kit/pool-overrides`,
+- [ ] 10.8 Verify the section: `make test-core`; `kit/storefront`, `kit/pool-overrides`,
       `kit/config` suites (via `make test-kits`).
       End-to-end: `storefront` — evidence once section 16 lands.
 
@@ -2655,19 +2776,25 @@ callback refusals (D3, D5, D6, D15). Touches
 `introductions_controller.py`, `admin_controller.py`, `listings_controller.py`),
 `settlement_stages.py`, and its tests.
 
-- [ ] 11.1 Classify every VM storefront route against D6's criterion and declare it; the
-      `RECORDED` set is negotiate new and continue, advance, force-accept, admin reserve
-      and release, run-cycle, projection refresh, pause and resume, `refund_listing` and
-      `arbitrate_listing`; credential-capable routes `RERUN` recording no body; each
-      operation names whether it has a target (the plan's preamble). The negotiation
+*Amended 2026-11-27* (D36, D38–D40): 11.1 declares from D6's table, 11.2 carries settle's
+reorder, and 11.4 is added; the verification is now 11.5.
+
+- [ ] 11.1 Declare every VM storefront route as D6's table gives it; credential-bearing
+      and contact-bearing routes `RERUN` recording no body (D38); each operation names
+      whether it has a target (the plan's preamble). The lifecycle-loop `pause` and
+      `resume` paths precede the lifecycle router's
+      `/api/v1/admin/lifecycle/{negotiation_id}` in the route table (D39). The negotiation
       list names its listing alone. The stage-event read names none. Their filters,
       folded into the resource today (`admin_identity.py`'s
       `_negotiation_list_resource`, `StageEventRouteService.signed_resource`), travel
-      as the query (D25, D28). Record the table in this task's note; a difference stops
-      the section as in 6.1.
+      as the query (D25, D28). Record the declarations in this task's note; a route the
+      table does not list stops the section (D39).
 - [ ] 11.2 Replace the four middlewares and every controller's `recorded_outcome`
-      handling with the core; handlers needing to know a retry read `exact_retry`
-      (`settle_controller`'s `refuse_after_end`); negotiation evidence
+      handling with the core, the Alkahest settle stage's replay of `recorded_outcome`
+      among them; handlers needing to know a retry read `exact_retry`
+      (`settle_controller`'s `refuse_after_end` on `settle_status`); the Alkahest settle
+      stage answers the coordinator's existing job before its chain and mechanism checks
+      (D36); negotiation evidence
       (`buyer-envelope:`, `seller-envelope:`) captured as records through the
       signed-outcome hook, no headers kept (D23). Verify by application integration tests
       through the typed client: the kept buyer request's and seller response's records
@@ -2675,8 +2802,11 @@ callback refusals (D3, D5, D6, D15). Touches
       buyer's signed opening"); a `negotiate_new` retry answered with the recorded outcome and no second
       negotiation; a credential-capable read retried after an end refused and no body
       recorded (marketplace-identity scenarios); a negotiation-list read whose buyer
-      filter an intermediary changed refused as an invalid proof (D25); a double-dispatch
-      case per `RERUN` mutation and the completeness test.
+      filter an intermediary changed refused as an invalid proof (D25); a settle retried
+      after the escrow's chain state moved answered with its settlement and credentials;
+      a heartbeat retried after its send time left the skew window answered as recorded
+      (10.6); a double-dispatch case per `RERUN` mutation, with the moved-precondition
+      variants, and the completeness test.
 - [ ] 11.3 Sign the service-peer callback's refusals (D15), and prove the resent
       capacity-released notification: provisioning's sender, through the version 3
       storefront client, resends a notification hours later under the same request
@@ -2685,24 +2815,32 @@ callback refusals (D3, D5, D6, D15). Touches
       acknowledgement is lost"; marketplace-identity "A notification is retried after its
       reservation expired"). Verify by application integration tests: a malformed
       callback answered with a signed refusal; the resent notification.
-- [ ] 11.4 Verify the section: the VM storefront's unit and integration suites (via
+- [ ] 11.4 Key the splitter-escrow interrupt (D40): `admin_controller.py`'s splitter
+      branch goes through the same `operation_key` as the hosted branch, so the route is
+      `RERUN`. Verify by an application integration test: an interrupt retried after a
+      later write truncates nothing again.
+- [ ] 11.5 Verify the section: the VM storefront's unit and integration suites (via
       `make test-domains`).
       End-to-end: `e2e_deal`, `e2e_vm_payment_purchase`, `e2e_vm_introduction` —
       evidence once section 16 lands.
 
 ## 12. The bare-metal storefront on the admission core
 
-Moves the bare-metal storefront onto the core (D3, D5, D6). Touches
-`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` (`api.py`,
-`response_auth.py`, `runtime.py`) and its tests.
+*Amended 2026-11-27* (D36, D39): 12.1 declares from D6's table, and 12.3 is added; the
+verification is now 12.4.
 
-- [ ] 12.1 Classify every bare-metal storefront route against D6's criterion and declare
-      it, naming whether each operation has a target (the plan's preamble), replacing `CREDENTIAL_CAPABLE_ROUTES` and `without_access_material` with
+Moves the bare-metal storefront onto the core (D3, D5, D6, D36). Touches
+`domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/` (`api.py`,
+`response_auth.py`, `runtime.py`, `settlement_stages.py`) and its tests.
+
+- [ ] 12.1 Declare every bare-metal storefront route as D6's table gives it, naming
+      whether each operation has a target (the plan's preamble), replacing `CREDENTIAL_CAPABLE_ROUTES` and `without_access_material` with
       `RERUN` declarations that record no body. The negotiation list names its listing
       alone and the stage-event read none, their filters (`api.py`'s
       `_negotiation_list_resource` and stage-event resource) travelling as the query
-      (D25, D28). Record the table in this task's note; a difference stops the section
-      as in 6.1.
+      (D25, D28). The lifecycle-loop `pause` and `resume` paths precede the lifecycle
+      router's `/{negotiation_id}` route (D39). Record the declarations in this task's
+      note; a route the table does not list stops the section (D39).
 - [ ] 12.2 Replace `response_auth.py` and `api.py`'s authentication with the core;
       seller-response evidence captured as a record through the signed-outcome hook, no
       headers kept (D23). Verify by application integration tests through the typed
@@ -2711,29 +2849,42 @@ Moves the bare-metal storefront onto the core (D3, D5, D6). Touches
       verifiers with the seller's principal; a stage-event read whose query an
       intermediary changed refused as an invalid proof (D25); a double-dispatch case per
       `RERUN` mutation and the completeness test.
-- [ ] 12.3 Verify the section: the bare-metal storefront's suites (via
+- [ ] 12.3 Answer an applied settle first (D36): the settle answers its settlement's
+      status before `physical_terms`, so a listing changed or removed since does not
+      refuse it. Verify by an application integration test: a settle retried after its
+      listing changed answered with its settlement, and the double-dispatch case's
+      moved-precondition variant.
+- [ ] 12.4 Verify the section: the bare-metal storefront's suites (via
       `make test-domains`).
       End-to-end: `e2e_bare_metal_deal`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_payment_deal` — evidence once section 16 lands.
 
 ## 13. The API-credits storefront on the admission core
 
-Moves the API-credits storefront onto the core (D3, D5, D6). Touches
+*Amended 2026-11-27* (D36, D38, D39): 13.1 declares from D6's table, and 13.2 carries
+settle's reorder.
+
+Moves the API-credits storefront onto the core (D3, D5, D6, D36, D38). Touches
 `domains/apicredits/storefront/src/apicredits_storefront/middleware/` (`admin_auth.py`,
 `seller_auth.py`, `buyer_auth.py`, `response_auth.py`), `controllers/` and its tests.
 
-- [ ] 13.1 Classify every API-credits storefront route against D6's criterion and declare
-      it, naming whether each operation has a target (the plan's preamble); `publish-from-quota` and the shared `RECORDED` routes are `RECORDED`. The
+- [ ] 13.1 Declare every API-credits storefront route as D6's table gives it, naming
+      whether each operation has a target (the plan's preamble); `publish-from-quota` and the shared `RECORDED` routes are `RECORDED`. The
       negotiation list names its listing alone, its buyer filter
       (`admin_auth.py`'s `negotiation_list_resource`) travelling as the query (D25,
-      D28). Record the table in this task's note; a difference stops the section as in
-      6.1.
+      D28). `settle` and `settle_status` are `RERUN` recording no body, their answers
+      carrying the buyer's API key (D38). Record the declarations in this task's note; a
+      route the table does not list stops the section (D39).
 - [ ] 13.2 Replace the four middlewares and `negotiate_controller`'s `recorded_outcome`
-      handling with the core. Verify by application integration tests through the typed
+      handling with the core. `_prepare_alkahest_settlement` answers existing progress
+      before `verify_escrow_against_plan` (D36). Verify by application integration tests through the typed
       client: a `publish-from-quota` retry answered with the recorded outcome and no
       second listing; a negotiation-list read whose buyer filter an intermediary changed
-      refused as an invalid proof (D25); a double-dispatch case per `RERUN` mutation and
-      the completeness test.
+      refused as an invalid proof (D25); a settle whose answer carried the API key
+      retried and answered from the settlement, no key in the replay store
+      (marketplace-identity "A settlement answer carrying credentials is lost"); a settle
+      retried after its escrow expired answered with its progress; a double-dispatch case
+      per `RERUN` mutation and the completeness test.
 - [ ] 13.3 Verify the section: the API-credits storefront's suites (via
       `make test-domains`).
       End-to-end: `e2e_credits_deal` — evidence once section 16 lands.
@@ -2748,10 +2899,13 @@ and the storefronts' introduction route declarations.
 
 - [ ] 14.1 Declare the introduction start, reads and reveal `RERUN`, and remove the
       start's recorded-outcome path, its failed-start answer still saying a new start
-      completes it. Verify by `kit/contact-exchange`'s integration suite: a failed start
-      replayed exactly completes the reveal and dispatches the seller's side once; a
-      completed start replayed dispatches nothing; no replay row holds a response body
-      (introduction-delivery scenarios).
+      completes it. A start whose introduction holds a record with the same buyer
+      payload is answered from it before the seller's contact is resolved (D36). Verify
+      by `kit/contact-exchange`'s integration suite: a failed start replayed exactly
+      completes the reveal and dispatches the seller's side once; a completed start
+      replayed dispatches nothing; a completed start replayed after the seller's
+      configured contact changed answered from the stored reveal; no replay row holds a
+      response body (introduction-delivery scenarios).
 - [ ] 14.2 Verify the section: `kit/contact-exchange` suites (via `make test-kits`) and
       the VM and bare-metal storefronts' introduction integration tests.
       End-to-end: `e2e_vm_introduction`, `e2e_bare_metal_introduction`,
@@ -2832,8 +2986,9 @@ its fix and test land here.
 - [ ] 16.2 Confirm the 0.4.0 upgrade path once more. A storefront, provisioning and
       registry database from the `marketplace-v0.4.0` floor fixtures migrate, the replay
       tables gone and the SQLite files compacted. The registry's version 2 publication
-      evidence is carried under `publication` and still verifies. Verify by the
-      migration-chain tests named in 6.4, 7.8 and 10.2 run together.
+      evidence is carried under `publication` and still verifies, and the storefronts'
+      lifecycle transport rows are gone. Verify by the migration-chain tests named in
+      6.4, 7.10, 9.6 and 10.2 run together.
 - [ ] 16.3 Verify the section: the full local suites through the pre-commit functional
       checks.
       End-to-end: every lane's scenarios — `e2e_deal`, `e2e_buy`, `e2e_deal_buyer_cli`,
@@ -2851,7 +3006,7 @@ its fix and test land here.
       implementation.
 - [ ] 17.2 Import placement: check the imports the change added (`git diff dev...` over
       `*.py`); a local import that should move returns the change to implementation.
-- [ ] 17.3 Documentation compliance: re-check D1–D29 against
+- [ ] 17.3 Documentation compliance: re-check D1–D40 against
       `openspec/README.md`, "Documentation placement", and confirm every permanent
       document this closeout writes describes the current state with no wording relative
       to the change.
@@ -2890,7 +3045,13 @@ its fix and test land here.
         D23, D24); a new section, "Signed messages retained as evidence", on the record of a
         message's signed values, its scope to authority-bound messages, and the two
         evidence verifiers reading either version (D21, D22); a new section on exact-retry
-        resolution, which routes record, and secrets never recorded (D5, D6); a new
+        resolution, which routes record, and secrets never recorded, re-read or
+        superseded; a `RERUN` repeat recognised by a record answered as applied before
+        any check governing a new request, one recognised by state answered from current
+        state, the exact retry and the keeping of a first outcome being the
+        replay-specific part of the engineering idempotency principle; which `RECORDED`
+        routes need a read, and the caller reading first wherever a route has one, a
+        replacement on a route with none last-writer-wins (D5, D6, D30, D31, D38); a new
         section on the replay state's bounds, the lease floor and renewal, the concluding
         write before `exact_retry_outcome_unknown`, expired rows treated as absent, and the
         sweep (D7);
@@ -2932,6 +3093,15 @@ its fix and test land here.
       - `docs/guidance/engineering/implementation.md`, "Route contracts and their HTTP
         binding": the route contract's exact-retry resolution, required with no default,
         a run-again declaration proven by a test dispatching the same request twice (D5);
+        and a new section, "Idempotent operations", opening "An operation can be
+        idempotent and safe to repeat when one of the following holds: there is no side
+        effect, the side effect itself is idempotent, or the service can recognise a
+        repeat and handle the repeat safely", then recognising a repeat before judging it
+        again, before any check that governs only whether a new request may apply, and
+        answering it from the record the first request left, or, where only the state it
+        produced recognises it, as a first request would be answered now; an operation
+        recognisable by neither is not safe to repeat on its own (D30). It names no
+        replay, exact retry or market concept;
       - a new `messaging.md` in `docs/guidance/engineering/`, tags
         `[engineering, messaging]`, with a `messaging` topic row in
         `docs/guidance/engineering/README.md`'s tag table: both directions signed; trust
@@ -2951,10 +3121,16 @@ its fix and test land here.
         compatibility path, and D12's evidence reader is current behaviour;
       - the delta specifications' `spec.md` files are written by the archive and named
         in the record (D14), carrying D26's filter-spec parameter and D27's rotation
-        retries; D28 and D29 have no destination beyond them and the plan.
+        retries, D32's and D35's reserve and release in `site-capacity`, D33's, D34's
+        and D40's provisioning operations and D36's reorders in `physical-provisioning`,
+        `api-credits`, `introduction-delivery`, `deal-lifecycle` and
+        `settlement-servicing`, and D37's transport rows in `deployment-state`; D28,
+        D29 and D39 have no destination beyond them, the route contracts and the plan,
+        and D32's wire principle is this design's alone.
       Run `make check-spec-index CHANGE=redesign-authenticated-requests`.
 - [ ] 17.10 Guidance placement: read the new `messaging.md`, the `implementation.md`
-      section and the moved `ARCHITECTURE.md` text against the layer test — the
+      sections (the route contract's declaration and "Idempotent operations") and the
+      moved `ARCHITECTURE.md` text against the layer test — the
       engineering text names no market concept and holds with neutral examples, the
       repository's instance stays in `ARCHITECTURE.md` and `marketplace-identity` — and
       run `make check-guidance`.
@@ -2965,5 +3141,6 @@ its fix and test land here.
 - [ ] 17.12 Archival: `change-workflow openspec archive redesign-authenticated-requests -y`,
       merging the deltas into `marketplace-identity`, `physical-provisioning`,
       `registry-discovery`, `storefront-publication`, `introduction-delivery`,
-      `compute-provisioning-contract`, `api-credits`, `deployment-state` and
-      `deal-lifecycle`; no `--skip-specs`, since no `spec.md` was edited by hand.
+      `compute-provisioning-contract`, `api-credits`, `deployment-state`,
+      `deal-lifecycle`, `site-capacity` and `settlement-servicing`; no `--skip-specs`,
+      since no `spec.md` was edited by hand.
