@@ -182,7 +182,8 @@ What the dispute authority owes, recorded in `deal-lifecycle`'s companion under
 "External authorities" and in the roadmap's Goal 8 row:
 
 - **R1.** A payee-endorsed `delivery_end(cause=payee)` filed on an Agreement holding an
-  earlier `delivery_end` case is a revision of the latest such case when its `ended_at`
+  earlier `delivery_end` case is a revision of the latest such case, in the order the
+  authority accepted them, when its `ended_at`
   is no later than that case's claim, whichever party filed it. A revision is ruled
   mechanically, outside the once-per-Agreement guard, at most once per revised case. A
   claim with a later end, or one the payee did not endorse, goes to an operator.
@@ -205,7 +206,7 @@ it adopts a filed claim equal to its own, and otherwise files at once, keeping a
 single-writer reservation per revised request and staying `Pending` only while its own
 earlier filing is of unknown outcome. The same path serves the buyer kit, whose
 `delivery_end` filed after a seller's case is no longer refused; the authority routes it
-to an operator. The filing's `claim` names the revised case. While the revision waits
+to an operator. The filing names no earlier case. While the revision waits
 the deal shows `case_open`. Against an authority without R1–R4 the same filing is an
 ordinary second case for an operator, so nothing need land first. Deals a 0.4.0
 storefront already refused keep their terminal rejection, as "The seller half lists
@@ -260,6 +261,11 @@ storefront become such steps:
   events and leaves them for the event delivery worker; `POST
   /api/v1/system/event-delivery/run-cycle` delivers them. Unpaused, delivery is inline
   as today.
+- A pause holds the sends that start after it is acknowledged. An inline delivery
+  already under way when the pause lands may still reach the storefront, and the
+  worker's gate goes on counting its timer cycles only (13 F2). The pause serves the
+  lanes, which take their holds before any traffic, and an operator present to judge
+  what is going wrong; neither needs in-flight sends drained.
 - The capacity-reservation watchdog gains a pause and a one-cycle step, through route
   contracts and the provisioning client.
 - Every compute lane holds event delivery and the capacity-reservation watchdog for the
@@ -294,6 +300,10 @@ Rejected:
 
 - Held loops alone, rows reshaped around them. The site's report would race the
   buyer's end, and the release stages would keep waiting on a timer.
+- Draining inline sends at the gate: pause and inline admission sharing one gate, the
+  worker at its gate only once every inline delivery admitted before the pause has
+  finished (13 F2). Its guarantee covers a pause taken under traffic, which neither the
+  lanes nor an operator's pause needs, at the cost of a second count and its tests.
 - Gating every ungated send the lanes meet in this change. Three further subsystems,
   none needed by these rows.
 - A follow-up change owning the rest. It would go unprioritised and make every other

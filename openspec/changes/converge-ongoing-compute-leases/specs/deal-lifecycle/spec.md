@@ -130,7 +130,7 @@ The dispute adapter MUST bind the semantic filing identity to commitment, Agreem
 
 ### Requirement: Revised cases carry their prior rulings
 
-A `delivery_end` that revises an earlier one on the same Agreement MUST be filed as a case of its own whose claim names the case it revises; the dispute authority links the cases by its own record. SCM MUST rely on the dispute authority to rule a payee-endorsed revision ending no later than the revised claim mechanically, after every earlier case on the Agreement has closed or applied its effects, and to net it against the effects earlier cases applied, the premature-stop penalty taken at most once per Agreement; any other revision is an operator's. SCM MUST record the delivery end a revision's ruling applies as it records any ruling's, and MUST NOT compute or send a remedy of its own.
+A `delivery_end` that revises an earlier one on the same Agreement MUST be filed as a case of its own, carrying nothing that names the case it revises; the dispute authority identifies the revised case from its own record, as the latest earlier `delivery_end` case on the Agreement in the order it accepted them. SCM MUST rely on the dispute authority to rule a payee-endorsed revision ending no later than the revised claim mechanically, after every earlier case on the Agreement has closed or applied its effects, and to net it against the effects earlier cases applied, the premature-stop penalty taken at most once per Agreement; any other revision is an operator's. SCM MUST record the delivery end a revision's ruling applies as it records any ruling's, and MUST NOT compute or send a remedy of its own.
 
 #### Scenario: A revision follows a ruling
 
