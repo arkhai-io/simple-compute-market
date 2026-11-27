@@ -2372,6 +2372,86 @@ Notes (section 7):
   section.
 - Nothing of section 7 was implemented, and no task is checked. This commit holds
   only these notes. Sections 8 and 9 were not given to this session.
+- **Stopped at 7.1 (2026-11-27), as replanned; the change returns to design.** 7.1
+  classifies every route against D6's criterion and stops the section on a difference
+  from D6's table, as 6.1 does. D6's criterion: a route is `RERUN` only where its domain
+  recognises the retry as applied, so that a re-run after any later write changes
+  nothing and its answer still tells a caller who lost its acknowledgement what
+  happened; everything else is `RECORDED`. D6's table names, for provisioning, `POST
+  relays`, relay token rotation and grant-key staging, host and pool upserts and
+  deletes, the VM job routes but `reset-password`, and the check-leases and convergence
+  cycle routes, and says every other route is `RERUN`. Read against the code, the
+  criterion makes the routes below `RECORDED` or leaves them undecided, and the table
+  names none of them:
+  - Absolute setters and toggles on the provisioning service, none a host or pool
+    upsert or delete:
+    - `PATCH relays/{relay_id}` (`provisioning_relay_update`) replaces each field it
+      names (`compute_provisioning/relays/service.py`, `update_relay`), so a delayed
+      retry restores an older address, port or window.
+    - Relay `enable` and `disable` (`set_enabled`, which calls `update_relay` with
+      `enabled`): a delayed disable after a later enable disables the relay again.
+    - Relay `grant-keys/activate` (`activate_grant_key`) activates whatever key is
+      staged when it runs. A delayed retry after a later staging activates a key whose
+      public half the operator may not have added to the relay's plugin yet, the harm
+      design review 27 F4 cited for staging.
+    - Host `enable` and `disable` (`provisioning_host_enable`, `_disable`).
+    - `hosts/{host}/host-keys/capture` with `replace` (`HostAuthority.capture_host_key`)
+      re-pins an older key over a newer one; without `replace` the first pin wins.
+    - The convergence and lease-watchdog `pause` and `resume` routes
+      (`controllers/system_controller.py`): a delayed pause after a later resume pauses
+      the worker again. D6's table makes the storefronts' pause and resume `RECORDED`
+      and does not name these.
+  - The hosted site's routes:
+    - `PUT capacity/resources/{resource_id}` (`capacity_resource_put`) replaces the whole
+      declaration (`market_site/router.py`, `register_resource`).
+    - `POST capacity/definitions/import` (`provisioning_capacity_definitions_import`)
+      upserts declarations.
+    - `POST capacity/reservations` (`capacity_reserve`) is keyed only when the caller
+      sends `deal_ref.placement_key` (`CapacityLedgerService.reserve`). Keyed by
+      `escrow_uid` alone, a delayed retry after a release reserves fresh capacity; with
+      neither, a retry reserves twice. Outside `kit/site`, only the VM storefront
+      (`negotiation_runtime.py`) and `domains/compute/delivery` (`path.py`) name a
+      placement key.
+    - `POST capacity/releases` (`capacity_release`) by `deal_ref.escrow_uid` releases
+      the escrow's held reservation, so a delayed retry after a later reservation for
+      that escrow releases the later one. By `capacity_reservation_id` it is keyed.
+  - Provisioning's principal rotation (`POST identity/rotations/{role}`,
+    `provisioning_identity_rotate`): an applied rotation's exact retry is refused 400,
+    "rotation nonce was already used", or "rotation current principal is not active"
+    once the overlap ends (`services/principal_authority.py`, `rotate`). As `RERUN`, its
+    answer does not tell a caller who lost its acknowledgement what happened. This is
+    the registry's case, which D27 settled by answering an applied rotation first; D27
+    names only the registry.
+  - The mock-profile rule routes (`provisioning_test_rule_add`, `_rule_delete`,
+    `_rule_resume`, and bare metal's under its mount): a rule add is keyed by nothing,
+    so a retry adds a second rule. They are mounted only under the mock profile.
+- Consistent with the table, as read here (no code written): the lease, fulfillment and
+  job routes, keyed by the lease, reservation, fulfillment or job they name;
+  `truncate-lease`, which only moves a lease's end earlier (`truncate_lease`);
+  `activate-lease` and `commit`, keyed by the reservation; every read, `probe`, pool
+  `validate` and mock `evaluate`. The API-credits service matches the table:
+  `credits_key_adjust` `RECORDED`; consume and consume-batch keyed by their idempotency
+  key, issuance re-run as D6 says, revoke monotonic, verify and the reads `RERUN`.
+- The decision the design owes, with the recommendations here:
+  - The absolute setters and toggles above, and the mock rule routes: `RECORDED`,
+    applying the criterion as D6's rule and its table as "the set known at design", its
+    own words. Recommended: their answers are small and carry no secret or contact
+    (`RelayView` is redacted, as for `POST relays`).
+  - `capacity_reserve`: (a) `RERUN`, with `deal_ref.placement_key` required in the
+    version 3 wire model, as D6 made consume's `idempotency_key` required; this changes
+    the bare-metal and API-credits storefronts' reservations. (b) `RECORDED`, keeping
+    every reservation's answer for the retention. Recommended (a) if every caller can
+    name a placement, since reserve is on every deal's path.
+  - `capacity_release`: (a) `RECORDED`; (b) `RERUN` with release by escrow removed from
+    the version 3 wire, every caller naming the reservation. Recommended (a), the
+    smaller change.
+  - Principal rotation: (a) answer an applied rotation first, as D27 does for the
+    registry, keeping it `RERUN`; (b) `RECORDED`. Recommended (a), for the reason D27
+    gives.
+  - Each `RECORDED` route added also gets the plan's SQLite check (one write
+    transaction, none held near the lease); none was run here.
+- Nothing of section 7 was implemented by this session, and no task is checked. This
+  commit holds only these notes.
 
 ## 8. The site kit and the API-credits service on the admission core
 
