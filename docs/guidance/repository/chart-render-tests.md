@@ -151,8 +151,7 @@ storefront chart's values schema carries a definition generated from that
 storefront's typed configuration models (`make helm-values-schema`, which runs each
 storefront's generator in its own environment), because the storefront's loader does
 not refuse a secret in its public file, an unknown key, or a doubled spelling
-itself. Moving those refusals into the loader and removing the definitions is a row
-of [`openspec/changes/README.md`](../../../openspec/changes/README.md). The generator
+itself. Moving those refusals into the loader would let the definitions go. The generator
 is `kit/config`'s, with its own unit tests over small
 model sets; each storefront supplies only its sections, settlement registrations,
 and discovered delivery sinks, and writes only its own chart's schema. Both

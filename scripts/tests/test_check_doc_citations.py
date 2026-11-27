@@ -192,6 +192,11 @@ def test_the_architecture_and_a_handbook_name_no_change_but_may_name_the_directo
     (docs / "development/ARCHITECTURE.md").write_text(
         "Transitions live in [`openspec/changes/`](../../openspec/changes/).\n", "utf-8")
     (docs / "operator-handbook.md").write_text("Once `old-one` did this.\n", "utf-8")
+    (docs / "guidance/engineering").mkdir(parents=True)
+    (docs / "guidance/engineering/rules.md").write_text("See openspec/changes/README.md.\n", "utf-8")
     (docs / "roadmap-like.md").write_text("`open-one` owns it.\n", "utf-8")
 
-    assert checker.change_references(tmp_path) == [("old-one", "docs/operator-handbook.md")]
+    assert checker.change_references(tmp_path) == [
+        ("a path under openspec/changes/", "docs/guidance/engineering/rules.md"),
+        ("old-one", "docs/operator-handbook.md"),
+    ]
