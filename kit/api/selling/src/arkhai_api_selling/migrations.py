@@ -7,10 +7,11 @@ constant of the composing storefront and not a setting, so one storefront's
 database migrates to one schema under any configuration. The composing
 storefront also names the family baseline's identifier: compatibility is the
 exact set of recorded identifiers, so two storefronts whose prefixes differ
-must record different ones for each to refuse the other's database. The chain
-names no floor: no
-database from before its baseline is supported, so the migration command
-refuses every non-empty database it did not build. A later change to the
+must record different ones for each to refuse the other's database. The
+composing storefront declares the chain's floor too: one whose storefront a
+release shipped names the IDs that release recorded, and a database recording
+every one of them is adopted at the baseline without running it; one with no
+earlier history declares ``0.0.0`` and adopts nothing. A later change to the
 family's tables is a migration appended to :data:`MIGRATIONS`, never an edit to
 the baseline.
 See openspec/specs/deployment-state/spec.md.
@@ -25,6 +26,7 @@ from core_storefront import migrations as core_migrations
 from market_schema_migrations import (
     Chain,
     CheckResult,
+    Floor,
     MigrateReport,
     Migration,
     SqliteMigrationConnection,
@@ -151,14 +153,15 @@ MIGRATIONS: tuple[Migration[sqlite3.Connection], ...] = ()
 
 
 def storefront_chain(
-    table_prefix: str, *, baseline_id: str, service: str, command: str
+    table_prefix: str, *, baseline_id: str, service: str, command: str, floor: Floor
 ) -> Chain[sqlite3.Connection]:
     """The chain a storefront whose bundle names ``table_prefix`` migrates and
     checks, named for that storefront and its migration command in every refusal.
 
     ``baseline_id`` identifies the family baseline in this storefront's
     databases; a storefront with another prefix names another, so neither
-    reads the other's database as compatible. The chain takes constants alone,
+    reads the other's database as compatible. ``floor`` is the release the
+    storefront is supported from. The chain takes constants alone,
     so a migration command builds it without composing the storefront's bundle
     or resolving its settings.
     """
@@ -171,6 +174,7 @@ def storefront_chain(
             storefront_baseline(table_prefix, baseline_id=baseline_id),
         ),
         migrations=(*core_migrations.MIGRATIONS, *MIGRATIONS),
+        floor=floor,
     )
 
 

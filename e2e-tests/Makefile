@@ -120,6 +120,8 @@ BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # shipped `market buy` in the harness's process on a deal of its own; and
 # `e2e_vm_rate_dispute`'s two rows each file and rule a case on a rate deal of
 # their own, removing their rules from the lane's doubles when they end.
+# `e2e_pool_declared_modes` stops at the reservation boundary: its reserve is
+# refused before a reservation exists, so it leaves none for a later module.
 E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring_purchase \
               or e2e_vm_rate_servicing or e2e_vm_rate_watchdog or e2e_vm_rate_dispute \
               or e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
@@ -129,7 +131,7 @@ E2E_MODULE ?= e2e_vm_payment_deal or e2e_vm_payment_purchase or e2e_vm_recurring
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
               or e2e_alkahest_trusted_oracle \
               or e2e_listing_shapes or e2e_vm_introduction \
-              or e2e_non_erc20_settlement
+              or e2e_non_erc20_settlement or e2e_pool_declared_modes
 # The API-credit lane's scenarios. The payment deal runs against the lane's
 # payments double.
 E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal

@@ -9,7 +9,10 @@ and no SSH.
 What a run produces is decided by the compute mock mechanism's rules
 (``compute_provisioning.jobs.executor_mock``): the first rule whose ``match`` is
 a subset of the job's stored parameters may hold the run at a gate, fail it, or
-replace its output. With no rule, the run succeeds with the output the domain
+replace its output. A rule's failure carries its ``failure_record`` as the
+run's recorded task failure, read as a real run's notification callback
+writes one, so the executor classifies it through the same codec; a failure
+with none is a playbook that recorded no failed task. With no rule, the run succeeds with the output the domain
 contributes as ``default_output``, rendered from the job and the host it runs
 against, so the codec reads the same fields from it that a real playbook
 prints. Each domain composes its own runner, so a rule installed for one
@@ -35,6 +38,7 @@ from compute_provisioning.jobs.executor_mock import MockRule, MockRuleSet
 
 from compute_provisioning_contracts import ConnectivityResult
 
+from .failures import FailureRecord
 from .runner import (
     AnsibleError,
     AnsibleResult,
@@ -197,7 +201,15 @@ class MockAnsibleRunner:
             self._waits.pop(run_id, None)
             self._cancelled.discard(run_id)
         if rule is not None and rule.fail_with:
-            raise AnsibleError(rule.fail_with, stdout="", stderr=rule.fail_with)
+            raise AnsibleError(
+                rule.fail_with,
+                stdout="",
+                stderr=rule.fail_with,
+                outcome="failed",
+                # ansible-playbook's exit status when a task failed.
+                returncode=2,
+                failures=self._failures(rule, run),
+            )
         if rule is not None and rule.result_stdout:
             stdout = rule.result_stdout
         else:
@@ -209,8 +221,21 @@ class MockAnsibleRunner:
             await asyncio.to_thread(log_callback, stdout, "")
         return AnsibleResult(stdout=stdout, stderr="", process_id=run.process_id)
 
+    @staticmethod
+    def _failures(rule: MockRule, run: AnsibleRun) -> tuple[FailureRecord, ...]:
+        """The rule's failure record, on the run's host unless it names one."""
+        if rule.failure_record is None:
+            return ()
+        record = dict(rule.failure_record)
+        playbook = getattr(run, "playbook", None)
+        if not record.get("host") and playbook is not None:
+            record["host"] = playbook.limit
+        return (FailureRecord.from_mapping(record),)
+
     async def _hold(self, run_id: str, rule: MockRule | None) -> None:
-        cancelled = AnsibleError("Playbook cancelled", stdout="", stderr="")
+        cancelled = AnsibleError(
+            "Playbook cancelled", stdout="", stderr="", outcome="cancelled"
+        )
         if run_id in self._cancelled:
             raise cancelled
         waiting = asyncio.ensure_future(self.rules.hold(rule))

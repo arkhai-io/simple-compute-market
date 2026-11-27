@@ -69,6 +69,25 @@ says, and `<service>-migrate --check` is the check mode
 ([`migrations.md`](../engineering/migrations.md#a-check-mode-previews)):
 it exits 0 only for a compatible database.
 
+Every refusal is worded by the kit's `refusal_message` from the check result, the
+registry's included. This holds for the startup check, the command, and each
+service's own incompatible-database error. A refusal therefore names its cause and
+its remedy as
+[`migrations.md`](../engineering/migrations.md#every-chain-declares-its-floor-and-a-database-upgrades-through-it)
+gives them:
+- an *ahead* database names the backup taken before the upgrade, or the image that
+  wrote it;
+- an *unsupported* database older than the floor, or another service's sharing its
+  history (`UnsupportedCause.OLDER_OR_SHARED`), names marketplace 0.3.0 and the IDs
+  it lacks, and directs an upgrade through marketplace 0.3.0 once the database is
+  confirmed as the service's;
+- an *unsupported* database the chain did not build (`UnsupportedCause.NOT_THIS_CHAIN`)
+  names no remedy but configuring the service with its own database.
+
+A test asserts the result's `cause` rather than the message where it can. No
+refusal, and no data refusal a service adds at startup, names a fresh database as
+the remedy for a database that can upgrade.
+
 ## Migrations fail forward
 
 The migrations after a chain's baseline are fail-forward

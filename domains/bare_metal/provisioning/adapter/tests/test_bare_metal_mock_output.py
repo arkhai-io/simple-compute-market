@@ -178,8 +178,9 @@ async def test_a_rule_holds_then_fails_a_grant() -> None:
     mock.resume_rule("gate")
     outcome = await asyncio.wait_for(running, timeout=1.0)
     assert isinstance(outcome, JobFailure)
-    assert outcome.error.message == "host unreachable"
-    assert outcome.error.retryable is False
+    # The rule carries no failure record: a playbook that recorded no failed task.
+    assert (outcome.error.code, outcome.error.retryable) == ("playbook_error", False)
+    assert "host unreachable" in outcome.error.message
 
 
 @pytest.mark.asyncio

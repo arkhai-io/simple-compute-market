@@ -6,6 +6,8 @@ share no test code.
 
 from __future__ import annotations
 
+from market_schema_migrations import Floor
+
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -80,6 +82,7 @@ CHAIN = storefront_chain(
     baseline_id="v0_3_0_baseline_example_storefront",
     service="the example storefront",
     command="example-storefront-migrate",
+    floor=Floor("0.0.0"),
 )
 
 

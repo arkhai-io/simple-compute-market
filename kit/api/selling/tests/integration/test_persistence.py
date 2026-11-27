@@ -6,7 +6,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 import pytest
-from market_resource_pools import ResolvedPool
+from market_resource_pools_contracts import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED
 
 from arkhai_api_selling.migrations import baseline_tables

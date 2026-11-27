@@ -7,8 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..events import DeliveryEvent
-from ..sinks import DeclaredSink, DeliveryError, DeliverySink, SinkSettings
+from ..sinks import DeclaredSink, Deliverable, DeliveryError, DeliverySink, SinkSettings
 
 
 class FileSinkSettings(SinkSettings):
@@ -21,7 +20,7 @@ def build_file_sink(settings: Mapping[str, Any]) -> DeliverySink:
     config = FileSinkSettings.model_validate(dict(settings))
     target = Path(config.path).expanduser()
 
-    def deliver_to_file(event: DeliveryEvent) -> None:
+    def deliver_to_file(event: Deliverable) -> None:
         line = json.dumps(event.payload(), ensure_ascii=False, sort_keys=True)
         try:
             with target.open("a", encoding="utf-8") as handle:

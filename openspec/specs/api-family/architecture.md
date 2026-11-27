@@ -288,15 +288,19 @@ place a proof format attaches.
   to the gate.
 - The authority's baseline migration is identified
   `v0_3_0_baseline_apicredits_service` in every domain's database: the chain
-  is one, and each domain's deployment runs it on its own database. The chain
-  names no floor, so a database it did not build is refused.
+  is one, and each domain's deployment runs it on its own database. Each
+  service root declares the chain's floor: API credits, which marketplace
+  0.3.0 shipped, names that release and the IDs it recorded, and adopts a
+  database that release ran on; inference, which no release has shipped,
+  declares `0.0.0` and adopts none.
 - Each family storefront names its own identifier for the storefront chain's
   family baseline: `v0_3_0_baseline_apicredits_storefront` for API credits and
   `v0_3_0_baseline_inference_storefront` for inference. Compatibility is the
   exact set of recorded migration identifiers, and each storefront's baseline
   creates tables under its own prefix, so a database one family storefront's
-  chain built is refused by the other's. The chain names no floor. The
-  authorities share one baseline identifier because their tables are identical.
+  chain built is refused by the other's. Each storefront root declares its
+  floor as its service root does. The authorities share one baseline
+  identifier because their tables are identical.
 - `selling` depends on the core storefront, and `buying`, `buying-alkahest`,
   and `buying-arkhai-payments` on the core buyer, both role compositions. Each
   edge is an exception row in

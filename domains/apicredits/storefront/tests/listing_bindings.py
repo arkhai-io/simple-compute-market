@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding
-from market_resource_pools import ResolvedPool
+from market_resource_pools_contracts import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED, CapacityBacking
 
 from apicredits_storefront.container import SELLING_CONTRIBUTIONS

@@ -44,6 +44,20 @@ async def _active(clients, test_client):
     return reservation, fulfillment
 
 
+_HELPER_TASK = "Clean attributable bounded scratch and IPC after verified termination"
+#: The record a real run's notification callback writes when the working-data
+#: helper refuses, as the bounded reclaim's tagged task fails.
+_HELPER_REFUSAL = {
+    "task": _HELPER_TASK,
+    "role": "bare-metal-access",
+    "tags": ["failure_class:cleanup_refused"],
+    "module": "ansible.builtin.command",
+    "rc": 1,
+    "msg": "non-zero return code",
+    "stderr": '{"version": 1, "error": "Refusal", "message": "working-data helper refused unsafe fixture"}',
+}
+
+
 async def test_bounded_cleanup_failure_retries_same_correlated_job_then_releases(
     client_and_queue, test_client
 ):
@@ -52,14 +66,29 @@ async def test_bounded_cleanup_failure_retries_same_correlated_job_then_releases
     create = await clients.family.get_job(create_job_id(reservation))
     assert create.params["reclaim_policy"] == "bounded_working_data"
     assert create.params["working_data_policy_id"] == "fixture-policy-v1"
-    await test_client.add_bare_metal_mock_rule(rule_id="bounded-refusal", match={"action": NODE_RECLAIM_ACCESS_ACTION}, fail_with="working-data helper refused unsafe fixture")
+    await test_client.add_bare_metal_mock_rule(
+        rule_id="bounded-refusal",
+        match={"action": NODE_RECLAIM_ACCESS_ACTION},
+        fail_with="working-data helper refused unsafe fixture",
+        failure_record=_HELPER_REFUSAL,
+    )
     await clients.family.terminate_lease(reservation, LeaseTermination())
     await _converge_cycle(clients)
     await asyncio.wait_for(queue.wait_until_idle(), timeout=5)
     (reclaim,) = _teardown_jobs(reservation)
     first = await clients.family.get_job(reclaim.id)
     assert first.status == "queued" and first.retry_count == 1
-    assert "working-data helper refused" in first.error
+    assert "working-data helper refused unsafe fixture" in first.error
+    # The job's view carries the attempt's classified failure beside its text.
+    assert (first.failure.code, first.failure.retryable) == ("cleanup_refused", True)
+    assert first.failure.message == (
+        f'{create.host_id}: task "{_HELPER_TASK}" failed: '
+        "working-data helper refused unsafe fixture"
+    )
+    assert first.failure.details["task"] == _HELPER_TASK
+    assert first.failure.details["domain_detail"] == {
+        "error": "Refusal", "message": "working-data helper refused unsafe fixture",
+    }
     for field in ("capacity_reservation_id", "working_data_policy_id", "reclaim_policy", "ssh_user"):
         assert first.params[field] == create.params[field]
     assert await _capacity_held(clients, reservation)
@@ -84,6 +113,10 @@ async def test_terminal_bounded_cleanup_failure_keeps_capacity_held(client_and_q
     await _converge_cycle(clients)
     (reclaim,) = _teardown_jobs(reservation)
     assert (await test_client.wait_for_job(reclaim.id, timeout=5))["status"] == "failed"
+    # A failure whose run recorded no failed task: a failed job's view carries it.
+    failed = await clients.family.get_job(reclaim.id)
+    assert (failed.failure.code, failed.failure.retryable) == ("playbook_error", False)
+    assert failed.error == f"Job failed (non-retryable error): {failed.failure.message}"
     await asyncio.wait_for(queue.wait_until_idle(), timeout=5)
     await _converge_cycle(clients)
     await clients.family.check_leases()

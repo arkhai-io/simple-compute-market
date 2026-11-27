@@ -27,6 +27,7 @@ from market_schema_migrations import (
 )
 from market_schema_migrations.sqlalchemy_adapter import SqlAlchemyMigrationConnection
 from market_site.db import Base as SiteBase
+from market_site.migrations import CAPACITY_BUCKET_HOST_INDEX
 from market_site.migrations import MIGRATIONS as SITE_MIGRATIONS
 from sqlalchemy import Engine, create_engine, inspect, text
 
@@ -93,7 +94,12 @@ def _behind(path: Path) -> Path:
     try:
         with engine.connect() as connection:
             migrate(
-                Chain(service=CHAIN.service, command=CHAIN.command, baselines=CHAIN.baselines),
+                Chain(
+                    service=CHAIN.service,
+                    command=CHAIN.command,
+                    baselines=CHAIN.baselines,
+                    floor=CHAIN.floor,
+                ),
                 SqlAlchemyMigrationConnection(connection),
             )
     finally:
@@ -103,10 +109,12 @@ def _behind(path: Path) -> Path:
 
 class TestTheChain:
     def test_the_site_ledgers_migrations_precede_the_authoritys_own(self):
-        assert CHAIN.migrations == (*SITE_MIGRATIONS, GRANT_TERMS)
+        assert CHAIN.migrations == (*SITE_MIGRATIONS, CAPACITY_BUCKET_HOST_INDEX, GRANT_TERMS)
 
     def test_each_root_names_its_own_service_and_command(self):
-        other = authority_chain(service="another service", command="another-migrate")
+        other = authority_chain(
+            service="another service", command="another-migrate", floor=CHAIN.floor
+        )
 
         assert (other.service, other.command) == ("another service", "another-migrate")
         assert other.ids == CHAIN.ids
@@ -199,7 +207,7 @@ class TestAnExistingDatabase:
             engine.dispose()
 
         assert f"`{COMMAND}`" in str(refused.value)
-        assert "fresh database" in str(refused.value)
+        assert "was not built by" in str(refused.value)
         assert f"`{COMMAND}`" in str(startup.value)
         assert path.read_bytes() == before
 

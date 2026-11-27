@@ -1325,7 +1325,8 @@ that boundary. Take no shortcut.
 
 ## 28. Prepare And Operate Buyer Relays
 
-Use a buyer-only relay per operator, distinct from any management relay. Buyer
+Each operator runs its own buyer-only relay, distinct from any management relay;
+a buyer relay is not shared between operators. Buyer
 frps and frpc use the verified **0.61.1** pin. The family installs binaries at
 `/usr/local/lib/frp/0.61.1/{frps,frpc}` after checking the archive SHA-256.
 The default archive is linux_amd64; another platform requires an operator-supplied
@@ -1456,7 +1457,14 @@ configuration simply to bypass the refusal during normal operation.
 ### Container relay
 
 Use the plugin image built from its Dockerfile and pin the deployment reference
-to the intended revision/immutable digest. Run it as a sidecar in frps's network
+to the intended revision/immutable digest. For a marketplace release, the digest
+to pin is the one the release's bill of materials records for
+`frp-grant-admission`: the SHA-256 of the component `image/frp-grant-admission`
+in `manifests/release-bom.cdx.json` at the tag `marketplace-v<semver>`, on the
+branch `releases/<semver>`
+([`ARCHITECTURE.md`, "The bill of materials"](ARCHITECTURE.md#the-bill-of-materials)).
+The record names no registry, so pin that digest wherever the image is pulled
+from. Run it as a sidecar in frps's network
 namespace: the same Kubernetes pod, Compose `network_mode: service:frps`, or
 explicit host networking. Mount its configuration directory read-only at `/etc/frp-grant-admission`
 so replacing `config.toml` is visible on reload; do not publish its loopback
@@ -1560,16 +1568,96 @@ until registration/reconnect: HUP is not revocation. Adding a key/issuer or
 widening a range is non-destructive, but still requires the deployed refusal
 check.
 
-For a compromised signing key, choose explicitly: remove it immediately and
-refuse affected tenants at their next reconnect until their leases end, or keep
-it until the leases it signed have ended, as its `grants_valid_until` reports,
-while the attacker can sign within that issuer's range and audience. Neither
-choice reissues live grants. A leaked client token has no live-rotation
-shortcut: disable the relay in every operator's provisioning service that
-registers this server, wait until each reads `drained: true`, rotate the token
-on frps and every client baseline, send each service the signed
-`POST /api/v1/relays/{relay_id}/token`, verify, then enable the relays again.
-Coordinated live credential reissue is not provided.
+### Respond to a compromised relay credential
+
+No operation reissues a live lease's grant, and the provisioning service accepts
+no token change while the relay holds a lease. A compromise is therefore answered
+by letting the relay's leases end, or by ending them. A grant expires at its
+lease's scheduled end plus `relay_grant_expiry_grace_seconds`, and an on-demand
+or spot deal's lease runs to its term end unless a stop ends the deal sooner, so
+letting the leases end takes as long as the longest deal on the relay.
+
+**See what the relay holds.** As the provisioning service's administrator,
+through the signed client:
+
+- `GET /api/v1/relays/{relay_id}` reports `active_lease_count`, `drained`, and
+  under `grant_keys` the active key and each retired key's `kid`, `retired_at`
+  and `grants_valid_until`.
+- `GET /api/v1/relays/{relay_id}/leases` lists every lease row. A row with no
+  `released_at` is held: `owner_id` is the capacity reservation holding it,
+  `allocated_at` when it was leased, `grant_expires_at` when its grants expire,
+  and `grant_key_id` the key that signed its latest grant.
+- `GET /api/v1/contract/leases/{owner_id}` reads that reservation's lease, whose
+  `deal_ref.negotiation_id` names the storefront's deal.
+
+**End a deal that holds a lease.** A deal ends by itself at its agreed end, and
+an on-demand or spot deal at its buyer's stop or when its funds run out. To end
+one sooner:
+
+- A spot deal settled through Arkhai payments ends by its seller's notice:
+  `market-storefront deals preempt <negotiation-id> --operation-key <key>`, or
+  the storefront administrator's
+  `POST /api/v1/admin/deals/{negotiation_id}/interrupt` with
+  `{"interruption_kind": "preemption", "reason": "<why>"}`. The deal stops once
+  its notice has run, and its delivery ends with it. This is the right the deal's
+  terms give the seller.
+- Any deal settled through Arkhai payments ends at once by the same route with
+  `{"interruption_kind": "failure", "reason": "<why>"}`: the storefront ends
+  delivery and files `delivery_end` with the deal's dispute authority as the
+  payee.
+- A lease whose storefront cannot end it is terminated at the site, as the
+  provisioning service's administrator:
+  `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` with
+  `{"reason": "<why>"}`. The storefront files the payee's `delivery_end` when it
+  learns of the termination.
+
+A failure end and a termination are the seller's own end of the deal, priced by
+the deal's terms: on any on-demand deal, and on a spot deal ended without its
+notice, the seller owes the option's premature-stop penalty, collectible from
+the earnings the payments service still holds
+([buyer quickstart, "On-demand and spot"](../buyer-quickstart.md#7-on-demand-and-spot)).
+The relay's lease is released with its reservation's capacity, once the teardown
+is proven or an operator force-releases the lease
+([operator handbook, "Serving rate deals"](../operator-handbook.md#serving-rate-deals)).
+
+**A leaked client token.** Whoever holds the token can log in to the relay from
+anywhere and open connections; without a grant it registers no proxy.
+
+1. Disable the relay in every provisioning service that registers this server,
+   `POST /api/v1/relays/{relay_id}/disable`. No new delivery is leased a port on
+   it; running deliveries are untouched.
+2. Let the deals holding its leases end, or end them as above, until each relay
+   read reports `drained: true`.
+3. Rotate the token on frps and every client baseline, and send each service the
+   signed `POST /api/v1/relays/{relay_id}/token` with
+   `{"token": "<replacement>"}`. The service refuses that request while the relay
+   holds an unreleased lease, and the old token admits logins until frps restarts
+   with the replacement.
+4. Run the admission check under "Prove admission before enabling a pool", then
+   enable the relays again with `POST /api/v1/relays/{relay_id}/enable`.
+
+**A compromised signing key.** Whoever holds the key can sign grants within its
+issuer's range and audience. Stage and activate a new key first, as "Rotate keys
+and change admission policy" says, so that every later grant is signed by a key
+the attacker does not hold; the compromised key is then listed under
+`grant_keys.retired`. Then choose explicitly:
+
+- **Remove the key at once.** Remove its public key from the issuer's TOML and
+  reload the plugin. A registered proxy is not rechecked, so each delivery whose
+  grant the key signed keeps its access until its client registers the proxy
+  again, at a client restart, an frps restart or a reconnect, and is then
+  refused as `key_unknown`. Nothing gives a live lease another grant, so a
+  delivery refused this way stays unreachable through the relay until its lease
+  ends: end its deal as above.
+- **Keep the key until its leases end.** The key stays in the plugin until its
+  `grants_valid_until` has passed or reads null, and the attacker can sign for
+  that long. `grants_valid_until` is the latest `grant_expires_at` among the
+  relay's unreleased leases allocated at or before the key's `retired_at`;
+  ending those deals as above brings it forward.
+
+The service stores the token and the grant keys under its `ssh_decryption_key`.
+Rotating that key, and recovering a relay after it changes, is the operator
+handbook's ["Rotating the key that protects stored secrets"](../operator-handbook.md#rotating-the-key-that-protects-stored-secrets).
 
 ### Retire a relay
 
@@ -1686,7 +1774,7 @@ Before the first destructive cycle, freeze the source candidate and have it inde
 2. **Two concurrent VM deals.** Buy two CPU-only VMs through `market buy`, each with its own TEST payment. Keep an SSH heartbeat open on the first guest while the second is created and torn down, and apply section 25's criteria: no observed heartbeat gap over five seconds, both delivered shapes match their agreements, an unrelated key is refused, and each guest is removed and its access ended at teardown. In addition, end both leases through the lease watchdog's expiry path, never through an early teardown or a buyer end; moving a lease's agreed end into the past and stepping one watchdog cycle with the watchdog held runs the same service code as waiting out its term. Check authenticated management connectivity before, during, and after those operations, and read the management and libvirtd generations then through the VM operator's host diagnostics job (`diagnose_host`): the management unit keeps one invocation, stays active and adds no restarts, and libvirtd adds no restarts, reports no failed result, and keeps one invocation while the first guest runs, since it is socket-activated and may exit when idle. A restart or lost connection fails the observation. Deals driven through the typed operator clients instead of the buyer exercise the physical path but do not make this observation.
 3. **Direct access.** Repeat the two-VM cycle over direct access, over an operator-routable test path, only in a controlled pool drained as section 27's steps 5 and 6 require and with no unreleased relay lease for the pool (`GET /api/v1/relays/{relay_id}/leases`). Host management stays unexposed, and a pool that retains an active reservation or relay holding is not rebound. Record the result as controlled-path evidence, distinct from external relay acceptance.
 4. **Bare-metal normal cycle.** Buy a bare-metal rental through the buyer and check the pinned relay endpoint, the nonroot tenant, and wrong-key refusal. GPU work is not part of this observation: it is owed by the paid purchase with checked GPU work required for each GPU offer above. Through the bounded working-data probe, seed tenant activity (a shell, a process, a scheduled job) and working data (home, scratch, path, System V and POSIX IPC objects) beside operator sentinels. After ordinary reclaim, the covered activity, account, private group, data, and IPC are absent, the sentinels are unchanged, fresh access is denied, and capacity is restored.
-5. **Bare-metal refusal and retry.** In a successor rental, confirm a fresh UID and key and no access to the predecessor's data. Plant one nonce-scoped descendant owned by another UID inside a tenant-owned directory that cleanup selects; a foreign entry at the top of a shared root is preserved rather than refused, so it proves nothing here. Ordinary reclaim must refuse it: the cleanup job is queued for retry, not terminal, with an error recorded, a retry count of at least one and within its maximum, and a next retry time set; its log names the foreign descendant; the lease stays `releasing` and its capacity is not advertised as available; and the actionable operator notification — the reclaim job's recorded error and scheduled retry — is read through the operator's typed job API, which is where it is observed. No notification is pushed to an operator. Repair only that fixture before retries are exhausted; the same job then completes, the final inventory is clean, and the sentinels are unchanged. A forced release, a manual retry, or a reset of the consumed-UID history does not satisfy this observation, and a terminal failure stays a failure with audited recovery.
+5. **Bare-metal refusal and retry.** In a successor rental, confirm a fresh UID and key and no access to the predecessor's data. Plant one nonce-scoped descendant owned by another UID inside a tenant-owned directory that cleanup selects; a foreign entry at the top of a shared root is preserved rather than refused, so it proves nothing here. Ordinary reclaim must refuse it: the cleanup job is queued for retry, not terminal, with an error recorded, a retry count of at least one and within its maximum, and a next retry time set; its log names the foreign descendant; the lease stays `releasing` and its capacity is not advertised as available; the reclaim job's recorded error and scheduled retry are read through the operator's typed job API; and the `provisioning.teardown_attempt_held` event of the reclaim's current attempt is read through the provisioning service's typed client (`list_events(kind="provisioning.teardown_attempt_held", subject="job:<job-id>")`): exactly one, its subject the job, `action_required`, carrying `cleanup_refused`, the retries the job has left and the host it records. That event is what a deployment's routes push to an operator's sinks. Repair only that fixture before retries are exhausted; the same job then completes, the final inventory is clean, and the sentinels are unchanged. A forced release, a manual retry, or a reset of the consumed-UID history does not satisfy this observation, and a terminal failure stays a failure with audited recovery.
 6. **Repeat registration and adoption.** Reapply the canonical VM and bare-metal registrations and run another publication cycle on the same stack. As in section 25's second run, existing listings are adopted with their identities, states, and pauses intact; no duplicate allocator, host, pool, resource, or listing appears; unexpired relay quarantine is retained; and the consumed-UID history is unchanged.
 
 For each observation, correlate the buyer run, Agreement and receipt, reservation, provisioning jobs, and grant identifiers in restricted evidence. Relay port reuse follows grant expiry and quarantine while compute capacity follows verified teardown, so do not require an immediate port reuse.

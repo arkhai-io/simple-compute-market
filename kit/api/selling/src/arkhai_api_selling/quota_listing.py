@@ -21,7 +21,7 @@ from core_storefront.domain_registry import (
 from market_capacity_publication import PublicationBinding, backing_changed, publication_binding
 from market_core import MarketDomainContract
 from market_policy.listing_source import ListingSourceVerdict
-from market_resource_pools import ResolvedPool, read_site_declarations
+from market_resource_pools_contracts import ResolvedPool, read_site_declarations
 
 from arkhai_api_selling.contributions import SellingContributions
 from arkhai_api_selling.issuance import (

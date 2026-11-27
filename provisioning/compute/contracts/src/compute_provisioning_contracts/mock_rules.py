@@ -140,6 +140,13 @@ class MockRuleCreate(BaseModel):
     matching job fail with that message and takes precedence over
     ``result_stdout``, which replaces the mock's default output. An empty
     ``rule_id`` is assigned by the service.
+
+    ``failure_record``, beside ``fail_with``, is the record of the failed task
+    the mocked run reports, in the form a real run's notification callback
+    writes it (``host``, ``task``, ``msg``, ``tags``, ``module``, ``rc``,
+    ``stdout``, ``stderr``, ``unreachable``, among others), so the failure is
+    classified as a real run's would be. A failure with none is classified as
+    a playbook that failed before any task.
     """
 
     rule_id: str = ""
@@ -147,6 +154,7 @@ class MockRuleCreate(BaseModel):
     pause_before_result: bool = False
     result_stdout: str | None = None
     fail_with: str | None = None
+    failure_record: dict[str, Any] | None = None
 
 
 class MockRuleAdded(BaseModel):
@@ -161,6 +169,9 @@ class MockRuleView(BaseModel):
     match: dict[str, Any]
     pause_before_result: bool
     fail_with: str | None = None
+    #: Whether the rule's failure carries a task's record; the record itself
+    #: is not returned.
+    failure_record: bool = False
     #: Whether the rule replaces the mock's output; the output itself is not
     #: returned.
     result_stdout: bool

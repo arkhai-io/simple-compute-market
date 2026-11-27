@@ -22,6 +22,10 @@ import httpx
 from compute_provisioning_contracts import (
     ConnectivityResult,
     ConvergenceCycleResponse,
+    EventDeliveriesResponse,
+    EventDeliveryCycleResponse,
+    EventDestinationResumeResponse,
+    EventListResponse,
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
@@ -385,6 +389,48 @@ def _worker_pause(path: str) -> _Call:
     return _Call("POST", path, {}, parse=_model(WorkerPauseResponse))
 
 
+def _list_events(
+    kind: str | None,
+    severity: str | None,
+    subject: str | None,
+    reference: str | None,
+    after: int | None,
+    limit: int,
+) -> _Call:
+    return _Call(
+        "GET",
+        "/api/v1/events",
+        query={
+            "kind": kind,
+            "severity": severity,
+            "subject": subject,
+            "reference": reference,
+            "after": after,
+            "limit": limit,
+        },
+        parse=_model(EventListResponse),
+    )
+
+
+def _event_deliveries() -> _Call:
+    return _Call("GET", "/api/v1/events/deliveries", parse=_model(EventDeliveriesResponse))
+
+
+def _resume_event_destination(destination: str, consumer: str | None) -> _Call:
+    return _Call(
+        "POST",
+        f"/api/v1/events/destinations/{destination}/resume",
+        {"consumer": consumer},
+        parse=_model(EventDestinationResumeResponse),
+    )
+
+
+def _event_delivery_cycle() -> _Call:
+    return _Call(
+        "POST", f"{_EVENT_DELIVERY}/run-cycle", {}, parse=_model(EventDeliveryCycleResponse)
+    )
+
+
 def _set_time(now: int) -> _Call:
     # ``now`` is sent as given: the service alone judges the value, refusing
     # anything but an integer instant (422 ``invalid_time``) and an instant
@@ -411,6 +457,7 @@ def _rotate(role: str, rotation: RotationRequest) -> _Call:
 
 _CONVERGENCE = "/api/v1/system/fulfillment-convergence"
 _LEASE_WATCHDOG = "/api/v1/system/lease-watchdog"
+_EVENT_DELIVERY = "/api/v1/system/event-delivery"
 _TERMINAL_FAILURES = frozenset({"failed", "cancelled"})
 
 
@@ -830,6 +877,47 @@ class ComputeProvisioningClient(SigningBase):
     async def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
         return await self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
 
+    async def list_events(
+        self,
+        *,
+        kind: str | None = None,
+        severity: str | None = None,
+        subject: str | None = None,
+        reference: str | None = None,
+        after: int | None = None,
+        limit: int = 100,
+        request_id: str | None = None,
+    ) -> EventListResponse:
+        """Recorded events in sequence order, filtered by kind, severity, subject
+        or a related reference (``subject`` and ``reference`` as ``<type>:<id>``),
+        past ``after``; ``next_after`` reads the next page."""
+        return await self._run(
+            _list_events(kind, severity, subject, reference, after, limit), request_id
+        )
+
+    async def get_event_deliveries(self, *, request_id: str | None = None) -> EventDeliveriesResponse:
+        """Every consumer destination's delivery state."""
+        return await self._run(_event_deliveries(), request_id)
+
+    async def resume_event_destination(
+        self, destination: str, *, consumer: str | None = None, request_id: str | None = None
+    ) -> EventDestinationResumeResponse:
+        """Resume a parked destination; ``consumer`` names it when two share the name."""
+        return await self._run(_resume_event_destination(destination, consumer), request_id)
+
+    async def run_event_delivery_cycle(
+        self, *, request_id: str | None = None
+    ) -> EventDeliveryCycleResponse:
+        """Run one event delivery and pruning cycle now, paused or not."""
+        return await self._run(_event_delivery_cycle(), request_id)
+
+    async def pause_event_delivery(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        """Hold the event delivery worker's timer; ``at_gate`` says whether it is held yet."""
+        return await self._run(_worker_pause(f"{_EVENT_DELIVERY}/pause"), request_id)
+
+    async def resume_event_delivery(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        return await self._run(_worker_pause(f"{_EVENT_DELIVERY}/resume"), request_id)
+
     async def set_time(self, now: int, *, request_id: str | None = None) -> TimeSettingResponse:
         """Set an injected service's time to ``now``, in Unix seconds.
 
@@ -1180,6 +1268,47 @@ class SyncComputeProvisioningClient(SigningBase):
 
     def resume_lease_watchdog(self, *, request_id: str | None = None) -> WorkerPauseResponse:
         return self._run(_worker_pause(f"{_LEASE_WATCHDOG}/resume"), request_id)
+
+    def list_events(
+        self,
+        *,
+        kind: str | None = None,
+        severity: str | None = None,
+        subject: str | None = None,
+        reference: str | None = None,
+        after: int | None = None,
+        limit: int = 100,
+        request_id: str | None = None,
+    ) -> EventListResponse:
+        """Recorded events in sequence order, filtered by kind, severity, subject
+        or a related reference (``subject`` and ``reference`` as ``<type>:<id>``),
+        past ``after``; ``next_after`` reads the next page."""
+        return self._run(
+            _list_events(kind, severity, subject, reference, after, limit), request_id
+        )
+
+    def get_event_deliveries(self, *, request_id: str | None = None) -> EventDeliveriesResponse:
+        """Every consumer destination's delivery state."""
+        return self._run(_event_deliveries(), request_id)
+
+    def resume_event_destination(
+        self, destination: str, *, consumer: str | None = None, request_id: str | None = None
+    ) -> EventDestinationResumeResponse:
+        """Resume a parked destination; ``consumer`` names it when two share the name."""
+        return self._run(_resume_event_destination(destination, consumer), request_id)
+
+    def run_event_delivery_cycle(
+        self, *, request_id: str | None = None
+    ) -> EventDeliveryCycleResponse:
+        """Run one event delivery and pruning cycle now, paused or not."""
+        return self._run(_event_delivery_cycle(), request_id)
+
+    def pause_event_delivery(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        """Hold the event delivery worker's timer; ``at_gate`` says whether it is held yet."""
+        return self._run(_worker_pause(f"{_EVENT_DELIVERY}/pause"), request_id)
+
+    def resume_event_delivery(self, *, request_id: str | None = None) -> WorkerPauseResponse:
+        return self._run(_worker_pause(f"{_EVENT_DELIVERY}/resume"), request_id)
 
     def set_time(self, now: int, *, request_id: str | None = None) -> TimeSettingResponse:
         """See ``ComputeProvisioningClient.set_time``."""

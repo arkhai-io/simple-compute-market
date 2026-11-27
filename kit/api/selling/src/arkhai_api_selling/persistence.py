@@ -43,8 +43,8 @@ def refuse_unbound_listings(db_path: str, contributions: SellingContributions) -
         conn.close()
     if unbound is not None:
         raise RuntimeError(
-            f"{contributions.refusal_noun} listing {unbound[0]!r} has no durable listing binding; "
-            "this storefront requires a fresh database"
+            f"{contributions.refusal_noun} listing {unbound[0]!r} has no durable listing binding, and "
+            "none can be derived: the storefront serves only listings created with one"
         )
 
 

@@ -23,6 +23,7 @@ from .sinks import (
     ConfiguredSink,
     DeclaredSink,
     DeliveryConfigurationError,
+    SigningAs,
     SinkSettings,
 )
 
@@ -85,12 +86,14 @@ def build_delivery_sinks(
     *,
     factories: Mapping[str, Any] | None = None,
     signer: Signer | None = None,
+    signing: SigningAs | None = None,
 ) -> DeliverySinkSet:
     """Construct the configured instances, or fail naming the instance at fault.
 
-    ``signer`` is the process's marketplace signer, handed to an instance that
-    asks to sign rather than carried in its settings: signing material never
-    travels through configuration.
+    ``signer`` is the process's marketplace signer, and ``signing`` the role and
+    operation the composition signs its deliveries as, both handed to an
+    instance that asks to sign rather than carried in its settings: signing
+    material never travels through configuration.
     """
 
     if not config.active:
@@ -118,13 +121,17 @@ def build_delivery_sinks(
             )
         settings = config.settings_for(name)
         signs = bool(settings.get("sign"))
-        if signs and signer is None:
+        if signs and (signer is None or signing is None):
             raise DeliveryConfigurationError(
                 f"delivery instance {name!r} asks to sign, and this process has no "
-                "marketplace signer to sign with"
+                "marketplace signer, or no role and operation, to sign with"
             )
         try:
-            sink = factory(settings, signer=signer) if signs else factory(settings)
+            sink = (
+                factory(settings, signer=signer, signing=signing)
+                if signs
+                else factory(settings)
+            )
         except DeliveryConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001 - the operator owns this input

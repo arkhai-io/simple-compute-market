@@ -15,8 +15,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, read_site_declarations
-from market_resource_pools_contracts import resolve_pool_declarations
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools_contracts import read_site_declarations, resolve_pool_declarations
 from market_resource_pools_contracts.backing import BACKED
 from market_site.projections import resource_pool_projection
 from sqlalchemy import Engine, text

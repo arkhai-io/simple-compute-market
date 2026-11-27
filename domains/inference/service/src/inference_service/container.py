@@ -11,6 +11,7 @@ from arkhai_api_authority import (
     initialize,
     require_migrated,
 )
+from market_resource_pools import ResourcePoolFacts
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -31,6 +32,23 @@ def initialise_database(engine: Engine) -> None:
     initialize(engine, authority_config.profile)
 
 
+def build_capacity_ledger(
+    session_factory: "sessionmaker[Session]",
+) -> CapacityLedgerService:
+    """The site ledger over the service's database.
+
+    Its pool reader is the pool authority's, over the ``resource_pools`` table
+    the service seeds, with no host requirement: a quota is delivered through
+    no host, so no pool needs one and admission is host-agnostic. No
+    eligibility invariant either, since quota resources carry no host, and a
+    quota is counted in the ledger's neutral ``units``.
+    """
+    return CapacityLedgerService(
+        session_factory=session_factory,
+        pool_facts=ResourcePoolFacts(),
+    )
+
+
 def init() -> None:
     """Build the engine, check and initialise the database, and wire the services."""
     global resolved_session_factory
@@ -42,11 +60,7 @@ def init() -> None:
     engine = create_db_engine(authority_config.database_url, settings.is_sqlite)
     initialise_database(engine)
     resolved_session_factory = create_session_factory(engine)
-    # No eligibility invariant: quota resources carry no host, and a quota is
-    # counted in the ledger's neutral `units`.
-    resolved_capacity_ledger_service = CapacityLedgerService(
-        session_factory=resolved_session_factory,
-    )
+    resolved_capacity_ledger_service = build_capacity_ledger(resolved_session_factory)
     resolved_keys_service = KeysService(
         session_factory=resolved_session_factory,
         capacity_ledger=resolved_capacity_ledger_service,

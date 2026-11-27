@@ -706,6 +706,8 @@ async def test_a_reclaim_that_succeeds_on_its_job_retry_releases_the_lease(
         rule_id="reclaim-busy",
         match={"action": NODE_RECLAIM_ACCESS_ACTION},
         fail_with="disk busy",
+        # A task that failed on a host that answered is retried.
+        failure_record={"task": "Remove the lease key", "msg": "disk busy", "rc": 1},
     )
     await clients.family.terminate_lease(capacity_reservation_id, LeaseTermination())
     await _converge_cycle(clients)

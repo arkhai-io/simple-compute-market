@@ -8,7 +8,8 @@ in the same words (``refusal_message``), naming ``registry-migrate``:
 
 - no database file, or no table but ``alembic_version`` and no revision:
   *absent*;
-- tables but no revision: *unsupported*, a database no supported release built;
+- tables but no revision, or more than one revision: *unsupported*, a
+  database the chain did not build;
 - the script head: *compatible*;
 - an earlier revision of the script: *behind*, with the revisions after it
   pending;
@@ -16,12 +17,14 @@ in the same words (``refusal_message``), naming ``registry-migrate``:
   *behind*, with the baseline revision to be adopted and the revisions after
   it pending;
 - a revision of the chain the release squashed into its baseline: *unsupported*,
-  naming the revisions it lacks;
+  older than the floor, naming the revisions it lacks, to be upgraded through
+  marketplace 0.3.0 first;
 - any other revision: *ahead*, written by an image this one does not know.
 
 Alembic upgrades only from a revision its script holds, and the floor revision
 is not among them, so adoption rewrites the floor revision to the baseline in
-one transaction, without running the baseline, before upgrading. The check opens the database
+one transaction, without running the baseline, before upgrading. Every result
+names the floor release, marketplace 0.3.0. The check opens the database
 read-only and creates no file; only the migration command writes.
 See openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history.
 """
@@ -43,6 +46,7 @@ from market_schema_migrations import (
     MigrateReport,
     MigrationFailed,
     MigrationRefused,
+    UnsupportedCause,
     connect_read_only,
     refusal_message,
 )
@@ -58,6 +62,9 @@ VERSION_TABLE = "alembic_version"
 
 FLOOR_REVISION = "018_listing_resource_column"
 """The revision a database the v0.3.0 release built or migrated records."""
+
+FLOOR_RELEASE = "marketplace 0.3.0"
+"""The release the registry is supported from, which every result names."""
 
 PRE_FLOOR_REVISIONS: tuple[str, ...] = (
     "001_initial",
@@ -80,9 +87,9 @@ PRE_FLOOR_REVISIONS: tuple[str, ...] = (
 )
 """The revisions before the floor, oldest first, which the baseline replaced.
 
-A database at one of them predates the supported baseline: it is refused as
-unsupported, naming what it lacks, rather than as ahead, whose remedy -- the
-image that wrote it -- would not serve it."""
+A database at one of them predates the floor: it is refused as unsupported,
+naming what it lacks, to be upgraded through the floor release, rather than as
+ahead, whose remedy -- the image that wrote it -- would not serve it."""
 
 
 class IncompatibleDatabase(RuntimeError):
@@ -131,13 +138,26 @@ def classify(
 
     others = set(tables) - {VERSION_TABLE}
     if not revisions:
-        return CheckResult(CheckState.UNSUPPORTED if others else CheckState.ABSENT)
+        if not others:
+            return CheckResult(CheckState.ABSENT, floor=FLOOR_RELEASE)
+        return CheckResult(
+            CheckState.UNSUPPORTED,
+            floor=FLOOR_RELEASE,
+            cause=UnsupportedCause.NOT_THIS_CHAIN,
+        )
+    if len(revisions) > 1:
+        # Alembic keeps one revision for a linear history; several are no
+        # state any image of the registry left, whatever revisions they name,
+        # so an unknown one among them is no sign of a newer image.
+        return CheckResult(
+            CheckState.UNSUPPORTED,
+            floor=FLOOR_RELEASE,
+            cause=UnsupportedCause.NOT_THIS_CHAIN,
+        )
     retired = (FLOOR_REVISION, *PRE_FLOOR_REVISIONS)
     unknown = tuple(r for r in revisions if r not in known and r not in retired)
     if unknown:
-        return CheckResult(CheckState.AHEAD, unknown=unknown)
-    if len(revisions) > 1:
-        return CheckResult(CheckState.UNSUPPORTED)
+        return CheckResult(CheckState.AHEAD, unknown=unknown, floor=FLOOR_RELEASE)
     revision = revisions[0]
     if revision in PRE_FLOOR_REVISIONS:
         after = PRE_FLOOR_REVISIONS[PRE_FLOOR_REVISIONS.index(revision) + 1 :]
@@ -145,6 +165,8 @@ def classify(
             CheckState.UNSUPPORTED,
             missing=(*after, FLOOR_REVISION),
             current=revision,
+            floor=FLOOR_RELEASE,
+            cause=UnsupportedCause.OLDER_OR_SHARED,
         )
     if revision == FLOOR_REVISION:
         # The floor stands for the baseline, which adoption records unrun.
@@ -153,12 +175,16 @@ def classify(
             pending=tuple(known[1:]),
             adopting=(known[0],),
             current=revision,
+            floor=FLOOR_RELEASE,
         )
     position = list(known).index(revision)
     if position == len(known) - 1:
-        return CheckResult(CheckState.COMPATIBLE, current=revision)
+        return CheckResult(CheckState.COMPATIBLE, current=revision, floor=FLOOR_RELEASE)
     return CheckResult(
-        CheckState.BEHIND, pending=tuple(known[position + 1 :]), current=revision
+        CheckState.BEHIND,
+        pending=tuple(known[position + 1 :]),
+        current=revision,
+        floor=FLOOR_RELEASE,
     )
 
 
@@ -217,7 +243,7 @@ def check_database(database_url: str) -> CheckResult:
     path = _sqlite_file(database_url)
     if path is not None:
         if not path.is_file():
-            return CheckResult(CheckState.ABSENT)
+            return CheckResult(CheckState.ABSENT, floor=FLOOR_RELEASE)
         try:
             tables, revisions = _read_sqlite(path)
         except sqlite3.DatabaseError as exc:

@@ -4,14 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "arkhai-e2e-tests"
-version = "0.3.1"
+version = "0.3.2"
 license = "MIT"
 description = "End-to-end integration tests for Arkhai deployed blockchain environments"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "arkhai-compute-provisioning-contracts>=0.12.0",
-    # 0.11.0 first sets the provisioning service's time.
-    "arkhai-compute-provisioning-client>=0.12.0",
+    # 0.18.0 first carries the operator event wire models.
+    "arkhai-compute-provisioning-contracts>=0.18.0",
+    # 0.13.0 first lists the provisioning service's operator events.
+    "arkhai-compute-provisioning-client>=0.13.0",
     "arkhai-kit-resource-pools-client>=0.1.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
     "pytest>=8.0",

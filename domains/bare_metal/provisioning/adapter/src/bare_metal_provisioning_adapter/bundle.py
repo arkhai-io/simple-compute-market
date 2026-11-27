@@ -12,6 +12,7 @@ from compute_provisioning import (
 )
 from compute_provisioning.job_fulfillment import JobFulfillmentProvider
 
+from bare_metal_provisioning_adapter.codec import CLEANUP_REFUSED
 from bare_metal_provisioning_adapter.inventory_views import BareMetalPublicationViews
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import (
     BareMetalPoolConfigHandler,
@@ -28,6 +29,12 @@ BARE_METAL_PROVIDER = "bare_metal.ansible"
 HOST_REQUIREMENT = MappingProxyType(
     {BARE_METAL_PROVIDER: JobFulfillmentProvider.needs_host}
 )
+
+#: The failure classes of this domain's jobs an operator can repair while a
+#: teardown waits for its retry: a bounded cleanup refusing a foreign-owned
+#: entry. Composition hands them to the job engine, which is built before any
+#: bundle exists, so a held teardown is reported for an operator to act on.
+OPERATOR_REPAIRABLE_FAILURES = frozenset({CLEANUP_REFUSED})
 
 
 def build_bare_metal_adapter_bundle(

@@ -18,8 +18,9 @@ from tests.e2e.roles.helpers.ssh_access import SshEndpoint, SshKey
 from tests.e2e.roles.scenarios.bare_metal import test_real_provisioning_deal as lane
 from tests.e2e.roles.scenarios.bare_metal import working_data_probe as probe
 from tests.e2e.roles.scenarios.bare_metal.working_data_qualification import (
-    WorkingDataQualification, checked_key_reference, probe_command,
-    qualification_cycles, qualification_requested, retryable_refusal,
+    TEARDOWN_ATTEMPT_HELD, WorkingDataQualification, checked_key_reference,
+    held_attempt_event, probe_command, qualification_cycles, qualification_requested,
+    retryable_refusal,
 )
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "config/config-real-provisioning-target.yml.example"
@@ -101,8 +102,32 @@ def test_preflight_uses_pinned_shared_ssh_and_copies_no_private_key(tmp_path):
 
 
 def _job(**changes):
-    return SimpleNamespace(status="queued", retry_count=1, max_retries=3,
-                           next_retry_at=datetime.now(timezone.utc), error="failed attempt", **changes)
+    return SimpleNamespace(status="queued", retry_count=1, max_retries=3, job_id="job",
+                           host_id="bm-02", next_retry_at=datetime.now(timezone.utc),
+                           error="failed attempt", **changes)
+
+
+def _held(retry_count=1, failure_class="cleanup_refused", retries_left=2, job_id="job"):
+    return SimpleNamespace(
+        id="event", kind=TEARDOWN_ATTEMPT_HELD, summary="held", severity="action_required",
+        subject=SimpleNamespace(type="job", id=job_id),
+        attributes={"failure_class": failure_class, "retries_left": retries_left},
+        details={"retry_count": retry_count, "host_id": "bm-02"},
+    )
+
+
+def test_the_held_attempt_event_is_the_current_attempt_s_refusal():
+    current = _held()
+    assert held_attempt_event([_held(retry_count=0), current], _job()) is current
+
+
+@pytest.mark.parametrize("event", [
+    _held(retry_count=2), _held(failure_class="timed_out"), _held(retries_left=1),
+    _held(job_id="another-job"),
+])
+def test_a_held_attempt_event_that_does_not_match_the_job_fails(event):
+    with pytest.raises(AssertionError):
+        held_attempt_event([event], _job())
 
 
 def test_only_actual_scheduled_nonterminal_attempt_is_a_refusal():
@@ -127,6 +152,7 @@ def test_refusal_observes_real_error_and_held_capacity_before_fixture_repair(tmp
     driver.jobs.only_job.return_value = SimpleNamespace(job_id="job")
     driver.provisioning_client.get_job.return_value = _job()
     driver.provisioning_client.get_job_logs.return_value = SimpleNamespace(logs="foreign descendant")
+    driver.provisioning_client.list_events.return_value = SimpleNamespace(events=[_held()])
     state = SimpleNamespace(teardown_fulfillment_id="teardown", create_job_id="grant", deal_lease=MagicMock(), reserved_resource_id="resource")
     state.deal_lease.refresh.return_value = {"status": "releasing"}
     state.deal_lease.resource_consumed.return_value = True
@@ -136,6 +162,9 @@ def test_refusal_observes_real_error_and_held_capacity_before_fixture_repair(tmp
     observer.observe_refusal_and_repair(driver=driver, deal_state=state, storefront_admin_client=object())
     assert events == ["capacity-held", "repair"]
     assert observer.state["refusal_observed"]
+    driver.provisioning_client.list_events.assert_called_once_with(
+        kind=TEARDOWN_ATTEMPT_HELD, subject="job:job"
+    )
     driver.jobs.until_succeeded.assert_not_called()
     driver.provisioning_client.submit_job.assert_not_called()
 
@@ -150,6 +179,7 @@ def test_unrelated_failure_or_available_capacity_never_authorizes_repair(tmp_pat
     driver.jobs.only_job.return_value = SimpleNamespace(job_id="job")
     driver.provisioning_client.get_job.return_value = _job()
     driver.provisioning_client.get_job_logs.return_value = SimpleNamespace(logs=error)
+    driver.provisioning_client.list_events.return_value = SimpleNamespace(events=[_held()])
     state = SimpleNamespace(teardown_fulfillment_id="teardown", create_job_id="grant", deal_lease=MagicMock(), reserved_resource_id="resource")
     state.deal_lease.refresh.return_value = {"status": "releasing"}
     state.deal_lease.resource_consumed.return_value = held

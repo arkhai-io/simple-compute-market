@@ -1,6 +1,6 @@
 # Introduction Delivery Architecture
 
-The [normative contract](spec.md) defines where a revealed introduction is delivered and when. This document explains why seller-side delivery is dispatched at most once, how that is held, and what it leaves to the buyer and the operator.
+The [normative contract](spec.md) defines where a revealed introduction is delivered and when. This document explains why seller-side delivery is dispatched at most once, how that is held, what it leaves to the buyer and the operator, and why its sinks serve a service's events too while its delivery stays its own.
 
 ## One seller-side dispatch per introduction
 
@@ -27,6 +27,16 @@ An interrupted reveal is completed by the buyer's new start. Completion is local
 ## Deletion during a reveal
 
 A start that completed the reveal from payloads it read before a deletion committed preceded that deletion, so the one dispatch it claims is still its own, sent from the record it holds. After the deletion no later start or re-delivery sends anything: re-delivery reads the durable reveal rather than reconstructing one, and once the payloads are gone there is nothing it may send.
+
+## One sink layer
+
+The sinks that deliver a revealed introduction also deliver a service's events, so an operator configures a mail relay, a webhook or an Apprise target in one way, and a sink installed as a plugin serves both. A sink takes a `Deliverable` and reads nothing else of it: `rendered`, the text a person reads; `payload()`, what a machine destination receives; and `reference`, what it is about. An introduction's `DeliveryEvent` is one, its reference its obligation reference. An event is one through `EventDeliverable`, with its summary as its rendering, its envelope as its payload, and its subject, `<type>:<id>` such as `lease:<reservation>`, as its reference. A sink contract and built-in sinks of the eventing component's own would duplicate every sink and Apprise's plugin. A third-party sink that reads `obligation_ref` keeps delivering introductions and fails an event's delivery, reported by its exception's class as any sink failure is.
+
+A signing webhook signs as the composition that builds it says, never as constants. A storefront delivering an introduction signs as role `seller` and operation `introduction_delivery`, and the provisioning service delivering an event as role `service` and operation `operator_event_delivery`, each with its own identity, so a receiver verifies which service sent what. A signing instance built without a signer, or without the role and operation to sign as, is refused.
+
+Events reach sinks through the event-sink consumer, `market_delivery.event_sinks`, under the distribution's `events` extra, so a buyer, which delivers introductions only, installs no eventing component. It is one consumer of the service's eventing system, `event-sinks`, with one destination per enabled sink instance. The deployment's routes, each an SQL condition over the envelope and the sinks it names, select the sinks an event goes to; each selected sink is sent it under its stable identity, retried until it succeeds or is abandoned, and its outcome is that destination's delivery state. A failing sink is retried with backoff and holds up no other sink. Once a delivery is older than the consumer's maximum age it is abandoned, and the event is handed to the finally sink: the log, unless an enabled sink instance is named for it. A route naming a sink that is not enabled, or a finally sink naming none, is refused when the consumer is built, so the service does not start on it. A sink added beside the others starts at the latest committed event. A sink that leaves the configuration is a departing destination whose routes are gone, so which of the events it had not yet read they would have selected is no longer known: every one of them is handed to the finally sink for it rather than lost, and the finally sink may therefore record an event the departed route would not have selected. See the [eventing architecture](../eventing/architecture.md).
+
+Introduction delivery stays outside the eventing system. Its seller-side dispatch is claimed at most once ("One seller-side dispatch per introduction" above), no counterparty has a lever on it, a seller's delivery is routed by the origin of the listing so one site's destinations never receive another's buyer contact, and a buyer delivers with no database of its own. A consumer delivering at least once from a store of events holds none of those, so introductions share the sinks but not the delivery: they keep their claim, their origin routing and the operator's explicit re-delivery.
 
 ## Related contracts
 

@@ -151,3 +151,26 @@ RESERVATION_PLACEMENT_KEY: Migration[Connection] = Migration(
 
 MIGRATIONS: tuple[Migration[Connection], ...] = (RESERVATION_PLACEMENT_KEY,)
 """Every migration after :data:`BASELINE`, in the order a chain applies them."""
+
+
+def _index_bucket_hosts(connection: Connection) -> None:
+    """Give the ledger the baseline's named unique index on a bucket's host.
+
+    :data:`BASELINE` creates ``uq_capacity_buckets_host_id``, which the table's
+    own ``UNIQUE (host_id)`` already enforces. A release that built the ledger
+    from its models left the named index out, so a database it built lacks it.
+    Dropping the index where present and creating it gives every database the
+    baseline's schema, and enforces nothing new.
+    """
+    connection.exec_driver_sql("DROP INDEX IF EXISTS uq_capacity_buckets_host_id")
+    connection.exec_driver_sql(
+        "CREATE UNIQUE INDEX uq_capacity_buckets_host_id ON capacity_buckets (host_id)"
+    )
+
+
+CAPACITY_BUCKET_HOST_INDEX: Migration[Connection] = Migration(
+    "20261126_001_capacity_bucket_host_index", _index_bucket_hosts
+)
+"""A repair, not in :data:`MIGRATIONS`: only a chain whose floor release built the
+ledger from its models, without the baseline's named index, composes it after
+:data:`MIGRATIONS`."""

@@ -137,6 +137,11 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "tools" / "injected-time",
             "arkhai_injected_time-*.whl",
         ),
+        # The event store the site kit records its transitions' events in.
+        "eventing": (
+            REPO / "tools" / "eventing",
+            "arkhai_eventing-*.whl",
+        ),
     }
     built: dict[str, Path] = {}
     for name, (project, pattern) in projects.items():

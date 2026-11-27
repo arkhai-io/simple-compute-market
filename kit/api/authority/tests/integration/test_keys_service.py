@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from arkhai_api.issuance import KeyDisposition, accepted_terms_digest, fulfillment_id, issuance_request
 from arkhai_api_authority import IssuanceError, KeysService, derive_key_id, initialize, migrate_database
 from market_identity import Identity, IdentityScheme
+from market_resource_pools import ResourcePoolFacts
 from market_site.ledger import CapacityLedgerService, UndeclaredOfferingModeError
 
 from tests.integration.profiles import CHAIN, CONFIG, LABEL, PROFILE, config_for
@@ -95,7 +96,7 @@ def _composed(config=CONFIG) -> tuple[CapacityLedgerService, KeysService, object
     migrate_database(engine, CHAIN)
     initialize(engine, config.profile)
     session_factory = sessionmaker(bind=engine)
-    ledger = CapacityLedgerService(session_factory)
+    ledger = CapacityLedgerService(session_factory, pool_facts=ResourcePoolFacts())
     ledger.register_resource(
         resource_id="svc-quota",
         total_units=1000,

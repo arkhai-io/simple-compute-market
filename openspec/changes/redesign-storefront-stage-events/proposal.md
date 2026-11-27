@@ -77,6 +77,11 @@ adds the deltas.
 - Opened by `unbacked-bare-metal-listings`, which handed it this defect (its design's
   decision 24) and changes nothing in stage events.
 - Related to `replace-polling-with-authenticated-push` in the same lesser goal.
+- `report-provisioning-failures-to-operators` built one eventing system per service,
+  the standalone component `tools/eventing` (its D6, D16): declared kinds recorded in
+  their producer's transaction under a versioned envelope, retained by time, and
+  delivered to consumers. This change designs the storefronts' stage events onto it
+  rather than a mechanism of their own (`docs/guidance/engineering/eventing.md`).
 
 ## Impact
 

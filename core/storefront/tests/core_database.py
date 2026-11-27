@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from market_schema_migrations import Chain, SqliteMigrationConnection, migrate
+from market_schema_migrations import Chain, Floor, SqliteMigrationConnection, migrate
 
 from core_storefront.migrations import BASELINE, MIGRATIONS
 
@@ -20,6 +20,8 @@ CORE_CHAIN: Chain[sqlite3.Connection] = Chain(
     command="(core storefront's tests)",
     baselines=(BASELINE,),
     migrations=MIGRATIONS,
+    # Core's tests build only fresh databases, so the chain adopts none.
+    floor=Floor("0.0.0"),
 )
 
 

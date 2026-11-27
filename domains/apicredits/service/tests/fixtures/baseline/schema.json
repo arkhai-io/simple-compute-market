@@ -4,6 +4,7 @@
     "v0_3_0_baseline_apicredits_service",
     "v0_3_0_baseline_site",
     "20261106_002_reservation_placement_key",
+    "20261126_001_capacity_bucket_host_index",
     "20261109_001_grant_terms"
   ],
   "tables": {

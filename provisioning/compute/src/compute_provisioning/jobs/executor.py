@@ -5,9 +5,11 @@ host the job runs against, it runs the job and reports one outcome. It owns how
 the job runs and what its output means; the job authority owns the job's
 durable state. The split that follows from that:
 
-- The executor decides whether a failure is retryable, because only it knows
-  what the failure means. The job authority decides whether and when a retry
-  happens, from a ``JobRetryPolicy``.
+- The executor classifies a failure and decides whether it is retryable,
+  because only it knows what the failure means. The job authority decides
+  whether and when a retry happens, from a ``JobRetryPolicy``, and classifies
+  only what no executor reached: a job it cannot dispatch, a preparation the
+  executor refused as ``ConfigurationRefusedError``, and anything raised.
 - The executor redacts everything it reports. Logs and outcomes reach durable
   state exactly as reported.
 - The executor reports that the job's execution is starting before it starts
@@ -24,23 +26,31 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, Union
 
-from compute_provisioning_contracts import CredentialEnvelope, ResultEnvelope
-from pydantic import BaseModel, Field
+from compute_provisioning_contracts import (
+    CredentialEnvelope,
+    ProvisioningErrorEnvelope,
+    ResultEnvelope,
+)
 
 from compute_provisioning.hosts.execution import ExecutionHost
 
+#: The job authority's own failure classes, for what no executor classified.
+#: None is retried: each meets the same refusal on every attempt.
+NOT_DISPATCHABLE = "not_dispatchable"
+CONFIGURATION_REFUSED = "configuration_refused"
+INTERNAL_ERROR = "internal_error"
 
-class ProvisioningErrorEnvelope(BaseModel):
-    """Why a job failed, as its executor classified it.
 
-    ``retryable`` is the executor's judgement, the only one that knows what the
-    failure means; whether and when a retry happens is the job authority's.
+class ConfigurationRefusedError(ValueError):
+    """An executor refuses to prepare a job against the configuration it meets.
+
+    Raised before the executor reports its start, for a refusal a retry would
+    meet again: parameters the executor cannot read, a credential that does
+    not decrypt, a resource the job references that is missing or unusable.
+    The job authority fails the job as ``configuration_refused`` without a
+    retry; the message names what was refused and leaves the service, so it
+    carries no secret.
     """
-
-    code: str
-    message: str
-    retryable: bool = False
-    details: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -76,9 +86,10 @@ class JobSuccess:
 class JobFailure:
     """An execution failure the executor anticipated and classified.
 
-    ``error.retryable`` says whether running the job again could succeed; an
-    executor raising instead reports a failure it did not anticipate, which is
-    never retried.
+    ``error.code`` is the failure's class and ``error.retryable`` says whether
+    running the job again could succeed; an executor raising
+    ``ConfigurationRefusedError`` reports a refused preparation, and one
+    raising anything else a failure it did not anticipate. Neither is retried.
     """
 
     error: ProvisioningErrorEnvelope
@@ -123,10 +134,15 @@ class JobRetryPolicy:
 
 
 __all__ = [
+    "CONFIGURATION_REFUSED",
+    "ConfigurationRefusedError",
+    "INTERNAL_ERROR",
+    "NOT_DISPATCHABLE",
     "JobExecutor",
     "JobFailure",
     "JobOutcome",
     "JobRetryPolicy",
     "JobRun",
     "JobSuccess",
+    "ProvisioningErrorEnvelope",
 ]

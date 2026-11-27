@@ -2,8 +2,8 @@
 
 Publication and the opening guard both read a site's resource-pool projection
 the same way, so the guard rechecks a listing against exactly the reading that
-published it. Each pool's declarations resolve through the resource-pool kit's
-shared reader; its region is the pool's ``region`` hint.
+published it. Each pool's declarations resolve through the shared reader in the
+resource-pool contracts package; its region is the pool's ``region`` hint.
 """
 
 from __future__ import annotations
@@ -20,19 +20,21 @@ from arkhai_bare_metal import (
     bare_metal_shape_digest,
     bare_metal_shape_problems,
 )
-from market_resource_pools import (
+from market_resource_pools_contracts import (
     AskingRateResolution,
+    CapacityBounds,
+    capacity_bound_hint,
     read_site_declarations,
     resolve_asking_rates,
+    resolve_capacity_bounds,
 )
-from market_resource_pools_contracts import CapacityBounds, capacity_bound_hint, resolve_capacity_bounds
 from market_resource_pools_contracts.backing import CapacityBacking
 from market_resource_pools_contracts.hints import raw_listing_shapes, raw_region
 
 
 def _policy_tags(pool: Mapping[str, Any]) -> Mapping[str, Any]:
     # A projected pool carries its declarations under ``pool_metadata``, where
-    # the resource-pool kit's reader finds them too.
+    # the resource-pool contracts package's reader finds them too.
     metadata = pool.get("pool_metadata")
     tags = metadata.get("policy_tags") if isinstance(metadata, Mapping) else None
     return tags if isinstance(tags, Mapping) else {}

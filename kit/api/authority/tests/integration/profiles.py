@@ -1,3 +1,4 @@
+from market_schema_migrations import Floor
 """Test profiles, labels, and chain; nothing here names a deployed domain's values."""
 
 from arkhai_api.labels import IssuanceLabel
@@ -15,7 +16,7 @@ PROFILE = CapacityProfile(
     backing=BACKED,
 )
 COMMAND = "example-service-migrate"
-CHAIN = authority_chain(service="the example service", command=COMMAND)
+CHAIN = authority_chain(service="the example service", command=COMMAND, floor=Floor("0.0.0"))
 CONFIG = AuthorityConfig(
     label=LABEL, profile=PROFILE, database_url="sqlite:///:memory:", distribution="example-service",
     key_prefix="ak",

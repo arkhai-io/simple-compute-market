@@ -11,8 +11,8 @@ dependencies = [
     "arkhai-kit-identity>=0.4.0",
     "arkhai-kit-resource-pools>=0.10.0",
     "arkhai-kit-resource-pools-contracts>=0.2.0",
-    "arkhai-kit-schema-migrations[sqlalchemy]>=0.1.0",
-    "arkhai-kit-site>=0.14.0",
+    "arkhai-kit-schema-migrations[sqlalchemy]>=0.2.0",
+    "arkhai-kit-site>=0.15.0",
     "sqlalchemy>=2.0",
 ]
 

@@ -12,7 +12,8 @@ from typing import Any, Iterator, Protocol
 
 from sqlalchemy.orm import Session
 
-from market_resource_pools import DeliverableHosts, ResourcePoolService
+from market_resource_pools import ResourcePoolService
+from market_site import DeliverableHosts
 from market_site.ledger import CapacityLedgerService
 
 from .settlement_repository import SettlementRepository, begin_sqlite_write_transaction

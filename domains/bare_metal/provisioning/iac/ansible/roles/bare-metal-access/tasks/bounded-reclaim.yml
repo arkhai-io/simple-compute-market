@@ -1,5 +1,7 @@
 ---
 - name: Clean attributable bounded scratch and IPC after verified termination
+  # A refusal of the working-data helper is one an operator can repair.
+  tags: ["failure_class:cleanup_refused"]
   ansible.builtin.command:
     argv:
       - /usr/bin/python3
@@ -20,6 +22,8 @@
   register: bare_metal_delete_result
 
 - name: Remove the descriptor-verified bounded tenant home
+  # A refusal of the working-data helper is one an operator can repair.
+  tags: ["failure_class:cleanup_refused"]
   ansible.builtin.command:
     argv:
       - /usr/bin/python3
@@ -38,6 +42,8 @@
   delegate_to: "{{ target_host }}"
 
 - name: Verify every bounded absence and commit completion
+  # A refusal of the working-data helper is one an operator can repair.
+  tags: ["failure_class:cleanup_refused"]
   ansible.builtin.command:
     argv:
       - /usr/bin/python3

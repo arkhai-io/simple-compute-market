@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 from core_storefront.multi_registry_client import RegistryListings
 from core_storefront.sqlite_client import SQLiteClient
-from market_resource_pools import ResolvedPool
+from market_resource_pools_contracts import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED
 from registry_client.models import ListingSummary
 

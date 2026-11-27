@@ -5,8 +5,6 @@ from __future__ import annotations
 import textwrap
 
 import pytest
-from market_resource_pools.db import Base as ResourcePoolBase
-from market_resource_pools.db import DEFAULT_POOL_ID, ResourcePool
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -24,6 +22,9 @@ from market_site.capacity_definitions import (
 )
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
+from pool_facts_double import PoolFactsDouble
+
+DEFAULT_POOL_ID = "default"
 
 
 def _ledger() -> CapacityLedgerService:
@@ -33,21 +34,12 @@ def _ledger() -> CapacityLedgerService:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    ResourcePoolBase.metadata.create_all(bind=engine)
-    session_factory = sessionmaker(bind=engine)
-    with session_factory() as db, db.begin():
-        for pool_id in (DEFAULT_POOL_ID, "pool-b"):
-            db.add(
-                ResourcePool(
-                    id=pool_id,
-                    label=pool_id,
-                    provider="test",
-                    enabled=True,
-                    policy_tags={"deliverable_modes": ["vm"]},
-                )
-            )
+    pools = PoolFactsDouble()
+    for pool_id in (DEFAULT_POOL_ID, "pool-b"):
+        pools.declare(pool_id, ("vm",))
     return CapacityLedgerService(
-        session_factory,
+        sessionmaker(bind=engine),
+        pool_facts=pools,
         unit_claim_keys=("units", "gpu_count"),
         mirror_dimension="gpu_count",
     )

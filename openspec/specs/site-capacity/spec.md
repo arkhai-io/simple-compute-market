@@ -1187,3 +1187,81 @@ A site authority MUST admit the `admin` role on every route contract it serves, 
 
 - **WHEN** a request signed under the `seller` role calls the capacity definitions import, whose contract names no caller role
 - **THEN** it is refused, and the same request under the `admin` role is authorized
+
+### Requirement: The site authority reads pool facts through an injected port
+
+A site authority SHALL obtain every Resource Pool fact it decides on — whether the pool
+exists, whether it is enabled, the offering modes it delivers, and whether its
+declarations need a host — through a pool-facts reader its composition root supplies,
+and SHALL NOT read the pool authority's persistence or import the pool capability. The
+reader SHALL be required: no site authority is constructed without one. Every read SHALL
+take the session of the transaction making the decision, so a decision is judged against
+the pool state that transaction sees.
+
+The port's values SHALL be structural, so a reader satisfies it without importing the
+site authority. A pool the reader does not find SHALL be reported as not existing, not
+enabled, with unreadable deliverable modes, and as needing a host exactly when its
+composition supplies a host requirement.
+
+#### Scenario: Admission reads pool facts in its own transaction
+
+- **WHEN** a claim is reserved against a declaration in a pool
+- **THEN** the pool's enablement, deliverable modes, and host need are read through the
+  composition's reader in the session that creates the reservation
+
+#### Scenario: Registration names a pool the reader does not find
+
+- **WHEN** a capacity registration names a pool the reader reports as not existing
+- **THEN** the registration is refused and no declaration is written or changed
+
+#### Scenario: The offered read meets a pool the reader does not find
+
+- **GIVEN** a composition supplying a host requirement
+- **WHEN** the offered read reaches a declaration whose pool the reader reports as not
+  existing
+- **THEN** the declaration is judged as one in a backed pool whose provider needs a
+  host: it is offered enabled only when it has a usable host, as admission judges it
+
+#### Scenario: The site authority is installed without the pool capability
+
+- **WHEN** the site authority's package is inspected
+- **THEN** it neither imports nor declares the pool authority or its contracts
+  distribution
+
+### Requirement: The site's ending and release transitions record their events
+
+Every transition that records a `lease_ended` event MUST also record a `site.lease_ended` event, keyed on the reservation and the transition's key, carrying that payload as its `details`, in the same transaction, through the event recorder its composition injects. A release that frees a reservation's capacity MUST record a `site.capacity_released` event, keyed on the reservation, with whether it was forced, whether the reservation was `release_failed` before it, and whether the lease lifecycle made it through the site authority port rather than a caller of the site's release route, in the same transaction.
+
+#### Scenario: A lease ends
+
+- **WHEN** a lease's ending transition commits
+- **THEN** its immutable `lease_ended` record and one `site.lease_ended` event carrying the same payload exist, and a repeated transition records neither again
+
+#### Scenario: An operator force-releases a lease left release_failed
+
+- **WHEN** an operator force-releases a reservation that was `release_failed`
+- **THEN** the release records one `site.capacity_released` event whose `forced` and `after_release_failure` attributes are true
+
+#### Scenario: A caller of the site's release route releases a reservation
+
+- **WHEN** a reservation is released through the site's release route rather than by the lease lifecycle
+- **THEN** its `site.capacity_released` event's `lease_lifecycle` attribute is false, as it is true for a release the lease lifecycle makes
+
+#### Scenario: A release is refused by its guard
+
+- **WHEN** the release guard refuses to free a reservation's capacity
+- **THEN** no `site.capacity_released` event is recorded
+
+### Requirement: A failing transition records a caller's prepared event
+
+The site's release-failure transition MUST accept an optional prepared event from its caller and record it in the transition's transaction without interpreting its kind. A transition the site refuses MUST record no event.
+
+#### Scenario: A release failure is recorded
+
+- **WHEN** the lease lifecycle records a release failure with a prepared event and the site accepts the transition
+- **THEN** the reservation is `release_failed` and the prepared event is recorded in the same transaction
+
+#### Scenario: A stale release failure is refused
+
+- **WHEN** the lease lifecycle records a release failure with a prepared event for a reservation an operator has since force-released
+- **THEN** the site refuses the transition and no event is recorded

@@ -34,6 +34,11 @@ from .ledger import (  # noqa: F401
     UndeclaredOfferingModeError,
     UnknownPoolError,
 )
+from .deliverable_hosts import (  # noqa: F401
+    DeliverableHosts,
+    declaration_has_usable_host,
+)
+from .pool_facts import PoolFacts, PoolFactsReader  # noqa: F401
 from .declarations import (  # noqa: F401
     CapacityDeclaration,
     CapacityDeclarationFields,

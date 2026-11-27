@@ -19,21 +19,25 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 
-from market_schema_migrations import schema_snapshot
+from market_schema_migrations import CheckState, schema_snapshot
 from market_schema_migrations.sqlalchemy_adapter import SqlAlchemyMigrationConnection
 
 from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning.relays.db import Base as RelaysBase
-from compute_provisioning_service.db.database import migrate_database
+from compute_provisioning_service.db.database import check_database, migrate_database
 from compute_provisioning_service.db.migrations import CHAIN, FLOOR_IDS
 from compute_provisioning_service.db.models import Base as ServiceBase
+from eventing import metadata as EventingMetadata
 from market_fulfillment.db import Base as FulfillmentBase
 from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from vm_provisioning_adapter.db import Base as VmBase
 
 from .floor_database import create_floor_database, floor_ids, floor_snapshot
+
+#: A record no release of the chain lists, as a release before the floor left it.
+_EARLIER_RECORD = "20250101_001_recorded_by_an_earlier_release"
 
 
 def _snapshot(path: Path) -> dict:
@@ -59,7 +63,7 @@ def test_the_fixture_is_the_snapshot_of_its_own_ddl(tmp_path):
 
 def test_the_chain_adopts_exactly_the_ids_the_release_recorded():
     assert list(FLOOR_IDS) == floor_ids()
-    assert CHAIN.floor_ids == FLOOR_IDS
+    assert CHAIN.floor.recorded == FLOOR_IDS
 
 
 def test_the_baselines_alone_reproduce_the_v0_3_0_schema(tmp_path):
@@ -94,6 +98,42 @@ def test_a_fresh_chain_is_the_v0_3_0_schema_with_the_later_migrations(tmp_path):
     assert _recorded(adopted_path) == _recorded(fresh_path) == set(CHAIN.ids)
     # The later migrations are what the chain adds to the release's schema.
     assert _snapshot(fresh_path) != floor_snapshot()
+
+
+def test_a_floor_database_carrying_an_earlier_releases_record_and_table_is_adopted(tmp_path):
+    path = create_floor_database(
+        tmp_path / "upgraded.db", earlier_records=(_EARLIER_RECORD,)
+    )
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE earlier_release_extension (id TEXT PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO earlier_release_extension VALUES ('kept')"))
+        connection.execute(text(
+            "INSERT INTO resource_pools (id, label, provider, enabled, policy_tags) "
+            "VALUES ('default', 'Default Pool', 'vm.ansible', 1, '{}')"
+        ))
+    later = tuple(m.id for m in CHAIN.migrations)
+
+    result = check_database(engine)
+    assert result.state is CheckState.BEHIND
+    assert result.floor == "marketplace 0.3.0"
+    assert result.adopting == CHAIN.baseline_ids
+    assert result.set_aside == (_EARLIER_RECORD,)
+    assert result.pending == later
+
+    report = migrate_database(engine)
+
+    assert report.adopted
+    assert report.set_aside == (_EARLIER_RECORD,)
+    assert report.applied == later
+    assert check_database(engine).state is CheckState.COMPATIBLE
+    assert _recorded(path) == set(CHAIN.ids)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT id FROM resource_pools")).all() == [("default",)]
+        assert connection.execute(text("SELECT id FROM earlier_release_extension")).all() == [
+            ("kept",)
+        ]
+    engine.dispose()
 
 
 def test_adoption_keeps_every_row_the_database_holds(tmp_path):
@@ -145,6 +185,45 @@ def test_a_v0_3_0_job_gains_execution_instants_that_read_null(tmp_path):
     assert {"execution_started_at", "finished_at"} <= columns
 
 
+def test_a_released_job_keeps_its_error_and_reads_no_structured_failure(tmp_path):
+    """Nothing is backfilled: a job recorded before structured failures were
+    kept reads ``failure`` null, its ``error`` text unchanged."""
+    path = create_floor_database(tmp_path / "provisioning.db")
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO ansible_jobs (id, status, params, retry_count, max_retries, error) "
+            "VALUES ('j-failed', 'failed', '{}', 3, 3, "
+            "'Job failed (max retries exceeded): Playbook failed')"
+        ))
+
+    migrate_database(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT id, error, failure FROM ansible_jobs"
+        )).all() == [
+            ("j-failed", "Job failed (max retries exceeded): Playbook failed", None)
+        ]
+
+
+def test_the_chain_builds_the_event_store_fresh_and_on_a_released_database(tmp_path):
+    """A fresh database and one the release built and the chain brought forward
+    both hold every table of the eventing component, its sequence counter at
+    zero, and record its steps."""
+    fresh = create_engine(f"sqlite:///{tmp_path / 'fresh.db'}")
+    migrate_database(fresh)
+    adopted = create_engine(f"sqlite:///{create_floor_database(tmp_path / 'adopted.db')}")
+    migrate_database(adopted)
+
+    for engine in (fresh, adopted):
+        assert set(EventingMetadata.tables) <= set(inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT value FROM eventing_sequence")).all() == [(0,)]
+            recorded = {row[0] for row in connection.execute(text("SELECT id FROM schema_migrations"))}
+        assert "eventing_0001" in recorded
+
+
 def test_every_mapped_table_and_column_is_one_the_chain_creates(tmp_path):
     """The models are read against the migrated schema and create none of it,
     so a column added to a model without a migration fails here."""
@@ -158,10 +237,11 @@ def test_every_mapped_table_and_column_is_one_the_chain_creates(tmp_path):
 
     missing = []
     for base in (
-        PoolsBase, RelaysBase, VmBase, HostsBase, JobsBase, ServiceBase,
-        FulfillmentBase, SiteBase,
+        PoolsBase.metadata, RelaysBase.metadata, VmBase.metadata, HostsBase.metadata,
+        JobsBase.metadata, ServiceBase.metadata, FulfillmentBase.metadata,
+        SiteBase.metadata, EventingMetadata,
     ):
-        for table in base.metadata.sorted_tables:
+        for table in base.sorted_tables:
             if table.name not in stored:
                 missing.append(table.name)
                 continue

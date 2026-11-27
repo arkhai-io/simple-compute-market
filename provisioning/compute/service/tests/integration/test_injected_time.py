@@ -18,14 +18,17 @@ from market_identity import Ed25519Signer, ReplayIdentity, ReplayReservation
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from market_site.events import lease_ended_draft
+
 from compute_provisioning_service.db.database import migrate_database
 from compute_provisioning_service.db.models import (
-    CapacityReleaseCallbackOutbox,
+    LeaseEndReport,
     ProvisioningReplayReservation,
 )
 from compute_provisioning_service.middleware.auth import SqlAlchemyProvisioningReplayStore
-from compute_provisioning_service.services.deal_event_sink import (
-    SqlAlchemyCapacityReleaseOutbox,
+from compute_provisioning_service.services.operator_events import (
+    event_catalogue,
+    event_recorder,
 )
 
 #: The instant the injected source starts at.
@@ -60,23 +63,23 @@ def _stored(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def test_a_release_callback_s_creation_attempts_and_delivery_are_the_source_s_instants(
+def test_a_lease_end_s_signed_report_is_kept_at_the_source_s_instant(
     sessions: sessionmaker[Session], source: InjectedTime
 ):
-    outbox = SqlAlchemyCapacityReleaseOutbox(sessions)
-    outbox.reserve("reservation-1")
+    """The report's age, which its retention counts, is the source's."""
+    recorder = event_recorder(event_catalogue(Ed25519Signer(b"\x11" * 32)), instance="site-west")
+    payload = {
+        "version": 1, "kind": "lease_ended", "event_id": "end-1",
+        "capacity_reservation_id": "reservation-1", "site_id": "site-west",
+        "effective_at": START, "source_state": "leased", "cause": "release", "reason": None,
+        "caller": None, "claimed_deadline": None, "deadline_phase": None,
+    }
     source.set(START + 10)
-    outbox.record_failure("reservation-1", "unreachable")
-    with sessions() as db:
-        row = db.get(CapacityReleaseCallbackOutbox, "reservation-1")
-        assert _stored(row.created_at) == _utc(START)
-        assert _stored(row.last_attempted_at) == _utc(START + 10)
+    with sessions.begin() as db:
+        recorder.record(db, lease_ended_draft(payload, transition_key="end"))
 
-    source.set(START + 20)
-    outbox.mark_delivered("reservation-1")
     with sessions() as db:
-        row = db.get(CapacityReleaseCallbackOutbox, "reservation-1")
-        assert _stored(row.delivered_at) == _utc(START + 20)
+        assert _stored(db.get(LeaseEndReport, "end-1").created_at) == _utc(START + 10)
 
 
 def test_a_dispatch_lease_is_claimed_again_only_once_the_source_reaches_its_expiry(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from core_storefront.domain_registry import StorefrontDomainBindingError
 from core_storefront.sqlite_client import SQLiteClient
-from market_resource_pools import ResolvedPool
+from market_resource_pools_contracts import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED
 
 from arkhai_api_selling.migrations import migrate_storefront_database

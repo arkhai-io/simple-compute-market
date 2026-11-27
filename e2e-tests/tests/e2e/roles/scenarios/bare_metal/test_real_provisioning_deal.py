@@ -36,6 +36,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage10b_LeaseCycleBeginsTeardown,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
+    Stage11c_LeaseEventsRecorded,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.real_provisioning import JobWatch, configured_relay
@@ -388,6 +389,10 @@ class TestStage11a3_ReclaimJobSucceeded:
 
 
 class TestStage11b_TeardownCompletion(Stage11b_TeardownCompletion):
+    pass
+
+
+class TestStage11c_LeaseEventsRecorded(Stage11c_LeaseEventsRecorded):
     pass
 
 

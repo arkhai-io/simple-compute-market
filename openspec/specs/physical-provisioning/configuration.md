@@ -8,7 +8,8 @@ The definition documents the provisioning service is given, as this repository's
 instance of
 [`definition-documents.md`](../../../docs/guidance/engineering/definition-documents.md):
 their settings, the order startup imports them in, how each kind applies the method,
-and the relays' secrets; and the service's time source. The pool document's own rules are
+and the relays' secrets; the service's time source; its operator events; and the
+failure messages an operator marks non-retryable. The pool document's own rules are
 [`resource-pool-management`'s](../resource-pool-management/configuration.md#pool-definitions).
 
 ## Definition documents
@@ -183,3 +184,113 @@ plugin checks a grant's expiry on its own clock, which no lane time moves. No
 packaged profile or chart default sets it; only the lanes' `lane-time` profile,
 `dev-env/provisioning/config-lane-time.yml`, layered through `ACTIVE_PROFILES`, does
 ([injected time](../injected-time/architecture.md)).
+
+## Operator events
+
+The provisioning service reads an `[Events]` section configuring the events it
+records ([`operator-events.md`](../../../docs/guidance/repository/operator-events.md)):
+how long they are kept, how often they are delivered, and which sinks receive which
+of them. The contract is the `physical-provisioning` requirement "The provisioning
+service delivers events to the sinks its routes select"
+([specification](spec.md)); what an operator reads and resumes is the
+[operator handbook's "Operator events"](../../../docs/operator-handbook.md#operator-events).
+
+```toml
+[Events]
+delivery_interval_seconds = 10
+sink_max_age_seconds = 86400
+finally = "log"
+
+[Events.retention_days]
+events = 30
+deliveries = 30
+lease_end_reports = 0               # 0 keeps every row
+
+[Events.sinks]
+enabled = ["ops-push", "audit"]
+
+[Events.sinks.ops-push]
+sink = "apprise"                    # its urls in the Secret overlay
+
+[Events.sinks.audit]
+sink = "file"
+path = "/var/log/provisioning-events.jsonl"
+
+[Events.routes.held-work]
+where = "severity = 'action_required'"
+sinks = ["ops-push", "audit"]
+
+[Events.routes.long-jobs]
+where = "kind = 'provisioning.job_finished' AND duration_seconds >= 1800"
+sinks = ["audit"]
+```
+
+- `retention_days` is how many days each table's rows are kept: `events` the events
+  with their references, `deliveries` the finished delivery state, and
+  `lease_end_reports` the signed lease-end reports. 0 keeps every row. The defaults,
+  in the service's `settings.toml`, are 30, 30 and 0. An event is pruned only once it
+  is past its retention and owed to no active destination; a signed report is kept,
+  whatever its own retention, while its event is.
+- `delivery_interval_seconds` (default 10) is the event delivery worker's timer: each
+  cycle runs every consumer's deliveries, then prunes. A lease command or watchdog
+  cycle that ends or releases a lease delivers the storefront's report and callback
+  before it returns, so this interval paces retries, operator sinks and pruning.
+- `sink_max_age_seconds` (default 86400) is how long a sink's failing delivery is
+  retried, with a backoff doubling from 10 seconds to at most an hour, before it is
+  abandoned to the finally sink. The storefront peer's deliveries have no maximum age
+  and are retried until delivered, parked or refused.
+- `finally` (default `"log"`) is where an abandoned operator-sink delivery goes:
+  `"log"`, a warning on the `eventing.finally` logger carrying the event and its last
+  error, or the name of an enabled sink instance. The storefront peer's consumers
+  abandon to the log.
+- `sinks` is shaped as a storefront's `[Delivery]`
+  ([`introduction-delivery`'s configuration](../introduction-delivery/configuration.md#introduction-delivery)):
+  `enabled` names the sink instances, and each `[Events.sinks.<name>]` names the
+  installed sink it uses with `sink` — `file`, `command`, `webhook`, `smtp`, or
+  `apprise` — and that sink's settings. A webhook instance with `sign = true` signs
+  each delivery with the service's identity, as role `service` and operation
+  `operator_event_delivery`. No sink is enabled by default, so a deployment that
+  configures none delivers events to the storefront peer alone.
+- `routes` holds one `[Events.routes.<name>]` per route: `where`, an SQL condition
+  over the event, and `sinks`, the enabled instances it selects. The condition's
+  columns are the envelope's scalar fields — `kind`, `kind_version`, `severity`,
+  `severity_rank` (`info` 0, `warning` 1, `action_required` 2), `subject_type`,
+  `subject_id`, `source_service`, `source_instance`, `sequence`, `occurred_at`,
+  `correlation_id`, `causation_id`, `summary`, `id` and the rest — and every
+  attribute a declared kind declares, which reads `NULL` on an event whose kind does
+  not; the table `related` (`event_id`, `type`, `id`) holds its references, read
+  through a subquery such as
+  `id IN (SELECT event_id FROM related WHERE type = 'host' AND id = 'bm-02')`. An
+  event goes to every sink any route selecting it names, once. No route is
+  configured by default.
+
+The service refuses to start, naming what is wrong, on an `[Events]` key it does not
+know, a negative retention or a delivery interval or maximum age that is not
+positive, a sink instance it cannot build, an instance configured but not enabled, a
+route whose condition holds anything but comparisons, `AND`, `OR`, `NOT`, `IN`,
+`LIKE`, `IS NULL`, literals and subqueries over `related`, or names a column neither
+the envelope nor a declared kind has, a route naming a sink that is not enabled, and
+a `finally` naming no enabled sink.
+
+A sink's secret settings — an Apprise URL, a webhook URL that carries a token, an
+SMTP password — go in the service's Secret overlay, under the chart the
+`config-provisioning-secrets.yml` profile its runtime Secret supplies, never in the
+public profile the chart renders into its ConfigMap
+([`DEPLOYMENT_AND_CONFIG.md`, "Kubernetes: ConfigMap and Secret mounting"](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting)).
+The chart passes `Events` through its `config` unchanged and the service does not
+refuse a secret sink setting stated in the public profile, so keeping it out is the
+operator's.
+
+## Non-retryable failure messages
+
+`additional_non_retryable_errors` (default empty) lists substrings an operator marks
+non-retryable for both domains' playbook jobs. A failed attempt is not retried,
+whatever its class, when one of them occurs, ignoring case, in the deciding failure
+record's `msg`, `stdout` or `stderr` — the last failed or unreachable task neither
+ignored nor rescued — or in the failure's classified message, which a timeout or a run that
+recorded no task also has. The classes the executor and the codecs already refuse to
+retry need no entry; the classes and their retry decisions are
+[the architecture's "Failure classification"](architecture.md#failure-classification).
+The contract is the `physical-provisioning` requirement "Operator-configured
+non-retryable substrings are matched against the failure record"
+([specification](spec.md)).

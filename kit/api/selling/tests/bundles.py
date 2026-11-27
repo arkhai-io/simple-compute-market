@@ -6,6 +6,8 @@ under it shows the library reads only what the bundle's projection returns.
 
 from __future__ import annotations
 
+from market_schema_migrations import Floor
+
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -171,6 +173,7 @@ def example_chain(
         baseline_id=baseline_id,
         service="the example storefront",
         command="example-storefront-migrate",
+        floor=Floor("0.0.0"),
     )
 
 

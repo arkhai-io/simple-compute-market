@@ -36,7 +36,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, ResourcePoolFacts
 from market_resource_pools.db import Base as ResourcePoolBase
 from market_site.db import Base
 from market_site.ledger import CapacityLedgerService
@@ -82,7 +82,12 @@ def site_app() -> tuple[FastAPI, CapacityLedgerService]:
                 policy_tags={"deliverable_modes": ["vm"]},
             )
         )
-    ledger = CapacityLedgerService(session_factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    ledger = CapacityLedgerService(
+        session_factory,
+        pool_facts=ResourcePoolFacts(),
+        unit_claim_keys=("units", "gpu_count"),
+        mirror_dimension="gpu_count",
+    )
     ledger.register_resource(
         resource_id="kvm1",
         total_units=1,

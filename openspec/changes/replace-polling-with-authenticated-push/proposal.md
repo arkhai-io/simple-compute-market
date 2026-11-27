@@ -131,3 +131,10 @@ None.
   that polling makes slow and timing-sensitive.
 - `pools-8-capacity-projection-and-listing-hints` owns projection semantics; this change
   changes how a storefront learns a projection changed, not what one means.
+- `report-provisioning-failures-to-operators` built the provisioning service's one
+  eventing system, the standalone component `tools/eventing`, and moved the lease-end
+  report outbox and the capacity-released callback outbox onto it as consumers of
+  `site.lease_ended` and `site.capacity_released` (its D14, D15): the durable outbox
+  this change once adopted is gone. This change designs its push delivery, and the
+  site's `capacity_events` feed, onto that eventing system as consumers rather than an
+  outbox of its own (`docs/guidance/engineering/eventing.md`).

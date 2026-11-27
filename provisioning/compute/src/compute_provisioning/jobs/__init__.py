@@ -2,6 +2,10 @@
 
 from .action_request import JobActionRequest
 from .executor import (
+    CONFIGURATION_REFUSED,
+    INTERNAL_ERROR,
+    NOT_DISPATCHABLE,
+    ConfigurationRefusedError,
     JobExecutor,
     JobFailure,
     JobOutcome,
@@ -12,6 +16,10 @@ from .executor import (
 )
 
 __all__ = [
+    "CONFIGURATION_REFUSED",
+    "ConfigurationRefusedError",
+    "INTERNAL_ERROR",
+    "NOT_DISPATCHABLE",
     "JobActionRequest",
     "ProvisioningErrorEnvelope",
     "JobExecutor",

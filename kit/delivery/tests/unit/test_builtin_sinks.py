@@ -10,7 +10,7 @@ import urllib.error
 from pathlib import Path
 
 import pytest
-from market_delivery import DeliveryError, introduction_delivery_event
+from market_delivery import DeliveryError, SigningAs, introduction_delivery_event
 from market_delivery.builtin.command_sink import build_command_sink
 from market_delivery.builtin.file_sink import build_file_sink
 from market_delivery.builtin.smtp_sink import build_smtp_sink
@@ -308,7 +308,11 @@ def test_smtp_settings_require_a_username_with_a_password() -> None:
         )
 
 
-def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("role", "operation"),
+    [("seller", "introduction_delivery"), ("service", "operator_event_delivery")],
+)
+def test_a_signing_webhook_signs_as_its_composition_names(monkeypatch, role, operation) -> None:
 
     signer = Ed25519Signer(b"s" * 32)
     seen = {}
@@ -329,7 +333,9 @@ def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) 
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     sink = build_webhook_sink(
-        {"url": "https://seller.invalid/introductions", "sign": True}, signer=signer
+        {"url": "https://seller.invalid/introductions", "sign": True},
+        signer=signer,
+        signing=SigningAs(role=role, operation=operation),
     )
     event = _event()
     sink(event)
@@ -346,8 +352,8 @@ def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) 
                 "identifier": headers["x-market-identity-identifier"],
             },
             "method": "POST",
-            "operation": "introduction_delivery",
-            "resource": event.obligation_ref,
+            "operation": operation,
+            "resource": event.reference,
             "request_id": headers["x-market-request-id"],
             "timestamp": int(headers["x-market-timestamp"]),
             "body_hash": __import__("market_identity").canonical_body_hash(body),
@@ -359,10 +365,10 @@ def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) 
         body=body,
         now=int(time.time()),
         max_skew=60,
-        expected_role="seller",
+        expected_role=role,
         expected_method="POST",
-        expected_operation="introduction_delivery",
-        expected_resource=event.obligation_ref,
+        expected_operation=operation,
+        expected_resource=event.reference,
         expected_principals=TrustedIdentitySet(identities=(signer.identity,)),
     )
     assert result.code == VerificationCode.VERIFIED
@@ -371,3 +377,10 @@ def test_a_signing_webhook_sends_a_request_the_receiver_can_verify(monkeypatch) 
 def test_a_signing_webhook_requires_a_signer() -> None:
     with pytest.raises(ValueError, match="marketplace signer"):
         build_webhook_sink({"url": "https://seller.invalid/hook", "sign": True})
+
+
+def test_a_signing_webhook_requires_the_role_and_operation_it_signs_as() -> None:
+    with pytest.raises(ValueError, match="role and operation"):
+        build_webhook_sink(
+            {"url": "https://seller.invalid/hook", "sign": True}, signer=Ed25519Signer(b"s" * 32)
+        )

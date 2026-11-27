@@ -23,7 +23,13 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
-from market_schema_migrations import Chain, CheckState, MigrationRefused, schema_snapshot
+from market_schema_migrations import (
+    Chain,
+    CheckState,
+    MigrationRefused,
+    UnsupportedCause,
+    schema_snapshot,
+)
 from market_schema_migrations import migrate as migrate_chain
 from market_schema_migrations.sqlalchemy_adapter import SqlAlchemyMigrationConnection
 
@@ -138,12 +144,14 @@ def test_a_database_older_than_v0_3_0_is_refused_and_left_unchanged(tmp_path):
 
     result = check_database(engine)
     assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.OLDER_OR_SHARED
     assert result.missing == (FLOOR_IDS[-1],)
     assert FLOOR_IDS[-1] in _refusal(engine)
     with pytest.raises(MigrationRefused) as refused:
         migrate_database(engine)
 
-    assert "fresh database" in str(refused.value)
+    assert "upgrade it through marketplace 0.3.0 first" in str(refused.value)
+    assert "fresh database" not in str(refused.value)
     assert FLOOR_IDS[-1] in str(refused.value)
     assert _schema(engine) == schema
     assert _recorded(engine) == recorded
@@ -155,8 +163,11 @@ def test_tables_with_no_migration_record_are_refused_and_left_unchanged():
     with engine.begin() as connection:
         connection.execute(text("CREATE TABLE hosts (name VARCHAR PRIMARY KEY)"))
 
-    assert check_database(engine).state is CheckState.UNSUPPORTED
-    assert "fresh database" in _refusal(engine)
+    result = check_database(engine)
+    assert result.state is CheckState.UNSUPPORTED
+    assert result.cause is UnsupportedCause.NOT_THIS_CHAIN
+    assert f"was not built by `{_COMMAND}`" in _refusal(engine)
+    assert "fresh database" not in _refusal(engine)
     with pytest.raises(MigrationRefused) as refused:
         migrate_database(engine)
 
@@ -173,7 +184,7 @@ def test_a_database_behind_the_chain_is_refused_at_startup_naming_what_is_pendin
         command=CHAIN.command,
         baselines=CHAIN.baselines,
         migrations=CHAIN.migrations[:-1],
-        floor_ids=CHAIN.floor_ids,
+        floor=CHAIN.floor,
     )
     with engine.connect() as connection:
         migrate_chain(older, SqlAlchemyMigrationConnection(connection))

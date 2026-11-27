@@ -28,10 +28,20 @@ status alone decides teardown; these fields are never release evidence. The
 result is its fact, or only the mismatch when the fact does not match
 its job. No result carries a credential: the buyer already holds the private
 half of the key that was installed.
+
+A failed task is classified from its record by the tags the role puts on the
+tasks that can raise a domain class: the bounded working-data helper's tasks
+carry ``failure_class:cleanup_refused``, the one class an operator can repair —
+a foreign-owned entry, say — so it is retried, giving the operator the retry
+window to repair the fixture before the job fails. The helper's structured
+refusal, a JSON object on its standard error, refines the message and is kept
+as the failure's domain detail. Any other task failure is the family's
+``task_failed``.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
@@ -48,9 +58,16 @@ from compute_provisioning_contracts import (
     DeliveryEvidence,
     ResultEnvelope,
 )
-from compute_provisioning.jobs import JobRun
+from compute_provisioning.jobs import ConfigurationRefusedError, JobRun
 from compute_provisioning.relays import RELAY_SECRET_VARIABLES
-from compute_provisioning_ansible import AnsibleJobInterpretation, AnsibleJobPlan, read_fact
+from compute_provisioning_ansible import (
+    TASK_FAILED_CLASS,
+    AnsibleJobInterpretation,
+    AnsibleJobPlan,
+    FailureClass,
+    FailureRecord,
+    read_fact,
+)
 from compute_provisioning_ansible.runner import AnsibleResult, InventoryTarget
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -64,6 +81,15 @@ BARE_METAL_ACCESS_RESULT_KIND = "bare_metal_access"
 #: removal, lock it, delete its home, or verify bounded working-data removal.
 BARE_METAL_RECLAIM_POLICIES = frozenset({"remove_lease_key", "lock_user", "delete_user", "bounded_working_data"})
 DEFAULT_BARE_METAL_RECLAIM_POLICY = "remove_lease_key"
+
+#: The bounded working-data helper refused to clean, remove or verify a
+#: tenant's working data, such as an entry another account owns. An operator
+#: can repair it, so it is retried.
+CLEANUP_REFUSED = "cleanup_refused"
+
+#: The domain classes the access role's task tags declare, and whether each is
+#: retried.
+BARE_METAL_FAILURE_CLASSES: Mapping[str, bool] = {CLEANUP_REFUSED: True}
 
 #: The fact the access role prints for each action. The role prints the job's
 #: action as the fact's own ``action``, which is what the fact reader selects by.
@@ -210,9 +236,14 @@ class BareMetalAnsibleCodec:
         self._relay_resolver = relay_resolver
 
     def prepare(self, run: JobRun) -> AnsibleJobPlan:
-        params = BareMetalJobParams.model_validate(dict(run.parameters))
+        try:
+            params = BareMetalJobParams.model_validate(dict(run.parameters))
+        except ValidationError as exc:
+            raise ConfigurationRefusedError(
+                f"bare-metal job parameters are not valid: {exc}"
+            ) from exc
         if params.action != run.action:
-            raise ValueError(
+            raise ConfigurationRefusedError(
                 f"bare-metal job parameters name action {params.action!r}, "
                 f"but the job runs {run.action!r}"
             )
@@ -266,8 +297,18 @@ class BareMetalAnsibleCodec:
             )
         )
 
-    def is_retryable(self, message: str) -> bool:
-        return True
+    def classify(self, run: JobRun, failure: FailureRecord) -> FailureClass:
+        """The domain class the failed task's tags declare, else ``task_failed``."""
+        for declared in failure.failure_classes:
+            if declared in BARE_METAL_FAILURE_CLASSES:
+                refusal = helper_refusal(failure.stderr)
+                return FailureClass(
+                    declared,
+                    retryable=BARE_METAL_FAILURE_CLASSES[declared],
+                    summary=str(refusal["message"]) if refusal else None,
+                    detail=refusal or {},
+                )
+        return TASK_FAILED_CLASS
 
     @staticmethod
     def variables(params: BareMetalJobParams) -> dict[str, Any]:
@@ -299,16 +340,37 @@ class BareMetalAnsibleCodec:
         return variables
 
 
+def helper_refusal(stderr: str) -> dict[str, Any] | None:
+    """The working-data helper's structured refusal on its standard error.
+
+    The helper prints one JSON object, ``{"version": 1, "error": …, "message":
+    …}``, as its last line when it refuses; anything else is not its refusal.
+    """
+    lines = stderr.strip().splitlines()
+    if not lines:
+        return None
+    try:
+        value = json.loads(lines[-1])
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or value.get("version") != 1 or "message" not in value:
+        return None
+    return {"error": value.get("error"), "message": value.get("message")}
+
+
 __all__ = [
     "BARE_METAL_ACCESS_RESULT_KIND",
+    "BARE_METAL_FAILURE_CLASSES",
     "BARE_METAL_GRANT_DETAIL",
     "BARE_METAL_INVENTORY_GROUP",
     "BARE_METAL_RECLAIM_POLICIES",
     "BARE_METAL_RESULT_FACTS",
     "BareMetalAnsibleCodec",
     "BareMetalJobParams",
+    "CLEANUP_REFUSED",
     "DEFAULT_BARE_METAL_RECLAIM_POLICY",
     "fact_mismatch",
     "grant_evidence",
+    "helper_refusal",
     "reclaim_policy_from",
 ]

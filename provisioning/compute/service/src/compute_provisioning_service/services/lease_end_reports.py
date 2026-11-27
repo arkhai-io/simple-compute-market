@@ -1,75 +1,168 @@
-"""Event-keyed signed report delivery, independent of proven capacity release."""
+"""Signed lease-end reports: kept as the site's evidence, delivered to the
+storefront peer by a consumer of ``site.lease_ended``.
 
-from collections.abc import Awaitable, Callable
-from typing import Literal
+``site.lease_ended``'s record-time hook signs the lease end's statement with
+the service's identity in the transaction that records the end, and keeps it in
+``lease_end_reports``, retained under its own setting and never pruned before
+its event: the authenticated lease read serves it from there, whatever has
+become of the event.
+
+The lease-end report consumer holds one destination per configured storefront
+peer, named for the peer's URL (``event_names.peer_destination``). A peer
+answering 404, 405, 501 or an explicit ``unsupported`` parks its destination
+until an administrator resumes it, and resuming delivers the reports it missed whose events are still retained; any
+other failure is retried with backoff; a report the table does not hold is
+abandoned to the finally sink, since no retry can send it. A first peer, the
+consumer's first destination, starts at the consumer's position, so it receives
+the reports recorded since the consumer last read. A peer configured
+beside or in place of another is a new destination starting at the latest
+committed event, so no report recorded before it reaches it; the destination of
+a peer the configuration does not name is retired, its undelivered reports —
+those not yet read included — going to the finally sink, the log. Each
+report is sent under its event's identity, so a lost acknowledgement is retried
+as the same request.
+"""
+
+from __future__ import annotations
+
+import hashlib
 
 import injected_time
-from compute_provisioning_contracts import LeaseEndedEvent, SignedLeaseEndedReport, sign_lease_end
+from compute_provisioning_contracts import (
+    LEASE_ENDED_CALLBACK,
+    LeaseEndedEvent,
+    SignedLeaseEndedReport,
+    sign_lease_end,
+)
+from eventing import (
+    AbandonDelivery,
+    Consumer,
+    Envelope,
+    ParkDestination,
+    PrunedTable,
+    RecordHook,
+    RetryPolicy,
+)
 from market_identity import Signer, canonical_json
-from sqlalchemy.orm import Session
+from market_site.events import SITE_LEASE_ENDED
+from sqlalchemy.orm import Session, sessionmaker
+from storefront_client import StorefrontClientError
 
-from compute_provisioning_service.db.models import LeaseEndReportOutbox
+from compute_provisioning_service.db.models import LeaseEndReport
+from compute_provisioning_service.event_names import LEASE_END_REPORT_CONSUMER, peer_destination
+from compute_provisioning_service.services.deal_event_sink import StorefrontPeer
 
-ReportDelivery = Literal["delivered", "unsupported", "retry"]
+#: The table the signed reports are kept in, the column they age by, and the
+#: column naming the event each is kept for.
+LEASE_END_REPORTS_TABLE = PrunedTable(
+    "lease_end_reports", "created_at", event_column="envelope_id"
+)
+
+#: The HTTP statuses of a storefront that does not take lease-end reports.
+UNSUPPORTED_STATUSES = frozenset({404, 405, 501})
+
+
+def lease_end_report_hook(signer: Signer) -> RecordHook:
+    """``site.lease_ended``'s record-time hook: sign the lease end's statement
+    and keep it, in the recording transaction, so the end and its signed report
+    commit or roll back together."""
+
+    def apply(session: Session, envelope: Envelope) -> None:
+        event = LeaseEndedEvent.model_validate(envelope.details)
+        report = sign_lease_end(event, signer)
+        session.add(
+            LeaseEndReport(
+                event_id=event.event_id,
+                capacity_reservation_id=event.capacity_reservation_id,
+                report=canonical_json(report).decode(),
+                envelope_id=envelope.id,
+            )
+        )
+
+    return RecordHook(apply, tables=(LEASE_END_REPORTS_TABLE,))
 
 
 class LeaseEndReports:
-    def __init__(self, session_factory, *, signer: Signer, peer: str):
-        self.session_factory = session_factory
-        self.signer = signer
-        self.peer = peer
+    """The signed reports a lease's ends recorded, as the lease read serves them."""
 
-    def record(self, db: Session, payload: dict) -> None:
-        """Borrow the ending transaction; signing and reservation precede commit."""
-        event = LeaseEndedEvent.model_validate(payload)
-        if db.get(LeaseEndReportOutbox, event.event_id) is not None:
-            return
-        parked = db.query(LeaseEndReportOutbox).filter_by(peer=self.peer, parked=True).first() is not None
-        report = sign_lease_end(event, self.signer)
-        db.add(LeaseEndReportOutbox(
-            event_id=event.event_id, capacity_reservation_id=event.capacity_reservation_id,
-            peer=self.peer, report=canonical_json(report).decode(), parked=parked,
-        ))
+    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        self._session_factory = session_factory
 
     def read(self, capacity_reservation_id: str) -> list[SignedLeaseEndedReport]:
-        with self.session_factory() as db:
-            return [SignedLeaseEndedReport.model_validate_json(row.report) for row in db.query(
-                LeaseEndReportOutbox,
-            ).filter_by(capacity_reservation_id=capacity_reservation_id).order_by(
-                LeaseEndReportOutbox.created_at, LeaseEndReportOutbox.event_id,
-            )]
+        with self._session_factory() as db:
+            return [
+                SignedLeaseEndedReport.model_validate_json(row.report)
+                for row in db.query(LeaseEndReport)
+                .filter_by(capacity_reservation_id=capacity_reservation_id)
+                .order_by(LeaseEndReport.created_at, LeaseEndReport.event_id)
+            ]
 
-    async def drain(self, deliver: Callable[[SignedLeaseEndedReport], Awaitable[ReportDelivery]]) -> None:
-        with self.session_factory() as db:
-            pending = [(row.event_id, row.report, row.peer) for row in db.query(LeaseEndReportOutbox).filter(
-                LeaseEndReportOutbox.delivered_at.is_(None), LeaseEndReportOutbox.parked.is_(False),
-            ).order_by(LeaseEndReportOutbox.created_at, LeaseEndReportOutbox.event_id).limit(100)]
-        for event_id, body, peer in pending:
-            # Never send an old event to a different configured owner after a
-            # reconfiguration. Pull still exposes the original signed statement.
-            if peer != self.peer:
-                continue
-            with self.session_factory() as db:
-                row = db.get(LeaseEndReportOutbox, event_id)
-                if row.parked or row.delivered_at is not None:
-                    continue
-            try:
-                result = await deliver(SignedLeaseEndedReport.model_validate_json(body))
-            except Exception:
-                result = "retry"
-            with self.session_factory() as db:
-                row = db.get(LeaseEndReportOutbox, event_id)
-                row.attempt_count += 1
-                row.last_attempted_at = injected_time.now_datetime()
-                row.last_error = None if result == "delivered" else result
-                if result == "delivered":
-                    row.delivered_at = row.last_attempted_at
-                elif result == "unsupported":
-                    db.query(LeaseEndReportOutbox).filter_by(peer=peer).update({"parked": True})
-                db.commit()
 
-    def resume_peer(self) -> None:
-        """Explicitly re-enable push after the coordinated receiver upgrade."""
-        with self.session_factory() as db:
-            db.query(LeaseEndReportOutbox).filter_by(peer=self.peer).update({"parked": False})
-            db.commit()
+class LeaseEndReportDestination:
+    """Delivers a ``site.lease_ended`` event's stored signed report to the
+    storefront peer, exactly as it was signed."""
+
+    def __init__(self, session_factory: sessionmaker[Session], peer: StorefrontPeer) -> None:
+        self._session_factory = session_factory
+        self._peer = peer
+
+    def deliver(self, envelope: Envelope) -> None:
+        event_id = str(envelope.details["event_id"])
+        with self._session_factory() as db:
+            row = db.get(LeaseEndReport, event_id)
+            if row is None:
+                raise AbandonDelivery(f"the signed report of lease end {event_id} is not retained")
+            report = SignedLeaseEndedReport.model_validate_json(row.report)
+            capacity_reservation_id = str(row.capacity_reservation_id)
+        path = LEASE_ENDED_CALLBACK["path"].format(capacity_reservation_id=capacity_reservation_id)
+        try:
+            answer = self._peer.client().authenticated_request(
+                "POST",
+                path,
+                role="service",
+                operation=LEASE_ENDED_CALLBACK["operation"],
+                resource=capacity_reservation_id,
+                body=report.model_dump(mode="json"),
+                request_id="lease-end-" + hashlib.sha256(event_id.encode()).hexdigest(),
+            )
+        except StorefrontClientError as exc:
+            if exc.status_code in UNSUPPORTED_STATUSES:
+                raise ParkDestination(f"unsupported: HTTP {exc.status_code}") from exc
+            raise
+        if answer.get("status") == "unsupported":
+            raise ParkDestination("unsupported")
+
+
+def lease_end_report_consumer(
+    session_factory: sessionmaker[Session], peer: StorefrontPeer, *, runner: str
+) -> Consumer:
+    """The lease-end report consumer over the configured storefront peer, which
+    retries without limit. With no peer configured it has no destination: a
+    stored one is retired."""
+    name = peer_destination(peer.url) if peer.url else None
+    destinations = {name: LeaseEndReportDestination(session_factory, peer)} if name else {}
+
+    def select(envelope: Envelope, candidates: frozenset[str]) -> frozenset[str]:
+        return candidates if envelope.kind == SITE_LEASE_ENDED.name else frozenset()
+
+    return Consumer(
+        LEASE_END_REPORT_CONSUMER,
+        session_factory=session_factory,
+        destinations=destinations,
+        clock=injected_time.now_datetime,
+        retry=RetryPolicy(max_age=None),
+        select=select,
+        runner=runner,
+    )
+
+
+__all__ = [
+    "LEASE_END_REPORTS_TABLE",
+    "LEASE_END_REPORT_CONSUMER",
+    "UNSUPPORTED_STATUSES",
+    "LeaseEndReportDestination",
+    "LeaseEndReports",
+    "lease_end_report_consumer",
+    "lease_end_report_hook",
+    "peer_destination",
+]

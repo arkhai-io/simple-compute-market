@@ -43,6 +43,7 @@ the code imports carries its language's tag.
 | `repository-content` | topic | What may enter a repository, private or public |
 | `terms` | topic | Vocabulary: one name per concept, one home per term |
 | `persistence` | topic | Stored representations, schema changes, migrations, and cutovers |
+| `eventing` | topic | A service's events: one eventing system, recording with the state change, delivery guarantees, and the envelope and its evolution |
 | `configuration` | topic | How a service resolves its configuration and secrets, and the documents it is given |
 | `packaging` | topic | Builds, artifacts, locks, environments, and images |
 | `deployment` | topic | How a service is deployed and started: dependencies, startup refusals, rehearsal |

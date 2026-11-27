@@ -12,14 +12,14 @@ tags: [repository, architecture]
 |---|---|
 | [System overview](#system-overview) | Marketplace purpose and production shape |
 | [Composition from above and below](#composition-from-above-and-below) | Core, kit, domain, and composition-root ownership |
-| [Package and dependency layers](#package-and-dependency-layers) | The package layers, the family kits, the kit areas, and the cross-system capabilities they hold |
+| [Package and dependency layers](#package-and-dependency-layers) | The package layers, the family kits, the kit areas, and the cross-system capabilities they hold, events among them |
 | [Runtime service map](#runtime-service-map) | Processes, authorities, and principal calls |
 | [Authority boundaries](#authority-boundaries) | Which component is authoritative for each kind of state, and how authority is decided |
 | [Shared vocabulary and identities](#shared-vocabulary-and-identities) | Official cross-service terms and identifiers |
 | [Major lifecycle flows](#major-lifecycle-flows) | Negotiation, settlement servicing, capacity, and fulfillment |
 | [Deployment topology](#deployment-topology) | Local and deployed structure, and who operates it |
 | [Build, packaging, and initialization](#build-packaging-and-initialization) | The build flow from internal wheels to images, the migration baseline, and how the repository adopts the change workflow |
-| [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry |
+| [Recovery workers](#recovery-workers) | Timer-driven durable recovery: capacity, fulfillment convergence, lease expiry, event delivery |
 | [Operator lifecycle controls](#operator-lifecycle-controls) | The storefront loop controller and the trading pause |
 | [Testing strategy](#testing-strategy) | Where the tests are described; see `TESTING.md` |
 | [Capability documentation index](#capability-documentation-index) | Permanent detailed contracts and rationale |
@@ -180,13 +180,13 @@ Dependencies never point upward. Kit packages never import deployed services or 
 
 `kit/alkahest`, the Alkahest mechanism kit, owns a listing's release conditions. `market_alkahest.release_conditions` derives each chain's arbiter and demand data from the seller's `[Settlement.alkahest]` policy, the seller wallet, and the chain's address book, identically for every domain that composes Alkahest, and each domain's Alkahest seller stage declares the release models it can deliver. Every kit entry point that materializes an obligation from a buyer's proposal takes the listing and authorizes the selected condition against it (`market_alkahest.release_authorization`), so no seller policy and no acceptance path can skip the check. Release conditions are derived only for escrows published while Alkahest is ready (`market_alkahest.release_conditions.escrow_release_conditions`). On the buyer side the kit writes and reads what a buyer records about a listing's release conditions (`release_conditions_record`, `recorded_release_conditions`), which the buyer's run-log carries as one opaque `listing_record`, so core never names a release condition; a resumed run derives its escrow through the kit and holds it to the seller's recorded plan (`derive_accepted_escrow_terms`), and the buyer's escrow settle hook checks the buyer's own derivation against that plan before any escrow is created (`require_escrow_terms_fund_plan`). The kit also owns the chain probe, `market_alkahest.chain_probe.AlkahestChainProbe`: each storefront composing Alkahest registers its step as the `alkahest-chain-probe` lifecycle loop, the probe holds and rebuilds the storefront's live map of chain clients, and Alkahest's readiness reads each chain's last result rather than calling a chain. See the [negotiation protocol](../../openspec/specs/negotiation-protocol/spec.md) and the [settlement configuration architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
-`kit/resource-pools-contracts` and `kit/resource-pools-client` are the pool capability's thin distributions. The contracts package holds the pool wire models, which validate every domain-neutral hint's structure, the declaration hints and their shared offering-mode resolver, the capacity-bound hints and their tier selection (`capacity_bounds`), the listing-terms resolver both compute storefronts resolve a candidate's settlement clauses through, from their override down the pool's `pricing` hint tiers to configuration (`listing_terms`), the asking-rate structural checks, the capacity backing delegate, and the pool route declarations as plain data. It depends only on pydantic, the admissibility kit, which splits a pool's stated shapes from their constraints, and the shape kit, which the asking-rate checks use directly. The client package holds typed sync and async pool methods over any transport exposing `authenticated_request`. The authority, its persistence, and its framework-free route service stay in `kit/resource-pools`, and the hosting service owns the HTTP binding and adds the declarations to its route table. A caller that only reads or administers pools therefore installs neither the authority nor the compute family's client.
+`kit/resource-pools-contracts` and `kit/resource-pools-client` are the pool capability's thin distributions. The contracts package holds the pool wire models, which validate every domain-neutral hint's structure, the declaration hints and their shared offering-mode resolver, the capacity-bound hints and their tier selection (`capacity_bounds`), the listing-terms resolver both compute storefronts resolve a candidate's settlement clauses through, from their override down the pool's `pricing` hint tiers to configuration (`listing_terms`), the asking-rate structural checks and the asking-rate resolution beside them, the reader of a site's projected pool declarations (`site_declarations`), the capacity backing delegate, and the pool route declarations as plain data. It depends only on pydantic, the admissibility kit, which splits a pool's stated shapes from their constraints, and the shape kit, which the asking-rate checks use directly. The client package holds typed sync and async pool methods over any transport exposing `authenticated_request`. The authority, its persistence, and its framework-free route service stay in `kit/resource-pools`, and the hosting service owns the HTTP binding and adds the declarations to its route table. A caller that only reads or administers pools therefore installs neither the authority nor the compute family's client.
 
 The backing delegate, `CapacityBacking`, makes every decision that differs between backed and unbacked supply, for every market whose listings are admitted against capacity an authority holds — VM and bare metal against physical capacity, API credits against quota — so it is a repository-wide kit rather than core or a family's. It sits beside the `capacity_backing` label it interprets because both sides of the provisioning boundary consult it, and storefront-side packages depend downward on it: `kit/capacity-publication` for its bindings, `core/storefront` to validate a durable binding's label, and the VM and bare-metal domain packages for their listing models. See the [resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#advertisement-delivery-and-backing).
 
 What stays in a core package is universal to every market. `market_core.identifier_encoding` is: it encodes operator-chosen identifiers unambiguously for any market that joins them into a key. So is `market_core.VersionedEnvelope`, the carrier for every provider-specific payload that crosses a domain or persistence boundary (see "Fulfillment" below). `arkhai-core` ships it with only pydantic, so the fulfillment kit, the compute contracts, and the domains all take it from there.
 
-One edge does not match this order: the site ledger in `kit/site` reads Resource Pool rows through `kit/resource-pools` for admission, registration, and the host requirement. Under the scope rule the pool authority — provider, playbook, and host routing — is compute-family knowledge, so the edge is also a kit depending on something family-specific. It is listed under [`package-layers.md`, "Where the current tree diverges"](../guidance/repository/package-layers.md#where-the-current-tree-diverges), whose rule admits no new edge of its shape, and tracked in the [change index](../../openspec/changes/README.md).
+The two authority capabilities do not depend on each other. The site ledger decides on a Resource Pool's facts — whether it exists, whether it is enabled, the offering modes it delivers, and whether its declarations need a host — through a pool-facts port `kit/site` defines and each composition root fills with the pool authority's reader, so `kit/site` imports and declares neither pool distribution, and `kit/resource-pools` imports no site authority; each kit's boundary test holds its half (see the [site-capacity architecture](../../openspec/specs/site-capacity/architecture.md#declared-capacity-and-connection-identity)). The pool authority is provider-neutral — it stores a provider as an opaque string and validates configuration through provider-owned handlers, and API credits and `kit/fulfillment` both depend on it — so it is a repository-wide kit, not compute-family knowledge (see the [resource-pool management architecture](../../openspec/specs/resource-pool-management/architecture.md#ownership-boundary)).
 
 The settlement-runtime distribution is
 `arkhai-kit-settlement-runtime`, imported as
@@ -448,7 +448,73 @@ A configured mechanism whose section parses but which cannot currently settle �
 
 Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
 
-Typed metadata generates role-appropriate templates, edit validation, environment and Helm schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject payment-provider, administrator, webhook, ledger database, and service-migration state. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+Typed metadata generates role-appropriate templates, edit validation, environment schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject payment-provider, administrator, webhook, ledger database, and service-migration state. A chart passing a service's configuration through carries no schema of that configuration, which the service validates itself ([`helm.md`, "A chart's values schema types the chart's own values"](../guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)); the two storefront charts carry a definition generated from their storefront's models, unowned work recorded in the [change index](../../openspec/changes/README.md). See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+
+### Events
+
+A service that tells others about its state changes has one eventing system
+([`eventing.md`](../guidance/engineering/eventing.md)). Producers record events in
+the service's own database, each in the transaction of the change it reports, and
+every delivery of them, to an operator's sinks or to a peer service, is a consumer
+of that one store, never a mechanism of its own per event type. Which state changes
+are reported to operators, and how a producer adds a kind, is
+[`operator-events.md`](../guidance/repository/operator-events.md).
+
+The system is the standalone component `tools/eventing`, which depends on no
+internal package and names no market concept
+([`package-layers.md`, "Kind"](../guidance/repository/package-layers.md#kind)). It
+holds a versioned envelope, whose routing fields every consumer reads without knowing
+an event's kind; kind declarations, collected in a catalogue; a recorder writing in
+the producer's transaction, which records an occurrence once by its kind's dedup key
+and runs the kind's record-time hook in the same transaction; consumers delivering
+each event to each destination in order, retrying each delivery until it succeeds
+or is abandoned, with each destination's delivery state, park and resume, and a finally sink for an abandoned delivery; routes selecting
+events by an SQL condition, validated with sqlglot; pruning by time, per table; and a
+framework-free read and status service. It owns no migration engine: it supplies its
+tables and one schema step per version, which each service's chain applies. Its
+model and rationale are the [eventing architecture](../../openspec/specs/eventing/architecture.md).
+
+The provisioning service composes it, with one recorder that the site ledger, the job
+engine and the lease lifecycle share. Two packages declare its kinds. `kit/site`
+declares `site.lease_ended` and `site.capacity_released` (`market_site.events`),
+which the ledger records in its ending and release transitions. Compute provisioning
+declares `provisioning.lease_release_failed`, `provisioning.teardown_attempt_held`
+and `provisioning.job_finished` (`compute_provisioning.operator_events`): the lease
+lifecycle prepares the first and hands it to the site's release-failure transition,
+which records it only when it accepts the transition, and the job engine records the
+other two in its own transitions. Every event of a lease names the lease among its
+related references, so the events read by `lease:<reservation>` are its history.
+Three consumers deliver them:
+
+| Consumer | Destinations | Delivers |
+|---|---|---|
+| `event-sinks` | One per sink enabled under `[Events.sinks]` | The events the deployment's `[Events.routes]` select, through `kit/delivery`'s sinks |
+| `lease-end-reports` | One named for the configured storefront peer | Each `site.lease_ended` event's signed lease-end report ("Release" below) |
+| `capacity-released` | One, `storefront` | The capacity-released callback for each release the lease lifecycle makes ("Release" below) |
+
+`EventDeliveryWorker` runs all three, then prunes ("Recovery workers" below). An
+administrator reads the events, by kind, severity, subject or related reference, at
+`GET /api/v1/events`, each destination's delivery state at
+`GET /api/v1/events/deliveries`, and resumes a parked destination at
+`POST /api/v1/events/destinations/{name}/resume`. The service reads its sinks, routes,
+retention per table, delivery interval, the sinks' maximum age and its finally sink
+from `[Events]`, and refuses to start on a sink, route or finally sink the component
+refuses ([physical provisioning](../../openspec/specs/physical-provisioning/spec.md)
+and its [configuration](../../openspec/specs/physical-provisioning/configuration.md));
+its chart passes the section through
+([`DEPLOYMENT_AND_CONFIG.md`, "Kubernetes: ConfigMap and Secret mounting"](DEPLOYMENT_AND_CONFIG.md#kubernetes-configmap-and-secret-mounting)).
+
+The event-sink consumer is `kit/delivery`'s (`market_delivery.event_sinks`, under the
+distribution's `events` extra, so a buyer installs no eventing). The sinks that
+deliver introductions deliver events too: a sink takes a `Deliverable`, which an
+introduction's delivery event and an event both satisfy, and a signing webhook signs
+as its composition says, the provisioning service as role `service` and operation
+`operator_event_delivery`. Introduction delivery itself keeps its own at-most-once
+claim and does not pass through the eventing system
+([introduction delivery, "One sink layer"](../../openspec/specs/introduction-delivery/architecture.md#one-sink-layer)).
+
+The site's capacity-event feed and the storefronts' stage events are mechanisms of
+their own, outside the eventing system.
 
 ## Runtime service map
 
@@ -482,7 +548,7 @@ Typed metadata generates role-appropriate templates, edit validation, environmen
                                       └────────────────────┘
 ```
 
-The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time; it also runs the timer-driven recovery watchdogs described in "Recovery workers" below. An api-family seller stack, which API credits is, instead composes a storefront over the family's `selling` library and its own service root over the family's `authority` library, which owns keys, balances, grants, quota as capacity, and online consumption; the seller's own application checks each request through the family's bearer gate. An inference seller stack is the same shape with a gateway in place of the seller's application: a domain executable over the family's `gateway` library sits in front of a model server, admits only the model its listing serves, verifies and charges each request through the gate, and forwards it under the deployment's own upstream credential.
+The buyer is normally a pure HTTP client. The registry is a shared discovery service. A storefront is seller-owned market state. The compute provisioner hosts the site capacity authority and shared physical-provisioning service, with concrete domain adapters registered at composition time; it also runs the timer-driven recovery workers described in "Recovery workers" below. An api-family seller stack, which API credits is, instead composes a storefront over the family's `selling` library and its own service root over the family's `authority` library, which owns keys, balances, grants, quota as capacity, and online consumption; the seller's own application checks each request through the family's bearer gate. An inference seller stack is the same shape with a gateway in place of the seller's application: a domain executable over the family's `gateway` library sits in front of a model server, admits only the model its listing serves, verifies and charges each request through the gate, and forwards it under the deployment's own upstream credential.
 
 ## Authority boundaries
 
@@ -655,8 +721,9 @@ Each provisioning connection is bound to an operator-configured `site_id`, its a
 Capacity events are anonymous availability deltas broadcast through a pull feed.
 Deal-scoped pushes to the owning storefront have separate durable acknowledgements:
 immutable site-signed `lease_ended` reports state intended end before teardown;
-the capacity-released callback states proven capacity return. Authenticated lease
-reads recover the original signed reports. Neither an intended end nor its push
+the capacity-released callback states proven capacity return. Each is a consumer
+of the event the site records with its transition ([Events](#events)).
+Authenticated lease reads recover the original signed reports. Neither an intended end nor its push
 acknowledgement frees capacity. Fulfillment status/results remain pull surfaces.
 A storefront reconciles listings for every capacity delta regardless of initiator.
 See [site evidence](../../openspec/specs/site-capacity/architecture.md#intended-end-evidence).
@@ -731,8 +798,10 @@ host record. Site admission, the site's rebind
 recheck, and settlement scheduling each refuse a declaration with no usable host,
 and the site's offered read, from which every projection is built, projects it not
 enabled: the same layer-by-layer recheck, so no layer relies on another having
-refused. Both the requirement and the report live in `kit/resource-pools` beside
-the predicate that applies them. Dispatch is the last check. It renders execution
+refused. The report's protocol and the predicate that applies it live in `kit/site`
+(`market_site.deliverable_hosts`), taking a pool's need for a host as a boolean; the
+requirement, which maps a pool's provider to that need, lives in `kit/resource-pools`,
+whose reader of pool facts resolves it for the site. Dispatch is the last check. It renders execution
 inventory only from the registered host record and refuses a host with none, and a
 create a disabled one. A composition that delivers nothing through hosts supplies
 no requirement, and its admission is host-agnostic; one that supplies a requirement
@@ -783,6 +852,7 @@ key when signing is not configured.
 | **Market Agreement** | Commercial terms accepted after negotiation | Core/domain and storefront |
 | **Capacity Offering** | Market-facing representation of sellable capacity | Storefront |
 | **Capacity Projection** | Storefront view of capacity believed sellable | Storefront, sourced from sites |
+| **Capacity Claim** | What a storefront asks a site to probe or reserve: the quantities requested, as `dimensions`; the offering mode; and the pool or Physical Resource, resource type and attributes a declaration must match | Storefront builds it; site authority admits it |
 | **Capacity Reservation** | Admitted hold against authoritative capacity | Site authority |
 | **Physical Resource** | Real supply resource such as host, pod allocation, storage, power, or bandwidth | Site/provisioning |
 | **Capacity Declaration** | Authoritative statement of a Physical Resource's sellable shape and quantity, its pool, and the attributes claims match | Site authority |
@@ -801,6 +871,8 @@ key when signing is not configured.
 | **Package allowlist** | Every distribution, internal or third-party, one package may declare or import beyond the standard library: its `allowed-dependencies` | The package's own `pyproject.toml`, held by `make check-architecture` |
 | **Role** | An actor in the market — buyer, seller, operator — whose part a role package such as core buyer or core storefront implements, or the authorization role a principal is bound to, such as `seller`, `admin`, or `service`. A deployable process is a service, not a role | The market's participants; each authority's role bindings |
 | **Service** | A deployable process with its own state and lifecycle — compute provisioning, a storefront, the API-credit service, the registry — which owns its database and migrations | `openspec/specs/deployment-state/spec.md` |
+| **Event** | One state change a service records in its eventing system, in the transaction of the change, under the eventing envelope. A capacity event of the site's feed and a storefront's stage event are not events in this sense | The recording service, through `tools/eventing` ("Events" above) |
+| **Event kind** | A declared type of event, such as `site.lease_ended`: its name, version, default severity, attributes, dedup key and details. Not a package's kind, nor a `VersionedEnvelope`'s `kind` | The package declaring it |
 | **Release candidate** | A default-branch commit loaded under its nine-character revision by `make load-candidate` | The release handbook's load; validated by the deployment |
 | **Marketplace release** | A release candidate the deployment promoted, named by its semver and recorded by its `marketplace-v<semver>` tag | The deployment; recorded by the bill of materials |
 | **Release component** | An entry of the release declaration other than a development image: a distribution, a release image, the chart, or the binary | `manifests/release-components.json` |
@@ -1115,6 +1187,8 @@ shared seller half
 and returned verbatim, not reinterpreted as capacity return. Due ends terminate
 immediately; future ends truncate the immutable lease horizon. Storefront teardown goes through lease termination. A storefront never frees a delivered reservation's capacity itself. Buyer teardown at the bare-metal storefront terminates the lease at the reservation's site, which is the release path expiry takes. A repeated teardown finds the same `releasing` or `released` lease. The storefront marks its own lifecycle released only on the site's capacity-released callback.
 
+The lease-end report and the capacity-released callback are consumers of the provisioning service's eventing system ([Events](#events)). The ledger records `site.lease_ended` with every `lease_ended` record, in the ending transaction, and that kind's record-time hook signs the report under `arkhai.site.lease-ended.v1` and writes it to `lease_end_reports` in the same transaction. The signed report is domain evidence, not delivery state: it is kept under its own retention, every report by default, and while its event is kept, and the authenticated lease read serves it whether or not it was pushed. The `lease-end-reports` consumer sends the stored bytes to the configured storefront peer's destination, retrying without limit. A peer answering 404, 405, 501 or "unsupported" parks its destination until an administrator resumes it; a peer configured beside or in place of another starts at the latest committed event; and the replaced peer's destination is retired, its undelivered reports handed to the finally sink, never redirected. Every release that frees capacity records `site.capacity_released` in its own transaction, marked `lease_lifecycle` when the lease lifecycle made it through the site authority port. The `capacity-released` consumer calls the storefront back for those releases alone, under a request identity derived from the release, until the storefront acknowledges it; a callback the storefront refuses with 400, 404 or 409 is abandoned to the finally sink and holds back no later one, and while no storefront URL is configured a callback waits for one. A lease command — terminate, retry-release, force-release — and a lease-watchdog cycle that made a transition run both consumers' cycles once, after the transition commits, so a report or callback leaves within the request or cycle that recorded it; a delivery that fails there is retried by `EventDeliveryWorker` alone. See [physical provisioning, "Lease-end report delivery"](../../openspec/specs/physical-provisioning/architecture.md#lease-end-report-delivery).
+
 `begin_fulfillment_teardown(fulfillment_id)` is the whole-fulfillment teardown entrypoint: it resolves the aggregate, reuses an already-prepared teardown operation when present (as legacy-backfilled rows carry) or prepares one via the provider when a native row reaches teardown for the first time, then hands off to convergence for dispatch — it never dispatches to the provider inline.
 
 ## Deployment topology
@@ -1196,12 +1270,16 @@ only, which is why `AGENTS.md`'s exceptions admit it to the public repository.
 
 What a service accepts of a stored representation, and what a cutover counts as live, is [`accepted-representations.md`](../guidance/repository/accepted-representations.md).
 
-Each stateful service's migration chain begins at a supported baseline, so a
-database is either built by that chain from empty or adopted at the baseline's
-release; any other existing database is refused, and the service starts from a
-fresh database instead. VM/bare-metal seller evidence/delivery and API-credit
-evidence/grant schemas require fresh owned databases when incompatible; startup
-rejects drift instead of silently copying/adopting old payment rows. Their
+Each stateful service's migration chain begins at a supported baseline and
+declares its floor release. A database is either built by that chain from empty, or
+adopted as one its floor release ran on, whatever earlier releases recorded in it. An
+older database is refused, to be upgraded through the floor release once confirmed
+as the service's. A database the chain did not build is refused as not the
+service's. No refusal directs a fresh database in place of one that can upgrade
+([`DEPLOYMENT_AND_CONFIG.md`, "Migrations at startup"](DEPLOYMENT_AND_CONFIG.md#migrations-at-startup)).
+VM/bare-metal seller evidence/delivery and API-credit evidence/grant schemas reach
+the current release only through their chains; startup rejects drift instead of
+silently copying/adopting old payment rows. Their
 capability architecture companions define quiesce, ownership and bootstrap
 boundaries.
 
@@ -1237,13 +1315,16 @@ capability ([specification](../../openspec/specs/market-change-workflow/spec.md)
 
 ## Recovery workers
 
-The compute provisioner runs three independent timer-driven workers, composed once at startup alongside the request-serving app, each owning a distinct slice of durable recovery:
+The compute provisioner runs four independent timer-driven workers, composed once at startup alongside the request-serving app, each owning a distinct slice of durable recovery:
 
 | Worker | Owns |
 |---|---|
 | `CapacityReservationWatchdog` | Expiring stale/unconfirmed capacity holds |
 | `FulfillmentConvergenceWatchdog` | Create and teardown dispatch/status convergence for the fulfillment aggregate (see "Fulfillment" and "Release" above) |
 | `LeaseWatchdog` | Lease expiry detection that triggers release |
+| `EventDeliveryWorker` | Every consumer's cycle of the service's eventing system — the operator sinks, the lease-end reports and the capacity-released callbacks — then pruning by the configured retention (see "Events" above) |
+
+`LeaseWatchdog` drains nothing and retries no delivery. A lease command or watchdog cycle that made a transition asks for the two storefront consumers' cycles once, after the transition commits, and every retry is `EventDeliveryWorker`'s. A consumer's cycles run one at a time, so a cycle asked for while one runs waits for it and then reads what committed before it, never waiting on another consumer's deliveries or on pruning. The worker's timer runs a cycle every `[Events] delivery_interval_seconds`, and the worker has pause, resume and run-cycle controls at `/api/v1/system/event-delivery/*`; a pause holds the timer, not a cycle a lease command asks for.
 
 `FulfillmentConvergenceWatchdog` runs four handler passes each cycle — create-submission recovery, create-status convergence, teardown-submission recovery, teardown-status convergence — plus a `teardown_failed` requeue step, sharing one timer rather than one watchdog per pass. Each pass claims eligible rows durably (a short transaction reserving the row with a lease and worker identity), performs any provider call entirely outside a database transaction, and applies the outcome in a second short transaction only if the claim is still owned — a claim whose lease lapsed before the provider call returns is silently superseded, not double-applied. No attempt-count ceiling exists anywhere in this recovery path; a fresh worker instance resumes purely from durable claim state after a restart. A row's attempt count is its run of consecutive unproductive claims: exponential backoff and jitter space attempts that fail, an applied outcome or a provider answering "still pending" starts the count again, and a healthy pending poll keeps its claim only for the initial interval, so a fast operation is observed on the next cycle rather than after a backoff it never earned. Every reset happens under the claim's owner, so a worker whose lease lapsed changes nothing.
 

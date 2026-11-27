@@ -7,20 +7,28 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
+import injected_time
 from compute_provisioning.lease_lifecycle import LeaseLifecycleService
 from compute_provisioning.executor_leases import ExecutorLeaseService
 from compute_provisioning.leases import LeaseRouteService
 from compute_provisioning.release import ReleaseAction, ReleaseDecision
 from compute_provisioning_contracts import LeaseForceRelease, LeaseTermination, verify_lease_end
+from injected_time import InjectedTime
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_resource_pools import ResourcePoolFacts
 from market_site.authority import LedgerSiteAuthority
-from market_site.db import Base as SiteBase, CapacityReservation
+from market_site.db import CapacityReservation
 from market_site.ledger import CapacityLedgerService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from storefront_client import StorefrontClientError
 
-from compute_provisioning_service.db.models import LeaseEndReportOutbox
-from compute_provisioning_service.services.lease_end_reports import LeaseEndReports
+from compute_provisioning_service.db.database import migrate_database
+from compute_provisioning_service.services.lease_end_reports import (
+    LeaseEndReports,
+    lease_end_report_consumer,
+)
+from compute_provisioning_service.services.operator_events import event_catalogue, event_recorder
 
 
 class Undispatched:
@@ -31,18 +39,45 @@ class Undispatched:
         raise AssertionError("nothing was dispatched")
 
 
+class ScriptedStorefront:
+    """The storefront's lease-end route, answering from a script: a lost
+    acknowledgement, an acknowledgement, or a 404 from an older receiver."""
+
+    def __init__(self):
+        self.answers = []
+        self.seen = []
+        self.url = "http://fixture-storefront"
+
+    def client(self):
+        return self
+
+    def authenticated_request(self, method, path, *, body, **_):
+        self.seen.append(json.dumps(body, sort_keys=True))
+        answer = self.answers.pop(0) if self.answers else "accepted"
+        if answer == "lost":
+            raise ConnectionError("acknowledgement lost")
+        if answer == 404:
+            raise StorefrontClientError("not found", status_code=404)
+        return {"status": answer}
+
+
 async def main():
     # Public deterministic development identity; never use on a public network.
     site = Ed25519Signer(bytes([3]) * 32)
+    # Held time, moved past the retry's backoff rather than waited out.
+    source = InjectedTime()
+    injected_time.install(source)
     with TemporaryDirectory(prefix="lease-end-reports-") as root:
         engine = create_engine("sqlite:///" + str(Path(root) / "site.sqlite"))
-        SiteBase.metadata.create_all(engine)
-        LeaseEndReportOutbox.__table__.create(engine)
+        migrate_database(engine)
         factory = sessionmaker(bind=engine)
-        reports = LeaseEndReports(factory, signer=site, peer="fixture-storefront")
         ledger = CapacityLedgerService(
-            factory, site_id="fixture-site", lease_end_effect=reports.record,
+            factory,
+            pool_facts=ResourcePoolFacts(),
+            site_id="fixture-site",
+            event_recorder=event_recorder(event_catalogue(site), instance="fixture-site"),
         )
+        reports = LeaseEndReports(factory)
         now = datetime.now(timezone.utc)
         with factory() as db, db.begin():
             for name in ("expiry", "termination", "direct", "failure", "force"):
@@ -67,17 +102,15 @@ async def main():
                                       caller=site.identity.model_dump(mode="json"))
         await lifecycle.force_release("force", LeaseForceRelease(reason="host inspected"))
         before = reports.read("termination")[0].model_dump_json()
-        seen = []
-        async def lost_ack(report):
-            seen.append(report.model_dump_json())
-            return "retry"
-        await reports.drain(lost_ack)
-        restarted = LeaseEndReports(factory, signer=site, peer="fixture-storefront")
-        async def acknowledged(report):
-            seen.append(report.model_dump_json())
-            return "delivered"
-        await restarted.drain(acknowledged)
-        routes = LeaseRouteService(ExecutorLeaseService(authority), lifecycle, reports=restarted.read)
+        storefront = ScriptedStorefront()
+        storefront.answers = ["lost"]
+        lease_end_report_consumer(factory, storefront, runner="first-use").run_cycle()
+        # A restarted process replays what was not acknowledged, as it was
+        # signed, once its retry is due.
+        source.set(source.now() + 11)
+        restarted = lease_end_report_consumer(factory, storefront, runner="first-use")
+        restarted.run_cycle()
+        routes = LeaseRouteService(ExecutorLeaseService(authority), lifecycle, reports=reports.read)
         pulled = routes.get("termination").end_reports[0]
         event = verify_lease_end(
             pulled, capacity_reservation_id="termination", site_id="fixture-site",
@@ -89,18 +122,16 @@ async def main():
                 lease_start_utc=now.isoformat(), lease_end_utc=(now + timedelta(hours=1)).isoformat(),
             ))
         ledger.release(capacity_reservation_id="unsupported")
-        async def unsupported(report):
-            return "unsupported"
-        await restarted.drain(unsupported)
-        with factory() as db:
-            parked = db.get(LeaseEndReportOutbox, ledger.lease_end_events("unsupported")[0]["event_id"]).parked
+        storefront.answers = [404]
+        parked = restarted.run_cycle().parked
+        first_attempt, replayed = storefront.seen[0], storefront.seen[1]
         print(json.dumps({
             "causes": {name: [item["cause"] for item in ledger.lease_end_events(name)]
                        for name in ("expiry", "termination", "direct", "failure", "force")},
-            "retry_preserves_bytes": sorted(seen[:len(seen)//2]) == sorted(seen[len(seen)//2:]),
+            "retry_preserves_bytes": first_attempt == replayed,
             "pull_preserves_report": pulled.model_dump_json() == before,
             "caller_reason": event.reason, "caller": event.caller.model_dump(mode="json"),
-            "unsupported_parked": parked, "unsupported_pull_retained": bool(restarted.read("unsupported")),
+            "unsupported_parked": bool(parked), "unsupported_pull_retained": bool(reports.read("unsupported")),
             "release_failure_still_holds_capacity": ledger.get_reservation("failure")["state"] == "release_failed",
         }))
 

@@ -11,6 +11,8 @@ through its entry point with the service's own settings loader.
 
 from __future__ import annotations
 
+from market_schema_migrations import Floor
+
 import importlib
 import sqlite3
 from collections.abc import Callable
@@ -54,7 +56,9 @@ def command(monkeypatch) -> Callable[..., int]:
 
 
 def test_the_chain_is_the_authoritys_named_for_this_service():
-    assert CHAIN == authority_chain(service="the inference service", command=COMMAND)
+    assert CHAIN == authority_chain(
+        service="the inference service", command=COMMAND, floor=Floor("0.0.0")
+    )
 
 
 def test_the_console_script_is_the_command():
