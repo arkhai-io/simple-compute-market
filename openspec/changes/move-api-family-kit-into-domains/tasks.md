@@ -519,11 +519,14 @@ Delivers D10, D12, the reason D7 states, and D4's consequence for the roadmap. T
 `docs/development/ROADMAP.md`, `openspec/specs/inference/architecture.md`,
 `openspec/changes/README.md`, and two other changes' documents.
 
-- [ ] 6.1 `docs/development/ROADMAP.md`, the inference goal: the paragraph
+- [x] 6.1 `docs/development/ROADMAP.md`, the inference goal: the paragraph
       fixing the campaign's order and recounting a withdrawn approach is
       replaced by its closing pointer to the change index (D10). Verify: the
       goal holds no sentence of sequence.
-- [ ] 6.2 `docs/development/ROADMAP.md`, the inference goal's current state:
+      *Note:* the paragraph is one sentence pointing to the change index
+      for the goal's changes and their readiness; a search of the goal for
+      words of order finds none that fixes a delivery order.
+- [x] 6.2 `docs/development/ROADMAP.md`, the inference goal's current state:
       the sentence saying the authority's consumption route accepts a variable
       amount says instead that it charges an unpinned key the amount sent and
       refuses a key whose first grant pins a request charge, as every
@@ -532,37 +535,78 @@ Delivers D10, D12, the reason D7 states, and D4's consequence for the roadmap. T
       Verify: the sentence agrees with the delta requirement "A key is scoped
       to its first grant". The `qualify-inference-market` row's reference to
       its goal's completion test, which D10 also names, is already corrected.
-- [ ] 6.3 `openspec/specs/inference/architecture.md`, "Role composition over
+      *Note:* the sentence says the consumption routes, the single and the
+      batched, charge an unpinned key the amount sent and refuse a pinned
+      key, as every inference key is, at any other amount, so a charge measured from usage needs routes of its
+      own; that is the delta's refusal, read against section 3's code.
+- [x] 6.3 `openspec/specs/inference/architecture.md`, "Role composition over
       the family kit": inference composes no dispute policy because it settles
       through Alkahest alone and reads no dispute authority (D7). Verify: the
       sentence is present and names no change.
-- [ ] 6.4 `openspec/changes/move-escrow-into-alkahest/proposal.md`: a bullet
+      *Note:* it closes the storefront's paragraph; it names no change.
+- [x] 6.4 `openspec/changes/move-escrow-into-alkahest/proposal.md`: a bullet
       naming the three Alkahest buyer modules of the family's buying library,
       the VM buyer's copies, the cycle and the configuration read that keep
       them from the Alkahest kit today, and the question of a buyer-side
       Alkahest kit; and its index row's Notes (D12). Verify: the row and the
       bullet name the same three files.
-- [ ] 6.5 `openspec/changes/kit-owned-storefront-auth-and-persistence/design.md`,
+      *Note:* both name `escrow_selection.py`, `escrow_client.py`, and
+      `chains.py`, and the VM buyer's own versions of the first two in
+      `domains/vms/buyer`: a copy of `escrow_selection.py` apart from its
+      lazy imports, and an `escrow_client.py` that D2 found is not a copy.
+      The bullet says the cycle and the configuration read hold only until
+      this proposal's own `kit/policy` split and `kit/alkahest` cleanup.
+- [x] 6.5 `openspec/changes/kit-owned-storefront-auth-and-persistence/design.md`,
       "Questions to settle before planning": the negotiation service's error
       is an import of the selling library the carve-out places; and its index
       row's Notes (D12). Verify: present in both.
-- [ ] 6.6 Index rows' Notes: `sign-multi-language-credits-middleware` — the
+      *Note:* a question in the design names `NegotiationServiceError`
+      and its import in `route_services.py` and asks where the carve-out
+      places it; the row's Notes name both.
+- [x] 6.6 Index rows' Notes: `sign-multi-language-credits-middleware` — the
       ported gates send no key scope and ignore a pinned charge, and the
       TypeScript gate answers an unknown refusal as exhausted credit;
       `keep-buyer-credentials-private` — the parameters section 5 adds to the
       credential store and the rewrite of its test module;
       `derive-buyer-settlement-inputs` — the collaborators section 5 adds to
       the Alkahest buyer stage (D12). Verify: `change-workflow check index`.
-- [ ] 6.7 The index's unowned work for the kit goal: add the payments adapter
+      *Note:* the three rows' Notes carry the notes, each naming the
+      parameters or collaborators sections 3 and 5 gave the code. The
+      gates' note is broader than D12: the Rust gate, read against
+      `gate-ports/rust/src/gate.rs`, answers an unknown consume refusal as
+      exhausted credit as the TypeScript gate does, and in front of the
+      inference authority both answer every request as an invalid key,
+      since it refuses their unscoped verify; the row says so and cites the
+      requirement both miss.
+      `change-workflow check index` passes.
+- [x] 6.7 The index's unowned work for the kit goal: add the payments adapter
       the VM and bare-metal buyers each construct in near-identical lines
       (D12). The row saying the API-credit lane has never run against the
       family kit, which D12 also names, left the index with
       `compose-api-family-kit`'s archive cleanup, whose row records the run.
       Verify: `change-workflow check index`.
-- [ ] 6.8 Verification. `make check-doc-citations
+      *Note:* the row names both buyers' `lifecycle.py`, where each builds
+      the `PaymentAdapter`, and gives D12 as its origin; `change-workflow
+      check index` passes.
+- [x] 6.8 Verification. `make check-doc-citations
       CHANGE=move-api-family-kit-into-domains`; `change-workflow run
       pre-commit move-api-family-kit-into-domains`.
       End-to-end: none exercises a document.
+      *Note:* `make check-doc-citations
+      CHANGE=move-api-family-kit-into-domains` and `change-workflow check
+      index` pass; `change-workflow run pre-commit
+      move-api-family-kit-into-domains --base origin/dev` passes, its
+      closing checks alone, since the section changes documents only.
+      Nothing is owed by validation. The fresh-context check found the
+      gates' note wrong about what the TypeScript gate answers in front of
+      the inference authority and silent on the Rust gate, the companion
+      misquoted, the escrow bullet's two obstacles stated as permanent
+      where the same proposal removes both, the VM buyer's modules called
+      copies against D2, the new design question stating an answer, the
+      roadmap sentence's routes and idempotency key imprecise, and one
+      note overstated; each corrected. The goal's remaining dated phrases,
+      which D10 does not cover, stay with the index's unowned row on the
+      inference goal's dated history.
 
 ## 7. Closeout
 

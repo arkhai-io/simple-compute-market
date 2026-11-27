@@ -89,6 +89,23 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     `drop-escrow-from-shared-wire`'s. `enforce-package-layers`'s exceptions table
     carries both edges under this change, and the rows are deleted when the
     imports are.
+- The `api` family's buying library for Alkahest,
+  `domains/api/buying-alkahest`, holds three buyer modules that belong with the
+  mechanism: `escrow_selection.py`, `escrow_client.py`, and `chains.py`. The VM
+  buyer has its own versions of the first two in `domains/vms/buyer`:
+  `escrow_selection.py` is a copy apart from its lazy imports, and six of
+  `escrow_client.py`'s seven functions are the same, while the family's
+  settlement payload builder sends the chain name, the VM buyer's does not,
+  and the family's codec class is its own. Two things keep them out of
+  `kit/alkahest` today: `escrow_selection.py` imports `kit/policy`, whose
+  escrow-kind half imports `kit/alkahest`, so the move would close a cycle
+  between the two kits until that half leaves `kit/policy` (above); and
+  `chains.py` reads the user's configuration file, which `package-layers.md`
+  names as misplaced in a kit, the kind of read this change removes from
+  `kit/alkahest`. The design decides where they go, weighing the placement
+  against the order of the `scalar_policies.py` split, including whether a
+  buyer-side Alkahest kit should hold them, which would avoid the cycle but
+  needs the rule that one kit holds a mechanism's scope amended.
 
 ## Capabilities
 

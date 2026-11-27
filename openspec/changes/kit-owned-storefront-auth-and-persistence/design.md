@@ -70,6 +70,13 @@ Design phase; not planned.
   whether the contracts carve-out is the first step of this change, landing before
   the shell's route set is planned, or its own small prerequisite change the other
   two depend on.
+- **The negotiation service's error in the `api` family's selling library.**
+  `arkhai_api_selling.route_services` imports `NegotiationServiceError` from
+  `core_storefront.services.negotiation_service`, one of the selling library's
+  imports of the storefront role the `arkhai-api-selling` →
+  `arkhai-core-storefront` exception row names. Decide where the carve-out
+  places it: beside the wire models in `kit/storefront-contracts`, or with the
+  negotiation service.
 
 ## Decisions
 

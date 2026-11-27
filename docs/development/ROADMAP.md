@@ -437,9 +437,11 @@ companion records that variable-cost metering is not established.
 
 What is reusable is real and specific. The settlement runtime, the negotiation
 runtime, the storefront composition seam (`kit/storefront`), the
-capacity/publication kit, and the registry are domain-neutral and need nothing. The credits authority's consumption route
-already accepts a variable amount with an idempotency key, though every caller
-passes one. Issuance — the immutable request with its digest, the deterministic
+capacity/publication kit, and the registry are domain-neutral and need nothing. The credits authority's consumption routes
+charge a key whose first grant pins no request charge the amount sent, under an
+optional idempotency key, and refuse, at any other amount, a key whose first
+grant pins one, as every inference key's does; so a charge measured from usage
+needs routes of its own. Issuance — the immutable request with its digest, the deterministic
 fulfillment identity, the client, the rollback, the signed evidence — is generic
 to any market that delivers a bearer credential, and the `api` family holds it
 under each domain's own label. What is not reusable
@@ -448,19 +450,8 @@ request; inference must reserve a worst-case charge, run the request, and settle
 from measured usage, because the cost is unknown until the response is complete
 and a single request can exceed a key's balance.
 
-The campaign therefore proceeds in a fixed order: define the vocabulary; take
-the `api` family vocabulary and kit that Goal 4's `compose-api-family-kit`
-builds by refactoring API credits onto it, with the API-credits digests pinned
-byte-for-byte first; compose the inference roles on
-the kit and prove one deal at a flat charge per request; replace the flat charge
-with hold-then-settle metering; package the seller path thinly; qualify the
-market. An earlier order copied the API-credits roles into inference first and
-extracted afterwards, because the shared boundary was thought unknowable from
-one consumer; the copy was carried as far as the storefront and the authority,
-measured at about 12,500 copied source lines against fewer than 300 new ones,
-and withdrawn unmerged on 2026-10-19 in favour of the family-kit shape compute
-already uses. See [`openspec/changes/README.md`](../../openspec/changes/README.md)
-for readiness.
+See [`openspec/changes/README.md`](../../openspec/changes/README.md) for the
+goal's changes and their readiness.
 
 | Open gap | Owned by |
 |---|---|
