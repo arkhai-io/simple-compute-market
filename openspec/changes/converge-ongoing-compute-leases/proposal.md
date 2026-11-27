@@ -79,7 +79,7 @@ None.
   envelope: `recover-deals-from-the-storefront-cli`, deferred (D2).
 - A storefront command acknowledging a release the site has not proven (D3).
 - The lane row that needs a delivery deadline the site enforces:
-  `renewable-compute-lease-deadlines` (D5).
+  `enforce-delivery-deadlines-at-the-site` (D5).
 - Re-anchoring a running deal across a receipt key change. A key change is a drained
   cutover, and the gap is tabled in Goal 8's unowned work.
 - Payment arithmetic, the mandate codec, authority policy and buyer acceptance policy.
@@ -97,7 +97,7 @@ None.
 - `end-delivery-when-funding-runs-out` takes the funding timer and does not depend on
   this change. Both modify `deal-lifecycle`'s "Each deal's servicing steps run in one
   kit-owned order"; whichever lands second reverifies against the other.
-- `renewable-compute-lease-deadlines` takes the late-anchor row.
+- `enforce-delivery-deadlines-at-the-site` takes the late-anchor row.
 - `recover-deals-from-the-storefront-cli` takes operator recovery.
 
 ## Impact

@@ -312,7 +312,7 @@ list and this one are the same list.
 
 A lease can end while its create is in flight, and the release guard holds its
 capacity until the create settles and teardown is proven. With a delivery deadline
-recorded at commit, as `renewable-compute-lease-deadlines` records it, every delivery
+recorded at commit, as `enforce-delivery-deadlines-at-the-site` records it, every delivery
 slower than its deadline is reclaimed mid-create. The site's part is proven in
 `kit/site` and in a lane, where a provisioning job is held at a gate under lane time.
 What a lane cannot show is that a real host is left clean when teardown follows an
@@ -329,7 +329,7 @@ observations cover teardown of delivered machines only.
   operator's procedure until a scenario exists.
 
 Recommended: (b). The path exists today and has never been observed on a host, and
-`renewable-compute-lease-deadlines` makes it routine. It would move to (a) if the
+`enforce-delivery-deadlines-at-the-site` makes it routine. It would move to (a) if the
 roles' create and teardown are shown, by their own tests, to be safe at any point of
 interruption.
 

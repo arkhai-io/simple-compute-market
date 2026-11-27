@@ -105,7 +105,7 @@ Rejected:
 
 - A deadline on the active lease that the storefront renews to the funded instant and
   the site enforces. It ends a working, paid lease when the storefront stops, which
-  harms the buyer for the seller's failure. `renewable-compute-lease-deadlines` leaves
+  harms the buyer for the seller's failure. `enforce-delivery-deadlines-at-the-site` leaves
   it buildable: its expiry claim is stated over what made a lease due, and its
   lease-end report names which deadline was claimed (that change's D2 and D5). It is
   revisited when a site's operator is not its storefront's, since such a site has its
@@ -268,7 +268,7 @@ states a pool.
   The first pool's deals end fifteen minutes after an unconfirmed funded instant; the
   second pool's serve on, as today.
 - (b) The same tag, with nothing resolving a default its provider declares, as
-  `renewable-compute-lease-deadlines`' pool tag does. A pool written under 0.4.0 states
+  `enforce-delivery-deadlines-at-the-site`' pool tag does. A pool written under 0.4.0 states
   nothing, so its running deals would gain an end on upgrade, and the operator handbook
   would need an upgrade step.
 - (c) No posture. The storefront always serves until a read succeeds, and the seller's

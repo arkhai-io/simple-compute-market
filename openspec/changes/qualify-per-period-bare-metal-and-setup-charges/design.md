@@ -187,7 +187,7 @@ with an output this change would compare:
 | Change | Why it does not gate this one |
 |---|---|
 | `end-delivery-when-funding-runs-out` | Funds running out is already compared live; a funded instant the authority cannot confirm cannot be made live |
-| `renewable-compute-lease-deadlines` | The site is this repository's own service; no external party is involved |
+| `enforce-delivery-deadlines-at-the-site` | The site is this repository's own service; no external party is involved |
 | `discover-open-ended-compute-listings`, `filter-listings-by-capacity-bounds` | No live scenario reads a class or a bound |
 | `offer-a-seller-chosen-payout-hold` | It makes its own live observation of its hold shape, once the dispute authority maps one |
 

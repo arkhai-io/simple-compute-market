@@ -26,10 +26,17 @@ written (see
 `storefront_domains` is public routing metadata only. Signing credentials,
 provider settings, SSH material, tenant credentials, payment-provider objects,
 and private domain results remain in service-owned Secret channels and never enter
-ConfigMaps, command arguments, images, listing bindings, or migration reports.
-Startup rejects missing wheels, duplicate modes/identities, assertion mismatch,
-unsupported versions, incomplete capabilities, or recoverable bindings that
-the frozen registry cannot resolve.
+ConfigMaps, command arguments, images, or listing bindings.
+Startup rejects a contribution that is not installed, duplicate modes or
+identities, assertion mismatch, unsupported versions, and incomplete
+capabilities. It does not read stored bindings: a record whose binding the
+frozen registry cannot resolve fails with a binding error when an operation
+next resolves it.
+
+The storefront builds its services for the `vm` registration. A row naming
+another installed contribution is validated at startup and reported in system
+status, and serves nothing
+([`ARCHITECTURE.md`, "Capacity publication and multi-domain storefront composition"](../../../docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition)).
 
 ## The storefront's time source
 

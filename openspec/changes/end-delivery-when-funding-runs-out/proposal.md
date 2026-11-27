@@ -98,7 +98,7 @@ None.
   `deal-lifecycle`'s "Each deal's servicing steps run in one kit-owned order";
   whichever lands second reverifies against the other. That change gave up the funding
   timer (its design, D4), and its scenario diagram of one is redrawn here.
-- `renewable-compute-lease-deadlines` names this change as the owner of any end
+- `enforce-delivery-deadlines-at-the-site` names this change as the owner of any end
   calculated from what a deal has funded (its design, D4). Nothing of it is used: the
   site is untouched.
 - `discover-open-ended-compute-listings` settles how a class is read. The rule reads no

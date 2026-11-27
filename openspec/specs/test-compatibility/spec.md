@@ -52,12 +52,12 @@ The VM and API-credit plugins MUST run against the same selected-primary and ret
 
 ### Requirement: Multi-domain storefront selection has focused compatibility coverage
 
-Deterministic focused tests MUST cover frozen registry validation, immutable listing/thread binding, publication mode enforcement, domain-envelope matching, selected-site routing, settlement/fulfillment contexts, migration, restart recovery, result decoding, and teardown under both VM and bare-metal contracts. Duplicate, missing, unknown, unsupported, mismatched, and cross-swapped modes/identities/versions MUST fail before an unselected policy, persistence mutation, capacity call, provider call, or decoder runs.
+Deterministic focused tests MUST cover frozen registry validation, immutable listing/thread binding, publication mode enforcement, domain-envelope matching, selected-site routing, settlement/fulfillment contexts, restart recovery, result decoding, and teardown under both VM and bare-metal contracts. Duplicate, missing, unknown, unsupported, mismatched, and cross-swapped modes/identities/versions MUST fail before an unselected policy, persistence mutation, capacity call, provider call, or decoder runs.
 
 #### Scenario: One and two registrations use the same shell
 
-- **WHEN** focused composition runs with one explicit registration and with VM plus bare-metal registrations
-- **THEN** both use the same common routes, repository, publication runner, and lifecycle carriers without a singleton or domain-specific control-flow copy
+- **WHEN** focused composition builds the shared shell with one explicit registration and with VM plus bare-metal registrations
+- **THEN** both use the same registry, application builder, repository bindings, publication-source construction, and lifecycle carriers, with no default registration and no singleton
 
 #### Scenario: Unknown binding is injected at a lifecycle boundary
 
@@ -71,8 +71,9 @@ Deterministic focused tests MUST cover frozen registry validation, immutable lis
 
 #### Scenario: Full live proof is requested
 
-- **WHEN** the production bare-metal contribution or selected-site POOLS-7 lifecycle is unavailable
-- **THEN** the real multi-domain E2E remains explicitly blocked rather than recording fake publication, fulfillment, teardown, or capacity-restoration success
+- **WHEN** evidence is requested that one storefront process completes a VM deal and a bare-metal deal, while each storefront executable mounts its own routes and builds its services for one registration
+- **THEN** that evidence is reported as blocked on a storefront process that serves a second registration
+- **AND** a second registration held in the registry, deals completed by separate storefront processes, and a faked publication, fulfillment, teardown, or capacity restoration are none of them recorded as that proof
 
 ### Requirement: Per-domain end-to-end deal path
 

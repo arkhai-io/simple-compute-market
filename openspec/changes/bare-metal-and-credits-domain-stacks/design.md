@@ -89,6 +89,9 @@ satisfies this change: what it proves is a working deal path, not a deployment
 topology. The stack definition is written so the answer can change without rewriting
 the scenarios.
 
+Amended 2026-11-27: settled by `unify-vm-and-bare-metal-storefronts`. One compute
+storefront serves both domains and no bare-metal storefront program remains.
+
 ### Composing bare metal onto the kit is this change's, not an extraction
 
 The kit negotiation runtime exists and bare metal is the last domain not composed onto
@@ -114,6 +117,9 @@ hook class, and thread persistence moved to `bare-metal-mock-provisioned-deal`, 
 serves bare metal's existing negotiate routes over the kit runtime so its pipeline deal
 reaches parity with VM's. What stays here is moving those routes, and the listing
 routes, onto the shell's shared routes (4a.3–4a.6).
+
+Amended 2026-11-27: 4a.3–4a.6 moved to `unify-vm-and-bare-metal-storefronts`, which
+deletes those routes.
 
 ### Teardown is domain-defined, and bare metal proves access revocation
 

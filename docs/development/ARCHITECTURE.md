@@ -4,7 +4,7 @@ tags: [repository, architecture]
 
 # Arkhai Market Stack — Architecture Reference
 
-> **Purpose:** This system's cross-system description — what the system is and why its major boundaries exist. The rules a change here satisfies across systems — its package layers, scope, and kinds among them — are [`docs/guidance/repository/`](../guidance/repository/README.md), and what the owner or an operator does is in the handbooks: the [operator handbook](../operator-handbook.md) and the [release handbook](../release-handbook.md). Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to [`openspec/changes/README.md`](../../openspec/changes/README.md).
+> **Purpose:** This system's cross-system description — what the system is and why its major boundaries exist. The rules a change here satisfies across systems — its package layers, scope, and kinds among them — are [`docs/guidance/repository/`](../guidance/repository/README.md), and what the owner or an operator does is in the handbooks: the [operator handbook](../operator-handbook.md) and the [release handbook](../release-handbook.md). Detailed normative subsystem contracts live in [`openspec/specs/`](../../openspec/specs/); proposed transitions live in [`openspec/changes/`](../../openspec/changes/). It is not a backlog or changelog: the goals being pursued and the value each delivers belong to [`ROADMAP.md`](ROADMAP.md), and delivery readiness belongs to the changes' index, in [`openspec/changes/`](../../openspec/changes/).
 
 ## Document map
 
@@ -350,18 +350,28 @@ admission is a conflict, distinct from an unknown site or a changed binding.
 owns its aggregate, as bare metal does for its durable reservation-to-site map,
 builds one over that. See the [market composition architecture](../../openspec/specs/market-composition/architecture.md#storefront-composition-kit).
 
-The storefront role is one domain-neutral compute-family shell. At startup it
-discovers installed `market.storefront.contributions`, applies the operator's
-explicit `[storefront_domains]` selection, and freezes one registry. Each
-registration binds a contribution ID, pool offering mode, exact domain
-identity, contract version, and the exact validated `MarketDomainContract`.
-One-domain deployments use the identical registry with one entry; there is no
-singleton, module getter, installed-order fallback, global selection, or
-contract reconstruction.
+Every storefront resolves contracts through a frozen
+`StorefrontDomainRegistry`. Each registration binds a contribution ID, pool offering mode, exact domain
+identity, contract version, and the exact validated `MarketDomainContract`. A
+durable binding resolves only to the registered object: no storefront selects
+a contract from installed order, a payload, or a default, or reconstructs one
+from stored strings.
 
-The common database owns immutable listing, negotiation-thread, and domain
-artifact bindings. They retain the selected site, mode, domain
-identity/version, and collision-safe provenance. Opening a thread inherits its
+VM, bare metal, and API credits each run a dedicated storefront executable,
+and each executable builds its services, routes, and migration chain for one
+registration. The bare-metal and API-credit executables register their own
+contract alone. The VM executable discovers the installed
+`market.storefront_contributions` entry points, applies the operator's explicit
+`[[storefront_domains]]` selection, and freezes the result; its image installs
+the bare-metal contribution too, so a selection may name both. A registration
+beyond the one an executable serves is validated at startup and reported in
+its system status, and serves nothing: the executable publishes, negotiates,
+and delivers only its own mode's listings, and refuses a record bound to
+another registration.
+
+Each storefront's database holds immutable listing, negotiation-thread, and
+domain-artifact bindings in one common schema. They retain the selected site,
+mode, domain identity/version, and collision-safe provenance. Opening a thread inherits its
 listing binding before domain policy runs. Publication, negotiation,
 settlement, fulfillment, result recovery, and teardown resolve only that
 recorded binding against the frozen registry. Selected-site calls are pinned
@@ -404,12 +414,6 @@ before completing. An evidence submission whose outcome is unknown is never
 repeated: it parks its obligation for an operator, and the storefront's status
 counts the parked obligations.
 
-Legacy single-domain databases cross this boundary only through an explicit
-contribution migration adapter. Check mode validates the complete population.
-Write mode uses a restrictive backup and atomic replacement; ambiguity,
-orphaned provenance, cross-domain rows, or unsupported versions abort without
-partial state.
-
 ### Settlement configuration
 
 Marketplace roles configure settlement mechanisms through one typed `[Settlement]` root. Its duplicate-free `priority` list contains canonical mechanism IDs; registered `alkahest`, `arkhai_payments`, and `contact` subsections own their mechanism policy and public client inputs. Identity, wallet, and chains remain independent shared resources. Composition roots register installed mechanisms explicitly and inject only the resources each declares.
@@ -448,7 +452,7 @@ A configured mechanism whose section parses but which cannot currently settle �
 
 Preflight remains mechanism-owned but projects one sanitized readiness contract. Storefront publication combines enabled ready registrations with explicit typed clauses in configured mechanism order; it never uses one untyped price for multiple mechanisms. Buyer policy ranks only compatible advertised survivors after ordered explicit clauses. Priority and clauses apply before acceptance only. Accepted Terms and persisted operation identities remain authoritative through readiness or configuration changes.
 
-Typed metadata generates role-appropriate templates, edit validation, environment schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject payment-provider, administrator, webhook, ledger database, and service-migration state. A chart passing a service's configuration through carries no schema of that configuration, which the service validates itself ([`helm.md`, "A chart's values schema types the chart's own values"](../guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)); the two storefront charts carry a definition generated from their storefront's models, unowned work recorded in the [change index](../../openspec/changes/README.md). See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
+Typed metadata generates role-appropriate templates, edit validation, environment schema fragments, clause descriptors, and reference output. Marketplace schemas admit public consumer trust and policy but reject payment-provider, administrator, webhook, ledger database, and service-migration state. A chart passing a service's configuration through carries no schema of that configuration, which the service validates itself ([`helm.md`, "A chart's values schema types the chart's own values"](../guidance/engineering/helm.md#a-charts-values-schema-types-the-charts-own-values)); the two storefront charts carry a definition generated from their storefront's models. See the [CLI query language](../../openspec/specs/cli-query-language/spec.md), [settlement configuration contract](../../openspec/specs/settlement-configuration/spec.md), and its [architecture](../../openspec/specs/settlement-configuration/architecture.md).
 
 ### Events
 
@@ -707,7 +711,7 @@ Which registry a listing is published to is an operator curation decision, expre
 
 ### Site authority
 
-A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. One storefront may aggregate several sites.
+A site authority owns resources, allocations, reservation expiry, capacity versions, and the event feed for one failure domain or datacenter. A storefront's code may aggregate several sites, routing each record to the site that admitted it. That is proven at integration level and is not a deployed topology: every deployment and lane runs one storefront beside one site.
 
 Capacity claims name their requested offering mode explicitly. The authority
 records that value on the reservation and never derives it from host
@@ -1195,7 +1199,7 @@ The lease-end report and the capacity-released callback are consumers of the pro
 
 ### Local development
 
-Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. The bare-metal seller uses its dedicated image, its own writable storefront database, durable reservation-to-site route map, a separately injected seller signer, and its configuration in mounted files: the operator's `storefront.toml`, which binds each site to its URL and service peer, and the Secret overlay `storefront.secrets.toml`, as every storefront reads them. VM and bare-metal storefront services are independently selectable and may share a provisioning authority without sharing writable storefront databases. The root compose file combines domain stacks for full end-to-end work: the VM stack, the API-credit stack, and the inference stack, whose registry serves a third schema, `inference`, beside its authority service, gateway, deterministic model stub, and storefront. On a local Kubernetes cluster, `make -C helm deploy-local` installs the umbrella as one release, and `make helm-topology-up` installs the two-release topology described below.
+Compose is organized by market domain and includes the shared development chain. There is no required long-running buyer service. The bare-metal seller uses its dedicated image, its own writable storefront database, durable reservation-to-site route map, a separately injected seller signer, and its configuration in mounted files: the operator's `storefront.toml`, which binds each site to its URL and service peer, and the Secret overlay `storefront.secrets.toml`, as every storefront reads them. VM and bare-metal storefront services are independently selectable, each beside a provisioning service of its own and with its own writable storefront database. The root compose file combines domain stacks for full end-to-end work: the VM stack, the API-credit stack, and the inference stack, whose registry serves a third schema, `inference`, beside its authority service, gateway, deterministic model stub, and storefront. On a local Kubernetes cluster, `make -C helm deploy-local` installs the umbrella as one release, and `make helm-topology-up` installs the two-release topology described below.
 
 How the stacks are composed is [`DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack composition"](DEPLOYMENT_AND_CONFIG.md#per-domain-stack-composition); how they take their configuration and secrets is [`compose-stacks.md`](../guidance/repository/compose-stacks.md) and [`service-configuration.md`](../guidance/repository/service-configuration.md).
 
@@ -1203,7 +1207,7 @@ How the stacks are composed is [`DEPLOYMENT_AND_CONFIG.md`, "Per-domain stack co
 
 The deployment surfaces support independently selectable registries, VM and bare-metal storefront services, compute provisioning, and optional development/test components. The umbrella chart uses the schema-opaque registry subchart for its default compute registry and may enable a second aliased API-credits registry. Each registry has its own schema path, authority signer Secret, descriptor, Service, and retained PVC. `helm/charts/bare-metal-storefront` installs the dedicated one-domain storefront service with its own Kubernetes Service, persistence boundary, health probes, external signer Secret, and its configuration passed through as public `config` with an optional existing Secret overlay; its sites, their service peers, and its public URL are public configuration. The umbrella/shared-shell chart may instead select installed domain contributions. Disabling one service creates no wait or reference from another.
 
-The supported topology is several storefronts per registry, each storefront in its own release of the umbrella with its own provisioning service, publishing to one release's registry. A provisioning service trusts one storefront principal and calls back one storefront, so several storefronts per site is not supported yet, and the umbrella refuses a release that runs both compute storefronts on its own provisioning service. Several sites per storefront are served by each storefront's per-site projection state and per-site trust. Locally, release 1 is `deploy-local`'s umbrella (registry, Bob's VM storefront, provisioning, and the development chain) and release 2 is the same chart with `helm/bare-metal-release-values.yaml` layered: the bare-metal storefront and its own provisioning service, on release 1's registry and chain. See [`DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md#release-topology).
+The supported topology is several storefronts per registry, each storefront in its own release of the umbrella with its own provisioning service, publishing to one release's registry. A provisioning service trusts one storefront principal and calls back one storefront, so several storefronts per site is not supported yet, and the umbrella refuses a release that runs both compute storefronts on its own provisioning service. Several sites per storefront are handled in code, by each storefront's per-site projection state, per-site trust and exact-site routing, and proven at integration level; no deployment or lane runs that topology. Locally, release 1 is `deploy-local`'s umbrella (registry, Bob's VM storefront, provisioning, and the development chain) and release 2 is the same chart with `helm/bare-metal-release-values.yaml` layered: the bare-metal storefront and its own provisioning service, on release 1's registry and chain. See [`DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md#release-topology).
 
 Configuration resolution, ConfigMap/Secret mounting, stateful-service persistence strategy, and migration-at-startup conventions are this repository's application of the engineering guidance ([`configuration.md`](../guidance/engineering/configuration.md), [`kubernetes.md`](../guidance/engineering/kubernetes.md), [`deployment.md`](../guidance/engineering/deployment.md), [`migrations.md`](../guidance/engineering/migrations.md)), stated in [`service-configuration.md`](../guidance/repository/service-configuration.md), [`helm-charts.md`](../guidance/repository/helm-charts.md), [`service-databases.md`](../guidance/repository/service-databases.md), and [`migrations-at-startup.md`](../guidance/repository/migrations-at-startup.md), described in [`docs/development/DEPLOYMENT_AND_CONFIG.md`](DEPLOYMENT_AND_CONFIG.md), and required by [the deployment and state specification](../../openspec/specs/deployment-state/spec.md).
 

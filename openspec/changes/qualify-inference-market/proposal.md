@@ -80,7 +80,7 @@ inference and broadens the evidence to the cases that break real markets.
 - [x] Existing subsystem specification — `inference`, `test-compatibility`.
 - [x] `docs/development/TESTING.md` — the inference lane and its blocked
       non-Python gates.
-- [x] `docs/development/ROADMAP.md` — Goal 9's completion test.
+- [x] `docs/development/ROADMAP.md` — Goal 10's completion test.
 
 ## Status
 

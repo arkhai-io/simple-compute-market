@@ -47,6 +47,19 @@ The history of a change — who made it, why, the alternatives considered, and t
 review discussion — is the version control history's and its pull requests', not a
 permanent document's.
 
+## Specifications, guidance, the architecture description and handbooks name no change
+
+A specification, a repository's guidance, its description of its system and its
+handbooks describe what the system is, what work on it must satisfy, and how it is
+run, all of which outlive any change to it, so none of them points at a change: not at
+one in progress, whose directory is gone once it merges, and not at one archived,
+which a repository prunes once nothing active needs it. Each states a limit or a gap
+as a fact about the system, and a gap that needs work is recorded where the repository
+tracks its work. A specification may cite other specifications. The capabilities
+whose subject is the change process itself may name the change index and the changes'
+directory, which they govern. The directory as a whole, as where proposed work sits,
+may be named anywhere.
+
 ## Citations resolve
 
 Every path a permanent document cites exists on the branch that cites it. A

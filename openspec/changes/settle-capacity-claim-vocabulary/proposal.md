@@ -15,9 +15,9 @@ keeps a scheduling cursor for each kind and has one kind
 
 Three parties meet the consequence:
 
-- **A buyer cannot ask for supply without GPUs.** The type is not published, and no
-  registry query selects listings that state no GPU: a filter decides a missing value
-  before an `exists` test runs
+- **A buyer cannot ask for supply by the work it suits.** The type is not published. No
+  registry query even selects the listings that state no GPU: a filter decides a missing
+  value before an `exists` test runs
   (`core/registry/src/core_registry/api/filter_eval.py`). A buyer asks for vCPUs and
   memory and is answered with GPU listings as well.
 - **An operator declares a machine with no GPU as `compute.gpu`.** One who writes
@@ -37,22 +37,27 @@ other than the machine.
 
 ## What Changes
 
-- **The resource type becomes the category of compute a seller sells**, such as
-  `compute.gpu` or `compute.cpu`, in both compute domains (design D1, D3).
+- **The resource type becomes the category of compute a seller sells**, a broad label
+  for the work its supply suits, in both compute domains (design D1, D3). Three are
+  documented, and they do not close the list: `compute.gpu` for supply oriented to
+  GPU-heavy work, `compute.cpu` for CPU-heavy work, and `compute.db` for database work,
+  which tends to be bound by disk I/O.
+- **A category constrains no shape.** No site or storefront checks what a shape states
+  against its category, and no category is derived from a shape (D3).
 - **A Resource Pool states the categories it sells**, in its policy tags beside the modes
   it delivers. A claim carries the category of what is bought, the site admits it where
   the pool states that category and records it on the reservation, and scheduling reads
   it from the reservation, not from a default (D4).
 - **A listing publishes its category and the compute registry filters by it**, so a buyer
-  can search for supply without GPUs (D3).
+  can search for supply by the work it suits (D3).
 - **A pool that states no category behaves as it does under `marketplace-v0.4.0`**, and
   its listings publish none. No capacity declaration is rewritten (D4).
 - **Bare metal follows the same rule as VM.** What becomes of the string
   `compute.bare-metal` is open in the design (Q5).
 - **The flat dimension names stand** (D2).
 
-Which categories exist, which one a listing takes when its pool states several, what a
-declaration's `resource_type` then does, the published field's name, the filter's
+Whether the names are an open set, which one a listing takes when its pool states
+several, what a declaration's `resource_type` then does, the published field's name, the filter's
 missing-value rule, and compatibility for a storefront and a site at different releases
 are open in the design's "Open Questions".
 
@@ -73,7 +78,7 @@ are open in the design's "Open Questions".
 - `compute-provisioning-contract`: only if the scheduling request or response changes.
 
 `.openspec.yaml` sets `skip_specs` until the design session settles the open questions;
-the design's Q10 names the requirements to be modified.
+the design's Q9 names the requirements to be modified.
 
 ### New Capabilities
 
@@ -86,7 +91,7 @@ None.
 - One declaration sold in two offering modes. A host carries one declaration and a pool
   one provider, and neither changes (D5).
 - One name for `resource_type` and `resource_kind`. The site and the claim say type,
-  fulfillment and the provisioning contract say kind, and both stay (Q10).
+  fulfillment and the provisioning contract say kind, and both stay (Q9).
 - The `resource_type` of a VM listing resource payload, which says whether the payload is
   compute or a token.
 - Respelling the flat dimension names (D2).
@@ -95,7 +100,9 @@ None.
   flat, partial mapping and a later round carries a whole family-grouped shape;
   `unify-negotiation-shape-forms` owns it.
 - Publishing no null for an absent capacity attribute, which VM publication already does.
-- A third category. The design asks what one would be (Q9).
+- Checking a shape against its category, or deriving a category from a shape (D3).
+- Selecting exactly the listings that state no GPU field. A category does not do it; the
+  design's Q6 says what becomes of the filter evaluator's `exists` ordering.
 
 ## Dependencies and Related Changes
 
@@ -166,7 +173,10 @@ every form below as it stands on the development branch.
 - D2: `openspec/specs/market-composition/architecture.md`, "The compute family
   vocabulary", which states it already.
 - D3: `openspec/specs/storefront-publication/spec.md` and
-  `openspec/specs/registry-discovery/spec.md`; `docs/buyer-quickstart.md`.
+  `openspec/specs/registry-discovery/spec.md`, for what a category is and that it
+  constrains no shape; `docs/operator-handbook.md`, "Pool definitions", and
+  `docs/buyer-quickstart.md`, for `compute.gpu`, `compute.cpu` and `compute.db` and what
+  each is for.
 - D4: `openspec/specs/resource-pool-management/spec.md`;
   `openspec/specs/site-capacity/spec.md` and its companion;
   `openspec/specs/fulfillment/spec.md`; `docs/operator-handbook.md`, "Pool definitions";

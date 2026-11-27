@@ -305,9 +305,8 @@ place a proof format attaches.
 - `selling` depends on the core storefront, and `buying`, `buying-alkahest`,
   and `buying-arkhai-payments` on the core buyer, both role compositions. Each
   edge is an exception row in
-  [`ARCHITECTURE.toml`](../../../docs/development/ARCHITECTURE.toml), owned by
-  `kit-owned-storefront-auth-and-persistence` for `selling` and
-  `kit-owned-buyer-orchestration` for the buying libraries.
+  [`ARCHITECTURE.toml`](../../../docs/development/ARCHITECTURE.toml), which
+  names the work that removes it.
 
 ## Related contracts
 
