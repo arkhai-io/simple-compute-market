@@ -31,8 +31,9 @@ This change builds one custody layer with both sets, and composes it into the st
   D21).
 - **Rotation re-encrypts** retained contacts online, through a pausable worker, and status
   shows when an old key is removable (D14).
-- **Retention is one running policy** over everything held, disclosed before commitment and
-  at reveal as current policy (D4, D23).
+- **Retention is one running policy** over revealed introductions, disclosed before
+  commitment and at reveal as current policy; a held contact's expiry is the host's (D4, D16,
+  D23).
 - **Either participant may end access** for both; on the storefronts the buyer gains a signed
   end route and command (D5, D27).
 - **Operators preview and step the sweep**, which also runs before a host serves

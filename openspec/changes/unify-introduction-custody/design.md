@@ -160,8 +160,8 @@ their own tables stay on `sqlite3`.
 
 The trigger admits on an introduction no update but redaction (both slots to NULL and the
 redaction time set, once) and re-encryption (on an unredacted row, both slots stay non-null
-and their key prefix changes); the identifier, roles, context and reveal time never change,
-and an unredacted row is never deleted. A held contact (D16) is never updated but by
+and their key prefix changes); the identifier, roles, context, reveal time and promotion
+source (D16) never change, and an unredacted row is never deleted. A held contact (D16) is never updated but by
 re-encryption, and may be deleted.
 
 This change ships the SQLite DDL and proves the store on SQLite. Statements are keyed by
@@ -182,8 +182,10 @@ Rejected:
 
 Contacts are encrypted with Tink AEAD (AES-256-GCM) under a keyset loaded from outside the
 database. A ciphertext carries Tink's prefix naming its key, so rows written under retained
-keys keep decrypting; associated data is passed on every call (D13). A KMS-wrapped keyset is
-Tink's optional extra, open to a later operator without code change. Custody reaches Tink only
+keys keep decrypting; associated data is passed on every call (D13). Only a cleartext keyset
+is loaded; a KMS-wrapped keyset, which Tink supports as an optional extra, would need a
+loading path in the component and a master-key setting in each host, and is not built here
+(29 F2). Custody reaches Tink only
 through the standalone keyed-encryption component (D29), and an operator edits a keyset with
 Tink's own tool, Tinkey. No keyring, key-file format or ciphertext format is built here.
 
@@ -218,6 +220,8 @@ custody_introductions
   context          opaque, non-secret, bounded JSON; kept after redaction
   revealed_at      from the process time source; drives retention
   redacted_at
+  promoted_from    the held_id a promotion created it from (D16); NULL when revealed
+                   directly; kept after redaction
 ```
 
 A slot's associated data is the canonical JSON
@@ -332,10 +336,17 @@ the operation again, needs no special case:
 - `hold` repeated with the same role and contact returns the held contact and writes
   nothing; with a different role or contact under the same identifier it is refused, and
   the held contact is unchanged.
-- `promote` whose held contact is gone converges when the target introduction exists with
-  the same other party's contact, roles and context, returning it; answers the deleted
-  outcome when that introduction is redacted; and is refused as not held when no
-  introduction exists either, writing nothing.
+- A promotion records its source: the introduction it creates carries the held contact's
+  `held_id` as `promoted_from`, which never changes and outlives redaction (D13), so a
+  repeat is recognised by the held contact it names, not by fields every respondent to one
+  request shares (29 F1). It is not bound into the associated data: it protects nothing
+  secret, and the trigger keeps it fixed.
+- `promote` whose held contact is gone converges when the target introduction exists
+  unredacted, was promoted from the same `held_id`, and has the same other party's contact,
+  roles and context, returning it; answers the deleted outcome when that introduction is
+  redacted and was promoted from the same `held_id`; is refused as conflicting when the
+  target was revealed directly or promoted from another `held_id`, redacted or not; and is
+  refused as not held when no introduction exists either. Each refusal writes nothing.
 - `promote` whose held contact remains but whose target introduction already exists is
   refused, and changes nothing.
 
@@ -350,6 +361,13 @@ Rejected:
   rows (17 F4). Sound, since those rows commit with custody's, but it gives custody two
   creating operations with different repeat rules and gives every credential-capable
   selection retry a special case in the host.
+- A typed not-held refusal whenever the held contact is gone, the host recovering a
+  completed selection from its own selection row (29 F1). It keeps the schema a column
+  smaller, but is the narrower half of the alternative above, with the same costs.
+- A repeat recognised by the other party's contact, roles and context alone, as this
+  design first had it (29 F1). Every respondent to one request shares them, so a promotion
+  of a discarded held contact into a target another held contact filled would be reported
+  as its own.
 - A held contact as an introduction row with one slot filled. It breaks "revealed when
   persisted" and needs a third trigger state.
 - Encryption primitives only, with the registry storing pending contacts in its own table. A
@@ -661,7 +679,9 @@ associated-data binding, a slot swap failing under repeated role labels among it
 re-encryption with plaintext equality and per-key counts, the startup refusals, one-way
 redaction under the trigger and under concurrent reads, reveal idempotency, read's three
 results, window changes, early end, held contacts with their repeated, conflicting and
-absent holds and promotions, restore redaction, and the workers' pause, preview and step.
+absent holds and promotions — a repeat promotion converging only on the introduction its
+own held contact created, redacted or not — the promotion source unchangeable under the
+trigger, restore redaction, and the workers' pause, preview and step.
 Each storefront's integration tests prove its composition through its own routes: the
 keyset refusals, the startup sweep, early end and its refusal for an unrevealed
 introduction, credential-capable retries after a redaction, an exact retry completing a

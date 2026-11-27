@@ -105,7 +105,8 @@ introduction, or an identifier never revealed, MUST converge rather than fail.
 
 A stored ciphertext MAY be replaced by a re-encryption of the same contact under another key.
 The database MUST enforce every part of this requirement it can observe: no change but
-redaction or re-encryption, no change to the identifier, role labels, context or reveal time,
+redaction or re-encryption, no change to the identifier, role labels, context, reveal time or
+the held contact an introduction was promoted from,
 no restoring a redacted contact, a re-encryption only on an unredacted introduction keeping
 both contacts present under a different key, and no removal of an unredacted record. Custody
 MUST enforce that a re-encryption leaves the decrypted contact unchanged, and MUST offer no
@@ -244,14 +245,20 @@ contact and removes the held contact, the promoted contact decrypting to the hel
 held contact MUST NOT be changed but by re-encryption. When a held contact is held,
 discarded or promoted MUST be the host's decision.
 
+An introduction created by a promotion MUST record the identifier of the held contact it was
+promoted from, keep it after redaction, and never change it.
+
 Holding and promoting MUST follow a reveal's idempotency. A hold repeated with the same role
 and contact MUST return the held contact and write nothing, and a hold with a different role
 or contact under the same identifier MUST be refused, leaving the held contact unchanged. A
 promotion whose held contact is gone MUST return the target introduction when it exists
-with the same other party's contact, roles and context, MUST answer the deleted outcome when
-that introduction is redacted, and MUST be refused as not held, writing nothing, when no
-introduction exists either. A promotion whose held contact remains but whose target
-introduction already exists MUST be refused and change nothing.
+unredacted, was promoted from the same held identifier, and has the same other party's
+contact, roles and context; MUST answer the deleted outcome when that introduction was
+promoted from the same held identifier and is redacted; MUST be refused as conflicting when
+the target introduction was revealed directly or promoted from another held identifier,
+redacted or not; and MUST be refused as not held when no introduction exists either. A
+promotion whose held contact remains but whose target introduction already exists MUST be
+refused. Each refusal MUST change nothing.
 
 #### Scenario: A held contact is promoted
 
@@ -279,6 +286,30 @@ introduction already exists MUST be refused and change nothing.
 - **WHEN** a host promotes a held contact again after its promotion committed, with the same
   other party's contact
 - **THEN** custody returns the introduction the first promotion revealed and writes nothing
+
+#### Scenario: A promotion is repeated after its introduction was redacted
+
+- **WHEN** a host promotes a held contact again after its promotion committed and the
+  introduction it created was redacted
+- **THEN** custody answers the deleted outcome and writes nothing
+
+#### Scenario: A discarded contact is promoted into a target another held contact filled
+
+- **WHEN** a host promotes a discarded held contact into an introduction identifier that a
+  promotion of a different held contact created, with the same other party's contact, roles
+  and context, whether that introduction is redacted or not
+- **THEN** custody refuses the promotion as conflicting and writes nothing
+
+#### Scenario: A discarded contact is promoted into a directly revealed introduction
+
+- **WHEN** a host promotes a discarded held contact into an introduction identifier that a
+  reveal created
+- **THEN** custody refuses the promotion as conflicting and writes nothing
+
+#### Scenario: A code path tries to change an introduction's promotion source
+
+- **WHEN** any update tries to change the held identifier an introduction was promoted from
+- **THEN** the database refuses the change
 
 #### Scenario: A discarded contact is promoted
 
