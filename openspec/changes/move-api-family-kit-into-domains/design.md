@@ -227,15 +227,20 @@ a factory on the module that defines it and nothing else.
 - Its test of the delivered credential's rows is rewritten to call the
   settlement resume's `finish` with the inference contributions, a memory
   credential store, and a log double, as the buying library's own tests do. No
-  production code changes.
+  production code changes. The module, whose one case is then the delivered
+  credential's rows, is renamed
+  `domains/inference/buyer/tests/test_delivered_credential.py`.
 - Its test that a scope refusal is reported once and not retried moves to the
   Alkahest buying library's tests, since the behaviour is that library's.
-  `AlkahestBuyerStage` gains three optional keyword collaborators — the two
-  seller calls and the chain resolver its settle path uses — each resolved
-  when called and falling back to the module's own function, as its wallet
-  does, so the module-level replacements other tests still make keep working.
-  The test passes a settlement resume whose log, buy configuration, and seller
-  principals are doubles.
+  `AlkahestBuyerStage` gains two optional keyword collaborators, the two
+  seller calls its settle path makes, each resolved when called and falling
+  back to the module's own function, as its wallet does, so the module-level
+  replacements other tests still make keep working. The test is an
+  integration test, since what it proves is the resume's orchestration: the
+  seller calls are doubled through those collaborators, and the chain
+  configuration, the wallet, the registry trust, and the run log are the
+  buyer's real ones, read from a temporary configuration and state
+  directory.
 
 `kit/api/buying/tests/unit/test_credentials.py` patches the standard library
 and a collaborator's class. `FileCredentialStore` gains optional `replace`,

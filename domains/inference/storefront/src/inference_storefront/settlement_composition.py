@@ -44,7 +44,6 @@ def record_servicing_event(event: str, fields: dict[str, Any]) -> None:
 
 def settlement_resources(
     *,
-    marketplace_signer: Signer,
     chain_clients: Mapping[str, Any],
     chain_probe: AlkahestChainProbe | None = None,
 ) -> dict[str, Any]:
@@ -54,7 +53,6 @@ def settlement_resources(
     held here rather than copied; readiness reads the probe's results.
     """
     resources: dict[str, Any] = {
-        "marketplace_signer": marketplace_signer,
         "clients": chain_clients,
         "get_client": lambda chain: chain_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
@@ -83,7 +81,6 @@ def build_inference_settlement_composition(
         database_path=sqlite_client.db_path,
         settlement_configuration=storefront_config.settlement_config_mapping(),
         resources=settlement_resources(
-            marketplace_signer=marketplace_signer,
             chain_clients=chain_clients,
             chain_probe=chain_probe,
         ),

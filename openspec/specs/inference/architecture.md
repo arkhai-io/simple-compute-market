@@ -214,9 +214,9 @@ gateway's address as metadata outside the digest; the convergent `model_id`
 stays in the accepted listing the kit pins. Its public-result extension places
 the contract's materialization in the delivery, built from the accepted listing
 and its rate card with the settlement reference the delivery context carries,
-so the public record cannot show a buyer a rate they did not accept. It
-composes no dispute policy, because it settles through Alkahest alone and reads
-no dispute authority.
+so the public record cannot show a buyer a rate they did not accept. The
+storefront composes no dispute policy, because it settles through Alkahest
+alone and reads no dispute authority.
 
 The accepted terms then exist in three places, each with one role and all bound
 by one digest: the storefront's accepted-listing artifact, which is the issuance

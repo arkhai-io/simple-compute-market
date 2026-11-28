@@ -419,6 +419,12 @@ and `domains/apicredits/tests`.
       22 passed, and API credits' five suites 468 passed, three fewer than
       before because the inference-label pin cases left its domain suite
       (5.5); no buyer test changed for this task.
+      *Note (round 2 triage, 04 F1):* once the moved case reads the real
+      chain configuration, no caller passes `resolve_chain`; it is removed,
+      and the stage has the two seller-call collaborators alone. D8, the
+      proposal, and the `derive-buyer-settlement-inputs` row say so. The
+      API-credits buyer suite 72, the inference buyer suite 22, and the
+      Alkahest buying suite 19 passed.
 - [x] 5.2 The scope-refusal test moves to the Alkahest buying library's unit
       tests, driving `AlkahestBuyerStage.resume` through those collaborators
       and a settlement resume whose log, buy configuration, and seller
@@ -440,6 +446,16 @@ and `domains/apicredits/tests`.
       standard error. The address book is still read from the user's
       configuration, steered by `XDG_CONFIG_HOME`, since D8 gives the stage
       no seam for it.
+      *Note (round 2 triage, 04 F1):* the case is an integration test,
+      since it proves the resume's orchestration (`test-levels.md`):
+      `tests/integration/test_resume.py`, driving the real
+      `SettlementResume` with only the two seller calls doubled, and the
+      chain configuration, wallet, registry trust, and run log read from a
+      temporary `buyer.toml` and state directory. It asserts exit status 7,
+      the refusal printed once, one submission and one wait, and the
+      recorded run's events in order ending `run_ended` with status
+      `failed`. The Alkahest buying suite: 19 passed. D8 is amended to
+      match.
 - [x] 5.3 `domains/inference/buyer/tests/test_scope_refusal.py`: the delivered
       credential's rows are asserted by calling the settlement resume's
       `finish` with the inference contributions, a memory credential store,
@@ -454,6 +470,11 @@ and `domains/apicredits/tests`.
       design and proposal cite, though its one case is no longer a scope
       refusal; its docstring says what it holds. The delivered credential
       carries no secret, as before, so the store records nothing.
+      *Note (round 2 triage, 04 F5):* renamed
+      `domains/inference/buyer/tests/test_delivered_credential.py` (git
+      mv), its one case being the delivered credential's rows; the design
+      and proposal keep the old name as the state they describe. The
+      inference buyer suite: 22 passed.
 - [x] 5.4 `FileCredentialStore`: optional `replace`, `fsync`, and `open`
       parameters. `tests/unit/test_credentials.py`: each standard-library
       patch becomes a parameter, the patch of a method no code under test
@@ -512,6 +533,13 @@ and `domains/apicredits/tests`.
       orchestration that `test-levels.md` proves at library integration,
       with a real run log; D8 and task 5.2 place it at unit, and the
       seller calls it doubles are the stage's external boundary.
+      *Note (round 2 triage):* 04 F1 took the integration placement (task
+      5.2's note); 04 F2 dropped the unread `marketplace_signer` key and
+      its parameter from both storefronts' `settlement_resources`, D7
+      reaffirmed; 04 F3 named the inference companion sentence's subject;
+      04 F4 restated the delta's two history phrases as current behaviour.
+      The API-credits storefront 281 and the inference storefront 77
+      passed.
 
 ## 6. The roadmap, the notes, and the rows
 

@@ -42,7 +42,7 @@ balance is only ever spent on what every one of its grants bought, at the
 charge each was bought at. `verify`, `consume`, and each batched consume item
 MAY carry the caller's expected service and resource; when present, the
 authority MUST refuse a key whose first grant's scope differs, uncharged, with
-a named status, and when absent it MUST behave as before the fields existed. A
+a named status, and when absent it MUST NOT refuse the call or item by scope. A
 gate with a configured scope MUST send it on every one of these calls, and
 MUST NOT admit a charge on a verification the authority has since refused. The
 authority MUST refuse, uncharged and naming the refusal `charge_mismatch`, a
@@ -98,4 +98,4 @@ key's balance.
 
 - **WHEN** a trusted caller consumes any amount within its balance from a key
   whose first grant pins no charge
-- **THEN** the amount is debited, as before the pinned charge existed
+- **THEN** the amount sent is debited

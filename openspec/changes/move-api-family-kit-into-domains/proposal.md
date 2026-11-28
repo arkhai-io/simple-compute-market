@@ -20,9 +20,11 @@ against the code, these stand:
   trusted only from the storefront's own signer are written twice.
 - The inference-label issuance pin is replayed by an API-credits test, though
   the code under test is the family vocabulary's.
-- `domains/inference/buyer/tests/test_scope_refusal.py` replaces eleven names
-  inside kit libraries, and `kit/api/buying/tests/unit/test_credentials.py`
-  patches the standard library and a collaborator's class, against
+- `domains/inference/buyer/tests/test_scope_refusal.py` (renamed
+  `test_delivered_credential.py` once its one case is no longer a scope
+  refusal) replaces eleven names inside kit libraries, and
+  `kit/api/buying/tests/unit/test_credentials.py` patches the standard library
+  and a collaborator's class, against
   `docs/guidance/engineering/testing-python.md` and
   `docs/guidance/engineering/testing.md`.
 - The authority's `consume` debits whatever amount it is sent and never
@@ -53,9 +55,8 @@ owns the corrections.
   the two storefronts repeat; each storefront passes its own resources.
 - The family's pin test replays the inference-label case.
 - The two test modules take their doubles through seams: the Alkahest buyer
-  stage gains optional collaborators for the seller calls and the chain
-  resolver, and the file credential store optional `replace`, `fsync`, and
-  `open` parameters.
+  stage gains optional collaborators for the seller calls, and the file
+  credential store optional `replace`, `fsync`, and `open` parameters.
 - The authority refuses a pinned key's consumption at an amount other than its
   pinned charge, as `charge_mismatch`, after the refusals of the key itself.
 - The roadmap's inference goal no longer fixes a delivery order.
