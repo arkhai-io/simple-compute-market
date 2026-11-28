@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from collections.abc import Awaitable
 from contextlib import ExitStack
 from dataclasses import replace
 from datetime import datetime
@@ -394,7 +395,7 @@ async def settled_db(tmp_path, monkeypatch, request):
 
 
 def _build_settlement_composition(
-    db, *, verify_escrow, on_outcome=None, on_completion=None, credits_client=None
+    db, *, verify_escrow, on_completion=None, credits_client=None
 ):
     """The settlement composition the coordinator tests drive.
 
@@ -464,8 +465,6 @@ def _build_settlement_composition(
         if on_completion is not None:
             asyncio.current_task().add_done_callback(on_completion)
         await persist_settlement_outcome(db, prepared, outcome)
-        if on_outcome is not None:
-            on_outcome()
     coordinator = SettlementJobCoordinator(
         runtime,
         prepare=partial(
@@ -488,7 +487,7 @@ def _build_settlement_composition(
     return runtime, worker, coordinator
 
 
-async def _fulfilled(finished: asyncio.Future):
+async def _fulfilled(finished: Awaitable[asyncio.Task]):
     """The coordinator task's outcome, once the task has finished, failing the
     test if it raised, was cancelled, or did not fulfil."""
     task = await asyncio.wait_for(finished, timeout=5)
@@ -578,30 +577,23 @@ async def test_an_uncertain_issuance_leaves_the_deal_open_for_the_redrive(settle
         return "0xfulfill"
 
     client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest))
-    outcomes = []
-    done = asyncio.Event()
-
-    def on_outcome():
-        outcomes.append(1)
-        done.set()
-
+    finished: asyncio.Queue[asyncio.Task] = asyncio.Queue()
     _runtime, _worker, coordinator = _build_settlement_composition(
-        db, verify_escrow=verify, on_outcome=on_outcome, credits_client=_FakeAuthority(issue),
+        db, verify_escrow=verify, on_completion=finished.put_nowait, credits_client=_FakeAuthority(issue),
     )
     await coordinator.start(
         escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
         request=_settlement_request(neg_id),
     )
-    await asyncio.wait_for(done.wait(), timeout=5)
+    (await asyncio.wait_for(finished.get(), timeout=5)).result()
     assert (await db.load_issuance_progress(reference="0xdeal"))["status"] == "provisioning"
     assert (await db.load_escrow(escrow_uid="0xdeal"))["status"] == "provisioning"
 
-    done.clear()
     await coordinator.start(
         escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
         request=_settlement_request(neg_id),
     )
-    await asyncio.wait_for(done.wait(), timeout=5)
+    await _fulfilled(finished.get())
     assert (await db.load_issuance_progress(reference="0xdeal"))["status"] == "ready"
     assert issued[0].fulfillment_id == issued[1].fulfillment_id
 
@@ -636,9 +628,9 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
         listing_resource={**resource, "service_name": "Another Service", "base_url": "https://other.example"},
         accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "99" * 20}],
     )
-    completed = asyncio.Event()
+    finished = asyncio.get_running_loop().create_future()
     _runtime, _worker, coordinator = _build_settlement_composition(
-        db, verify_escrow=verify, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+        db, verify_escrow=verify, on_completion=finished.set_result, credits_client=_FakeAuthority(issue),
     )
 
     await coordinator.start(
@@ -646,7 +638,7 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
         mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
         chain_name="anvil", request=_settlement_request(neg_id),
     )
-    await asyncio.wait_for(completed.wait(), timeout=5)
+    await _fulfilled(finished)
 
     # Verified against the plan committed at acceptance, not the listing now.
     assert verified[0]["settlement_plan"] == thread["settlement_plan"]

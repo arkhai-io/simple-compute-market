@@ -635,6 +635,24 @@ Delivers D10, D12, the reason D7 states, and D4's consequence for the roadmap. T
       note overstated; each corrected. The goal's remaining dated phrases,
       which D10 does not cover, stay with the index's unowned row on the
       inference goal's dated history.
+      *Note (validation 06 triage, 06 V1):* outside the plan. In
+      `domains/apicredits/storefront/tests/unit/test_settlement_fulfillment.py`,
+      `test_an_uncertain_issuance_leaves_the_deal_open_for_the_redrive` and
+      `test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted`
+      waited on an outcome event the coordinator's task sets before it wakes
+      servicing, so on a slow runner the task outlived the test's event loop
+      and asyncio reported it destroyed inside a later test, which
+      `tests.yml` run 46094418018 caught. Both now wait for each task they
+      start through the fixture's `on_completion` hook, the redrive test's
+      first run included, and the fixture's unused `on_outcome` is removed.
+      Shown with every coordinator task slowed after its outcome: the earlier
+      tests left 2 and 1 tasks running at their end, these leave none. Unit:
+      the module 16 passed, the API-credits storefront suite 281 passed.
+      `change-workflow run pre-commit --base origin/dev`: the relock and
+      every repository check passed; its local `make test` stopped at the
+      macOS-only bare-metal provisioning IaC suites. The fresh-context check
+      found the helper's annotation too narrow for the queue's coroutine,
+      fixed, and nothing else.
 
 ## 7. Closeout
 
